@@ -22,6 +22,7 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
             "mrc_file",
             "address_by_blob_idx",
             "dose_per_angstrom",
+            "image_units",
             "halfset",
             "n_particles",
         ],

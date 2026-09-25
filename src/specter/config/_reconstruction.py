@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from ._field import help_of, setting
 from typing import Literal
-from specter.options import EwaldSphereSign, RotateMode, Scheduler
+from specter.options import EwaldSphereSign, ImageUnits, RotateMode, Scheduler
 
 
 @dataclass
@@ -58,6 +58,17 @@ class ReconstructionConfig:
             "real value."
         ),
         check="positive",
+    )
+    # What the stack's values are. A CryoSPARC/RELION stack is normalised with
+    # inverted contrast and is mapped back to counts from the dose; a stack
+    # already in electron counts is used as it is.
+    image_units: ImageUnits = setting(
+        "normalized",
+        help=(
+            "What mrc_file's values are: 'normalized' (a CryoSPARC/RELION stack, "
+            "mapped back to counts from dose_per_angstrom) or 'counts' (electrons "
+            "per pixel, used as is)."
+        ),
     )
     # Read a stack that is NOT in row order where the .cs file says the images
     # are. The escape hatch for pointing straight at a CryoSPARC restack without

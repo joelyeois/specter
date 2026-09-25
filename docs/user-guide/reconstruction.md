@@ -47,6 +47,17 @@ twin](dataset-twin.md) path on the forward side (see [Generate a particle
 stack](particle-stack.md#example-matching-empiar-11377) for a worked
 `.cs`-driven example).
 
+The forward model predicts electron counts per pixel, so the stack is
+brought into those units before the fit. `image_units` states what the
+stack holds. The default, `"normalized"`, is a CryoSPARC or RELION stack:
+zero mean, unit variance, inverted contrast. It is negated and mapped back
+to counts as `sqrt(N) * x + N`, where `N` is `dose_per_angstrom` times the
+pixel area. `"counts"` is a stack already in electrons per pixel, such as
+one written by `specter simulate particles` with
+`normalize_particles = false`, and is used unchanged. The units are never
+inferred from the image statistics, because a stack's mean and variance do
+not identify its units reliably.
+
 ### Pairing rows to images
 
 Row *i* of the `.cs` file is slice *i* of the stack. That is the contract,

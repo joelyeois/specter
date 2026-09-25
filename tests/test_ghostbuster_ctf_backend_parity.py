@@ -136,6 +136,7 @@ def _build_tomogram_reconstructor(
         translations=torch.zeros(3, 2),
         ctf_params=ctf_params,
         voltage=300.0,
+        dose_per_angstrom=1.0,
         propagation=Propagation(scattering_model="projection"),
         optics=Optics(aberration_backend=aberration_backend, lpp_params=lpp_params),
     )
@@ -172,6 +173,7 @@ def test_tomogram_reconstructor_lpp_params_with_legacy_backend_raises(
             translations=torch.zeros(3, 2),
             ctf_params={"dfu": torch.full((3,), 5000.0), "cs": torch.full((3,), 2.7)},
             voltage=300.0,
+            dose_per_angstrom=1.0,
             propagation=Propagation(scattering_model="projection"),
             optics=Optics(lpp_params=_LPP_PARAMS),
         )

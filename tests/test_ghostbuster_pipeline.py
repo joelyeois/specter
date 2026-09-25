@@ -77,7 +77,22 @@ def test_ghostbuster_loads_and_preprocesses_images(mrc_file: Path) -> None:
         raw = torch.as_tensor(mrc.data.copy())
     dose_per_area = dose_per_angstrom * PIXEL_SIZE**2
     expected = dose_per_area**0.5 * (-raw) + dose_per_area
-    assert torch.allclose(gb._images, expected)
+    # Exact, not approximate: the default must reproduce earlier runs.
+    assert torch.equal(gb._images, expected)
+
+
+def test_ghostbuster_counts_stack_is_used_as_is(mrc_file: Path) -> None:
+    """image_units='counts' skips the sign flip and the dose mapping."""
+    gb = Ghostbuster(
+        cs_file="fake.cs",
+        mrc_file=str(mrc_file),
+        dose_per_angstrom=2.0,
+        image_units="counts",
+        propagation=Propagation(scattering_model="projection"),
+    )
+    with mrcfile.mmap(str(mrc_file)) as mrc:
+        raw = torch.as_tensor(mrc.data.copy())
+    assert torch.equal(gb._images, raw)
 
 
 @pytest.mark.parametrize(
@@ -184,6 +199,7 @@ def test_tomogram_ghostbuster_angles_path(
         voxel_size=2.0,
         voltage=300.0,
         ctf_params=tomo_ctf_params,
+        dose_per_angstrom=1.0,
         angles=[-20.0, 0.0, 20.0],
         lr=0.1,
         epochs=1,
@@ -207,12 +223,76 @@ def test_tomogram_ghostbuster_quaternions_path(
         voxel_size=2.0,
         voltage=300.0,
         ctf_params=tomo_ctf_params,
+        dose_per_angstrom=1.0,
         quaternions=quats,
         lr=0.1,
         propagation=Propagation(scattering_model="projection"),
     )
     model = tgb.test_run(bin_factor=2)
     assert isinstance(model, TomogramReconstructor)
+
+
+def test_tomogram_ghostbuster_maps_a_normalised_series_with_per_tilt_dose(
+    tilt_series: torch.Tensor, tomo_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    """A normalised series is flipped and mapped to counts tilt by tilt."""
+    dose = torch.tensor([1.0, 2.0, 4.0])
+    tgb = TomogramGhostbuster(
+        tilt_series=tilt_series,
+        voxel_size=2.0,
+        voltage=300.0,
+        ctf_params=tomo_ctf_params,
+        dose_per_angstrom=dose,
+        angles=[-20.0, 0.0, 20.0],
+        image_units="normalized",
+        propagation=Propagation(scattering_model="projection"),
+    )
+    n = (dose * 2.0**2).reshape(-1, 1, 1)
+    assert torch.allclose(tgb._images, n**0.5 * (-tilt_series) + n)
+
+
+def test_tomogram_ghostbuster_refuses_to_flip_counts(
+    tilt_series: torch.Tensor, tomo_ctf_params: dict[str, torch.Tensor]
+) -> None:
+    with pytest.raises(ValueError, match="flip_contrast"):
+        TomogramGhostbuster(
+            tilt_series=tilt_series,
+            voxel_size=2.0,
+            voltage=300.0,
+            ctf_params=tomo_ctf_params,
+            dose_per_angstrom=1.0,
+            angles=[-20.0, 0.0, 20.0],
+            flip_contrast=True,
+        )
+
+
+def test_tomogram_test_run_bins_counts_by_sum_and_potential_by_mean(
+    tomo_ctf_params: dict[str, torch.Tensor], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Binning keeps the electrons a region received and the potential's value.
+
+    Counts add across the pooled pixels; a potential in volts is averaged, so
+    the projected potential sum(V * dz) survives the coarser slicing.
+    """
+    counts = torch.full((3, BOX, BOX), 7.0)
+    V_init = torch.full((BOX, BOX, BOX), 0.5)
+    tgb = TomogramGhostbuster(
+        tilt_series=counts,
+        voxel_size=2.0,
+        voltage=300.0,
+        ctf_params=tomo_ctf_params,
+        dose_per_angstrom=1.0,
+        angles=[-20.0, 0.0, 20.0],
+        V_init=V_init,
+        propagation=Propagation(scattering_model="projection"),
+    )
+    binned, _ = tgb._bin_images(2)
+    assert torch.allclose(binned, torch.full((3, BOX // 2, BOX // 2), 28.0))
+    # Skip the fit: what is under test is the volume test_run starts from.
+    monkeypatch.setattr(tgb, "_fit", lambda model, *args, **kwargs: model)
+    model = tgb.test_run(bin_factor=2, device="cpu")
+    assert torch.allclose(model.V, torch.full((BOX // 2,) * 3, 0.5))
 
 
 def test_tomogram_ghostbuster_rejects_both_angles_and_quaternions(
@@ -224,6 +304,7 @@ def test_tomogram_ghostbuster_rejects_both_angles_and_quaternions(
             voxel_size=2.0,
             voltage=300.0,
             ctf_params=tomo_ctf_params,
+            dose_per_angstrom=1.0,
             angles=[0.0, 10.0, 20.0],
             quaternions=torch.zeros(3, 4),
         )
@@ -238,6 +319,7 @@ def test_tomogram_ghostbuster_requires_angles_or_quaternions(
             voxel_size=2.0,
             voltage=300.0,
             ctf_params=tomo_ctf_params,
+            dose_per_angstrom=1.0,
         )
 
 

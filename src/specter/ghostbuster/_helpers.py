@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import (
     LRScheduler,
     OneCycleLR,
 )
-from specter.options import Scheduler
+from specter.options import ImageUnits, Scheduler
 
 
 # ---------------------------------------------------------------------------
@@ -81,30 +81,60 @@ def _build_lr_scheduler(
     )
 
 
-def _preprocess_particle_images(
-    images: torch.Tensor, dose_per_angstrom: float, voxel_size: float
+def _images_to_counts(
+    images: torch.Tensor,
+    image_units: ImageUnits,
+    dose_per_pixel: float | torch.Tensor,
+    flip_contrast: bool,
 ) -> torch.Tensor:
     """
-    Sign-flip and dose-scale a raw particle stack to match the forward model's
-    intensity units.
+    Bring observed images into electron counts per pixel, the units both
+    reconstructors' forward models predict.
+
+    A normalised stack is taken to have unit-variance shot noise about a zero
+    mean, and is mapped back to counts as ``sqrt(N) * x + N`` with ``N`` the
+    expected dose per pixel. Counts are used as they are.
 
     Parameters
     ----------
     images : torch.Tensor
-        Raw particle stack as read from the .mrc/.mrcs file.
-    dose_per_angstrom : float
-        Total electron dose (fluence) per image in e⁻/Å².
-    voxel_size : float
-        Voxel size in Å.
+        Observed images, shape ``(N, H, W)``.
+    image_units : {"normalized", "counts"}
+        What the values of ``images`` mean.
+    dose_per_pixel : float or torch.Tensor
+        Expected electrons per pixel, ``dose_per_angstrom * voxel_size**2``:
+        a scalar, or a tensor broadcasting against ``images`` for a dose that
+        differs per image. Unused for counts.
+    flip_contrast : bool
+        Negate a normalised stack before the conversion, for a stack stored
+        with inverted contrast. Must be ``False`` for counts, which have a
+        physical sign.
 
     Returns
     -------
     torch.Tensor
-        Preprocessed images.
+        Images in electron counts per pixel.
+
+    Raises
+    ------
+    ValueError
+        If ``flip_contrast`` is requested for counts, or ``image_units`` is
+        not recognised.
     """
-    images = -images
-    dose_per_area = dose_per_angstrom * voxel_size**2
-    return dose_per_area**0.5 * images + dose_per_area
+    if image_units == "counts":
+        if flip_contrast:
+            raise ValueError(
+                "flip_contrast=True is only meaningful for image_units='normalized': "
+                "counts are non-negative, so negating them has no physical reading"
+            )
+        return images if images.is_floating_point() else images.float()
+    if image_units != "normalized":
+        raise ValueError(
+            f"image_units={image_units!r} is invalid: must be 'normalized' or 'counts'"
+        )
+    if flip_contrast:
+        images = -images
+    return dose_per_pixel**0.5 * images + dose_per_pixel
 
 
 def _kmask_half_spectrum(kmask: torch.Tensor) -> torch.Tensor:

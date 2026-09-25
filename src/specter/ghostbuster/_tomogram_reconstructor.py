@@ -59,6 +59,13 @@ class TomogramReconstructor(_BaseReconstructor):
         Per-tilt CTF parameters; each value has leading dimension ``N_tilts``.
     voltage : float
         Electron beam accelerating voltage in kV.
+    dose_per_angstrom : float or torch.Tensor
+        Electron dose (fluence) per tilt image in e⁻/Å². Scalar, or a 1-D
+        tensor of length ``N_tilts`` giving a separate dose for each tilt, as
+        `TiltSeriesGenerator` takes it. The forward model predicts electron
+        counts per pixel, ``dose_per_angstrom * voxel_size**2 * |CTF(psi)|²``,
+        and the loss divides each tilt's squared residual by that tilt's
+        expected counts per pixel, its Poisson variance.
     tilt : TiltGeometry, optional
         Tilt axis and edge tapers -- the same object the `TiltSeriesGenerator`
         that produced the data was built with. The axis decides which image
@@ -111,6 +118,7 @@ class TomogramReconstructor(_BaseReconstructor):
         translations: torch.Tensor,
         ctf_params: dict[str, torch.Tensor],
         voltage: float,
+        dose_per_angstrom: float | torch.Tensor,
         tilt: TiltGeometry = TiltGeometry(),
         lr: float | None = None,
         sparsity: float | None = None,
@@ -172,6 +180,21 @@ class TomogramReconstructor(_BaseReconstructor):
         )
         self.required_nxy = int(
             tilt_geometry.estimate_required_nxy(self.nxy, self.nz, max_tilt_deg)
+        )
+
+        # Expected electrons per pixel for each tilt, the scale of the
+        # predicted counts and the Poisson variance the loss divides by.
+        n_tilts = len(quaternions)
+        dose = torch.as_tensor(dose_per_angstrom, dtype=torch.float32).flatten()
+        if dose.numel() not in (1, n_tilts):
+            raise ValueError(
+                f"dose_per_angstrom has {dose.numel()} entries; expected 1 or "
+                f"one per tilt ({n_tilts})"
+            )
+        if not bool((dose > 0).all()):
+            raise ValueError("dose_per_angstrom must be positive")
+        self.register_buffer(
+            "dose_per_pixel", dose.expand(n_tilts).clone() * voxel_size**2
         )
 
         # Tilt geometry buffers (fixed — orientations are known in cryo-ET)
@@ -315,8 +338,9 @@ class TomogramReconstructor(_BaseReconstructor):
         Returns
         -------
         torch.Tensor
-            Clean intensity image, shape ``(H, W)``, same units as
-            ``TiltSeriesGenerator.generate_tilt_series`` ``clean_images``.
+            Noiseless expected electron counts per pixel, shape ``(H, W)``:
+            ``TiltSeriesGenerator.generate_tilt_series``' ``clean_images``
+            times the tilt's dose per pixel.
         """
         Q = self.quaternions[tilt_idx : tilt_idx + 1]  # (1, 4)
         T = self.translations[tilt_idx : tilt_idx + 1]  # (1, 2)
@@ -354,7 +378,7 @@ class TomogramReconstructor(_BaseReconstructor):
             )
 
         detector_waves = self.aberration(exitwave, ctf_batch)
-        return torch.abs(detector_waves[0]) ** 2  # (H, W)
+        return self.dose_per_pixel[tilt_idx] * torch.abs(detector_waves[0]) ** 2
 
     def forward(self, tilt_idx: int) -> torch.Tensor:
         """Simulate tilt image ``tilt_idx`` using the current volume."""
@@ -370,8 +394,19 @@ class TomogramReconstructor(_BaseReconstructor):
         obs: torch.Tensor,
         tilt_idx: int,
     ) -> torch.Tensor:
-        """MSE loss with optional FOV masking and sparsity regularisation."""
-        mse = F.mse_loss(sim, obs, reduction="none")
+        """
+        Squared residual per pixel over the tilt's Poisson variance, with
+        optional FOV masking.
+
+        Dividing by the expected counts per pixel makes the loss a per-pixel
+        chi-squared under Poisson statistics. Shot noise then contributes
+        about one per pixel at any dose, while a real misfit weighs in
+        proportion to the dose, as the evidence for it does. Without the
+        division both would scale with the square of the dose, and the
+        ``sparsity`` term added in `training_step` would carry a different
+        weight on every dataset.
+        """
+        mse = F.mse_loss(sim, obs, reduction="none") / self.dose_per_pixel[tilt_idx]
         if self.use_fov_mask:
             mask = self._fov_mask(tilt_idx)
             if mask is not None:

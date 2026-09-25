@@ -22,6 +22,8 @@ mrc_file = "path/to/particles.mrcs"
                                 # without exporting a row-ordered copy of it first
 dose_per_angstrom = 40.0   # the dataset's real fluence, not a nominal one: it sets the
                            # Poisson statistics the loss is weighted by
+# image_units = "normalized"   # "normalized" for a CryoSPARC/RELION stack; "counts"
+                               # for one already in electrons per pixel
 halfset = "gold"           # "gold" reconstructs A and B and computes the halfmap FSC
                            # between them; "A" | "B" reconstructs just that half;
                            # "all" ignores the split and reconstructs one volume

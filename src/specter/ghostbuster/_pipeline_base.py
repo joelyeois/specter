@@ -58,6 +58,11 @@ class _GhostbusterBase:
         The observed images average-pooled by ``bin_factor`` in each
         spatial dimension, scaled to keep their sum, with the voxel size to
         match.
+
+        Summing is right because both pipelines hold their images in
+        electron counts per pixel by this point, and counts add: a binned
+        pixel receives every electron its ``bin_factor**2`` fine pixels did,
+        which is what the forward model predicts at the binned pixel size.
         """
         pool = torch.nn.AvgPool2d(bin_factor, stride=bin_factor)
         images = pool(self._images.unsqueeze(1)).squeeze(1) * bin_factor**2

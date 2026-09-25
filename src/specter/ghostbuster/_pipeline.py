@@ -16,10 +16,10 @@ import torch
 import torch.utils.data
 
 from ..settings import Optics, Propagation
-from ._helpers import _preprocess_particle_images
+from ._helpers import _images_to_counts
 from ._reconstructor import Reconstructor
 from ._pipeline_base import _GhostbusterBase
-from specter.options import RotateMode, Scheduler
+from specter.options import ImageUnits, RotateMode, Scheduler
 
 
 class Ghostbuster(_GhostbusterBase):
@@ -137,6 +137,13 @@ class Ghostbuster(_GhostbusterBase):
     run_dir : str or Path, optional
         Directory for all job outputs. Injected automatically by
         :meth:`~specter.jobs.Job.create` when used inside a ``Job`` context.
+    image_units : {"normalized", "counts"}, optional
+        What the particle stack's values are. ``"normalized"`` (the default)
+        is a CryoSPARC/RELION stack with zero mean, unit variance and
+        inverted contrast; it is sign-flipped and mapped back to counts as
+        ``sqrt(N) * x + N``, with ``N = dose_per_angstrom * pixel_size**2``.
+        ``"counts"`` is electrons per pixel, used as is, such as a specter
+        stack written with ``normalize_particles=False``.
     """
 
     _job_log_exclude: tuple[str, ...] = ("halfset", "cryosparc_ref")
@@ -176,6 +183,7 @@ class Ghostbuster(_GhostbusterBase):
         n_particles: int | None = None,
         halfset: Literal["A", "B", "all"] = "all",
         run_dir: str | Path | None = None,
+        image_units: ImageUnits = "normalized",
     ) -> None:
         if alpha is not None and not 0.0 <= alpha <= 1.0:
             # Checked before the particle stack is read, not after.
@@ -200,7 +208,12 @@ class Ghostbuster(_GhostbusterBase):
         voxel_size = float(
             pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
         )
-        images = _preprocess_particle_images(images, dose_per_angstrom, voxel_size)
+        images = _images_to_counts(
+            images,
+            image_units,
+            dose_per_angstrom * voxel_size**2,
+            flip_contrast=image_units == "normalized",
+        )
 
         # preprocessed particle data (not hyperparams — not logged by job.create)
         self._images = images

@@ -16,10 +16,11 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 
+from ._helpers import _images_to_counts
 from ._pipeline_base import _GhostbusterBase
 from ._tomogram_reconstructor import TomogramReconstructor
 from ..settings import Optics, Propagation, TiltGeometry
-from specter.options import Scheduler, TiltAxis
+from specter.options import ImageUnits, Scheduler, TiltAxis
 
 
 class TomogramGhostbuster(_GhostbusterBase):
@@ -30,13 +31,13 @@ class TomogramGhostbuster(_GhostbusterBase):
     drives it via a Lightning ``Trainer``.  The ``run`` / ``test_run`` API
     mirrors :class:`Ghostbuster`.
 
-    The forward model is noiseless; the observed images are compared directly
-    to ``|CTF(exitwave)|²``.  Images should be preprocessed so that their
-    intensity scale matches this quantity.  For simulated data from
-    :class:`~specter.imagegenerator.TiltSeriesGenerator`, pass
-    ``clean_images`` directly.  For experimental data, dividing by the
-    expected dose per pixel (``dose_per_angstrom * voxel_size²``) brings
-    images into the correct scale.
+    The forward model is noiseless and predicts electron counts per pixel,
+    ``dose_per_angstrom * voxel_size² * |CTF(exitwave)|²``, as the particle
+    pipeline's does. ``image_units`` says what the tilt series holds: counts
+    (the default, and what a motion-corrected tilt series and
+    :class:`~specter.imagegenerator.TiltSeriesGenerator`'s detected images
+    are) are used as they are, and a normalised series is mapped back to
+    counts from the dose.
 
     Parameters
     ----------
@@ -50,6 +51,9 @@ class TomogramGhostbuster(_GhostbusterBase):
     ctf_params : dict[str, torch.Tensor]
         Per-tilt CTF parameters; each value must have leading dimension
         ``N_tilts``.
+    dose_per_angstrom : float or torch.Tensor
+        Electron dose (fluence) per tilt image in e⁻/Å². Scalar, or a 1-D
+        tensor of length ``N_tilts`` for a dose that differs per tilt.
     angles : sequence of float or torch.Tensor, optional
         Tilt angles in degrees.  Mutually exclusive with ``quaternions``.
     quaternions : torch.Tensor, optional
@@ -66,9 +70,11 @@ class TomogramGhostbuster(_GhostbusterBase):
         width (square volume).
     V_init : torch.Tensor, optional
         Initial volume ``(Z, Y, X)``.  Defaults to all-zeros.
-    flip_contrast : bool
-        Negate ``tilt_series`` on load (standard cryo-EM convention).
-        Default ``True``.
+    flip_contrast : bool, optional
+        Negate a normalised ``tilt_series`` before converting it to counts,
+        for a series stored with inverted contrast. ``None`` (the default)
+        flips normalised input and leaves counts alone; ``True`` with counts
+        is an error, since counts have a physical sign.
     lr : float, optional
         Learning rate for V.  ``None`` disables optimisation.
     sparsity : float, optional
@@ -94,6 +100,11 @@ class TomogramGhostbuster(_GhostbusterBase):
         Lightning ``Trainer`` precision.  Default ``"16-mixed"``.
     run_dir : str or Path, optional
         Output directory for volumes and metadata.
+    image_units : {"counts", "normalized"}
+        What ``tilt_series``' values are: electron counts per pixel, used as
+        is, or a series normalised to zero mean and unit variance, mapped
+        back to counts as ``sqrt(N) * x + N`` with ``N`` each tilt's dose per
+        pixel. Default ``"counts"``.
     """
 
     def __init__(
@@ -102,13 +113,14 @@ class TomogramGhostbuster(_GhostbusterBase):
         voxel_size: float,
         voltage: float,
         ctf_params: dict[str, Any],
+        dose_per_angstrom: float | torch.Tensor,
         angles: Sequence[float] | torch.Tensor | None = None,
         quaternions: torch.Tensor | None = None,
         translations: torch.Tensor | None = None,
         tilt: TiltGeometry = TiltGeometry(),
         nz: int | None = None,
         V_init: torch.Tensor | None = None,
-        flip_contrast: bool = True,
+        flip_contrast: bool | None = None,
         lr: float | None = None,
         sparsity: float | None = None,
         epochs: int = 5,
@@ -121,9 +133,24 @@ class TomogramGhostbuster(_GhostbusterBase):
         num_workers: int = 0,
         precision: str = "16-mixed",
         run_dir: str | Path | None = None,
+        image_units: ImageUnits = "counts",
     ) -> None:
-        images = self._load_tilt_series(tilt_series, flip_contrast)
+        images = self._load_tilt_series(tilt_series)
         n_tilts, H, W = images.shape
+        dose = torch.as_tensor(dose_per_angstrom, dtype=torch.float32).flatten()
+        if dose.numel() not in (1, n_tilts):
+            raise ValueError(
+                f"dose_per_angstrom has {dose.numel()} entries; expected 1 or "
+                f"one per tilt ({n_tilts})"
+            )
+        if flip_contrast is None:
+            flip_contrast = image_units == "normalized"
+        images = _images_to_counts(
+            images,
+            image_units,
+            (dose * voxel_size**2).reshape(-1, 1, 1),
+            flip_contrast,
+        )
         console.print(
             f"  {n_tilts} tilts  |  {H}×{W} px  |  {voxel_size:.3f} Å/px  |  "
             f"{voltage:.0f} kV"
@@ -147,6 +174,7 @@ class TomogramGhostbuster(_GhostbusterBase):
         self._volume_init = volume_init
         self._voxel_size = voxel_size
         self._voltage = voltage
+        self._dose_per_angstrom = dose
 
         self.lr = lr
         self.sparsity = sparsity
@@ -163,19 +191,14 @@ class TomogramGhostbuster(_GhostbusterBase):
         self.run_dir = Path(run_dir) if run_dir is not None else None
 
     @staticmethod
-    def _load_tilt_series(
-        tilt_series: torch.Tensor | str | Path, flip_contrast: bool
-    ) -> torch.Tensor:
-        """Load a tilt series from a tensor or an .mrc file path, optionally flipping contrast."""
+    def _load_tilt_series(tilt_series: torch.Tensor | str | Path) -> torch.Tensor:
+        """Load a tilt series from a tensor or an .mrc file path."""
         if isinstance(tilt_series, (str, Path)):
             console.print(f"Loading tilt series from {Path(tilt_series).name} ...")
             with mrcfile.open(str(tilt_series)) as mrc:
                 images = torch.as_tensor(mrc.data.copy()).float()
         else:
             images = torch.as_tensor(tilt_series).float()
-
-        if flip_contrast:
-            images = -images
         return images
 
     @staticmethod
@@ -249,6 +272,7 @@ class TomogramGhostbuster(_GhostbusterBase):
             self._translations,
             self._ctf_params,
             self._voltage,
+            self._dose_per_angstrom,
             tilt=self.tilt,
             lr=self.lr,
             sparsity=self.sparsity,
@@ -336,7 +360,10 @@ class TomogramGhostbuster(_GhostbusterBase):
         )
         images_binned, voxel_size_binned = self._bin_images(bin_factor)
 
-        # Bin the initial volume in XY and Z as well.
+        # Bin the initial volume in XY and Z as well. A voxel holds a
+        # potential in volts, not a per-voxel integral, so binning averages:
+        # the projected potential sum(V * dz) is then unchanged, as dz grows
+        # by bin_factor while the slice count shrinks by it.
         V_b = (
             nn.functional.avg_pool3d(
                 self._volume_init.unsqueeze(0).unsqueeze(0),
@@ -345,7 +372,6 @@ class TomogramGhostbuster(_GhostbusterBase):
             )
             .squeeze(0)
             .squeeze(0)
-            * bin_factor**3
         )
 
         model, loader = self._build_reconstructor_and_loader(

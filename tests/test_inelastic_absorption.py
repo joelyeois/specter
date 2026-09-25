@@ -530,6 +530,7 @@ def test_iterative_consumers_reject_unsupported_mfp(kind, specimen_mfp):
                 torch.zeros(1, 2),
                 {},
                 VOLTAGE,
+                1.0,
                 propagation=propagation,
             )
         elif kind == "reconstructor":

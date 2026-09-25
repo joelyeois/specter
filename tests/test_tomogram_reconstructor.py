@@ -78,6 +78,7 @@ def tr_kwargs(
         translations=torch.zeros(3, 2),
         ctf_params=tilt_ctf_params,
         voltage=300.0,
+        dose_per_angstrom=1.0,
     )
 
 
@@ -96,6 +97,26 @@ def test_forward_multislice_runs_and_is_finite(tr_kwargs: dict) -> None:
     img = model.forward(0)  # -20 degree tilt
     assert img.shape == (8, 8)
     assert torch.isfinite(img).all()
+
+
+def test_forward_predicts_counts_in_proportion_to_each_tilts_dose(
+    tr_kwargs: dict,
+) -> None:
+    """The forward model scales with the tilt's own dose per pixel."""
+    kwargs = dict(tr_kwargs, propagation=Propagation(scattering_model="projection"))
+    unit = TomogramReconstructor(**kwargs)
+    kwargs["dose_per_angstrom"] = torch.tensor([1.0, 3.0, 1.0])
+    dosed = TomogramReconstructor(**kwargs)
+    pixel_area = tr_kwargs["voxel_size"] ** 2
+    assert torch.allclose(unit.forward(1) * 3.0, dosed.forward(1))
+    assert torch.allclose(unit.forward(0), dosed.forward(0))
+    assert float(unit.forward(1).mean()) == pytest.approx(pixel_area, rel=0.05)
+
+
+def test_dose_must_have_one_entry_per_tilt(tr_kwargs: dict) -> None:
+    kwargs = dict(tr_kwargs, dose_per_angstrom=torch.tensor([1.0, 2.0]))
+    with pytest.raises(ValueError, match="one per tilt"):
+        TomogramReconstructor(**kwargs)
 
 
 # ---------------------------------------------------------------------------

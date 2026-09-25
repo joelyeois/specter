@@ -104,6 +104,12 @@ CarbonEdgeSide = Literal["random", "left", "right", "top", "bottom"]
 #: Axis a tilt series is tilted about.
 TiltAxis = Literal["x", "y"]
 
+#: What an observed image's values mean, for a reconstruction: electron
+#: counts per pixel, or a stack normalised to zero mean and unit variance (a
+#: CryoSPARC/RELION particle stack) that is converted back to counts from the
+#: dose.
+ImageUnits = Literal["normalized", "counts"]
+
 #: Learning-rate scheduler for a reconstruction, by ``torch.optim`` name.
 Scheduler = Literal[
     "LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"
@@ -122,6 +128,7 @@ __all__ = [
     "GridConvention",
     "GridOrigin",
     "GridSamplePadding",
+    "ImageUnits",
     "IceModel",
     "IceOptimizer",
     "KernelParameterization",

@@ -264,6 +264,7 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
         translations=torch.zeros(1, 2),
         ctf_params={k: v.clone() for k, v in ctf_params.items()},
         voltage=300.0,
+        dose_per_angstrom=2.0,
         propagation=Propagation(scattering_model=scattering_model, alpha=0.1),
     )
 
@@ -272,7 +273,9 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
     )
 
     torch.manual_seed(0)
-    simulated, inverted = clean[0, 0], inverse.forward(0)
+    # The inverse predicts counts; clean_images is |psi|^2 per unit dose.
+    simulated = clean[0, 0] * 2.0 * pixel_size**2
+    inverted = inverse.forward(0)
     divergence = ((simulated - inverted).abs().max() / simulated.std()).item()
     assert divergence < 1e-3, (
         f"simulator and inverse disagree by {divergence:.2%} of the image "
@@ -294,10 +297,11 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
     term, the scattering model. A reconstruction cannot converge if those
     differ, so convergence is the test.
 
-    Calibrated against a wrong forward model rather than against zero.
-    Reconstructing with the CTF the tilt series was simulated with drops the
-    loss ~49x and reaches a correlation of 0.77; getting the defocus wrong by
-    8000 A drops it ~5x and reaches 0.51. Correlation is capped well below 1
+    Calibrated against a wrong forward model rather than against zero, with
+    the reconstructor's own loss (squared residual over the expected counts
+    per pixel). Reconstructing with the CTF the tilt series was simulated
+    with drops the loss ~87x and reaches a correlation of 0.78; getting the
+    defocus wrong by 8000 A drops it ~6x and reaches 0.41. Correlation is capped well below 1
     by the missing wedge, which a +/-45 degree range leaves regardless of how
     well the forward model matches.
     """
@@ -331,7 +335,9 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         tilt=TiltGeometry(tilt_axis="y"),
     )
     torch.manual_seed(0)
-    _, _, observed = generator.generate_tilt_series(torch.tensor([0]))
+    _, _, clean = generator.generate_tilt_series(torch.tensor([0]))
+    dose_per_pixel = 2.0 * pixel_size**2
+    observed = clean * dose_per_pixel  # expected counts per pixel
 
     reconstructor = TomogramReconstructor(
         V=torch.zeros_like(truth),
@@ -340,6 +346,7 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         translations=torch.zeros(n_tilts, 2),
         ctf_params={k: v.expand(n_tilts).clone() for k, v in ctf_params.items()},
         voltage=300.0,
+        dose_per_angstrom=2.0,
         lr=5e-2,
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
     )
@@ -350,6 +357,7 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         loss = (
             sum(
                 ((reconstructor.forward(i) - observed[0, i]) ** 2).mean()
+                / dose_per_pixel
                 for i in range(n_tilts)
             )
             / n_tilts

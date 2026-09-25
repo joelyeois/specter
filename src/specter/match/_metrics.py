@@ -440,8 +440,8 @@ def matched_pose_snr(
     mixed in CryoSPARC from the ones that did not: flat near 1-5 on the
     energy-filtered sets, growing to 40-100x with frequency on the
     unfiltered ones. The Guinier slope of ``a(k)`` between 10 and 4 Å is
-    the envelope the experiment carries beyond the simulation, applied as
-    a B-factor when it is clearly positive.
+    the envelope the experiment's particle carries beyond the simulation,
+    reported as a residual and never applied.
 
     Parameters
     ----------

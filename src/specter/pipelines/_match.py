@@ -26,7 +26,7 @@ Stages
    ``probe_workers`` processes.
 4. Battery: two seeds at the chosen settings, at the native box, compared
    with the experiment at matched poses. A clearly positive residual
-   envelope is applied as a B-factor and the battery is rerun once.
+   envelope is reported as a warning and never applied.
 5. Output: ``matched.toml`` for `specter simulate particles`, a Markdown and
    PNG report, and optionally a full stack.
 """
@@ -850,8 +850,8 @@ def _compare_two_seeds(
     seed: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Simulate the battery twice at matched poses, fit a residual B-factor if
-    one is called for, and fill the report's SNR, twin and band statistics.
+    Simulate the battery twice at matched poses, report a residual envelope
+    if one is significant, and fill the report's SNR, twin and band statistics.
     Returns the first simulated stack and the experimental images it is
     compared with.
     """
@@ -881,24 +881,24 @@ def _compare_two_seeds(
 
     sim_a, sim_b = battery("")
     snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
-    bfactor: float | None = None
-    # A NaN here means the envelope was not significantly different from flat,
-    # not that it is small -- `_residual_envelope` refuses rather than guessing.
+    # The residual envelope is reported, never applied. It is measured from the
+    # matched-pose cross-spectra, where only the particle survives (ice,
+    # neighbours and noise are fresh draws per seed), yet `bfactor` acts on the
+    # transfer function and so would blur the solvent too, whose exposure the
+    # model already describes; at 196 A^2 on EMPIAR-11377 it erased the water
+    # ring the experiment shows. It also folds in pose and CTF-estimation error,
+    # which lowers twin agreement without blurring the real particle. A NaN
+    # means not significantly different from flat -- `_residual_envelope`
+    # refuses rather than guessing.
     if math.isfinite(snr.residual_bfactor) and snr.residual_bfactor > 20.0:
-        bfactor = round(snr.residual_bfactor, 0)
-        base.update(bfactor=bfactor)
-        console.print(
-            f"residual envelope B = {bfactor:.0f} Å²; applying it and re-rendering"
+        report.warnings.append(
+            f"The experimental particle signal falls off faster than the simulated one "
+            f"between 10 and 4 Å (residual envelope B = {snr.residual_bfactor:.0f} Å²): "
+            "conformational heterogeneity, pose or CTF-estimation error, or damage beyond "
+            "the model. Reported, not applied."
         )
-        sim_a, sim_b = battery("_b")
-        snr = matched_pose_snr(sim_a, sim_b, exp_b, pixel_size)
     report.derived.append(
-        DerivedValue(
-            "bfactor",
-            bfactor if bfactor is not None else 0.0,
-            "measured" if bfactor else "fixed",
-            "Guinier slope of the matched-pose signal ratio, 10-4 Å",
-        )
+        DerivedValue("bfactor", 0.0, "fixed", "residual envelope reported, not applied")
     )
     report.snr = snr
     report.twin = twin_test(sim_a, sim_b, exp_b)

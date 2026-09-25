@@ -318,6 +318,8 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
     assert matched.dose_envelope_target == "specimen"
     assert matched.ice_motion_variance == pytest.approx(0.38)
     assert matched.absorption_model == "inelastic_mfp"
+    # A residual envelope is reported, never written as a B-factor.
+    assert matched.bfactor is None
 
 
 def test_rescale_metadata_follows_a_fourier_cropped_stack(tmp_path: Path) -> None:

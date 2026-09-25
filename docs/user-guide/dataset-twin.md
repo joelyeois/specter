@@ -60,8 +60,9 @@ specter match particles \
 4. **Comparison at matched poses.** Two seeds at the chosen settings, at
    the native box, against the experiment: the signal-to-noise ratio of each stack per frequency
    band, the twin test, and the screens for fixed patterns and background
-   mismatch. A clearly positive residual envelope is applied as a B-factor
-   and the comparison rerun once.
+   mismatch. A clearly positive residual envelope, measured on the
+   particle's signal between 10 and 4 Å, is reported as a warning and is
+   not written into the matched configuration.
 5. **Output.** `matched.toml`, `match_report.md`, `match_report.png`, and
    with `--write_stack N` a stack of `N` particles simulated from the
    matched config.

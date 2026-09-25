@@ -29,11 +29,8 @@ from specter.detectors import (
     perfect_detector,
 )
 
-from ..aberrations import (
-    Aberration,
-    aberration_model_for_scattering,
-    defocus_midplane_shift,
-)
+from ..aberrations import Aberration, aberration_model_for_scattering
+from ..aberrations._functions import shift_defocus_to_midplane
 from ..arrays import compute_nz, pad_volume
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
@@ -371,16 +368,9 @@ class BaseImager(L.LightningModule):
             :meth:`~specter.ice.IceProfile.entry_face_shift` instead, or the
             defocus silently picks up the padding (see that method).
         """
-        if not shift_required:
-            shift = 0.0
-        elif shift is None:
-            shift = defocus_midplane_shift(self.nz, self.pixel_size)
-        self._defocus_shift_angstrom = shift
-        if shift:
-            if hasattr(self, "dfu"):
-                setattr(self, "dfu", getattr(self, "dfu") - shift)
-            if hasattr(self, "dfv"):
-                setattr(self, "dfv", getattr(self, "dfv") - shift)
+        self._defocus_shift_angstrom = shift_defocus_to_midplane(
+            self, self.nz, self.pixel_size, shift_required=shift_required, shift=shift
+        )
 
     @property
     def _uniform_absorption(self) -> float:

@@ -283,6 +283,56 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     return (nz * pixel_size) / 2
 
 
+def shift_defocus_to_midplane(
+    module: object,
+    nz: int,
+    pixel_size: float,
+    shift_required: bool = True,
+    shift: float | None = None,
+) -> float:
+    """
+    Move a module's ``dfu``/``dfv`` from the entry face to the midplane.
+
+    The one implementation of the convention both the simulator
+    (:meth:`~specter.imagegenerator.BaseImager._apply_defocus_shift`) and
+    the tomogram inverse (:class:`~specter.ghostbuster.TomogramReconstructor`)
+    apply; a mismatch between the two images the specimen at different
+    defocus, which ``tests/test_forward_model_parity.py`` pins. Subtracts
+    the shift from whichever of ``dfu``/``dfv`` `module` carries, replacing
+    each attribute (a registered buffer stays registered).
+
+    Parameters
+    ----------
+    module : object
+        Object carrying the ``dfu``/``dfv`` defocus attributes, in Å.
+    nz : int
+        Number of Z slices in the simulation volume.
+    pixel_size : float
+        Pixel size in Å.
+    shift_required : bool, optional
+        Whether the scattering model has a Z extent to offset from; False
+        (the ``'projection'``/``'ctf'`` models) makes the shift zero.
+        Default True.
+    shift : float, optional
+        Distance in Å from the volume's midplane to the specimen's entry
+        face. Defaults to :func:`defocus_midplane_shift`.
+
+    Returns
+    -------
+    float
+        The shift applied, in Å.
+    """
+    if not shift_required:
+        shift = 0.0
+    elif shift is None:
+        shift = defocus_midplane_shift(nz, pixel_size)
+    if shift:
+        for name in ("dfu", "dfv"):
+            if hasattr(module, name):
+                setattr(module, name, getattr(module, name) - shift)
+    return shift
+
+
 def aberration_model_for_scattering(
     scattering_model: ScatteringModel,
 ) -> AberrationModel:

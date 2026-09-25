@@ -19,11 +19,8 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from .. import rotations
 from .. import tilt as tilt_geometry
-from ..aberrations import (
-    Aberration,
-    aberration_model_for_scattering,
-    defocus_midplane_shift,
-)
+from ..aberrations import Aberration, aberration_model_for_scattering
+from ..aberrations._functions import shift_defocus_to_midplane
 from ..ctf import LegacyAberrationAdapter
 from ..scattering import IterativeScattering
 from ._base_reconstructor import _BaseReconstructor
@@ -220,17 +217,16 @@ class TomogramReconstructor(_BaseReconstructor):
         # nz * voxel_size / 2 Angstrom out, which is 750 A on a 300-slice
         # tomogram at 5 A/voxel. Skipped for the models with no Z extent to
         # offset from, matching `_apply_defocus_shift`'s own `shift_required`.
-        self._defocus_shift_angstrom = (
-            0.0
-            if scattering_model in ("projection", "ctf")
-            else defocus_midplane_shift(self.nz, voxel_size)
+        # Both call the one `shift_defocus_to_midplane`.
+        self._defocus_shift_angstrom = shift_defocus_to_midplane(
+            self,
+            self.nz,
+            voxel_size,
+            shift_required=scattering_model not in ("projection", "ctf"),
         )
         if self._defocus_shift_angstrom:
             for name in ("dfu", "dfv"):
                 if hasattr(self, name):
-                    setattr(
-                        self, name, getattr(self, name) - self._defocus_shift_angstrom
-                    )
                     self.ctf_params[name] = getattr(self, name)
 
         # Fourier-space mask applied after each gradient step

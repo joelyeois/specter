@@ -49,8 +49,8 @@ from ..constants import (
 )
 from ._occupancy import (
     FULL_OCCUPANCY_POTENTIAL_V,
-    occupancy_blur_halo_voxels,
     potential_occupancy,
+    potential_occupancy_slabs,
 )
 
 INELASTIC_MFP_ICE_A = 3950.0
@@ -520,7 +520,7 @@ def _occupancy_chunked(
     :func:`potential_occupancy`, evaluated a z-slab at a time.
 
     Each slab is widened by :func:`occupancy_blur_halo_voxels` and the margin
-    discarded, without which every slab boundary becomes an edge the blur
+    discarded (:func:`potential_occupancy_slabs`), without which every slab boundary becomes an edge the blur
     sees. Identical to the whole-volume result wherever the halo fits, which
     is what ``tests/test_inelastic_absorption.py`` pins.
 
@@ -546,16 +546,12 @@ def _occupancy_chunked(
     if slab >= nz:
         return potential_occupancy(v, voxel_size, full_potential=full_potential)
 
-    halo = occupancy_blur_halo_voxels(voxel_size)
     out = torch.empty_like(v)
-    for z0 in range(0, nz, slab):
-        z1 = min(z0 + slab, nz)
-        lo, hi = max(0, z0 - halo), min(nz, z1 + halo)
-        wide = potential_occupancy(
-            v[..., lo:hi, :, :], voxel_size, full_potential=full_potential
-        )
-        out[..., z0:z1, :, :] = wide[..., z0 - lo : z0 - lo + (z1 - z0), :, :]
-        del wide
+    for z0, z1, occ in potential_occupancy_slabs(
+        v, voxel_size, slab, full_potential=full_potential
+    ):
+        out[..., z0:z1, :, :] = occ
+        del occ
     return out
 
 

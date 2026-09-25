@@ -34,6 +34,7 @@ ice in it, and not before.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterator
 
 import torch
 
@@ -49,6 +50,7 @@ __all__ = [
     "molecular_mass_from_atoms",
     "occupancy_blur_halo_voxels",
     "potential_occupancy",
+    "potential_occupancy_slabs",
 ]
 
 #: Scattering potential of a voxel entirely filled with biological
@@ -248,6 +250,60 @@ def potential_occupancy(
     if sigma_vox >= 0.25:
         field = gaussian_blur3d(field, sigma_vox)
     return (field / full_potential).clamp_(0.0, 1.0)
+
+
+def potential_occupancy_slabs(
+    V: torch.Tensor,
+    voxel_size: float,
+    slab: int,
+    full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
+    sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
+) -> Iterator[tuple[int, int, torch.Tensor]]:
+    """
+    :func:`potential_occupancy`, evaluated a z-slab at a time.
+
+    Each slab of `slab` slices is widened by :func:`occupancy_blur_halo_voxels`
+    on both sides, blurred, and the margin discarded, without which every
+    slab boundary becomes an edge the blur sees. Wherever the halo fits,
+    each slab is identical to the matching slices of the whole-volume field.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Scattering potential in volts, shape ``(..., Z, Y, X)``.
+    voxel_size : float
+        Voxel size in Angstrom.
+    slab : int
+        Slices per slab, before the halo is added. Must be positive.
+    full_potential : float or torch.Tensor, optional
+        Potential of a fully occupied voxel, as :func:`potential_occupancy`'s.
+    sigma_angstrom : float, optional
+        Coarse-graining length in Angstrom. Default
+        :data:`WATER_COARSE_GRAIN_SIGMA_ANGSTROM`.
+
+    Yields
+    ------
+    tuple of (int, int, torch.Tensor)
+        ``(z0, z1, occupancy)``, where `occupancy` is the field over
+        ``V[..., z0:z1, :, :]``: a view into the widened slab's result, which
+        the caller may modify in place. The slabs cover ``[0, Z)`` in
+        ascending order.
+    """
+    nz = V.shape[-3]
+    halo = occupancy_blur_halo_voxels(voxel_size, sigma_angstrom)
+    for z0 in range(0, nz, slab):
+        z1 = min(z0 + slab, nz)
+        lo, hi = max(0, z0 - halo), min(nz, z1 + halo)
+        wide = potential_occupancy(
+            V[..., lo:hi, :, :],
+            voxel_size,
+            sigma_angstrom=sigma_angstrom,
+            full_potential=full_potential,
+        )
+        core = wide[..., z0 - lo : z0 - lo + (z1 - z0), :, :]
+        del wide
+        yield z0, z1, core
+        del core
 
 
 def molecular_mass_from_atoms(atomic_numbers: torch.Tensor) -> float:

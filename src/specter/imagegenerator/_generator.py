@@ -14,7 +14,7 @@ import torch.nn as nn
 from specter import logger
 
 from .. import rotations
-from ..ice import IceBank, RandomIcemaker, resolve_icemaker
+from ..ice import IceBank, RandomIcemaker
 from ..potential import PotentialBuilder, molecular_mass_from_atoms
 from ..rotations import VolumeRotator, translate_coordinates
 from ..settings import Camera, Crowding, Envelopes, Ice, Optics, Propagation
@@ -128,14 +128,8 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         periodic_potential: bool = False,
         bfactor: float | torch.Tensor | None = None,
     ):
-        self.pad_fft = propagation.pad_fft
-        self.ice = ice
-        self.ice_thickness = ice.thickness
-        self.ice_relax_steps = ice.relax_steps
         self.nxy = nxy
-
-        self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
-        self.nz = compute_nz(self.nxy, ice.thickness, pixel_size)
+        self._init_ice_geometry(nxy, nxy, pixel_size, ice, propagation)
 
         super().__init__(
             pixel_size=pixel_size,
@@ -156,18 +150,8 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
             bfactor=bfactor,
             n_images=quaternions.shape[0] if quaternions.ndim == 2 else 1,
         )
-        self.ice_model = ice.model
-        # The TEMPLATE's depth, not `self.nz * pixel_size`: the neighbour slab
-        # must not follow `ice.thickness`. See the constructor docstring. The
-        # two agree until the ice is deeper than the box, which is what makes
-        # this a no-op for every run that was not growing its crowding.
-        self.crowding = crowding
-        self.crowd_max_distance_z = (
-            crowding.max_distance_z
-            if crowding.max_distance_z is not None
-            else self.nxy * pixel_size
-        )
-        self.crowd_min_distance = crowding.min_distance
+        # The template is the `nxy`-cube the coordinates are rendered into.
+        self._init_crowding(crowding, ice, self.nxy, pixel_size)
 
         self.coordinates = nn.Parameter(coordinates)
         self.register_buffer("quaternions", quaternions)
@@ -197,18 +181,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         if self.crowd_min_distance is not None:
             self.crowd = self._build_crowd(self.V, crowding, progressbars=True)
 
-        self.ice_parameterization = ice.parameterization
-        self.icemaker: IceBank | RandomIcemaker | None = resolve_icemaker(
-            self.ice_model,
-            pixel_size,
-            self.nxy,
-            self.nz,
-            ice_cache_dir=ice.cache_dir,
-            icemaker=icemaker,
-            parameterization=self.ice_parameterization,
-        )
-        if icemaker is not None:
-            self.ice_model = icemaker.method
+        self._init_icemaker(ice, icemaker, pixel_size, progressbars=True)
 
     def rotate(self, Q: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
         """
@@ -378,14 +351,8 @@ class ImageGenerator(ParticleGeneratorBase):
         molecular_mass: float | None = None,
     ):
         nxy = scattering_potential.shape[-1]
-        self.pad_fft = propagation.pad_fft
-        self.ice = ice
-        self.ice_thickness = ice.thickness
-        self.ice_relax_steps = ice.relax_steps
-        self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
-
         volume_nz = scattering_potential.shape[0]
-        self.nz = compute_nz(volume_nz, ice.thickness, pixel_size)
+        self._init_ice_geometry(nxy, volume_nz, pixel_size, ice, propagation)
 
         super().__init__(
             pixel_size=pixel_size,
@@ -408,19 +375,7 @@ class ImageGenerator(ParticleGeneratorBase):
             n_images=quaternions.shape[0] if quaternions.ndim == 2 else 1,
         )
 
-        self.ice_parameterization = ice.parameterization
-        self.ice_model = ice.model
-        # The TEMPLATE's depth, not `self.nz * pixel_size`: the neighbour slab
-        # must not follow `ice.thickness`. See the constructor docstring. The
-        # two agree until the ice is deeper than the box, which is what makes
-        # this a no-op for every run that was not growing its crowding.
-        self.crowding = crowding
-        self.crowd_max_distance_z = (
-            crowding.max_distance_z
-            if crowding.max_distance_z is not None
-            else volume_nz * pixel_size
-        )
-        self.crowd_min_distance = crowding.min_distance
+        self._init_crowding(crowding, ice, volume_nz, pixel_size)
 
         self.register_buffer("V", scattering_potential)
         self._set_molecular_mass(molecular_mass)
@@ -440,18 +395,7 @@ class ImageGenerator(ParticleGeneratorBase):
                 move_to_cpu=crowd_move_to_cpu,
             )
 
-        self.icemaker: IceBank | RandomIcemaker | None = resolve_icemaker(
-            self.ice_model,
-            pixel_size,
-            self.nxy,
-            self.nz,
-            ice_cache_dir=ice.cache_dir,
-            icemaker=icemaker,
-            parameterization=self.ice_parameterization,
-            progressbars=self.progressbars,
-        )
-        if icemaker is not None:
-            self.ice_model = icemaker.method
+        self._init_icemaker(ice, icemaker, pixel_size, progressbars=self.progressbars)
 
         self._apply_defocus_shift(
             shift_required=self.scattering_model not in ["projection", "ctf"]

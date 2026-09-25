@@ -36,6 +36,7 @@ from ._occupancy import (
     template_occupancy_reference,
     occupancy_blur_halo_voxels,
     potential_occupancy,
+    potential_occupancy_slabs,
 )
 from ._potential_builder import PotentialBuilder
 
@@ -62,6 +63,7 @@ __all__ = [
     "WATER_COARSE_GRAIN_SIGMA_ANGSTROM",
     "occupancy_blur_halo_voxels",
     "potential_occupancy",
+    "potential_occupancy_slabs",
     "build_atomic_potential_kernel",
     "build_potential_volume_analytic_scatter",
     "build_potential_volume_analytic_scatter_kirkland",

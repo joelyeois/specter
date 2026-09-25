@@ -6,24 +6,25 @@ crowding, solvation with ice, and the per-batch volume pipeline.
 from __future__ import annotations
 
 import contextlib
+from typing import cast
 
 import torch
 
 from specter import logger
 
+from ..arrays import compute_nz
 from ..cpu_threads import limited_cpu_threads
 from ..crowding import CrowdWithDuplicates
-from ..ice import IceBank
+from ..ice import IceBank, RandomIcemaker, resolve_icemaker
 from ..ice._blend import IceSlabBlender
 from ..potential import (
     aperture_lowpass,
     apply_dose_damage,
-    occupancy_blur_halo_voxels,
-    potential_occupancy,
+    potential_occupancy_slabs,
     template_occupancy_reference,
 )
 from ..scattering import Scattering
-from ..settings import Crowding
+from ..settings import Crowding, Ice, Propagation
 from ._base import BaseImager
 
 __all__ = ["ParticleGeneratorBase"]
@@ -119,6 +120,113 @@ class ParticleGeneratorBase(BaseImager):
             )
         return self._occupancy_reference_V
 
+    icemaker: IceBank | RandomIcemaker | None
+
+    def _init_ice_geometry(
+        self,
+        nxy: int,
+        template_nz: int,
+        pixel_size: float,
+        ice: Ice,
+        propagation: Propagation,
+    ) -> None:
+        """
+        Set the ice and box-geometry attributes, before ``BaseImager.__init__``.
+
+        ``pad_nxy`` adds an ``nxy // 2`` FFT margin on each side when
+        ``propagation.pad_fft`` is on, and ``nz`` is the template's depth
+        grown to hold ``ice.thickness`` (:func:`~specter.arrays.compute_nz`).
+
+        Parameters
+        ----------
+        nxy : int
+            Lateral box size of the template, in pixels.
+        template_nz : int
+            Depth of the template, in slices.
+        pixel_size : float
+            Pixel size in Å.
+        ice : Ice
+            Ice settings.
+        propagation : Propagation
+            Propagation settings; only ``pad_fft`` is read.
+        """
+        self.pad_fft = propagation.pad_fft
+        self.ice = ice
+        self.ice_thickness = ice.thickness
+        self.ice_relax_steps = ice.relax_steps
+        self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
+        self.nz = compute_nz(template_nz, ice.thickness, pixel_size)
+
+    def _init_crowding(
+        self, crowding: Crowding, ice: Ice, template_nz: int, pixel_size: float
+    ) -> None:
+        """
+        Record the crowding settings, resolving ``crowd_max_distance_z``.
+
+        The default is the TEMPLATE's depth, ``template_nz * pixel_size``,
+        not ``self.nz * pixel_size``: the neighbour slab must not follow
+        ``ice.thickness``. The two agree until the ice is deeper than the
+        box, which is what makes this a no-op for every run that was not
+        growing its crowding.
+
+        Parameters
+        ----------
+        crowding : Crowding
+            Crowding settings.
+        ice : Ice
+            Ice settings; ``model`` becomes ``ice_model``.
+        template_nz : int
+            Depth of the template, in slices.
+        pixel_size : float
+            Pixel size in Å.
+        """
+        self.ice_model = ice.model
+        self.crowding = crowding
+        self.crowd_max_distance_z = (
+            crowding.max_distance_z
+            if crowding.max_distance_z is not None
+            else template_nz * pixel_size
+        )
+        self.crowd_min_distance = crowding.min_distance
+
+    def _init_icemaker(
+        self,
+        ice: Ice,
+        icemaker: IceBank | RandomIcemaker | None,
+        pixel_size: float,
+        progressbars: bool,
+    ) -> None:
+        """
+        Resolve ``self.icemaker`` from the ice settings or a prebuilt one.
+
+        Must follow :meth:`_init_crowding`, which sets ``ice_model``; a
+        prebuilt `icemaker` overrides it with its own method.
+
+        Parameters
+        ----------
+        ice : Ice
+            Ice settings.
+        icemaker : IceBank or RandomIcemaker or None
+            Prebuilt icemaker, used as given when not None.
+        pixel_size : float
+            Pixel size in Å.
+        progressbars : bool
+            Whether building the icemaker shows progress bars.
+        """
+        self.ice_parameterization = ice.parameterization
+        self.icemaker = resolve_icemaker(
+            self.ice_model,
+            pixel_size,
+            self.nxy,
+            self.nz,
+            ice_cache_dir=ice.cache_dir,
+            icemaker=icemaker,
+            parameterization=self.ice_parameterization,
+            progressbars=progressbars,
+        )
+        if icemaker is not None:
+            self.ice_model = icemaker.method
+
     def _build_crowd(
         self,
         template: torch.Tensor,
@@ -204,18 +312,13 @@ class ParticleGeneratorBase(BaseImager):
             potential_scale, dtype=V.dtype, device=V.device
         ).reshape(-1, 1, 1, 1)
         full = self._occupancy_reference() * scale
-        halo = occupancy_blur_halo_voxels(self.pixel_size)
-        nz = V.shape[1]
         chunk = _solvate_chunk_slices(V.shape[-1])
         free = torch.empty(V.shape, dtype=torch.float16, device=V.device)
         for b in range(V.shape[0]):
             full_b = full[b : b + 1] if full.shape[0] > 1 else full
-            for start in range(0, nz, chunk):
-                end = min(start + chunk, nz)
-                lo, hi = max(0, start - halo), min(nz, end + halo)
-                occ = potential_occupancy(
-                    V[b : b + 1, lo:hi], self.pixel_size, full_potential=full_b
-                )[:, start - lo : start - lo + (end - start)]
+            for start, end, occ in potential_occupancy_slabs(
+                V[b : b + 1], self.pixel_size, chunk, full_potential=full_b
+            ):
                 free[b : b + 1, start:end] = (
                     occ.neg_().add_(1.0).clamp_(0.0, 1.0).to(torch.float16)
                 )
@@ -316,7 +419,10 @@ class ParticleGeneratorBase(BaseImager):
                 relax_steps=self.ice_relax_steps,
             ).to(V.device)
         else:
-            ice = self.icemaker.generate_ice(batchsize=len(V)).to(V.device)
+            # Only reached with an icemaker: `process_volume` skips solvation
+            # without one.
+            icemaker = cast(RandomIcemaker, self.icemaker)
+            ice = icemaker.generate_ice(batchsize=len(V)).to(V.device)
         # On the pure ice canvas, before the particle's hole is cut: the
         # hole moves with the particle and never decorrelates.
         self._apply_solvent_exposure(ice)

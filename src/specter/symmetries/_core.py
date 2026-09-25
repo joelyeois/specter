@@ -91,13 +91,15 @@ def get_rotation_matrices(sym: str, return_affine: bool = True) -> torch.Tensor:
 
         Case-insensitive.
     return_affine : bool, optional
-        If True, returns 4x4 affine transformation matrices.
-        If False, returns 3x3 rotation matrices. Default is True.
+        If True, returns 3x4 affine matrices (the rotation with a zero
+        translation column), the form `rotate_volume` and
+        `rotate_volume_fourier` take. If False, returns 3x3 rotation
+        matrices. Default is True.
 
     Returns
     -------
     matrices : torch.Tensor
-        Rotation matrices with shape (N, 3, 3) or (N, 4, 4) where N is the
+        Rotation matrices with shape (N, 3, 3) or (N, 3, 4) where N is the
         number of symmetry operations in the group.
 
     Notes
@@ -180,7 +182,7 @@ def apply_symmetry(
     if isinstance(sym_ops, str):
         sym_ops = get_rotation_matrices(
             sym_ops, return_affine=True
-        )  # returns tensor n_sym x 3 x 3
+        )  # returns tensor n_sym x 3 x 4
 
     sym_ops = sym_ops.to(volume.device, dtype=volume.dtype)
     n_sym = len(sym_ops)

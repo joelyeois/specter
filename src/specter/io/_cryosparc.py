@@ -5,6 +5,7 @@ file.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -12,13 +13,9 @@ import numpy as np
 import roma
 import torch
 from cryosparc.dataset import Dataset
-from rich.console import Console
-
 from .. import logger
 from ..constants import energy_to_wavelength
-from ._common import _select_particles
-
-_console = Console()
+from ._common import _select_particles, _uniform_scalar
 
 
 def _load_csfile_parameters(
@@ -69,14 +66,15 @@ def _load_csfile_parameters(
         image_psize = None
     if image_psize is not None:
         if not torch.allclose(image_psize, alignment_psize):
-            _console.print(
-                f"[yellow]Warning:[/yellow] {csfile_path}: the images are at "
+            warnings.warn(
+                f"{csfile_path}: the images are at "
                 f"{float(image_psize.flatten()[0]):.4f} A/px "
                 f"(blob/psize_A) but the alignment was done at "
                 f"{float(alignment_psize.flatten()[0]):.4f} A/px "
                 "(alignments3D/psize_A), i.e. a binned refinement. Rendering at "
                 "the images' pixel size; shifts are still converted with the "
-                "alignment's."
+                "alignment's.",
+                stacklevel=3,
             )
         pixel_size = image_psize
     else:
@@ -85,20 +83,20 @@ def _load_csfile_parameters(
         # which is exactly the case that bites, because a passthrough with no
         # blob columns is what a binned refinement emits. Say so rather than
         # proceeding silently; the caller can check the stack's own header.
-        _console.print(
-            f"[yellow]Warning:[/yellow] {csfile_path}: no blob/psize_A, so the "
+        warnings.warn(
+            f"{csfile_path}: no blob/psize_A, so the "
             f"pixel size is taken from alignments3D/psize_A "
             f"({float(alignment_psize.flatten()[0]):.4f} A/px). If the "
             "refinement was binned this is NOT the pixel size of the images; "
-            "check it against the particle stack before rendering."
+            "check it against the particle stack before rendering.",
+            stacklevel=3,
         )
 
-    if torch.allclose(pixel_size[0], pixel_size.mean()):
-        pixel_size = pixel_size[0]
-    else:
-        _console.print(
-            "[yellow]Warning:[/yellow] pixel size is not the same for all particles."
-        )
+    pixel_size = _uniform_scalar(
+        pixel_size,
+        "blob/psize_A" if image_psize is not None else "alignments3D/psize_A",
+        csfile_path,
+    )
 
     # extract spherical aberration
     cs_mm = torch.as_tensor(dataset["ctf/cs_mm"])
@@ -111,22 +109,14 @@ def _load_csfile_parameters(
     dfv_angstrom = torch.as_tensor(dataset["ctf/df2_A"])
 
     # extract amplitude contrast
-    alpha = torch.as_tensor(dataset["ctf/amp_contrast"])
-    if torch.allclose(alpha[0], alpha.mean()):
-        alpha = alpha[0]
-    else:
-        _console.print(
-            "[yellow]Warning:[/yellow] amplitude contrast is not the same for all particles."
-        )
+    alpha = _uniform_scalar(
+        torch.as_tensor(dataset["ctf/amp_contrast"]), "ctf/amp_contrast", csfile_path
+    )
 
     # extract voltage
-    voltage_kv = torch.as_tensor(dataset["ctf/accel_kv"])
-    if torch.allclose(voltage_kv[0], voltage_kv.mean()):
-        voltage_kv = voltage_kv[0]
-    else:
-        _console.print(
-            "[yellow]Warning:[/yellow] voltage is not the same for all particles."
-        )
+    voltage_kv = _uniform_scalar(
+        torch.as_tensor(dataset["ctf/accel_kv"]), "ctf/accel_kv", csfile_path
+    )
     wavelength_angstrom = energy_to_wavelength(voltage_kv)
 
     # extract rotations

@@ -438,12 +438,22 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         config.targets
     ) + _protein_specs_from_dicts(config.filler)
     if config.filler_from_pei2016:
+        # Ratio 1 per species unless abundance weighting is on. The ratios
+        # are relative within the cytosol's ratio-mode pool, which also holds
+        # any [[filler]] entries and the CryoETSim table's species at ratio 1;
+        # the weighted ratios average 1, so the table's share of that pool is
+        # the same either way.
         protein_specs += [
-            TomogramProteinSpec(pdb_source=d["pdb_source"], location="cytosol")
+            TomogramProteinSpec(
+                pdb_source=d["pdb_source"],
+                location="cytosol",
+                ratio=float(d.get("ratio", 1.0)),
+            )
             for d in build_filler_pool_specs(
                 PEI2016_CROWDING_TABLE,
                 max_mw_kda=config.filler_table_max_mw_kda,
                 min_mw_kda=config.filler_table_min_mw_kda,
+                abundance_weighted=config.filler_pei2016_abundance_weighting,
             )
         ]
     if config.filler_from_cryoetsim:

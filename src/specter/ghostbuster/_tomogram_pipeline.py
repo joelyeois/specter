@@ -105,6 +105,17 @@ class TomogramGhostbuster(_GhostbusterBase):
         is, or a series normalised to zero mean and unit variance, mapped
         back to counts as ``sqrt(N) * x + N`` with ``N`` each tilt's dose per
         pixel. Default ``"counts"``.
+    checkpoint_chunks : int or None
+        Split the multislice slice loop into chunks of this many slices and
+        run each under gradient checkpointing, trading one extra forward pass
+        per chunk for activation memory, see `TomogramReconstructor`.
+        ``None`` (the default) disables checkpointing.
+    lr_decay : float
+        Decay coefficient for the reciprocal-sqrt LR schedule. Default ``0.1``.
+    kmask : torch.Tensor, optional
+        3-D Fourier-space mask applied to V after every gradient update. Its
+        shape must be the reconstructed volume's. `test_run` bins the volume
+        and therefore runs without it. Default ``None`` (no mask).
     """
 
     def __init__(
@@ -134,6 +145,9 @@ class TomogramGhostbuster(_GhostbusterBase):
         precision: str = "16-mixed",
         run_dir: str | Path | None = None,
         image_units: ImageUnits = "counts",
+        checkpoint_chunks: int | None = None,
+        lr_decay: float = 0.1,
+        kmask: torch.Tensor | None = None,
     ) -> None:
         images = self._load_tilt_series(tilt_series)
         n_tilts, H, W = images.shape
@@ -163,6 +177,11 @@ class TomogramGhostbuster(_GhostbusterBase):
             else torch.as_tensor(translations, dtype=torch.float32)
         )
         volume_init = self._build_initial_volume(V_init, nz, nxy=W)
+        if kmask is not None and tuple(kmask.shape) != tuple(volume_init.shape):
+            raise ValueError(
+                f"kmask has shape {tuple(kmask.shape)}; it must match the "
+                f"reconstructed volume's {tuple(volume_init.shape)}"
+            )
 
         # Store preprocessed data and settings
         self._images = images
@@ -189,6 +208,9 @@ class TomogramGhostbuster(_GhostbusterBase):
         self.num_workers = num_workers
         self.precision = precision
         self.run_dir = Path(run_dir) if run_dir is not None else None
+        self.checkpoint_chunks = checkpoint_chunks
+        self.lr_decay = lr_decay
+        self.kmask = kmask
 
     @staticmethod
     def _load_tilt_series(tilt_series: torch.Tensor | str | Path) -> torch.Tensor:
@@ -255,6 +277,7 @@ class TomogramGhostbuster(_GhostbusterBase):
         volume_init: torch.Tensor,
         voxel_size: float,
         batchsize: int,
+        kmask: torch.Tensor | None,
     ) -> tuple["TomogramReconstructor", torch.utils.data.DataLoader]:
         n_tilts = images.shape[0]
         idx = torch.arange(n_tilts)
@@ -280,7 +303,10 @@ class TomogramGhostbuster(_GhostbusterBase):
             propagation=self.propagation,
             optics=self.optics,
             scheduler=self.scheduler,
+            lr_decay=self.lr_decay,
+            kmask=kmask,
             slice_batchsize=self.slice_batchsize,
+            checkpoint_chunks=self.checkpoint_chunks,
             run_dir=self.run_dir,
         )
         return model, loader
@@ -321,7 +347,11 @@ class TomogramGhostbuster(_GhostbusterBase):
             f"{self._device_label(device)}"
         )
         model, loader = self._build_reconstructor_and_loader(
-            self._images, self._volume_init, self._voxel_size, self.batchsize
+            self._images,
+            self._volume_init,
+            self._voxel_size,
+            self.batchsize,
+            self.kmask,
         )
         return self._fit(model, loader, device, self.epochs, self.precision, callbacks)
 
@@ -374,8 +404,14 @@ class TomogramGhostbuster(_GhostbusterBase):
             .squeeze(0)
         )
 
+        # A kmask is shaped for the full volume and does not survive binning.
+        kmask = self.kmask if bin_factor == 1 else None
+        if self.kmask is not None and kmask is None:
+            console.print(
+                "  [dim]kmask skipped: it does not match the binned volume[/dim]"
+            )
         model, loader = self._build_reconstructor_and_loader(
-            images_binned, V_b, voxel_size_binned, self.batchsize
+            images_binned, V_b, voxel_size_binned, self.batchsize, kmask
         )
         model = self._fit(model, loader, device, 1, "32", callbacks)
         self._report_test_run(

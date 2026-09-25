@@ -16,7 +16,7 @@ import starfile
 import torch
 from rich.console import Console
 
-from ._common import _select_particles
+from ._common import _select_particles, _uniform_scalar
 
 if TYPE_CHECKING:
     # Annotation-only. Importing `..imagegenerator` eagerly would pull the whole
@@ -108,18 +108,13 @@ def _load_starfile_parameters(
             )
         return torch.full((n,), float(default))
 
-    def scalar_col(name: str) -> torch.Tensor:
-        values = col(name)
-        if torch.allclose(values[0], values.mean()):
-            return values[0]
-        _console.print(
-            f"[yellow]Warning:[/yellow] {name} is not the same for all particles."
-        )
-        return values
-
-    voltage_kv = scalar_col("rlnVoltage")
-    pixel_size = scalar_col("rlnImagePixelSize")
-    alpha = scalar_col("rlnAmplitudeContrast")
+    voltage_kv = _uniform_scalar(col("rlnVoltage"), "rlnVoltage", starfile_path)
+    pixel_size = _uniform_scalar(
+        col("rlnImagePixelSize"), "rlnImagePixelSize", starfile_path
+    )
+    alpha = _uniform_scalar(
+        col("rlnAmplitudeContrast"), "rlnAmplitudeContrast", starfile_path
+    )
 
     cs_angstrom = col("rlnSphericalAberration") * 1e7
     dfu_angstrom = col("rlnDefocusU")

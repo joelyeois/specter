@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from specter import logger
 
+import contextlib
 import gzip
 import hashlib
 import io
+import logging
 import os
 import sys
+import tempfile
 import warnings
 from collections import defaultdict
 from typing import TYPE_CHECKING
@@ -41,6 +44,10 @@ from .config import default_pdb_cache_dir
 # where it lies, which is what keeps `specter cache clean` safe. See
 # `default_pdb_cache_dir` in config/_paths.py.
 DEFAULT_PDB_CACHE_DIR = default_pdb_cache_dir()
+
+# Seconds an RCSB request may wait for a connection or for the next byte
+# before failing, so an unreachable server raises instead of hanging a run.
+_HTTP_TIMEOUT_S = 60.0
 
 # Suppress only PDBConstructionWarnings
 warnings.simplefilter("ignore", PDBConstructionWarning)
@@ -660,15 +667,6 @@ class PDB:
         # direct fetches.
         pdb_id = canonical_pdb_source(pdb_id)
 
-        # Guarded on `verbose` because that is the ONLY thing it does: it
-        # returns None and its sole effect is a print. Unguarded it spent a
-        # ~0.6 s HTTPS round trip per structure -- on every call, before the
-        # cache check below, and discarded -- which was the entire cost of a
-        # "cache hit" for the 26 already-downloaded structures a tomogram
-        # loads.
-        if verbose:
-            PDB.get_available_assemblies(pdb_id, verbose=verbose)
-
         # Decide what to fetch
         if assembly is True:
             if verbose:
@@ -705,11 +703,17 @@ class PDB:
                 logger.info(f"File already exists: {cached}, skip fetching.")
             return cached
 
-        # Fetch
+        # Fetch. The assembly listing is a log line and nothing else: it
+        # returns None. It costs a ~0.6 s HTTPS round trip, so it runs only on
+        # a cache miss and only when the line would actually be emitted;
+        # before the cache check it was the entire cost of a "cache hit" for
+        # the 26 already-downloaded structures a tomogram loads.
+        if verbose and logger.isEnabledFor(logging.INFO):
+            PDB.get_available_assemblies(pdb_id, verbose=verbose)
         if verbose:
             logger.info("File does not exist, fetching.")
         url = "https://files.rcsb.org/download/" + filename + ".gz"
-        r = requests.get(url)
+        r = requests.get(url, timeout=_HTTP_TIMEOUT_S)
         r.raise_for_status()
 
         # Decompress in memory
@@ -721,8 +725,21 @@ class PDB:
         # specter repo root), so create it on demand rather than crashing
         # with a raw FileNotFoundError if it doesn't exist yet.
         os.makedirs(pdb_cache_dir, exist_ok=True)
-        with open(file_path, "w") as f:
-            f.write(cif_content)
+        # Written to a temporary file beside the destination and renamed into
+        # place, so an interrupted write, or a second process fetching the
+        # same entry, never leaves a truncated file that the existence check
+        # above would later return as a cache hit.
+        fd, tmp_path = tempfile.mkstemp(
+            dir=pdb_cache_dir, prefix=f".{filename}.", suffix=".part"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(cif_content)
+            os.replace(tmp_path, file_path)
+        except BaseException:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(tmp_path)
+            raise
 
         if verbose:
             logger.info(f"Downloaded to: {file_path}")
@@ -731,7 +748,7 @@ class PDB:
     @staticmethod
     def get_available_assemblies(pdb_id: str, verbose: bool = True) -> None:
         """
-        Print the available biological assembly IDs for a PDB entry.
+        Log the available biological assembly IDs for a PDB entry.
 
         Parameters
         ----------
@@ -742,19 +759,20 @@ class PDB:
 
         Notes
         -----
-        Prints the available assemblies to console. If the PDB entry cannot be
-        accessed or does not have assembly information, prints an error message.
+        Logs the available assemblies through ``specter.logger`` at info
+        level. If the PDB entry cannot be accessed or does not have assembly
+        information, logs a warning instead.
         """
         url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id.lower()}"
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=_HTTP_TIMEOUT_S)
             response.raise_for_status()
             data = response.json()
             assemblies = data.get("rcsb_entry_container_identifiers", {}).get(
                 "assembly_ids", []
             )
             if verbose:
-                logger.warning("Assemblies available: " + ", ".join(assemblies))
+                logger.info("Assemblies available: " + ", ".join(assemblies))
         except Exception as e:
             if verbose:
                 logger.warning(f"Error fetching assemblies for {pdb_id}: {e}")

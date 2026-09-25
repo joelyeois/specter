@@ -505,7 +505,9 @@ class Detector(L.LightningModule):
         img : torch.Tensor
             Total-dose image, shape (H, W).
         dose : float
-            Total dose for this image in e⁻/Å².
+            Total dose for this image in e⁻/Å². Unused: the expected counts
+            per frame are derived from ``img`` itself, which already carries
+            the dose. Kept for the callers that pass it positionally.
         coincidence_radius : float
             Effective coincidence exclusion radius in pixels: within a single
             readout frame, an arriving electron is lost if it lands inside the
@@ -547,9 +549,9 @@ class Detector(L.LightningModule):
         higher dose rates measured here.
 
         The radius is a true exclusion radius: the suppression grid's cell
-        side is ``r * sqrt(pi / 2)``, so the effective exclusion area is
-        ``pi * r**2`` (a value that indexed the cell side as ``r / sqrt(2)``
-        would be ``sqrt(2 * pi)`` times larger).
+        side is ``r * sqrt(pi)``, so the cell area, and with it the effective
+        exclusion area, is ``pi * r**2`` (see
+        :meth:`apply_detector_physics`).
         """
         if self.noise_model != "poisson":
             return img

@@ -454,6 +454,11 @@ TOMOGRAM = CommandSpec(
         Flag("voxel_size", "16.0"),
         Flag("seed", "8"),
         Flag("filler_from_pei2016", "false"),
+        Flag(
+            "filler_pei2016_abundance_weighting",
+            "true",
+            context=["--filler_from_pei2016", "true"],
+        ),
         Flag("filler_from_cryoetsim", "true"),
         Flag("filler_table_max_mw_kda", "300.0"),
         Flag("filler_table_min_mw_kda", "80.0"),

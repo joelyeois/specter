@@ -183,6 +183,55 @@ def test_fetch_pdb_file_does_not_call_the_network_when_quiet(tmp_path, monkeypat
     assert Path(path).name == "1ABC-assembly1.cif"
 
 
+def test_fetch_pdb_file_verbose_cache_hit_makes_no_request(tmp_path, monkeypatch):
+    # The assembly listing is only a log line, so a cache hit must not pay
+    # its HTTPS round trip even with verbose=True and info logging on.
+    import logging
+
+    (tmp_path / "1ABC-assembly1.cif").write_text("data_1ABC\n#\n")
+
+    def fake_get(url, *args, **kwargs):
+        raise AssertionError(f"no request should be made, got {url}")
+
+    monkeypatch.setattr(pdb_module.requests, "get", fake_get)
+    monkeypatch.setattr(pdb_module.logger, "level", logging.INFO)
+    path = PDB.fetch_pdb_file("1ABC", pdb_cache_dir=str(tmp_path), verbose=True)
+    assert Path(path).name == "1ABC-assembly1.cif"
+
+
+def test_fetch_pdb_file_times_out_and_writes_atomically(tmp_path, monkeypatch):
+    # Every request carries a timeout, and a download that fails mid-write
+    # leaves nothing in the cache that a later existence check would take
+    # for a complete file.
+    compressed = gzip.compress(b"data_1ABC\n#\n")
+    timeouts = []
+
+    def fake_get(url, *args, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        if "rest/v1/core/entry" in url:
+            return _FakeResponse(
+                json_data={"rcsb_entry_container_identifiers": {"assembly_ids": []}}
+            )
+        return _FakeResponse(content=compressed)
+
+    monkeypatch.setattr(pdb_module.requests, "get", fake_get)
+
+    def failing_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pdb_module.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="disk full"):
+        PDB.fetch_pdb_file("1abc", pdb_cache_dir=str(tmp_path), verbose=False)
+    assert list(tmp_path.iterdir()) == []
+
+    monkeypatch.undo()
+    monkeypatch.setattr(pdb_module.requests, "get", fake_get)
+    PDB.get_available_assemblies("1abc", verbose=True)
+    path = PDB.fetch_pdb_file("1abc", pdb_cache_dir=str(tmp_path), verbose=False)
+    assert [p.name for p in tmp_path.iterdir()] == [Path(path).name]
+    assert timeouts and all(t is not None and t > 0 for t in timeouts)
+
+
 @pytest.mark.skipif(not _FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_parsed_cache_returns_an_identical_structure(tmp_path):
     """A cached parse must be indistinguishable from a fresh one.

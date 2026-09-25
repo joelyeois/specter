@@ -34,6 +34,7 @@ _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
         "Filler tables",
         [
             "filler_from_pei2016",
+            "filler_pei2016_abundance_weighting",
             "filler_from_cryoetsim",
             "filler_table_max_mw_kda",
             "filler_table_min_mw_kda",

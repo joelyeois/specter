@@ -80,8 +80,8 @@ per region:
    count. This is the annotated ground truth, always exported to picks.
 2. **`[[filler]]`** (plus `filler_from_pei2016`/`filler_from_cryoetsim`):
    placed second, packed around the already-placed targets until it
-   reaches `filler_occupancy_fraction` (a bare-sphere volume fraction, per
-   region) or the packing jams, whichever comes first, so you rarely need
+   reaches `filler_occupancy_fraction` (a fraction of real footprint
+   volume, per region) or the packing jams, whichever comes first, so you rarely need
    to hand-tune it. Excluded from picks by default (`write_picks` still
    controls this; see the CLI help for the exact rule).
 

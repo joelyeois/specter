@@ -1200,6 +1200,7 @@ class _FakePDB:
     def __init__(self):
         g = torch.Generator().manual_seed(0)
         self.coordinates = torch.randn(80, 3, generator=g) * 6.0
+        self.filepath = "fake.cif"  # part of the species-mask cache key
 
 
 def _bare_generator() -> TomogramSpecimenGenerator:
@@ -1211,6 +1212,10 @@ def _bare_generator() -> TomogramSpecimenGenerator:
     gen.seed = 0
     gen.device = "cpu"
     gen.clip_axes = (True, True, True)
+    # Parse flags, which the species-mask cache key includes.
+    gen.parameterization = "kirkland"
+    gen.readd_hydrogens = "auto"
+    gen.monomer_library_path = None
     return gen
 
 
@@ -1241,3 +1246,34 @@ def test_pack_shapes_still_packs_a_region_with_room():
         [_FakePDB()], torch.zeros(6, dtype=torch.long), pack_shape, 8.0, 2, occupancy
     )
     assert coords.shape[0] > 0 and occ.any()
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_second_generate_does_not_accumulate_beads_or_masks():
+    """
+    A second seeded ``generate()`` reproduces the first: bead picks are reset
+    rather than appended to, and the species-mask cache is keyed on the
+    structure rather than on ``id(pdb)``, so the freshly loaded PDB objects of
+    the second call reuse the first call's masks instead of adding entries.
+    """
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=_TARGET_SHAPE_ZYX,
+        voxel_size=_V_SIZE,
+        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE))],
+        bead_specs=[TomogramBeadSpec(radius=15.0, count=5)],
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        seed=0,
+        progressbars=False,
+    )
+    first = gen.generate()
+    n_beads = len(gen.bead_instances)
+    labels = gen.instance_labels.clone()
+    n_masks = len(gen._mask_cache)
+    assert n_beads > 0 and n_masks > 0
+
+    second = gen.generate()
+    assert len(gen.bead_instances) == n_beads
+    assert len(gen._mask_cache) == n_masks
+    assert torch.equal(gen.instance_labels, labels)
+    assert torch.allclose(first, second)

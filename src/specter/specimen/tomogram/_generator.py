@@ -16,13 +16,17 @@ outside one, and are placed either at an exact count
 first within each region) or ratio-weighted up to `occupancy_fraction` of
 the region (`TomogramProteinSpec.ratio`, "filler" semantics).
 
-Placement is Random Sequential Addition (``specimen.packing``) with an
-exclusion field, and the collision tests are bounding-sphere-against-
-distance-field approximations rather than exact voxel-overlap guarantees:
-a placed protein's true rendered shape can still graze a filament, the
-membrane shell or the carbon film close to the boundary. Anything that
-does not fit is dropped rather than retried ("reject and move on"). Two
-consequences of that:
+Protein placement is `specimen.packing.pack_shapes_3d`: each instance is
+tested at its rotated voxel footprint (van der Waals shell plus `gap`)
+against a running occupancy grid that already holds the region's
+complement and everything placed before it, so proteins collide with each
+other, filaments, beads, the membrane shell and the carbon film at voxel
+resolution. Membrane instances and gold beads are placed by Random
+Sequential Addition of bounding spheres against an exclusion distance
+field (`pack_hard_spheres_3d`), which is an approximation: an instance's
+true rendered shape can still graze what it avoided close to the boundary.
+Anything that does not fit is dropped rather than retried ("reject and
+move on"). Two consequences of the approximate stages:
 
 - The carbon film is painted into the canvas first and everything after
   it avoids it, but membrane placement only avoids it as a bounding
@@ -49,11 +53,10 @@ dropped with a warning; the bounding-sphere check is necessarily
 approximate for `swept_spline`'s wandering shape.
 
 Labels: `membrane_labels` records which membrane instance a shell voxel
-belongs to; `instance_labels` records which filament monomer (stamped
-first) or cytosol/lumen protein instance (continuing the same id counter)
-a voxel belongs to. Transmembrane placements get no per-instance voxel
-labels; their density is present in the volume via
-`MembraneGenerator.place_transmembrane`.
+belongs to; `instance_labels` records which protein object a voxel belongs
+to, with one id counter shared in generation order: transmembrane
+proteins, filaments (one id per filament) and microtubules (one id per
+tube), gold beads, then cytosol/lumen proteins.
 """
 
 from __future__ import annotations
@@ -61,6 +64,7 @@ from __future__ import annotations
 import gc
 import json
 import math
+import os
 import warnings
 from pathlib import Path
 from collections.abc import Iterator
@@ -173,8 +177,8 @@ class TomogramSpecimenGenerator:
 
     Places any number of distinct species (see `protein_specs` below),
     purely for DENSITY -- each region (cytosol/lumen) is packed as densely
-    as `occupancy_fraction` allows via RSA hard-sphere placement, uniformly
-    throughout it, with no distributional shaping of any one species' own
+    as `occupancy_fraction` allows by exact-footprint shape packing
+    (`..packing.pack_shapes_3d`), uniformly throughout it, with no distributional shaping of any one species' own
     spatial statistics. Contrast `specter.specimen.
     MicrographSpecimenGenerator` (the single-particle-micrograph backend):
     single-species only (many duplicate copies of ONE template), but its
@@ -234,7 +238,7 @@ class TomogramSpecimenGenerator:
         draws per bead, mixing near-round and misshapen particles. Default
         0.12.
     occupancy_fraction : float, optional
-        Target packing density (see `pack_hard_spheres_3d`/
+        Target packing density, as a fraction of real footprint volume (see
         `draw_species_pool`), applied independently per region -- e.g. 0.2
         for `"lumen"` species targets 20% of the LUMEN's own volume, not
         20% of the whole tomogram. Default 0.2.
@@ -282,8 +286,9 @@ class TomogramSpecimenGenerator:
         reads a denser 0.348, with instances interpenetrating.
     clip_axes : tuple of bool, optional
         (z, y, x), matching `target_shape`'s axis order -- passed
-        straight through to every `pack_hard_spheres_3d` call here (auto-
-        placed membrane instances AND cytosol/lumen protein packing). True
+        straight through to every packer call here (`pack_hard_spheres_3d`
+        for auto-placed membrane instances and gold beads,
+        `pack_shapes_3d` for cytosol/lumen protein packing). True
         on an axis lets a placed instance's center stay in-bounds while its
         body pokes past that wall (truncated at render time) instead of
         being rejected outright -- e.g. for a tomogram whose xy field of
@@ -292,12 +297,13 @@ class TomogramSpecimenGenerator:
         Passed to `classify_membrane_regions`. Default None (that
         function's own default).
     region_max_passes : int, optional
-        `max_passes` (and `stall_patience`, set equal to it -- see
-        `pack_hard_spheres_3d`'s `sampling_mask` docstring for why a small
-        region needs the early-exit heuristic disabled) for cytosol/lumen
-        packing. Default 300, higher than `pack_hard_spheres_3d`'s own
-        default 200 since a tight region (e.g. a small vesicle lumen) can
-        need more attempts before a geometrically valid spot turns up.
+        `max_passes` for the gold-bead `pack_hard_spheres_3d` call, whose
+        placement is restricted to outside the membrane shell and the
+        already-placed filaments by a `sampling_mask`. Default 300, higher
+        than `pack_hard_spheres_3d`'s own default 200, since a crowded
+        volume can need more attempts before a valid spot turns up.
+        Cytosol/lumen protein packing does not read it; its attempt budget
+        is `packing_max_retries`.
     min_transmembrane_spacing : float, optional
         Passed to `MembraneGenerator.place_transmembrane`. Default 40.0.
     pdb_cache_dir : str, optional
@@ -325,10 +331,11 @@ class TomogramSpecimenGenerator:
     seed : int, optional
         Random seed.
     device : str or torch.device, optional
-        Device for the packing step (see `pack_hard_spheres_3d`'s own
-        docstring on why that specifically stays CPU-bound regardless) AND,
+        Device for cytosol/lumen protein packing (`pack_shapes_3d`) AND,
         by default, for `_render_species_pool`'s own `PotentialBuilder`
-        step -- override the latter alone via `render_devices` below.
+        step -- override the latter alone via `render_devices` below. The
+        bounding-sphere placement of membrane instances and beads always
+        runs on the CPU (see `pack_hard_spheres_3d`'s own docstring).
         Default "cpu".
     chunk_size : int, optional
         Instances rotated per batch, per species. Default None (all of a
@@ -560,9 +567,11 @@ class TomogramSpecimenGenerator:
         self.transmembrane_placements: list[TransmembranePlacement] = []
         self.placements: list[TomogramPlacement] = []
         self.instance_labels: torch.Tensor | None = None
-        # Rasterized footprints for protein packing, keyed by
-        # (PDB identity, voxel_size, gap) -- a species reappearing across
-        # regions rasterizes once.
+        # Rasterized footprints for protein packing, keyed by the structure's
+        # file and the flags that shape its parse, plus (voxel_size, gap) -- a
+        # species reappearing across regions, or across generate() calls,
+        # rasterizes once. Not keyed on id(pdb): CPython reuses an id once
+        # its object is freed, so a later PDB could hit a stale mask.
         self._mask_cache: dict[tuple, torch.Tensor] = {}
         self.filament_instances: list[FilamentInstance] = []
         self.microtubule_instances: list[MicrotubuleInstance] = []
@@ -582,6 +591,9 @@ class TomogramSpecimenGenerator:
             torch.manual_seed(
                 self.seed
             )  # random_rotation_matrix has no generator= param
+
+        # Per-run outputs: a second generate() must not append to the first's.
+        self.bead_instances = []
 
         voxel_size = self.voxel_size
         target_shape = self.target_shape
@@ -1160,9 +1172,8 @@ class TomogramSpecimenGenerator:
         # after membranes, BEFORE cytosol/lumen protein packing (see module
         # docstring) -- obstacle_mask (voxels they actually occupy, from
         # instance_labels before any protein instance touches it) is then
-        # folded into the per-region exclusion field/sampling_mask below,
-        # the same mechanism already used to keep packed spheres clear of
-        # the membrane shell.
+        # folded into the beads' sampling mask and the protein packer's
+        # occupancy grid, alongside the membrane shell.
         if self.filament_specs or self.microtubule_specs:
             _filament_phase_start = phase_start(
                 "Filaments", disable=not self.progressbars
@@ -1377,8 +1388,8 @@ class TomogramSpecimenGenerator:
         ratio_specs = [s for s in specs_here if s.n_copies is None]
 
         # Exact-count ("target") species are placed FIRST within this
-        # region; the ratio-weighted ones then fill what is left via
-        # the exclusion field.
+        # region; the ratio-weighted ones then fill what is left of the
+        # occupancy grid, which carries the targets forward.
         if exact_specs:
             exact_pdbs = [pdbs_by_source[s.pdb_source] for s in exact_specs]
             exact_radii = torch.cat(
@@ -1447,9 +1458,8 @@ class TomogramSpecimenGenerator:
 
         # Ratio-weighted ("filler") species, drawn to fill
         # occupancy_fraction of this region -- avoiding the exact-count
-        # placements above (if any), the filament mask, and the
-        # membrane shell, all folded into region_exclusion_field/region_mask
-        # by this point.
+        # placements above (if any), the obstacles (filaments, beads) and
+        # the membrane shell, all folded into `occupancy` by this point.
         if ratio_specs:
             ratio_pdbs = [pdbs_by_source[s.pdb_source] for s in ratio_specs]
             species_radii = torch.tensor(
@@ -1595,11 +1605,11 @@ class TomogramSpecimenGenerator:
         obstacle_mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         """
-        Place and render every `bead_specs` population -- solid gold
-        spheres, no rotation needed (spherically symmetric) -- via the same
-        RSA backend (`pack_hard_spheres_3d`) used for membrane instances and
-        protein packing (see module docstring for why this differs from
-        the deleted CTS-derived generator's own sequential bead placement).
+        Place and render every `bead_specs` population -- gold spheres,
+        placed by bounding sphere with the RSA backend
+        (`pack_hard_spheres_3d`) that also places membrane instances. A
+        sphere is its own bounding sphere, so for beads that approximation
+        is exact up to the rendered surface roughness.
 
         Sampling is restricted to outside the membrane shell (beads
         embedded in the bilayer would be a glaring, physically wrong
@@ -1697,8 +1707,8 @@ class TomogramSpecimenGenerator:
         next_instance_id += n_placed
 
         # One bead at a time: each is an independent realisation (its own
-        # grain, orientation and -- under radius_cv -- its own size), so
-        # there is no shared template to batch over.
+        # grain, orientation and, for a [low, high] radius, its own size),
+        # so there is no shared template to batch over.
         for i in range(n_placed):
             bead = bead_gen.generate(radius=float(accepted_radii[i]))
             volume = insert_particles_into_micrograph(
@@ -1773,13 +1783,14 @@ class TomogramSpecimenGenerator:
         carbon_mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         """Place and render every `filament_specs` species, continuing
-        `instance_labels`'s own instance-id counter from wherever the
-        cytosol/lumen protein loop left it.
+        `instance_labels`'s own instance-id counter from the transmembrane
+        proteins. Filaments render before beads and the cytosol/lumen
+        protein fill, which then avoid them.
 
         `place_filaments` draws positions in `[0, extent)` -- a corner-
         relative box -- while `volume`/`instance_labels` (and
-        `insert_particles_into_micrograph`/`_insert_instance_labels`, both
-        already used for cytosol/lumen proteins above) are centered at
+        `insert_particles_into_micrograph`/`_insert_instance_labels`, the
+        same helpers the cytosol/lumen proteins use) are centered at
         physical (0,0,0). Only the LOCAL `positions_centered` used for
         rendering is shifted by `-extent/2` to bridge that; `self.
         filament_instances` keeps each `FilamentInstance`'s original
@@ -2435,14 +2446,24 @@ class TomogramSpecimenGenerator:
     def _species_mask(self, pdb: PDB, voxel_size: float) -> torch.Tensor:
         """
         This species' footprint mask for protein packing, built
-        once per (structure, voxel size, gap) and reused across regions and
-        across the pool-sizing/packing steps.
+        once per (structure, voxel size, gap) and reused across regions,
+        across the pool-sizing/packing steps and across `generate` calls.
+        The structure is identified by its file and the parse flags that
+        change its atoms, never by object identity.
 
         Always at the RENDER voxel size. Coarsening for a coarser packing
         grid happens per rotated orientation inside the packer, not here --
         see `packing_voxel_size`.
         """
-        key = (id(pdb), voxel_size, self.gap)
+        key = (
+            os.path.realpath(pdb.filepath),
+            int(pdb.coordinates.shape[0]),
+            _wants_atom_species(self.parameterization),
+            self.readd_hydrogens,
+            self.monomer_library_path,
+            voxel_size,
+            self.gap,
+        )
         if key not in self._mask_cache:
             self._mask_cache[key] = build_species_mask(
                 pdb.coordinates, voxel_size, gap=self.gap

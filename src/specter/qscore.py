@@ -17,6 +17,7 @@ import torch
 import torch.nn.functional as F
 from scipy.spatial import cKDTree
 
+from specter import logger
 from specter.pdb import PDB
 
 # Standard residue and atom names — mirrors qscore's selection so per-atom
@@ -199,10 +200,10 @@ class QScore:
         self._centroid: np.ndarray | None = None
         self._atom_keys: list[tuple[str, int, str, str]] | None = None
 
-        print(
-            "[QScore] Reminder: verify that the CIF/PDB structure is spatially "
-            "aligned to the MRC map before scoring. Misaligned inputs will "
-            "produce Q-scores near zero regardless of map quality."
+        logger.warning(
+            "QScore: verify that the CIF/PDB structure is spatially aligned to "
+            "the MRC map before scoring. Misaligned inputs produce Q-scores "
+            "near zero regardless of map quality."
         )
 
         if cif_path is not None:
@@ -573,14 +574,17 @@ class QScore:
         label: str = "",
         plot: bool = True,
     ) -> dict[str, float]:
-        """Print Q-score statistics and optionally show a histogram.
+        """Compute Q-score statistics, log them, and optionally show a histogram.
+
+        The summary is logged through ``specter.logger`` at info level, so it
+        is shown once ``specter.set_verbosity("INFO")`` has been called.
 
         Parameters
         ----------
         q : torch.Tensor
             Per-atom Q-scores, shape ``(N,)``.
         label : str
-            Optional label shown in the printed header and plot title.
+            Optional label shown in the logged header and plot title.
         plot : bool
             If ``True`` (default), display a histogram using matplotlib.
             Silently skipped if matplotlib is not available.
@@ -606,17 +610,20 @@ class QScore:
             "frac_above_0.7": float((q_np > 0.7).mean()),
         }
 
-        print(f"Q-score summary{tag}")
-        print(f"  atoms            : {int(stats['n_atoms'])}")
-        print(f"  mean / median    : {stats['mean']:.4f} / {stats['median']:.4f}")
-        print(f"  std              : {stats['std']:.4f}")
-        print(
-            f"  10/25/75/90 pct  : "
-            f"{stats['p10']:.3f} / {stats['p25']:.3f} / "
-            f"{stats['p75']:.3f} / {stats['p90']:.3f}"
+        logger.info(
+            "\n".join(
+                [
+                    f"Q-score summary{tag}",
+                    f"  atoms            : {int(stats['n_atoms'])}",
+                    f"  mean / median    : {stats['mean']:.4f} / {stats['median']:.4f}",
+                    f"  std              : {stats['std']:.4f}",
+                    f"  10/25/75/90 pct  : {stats['p10']:.3f} / {stats['p25']:.3f} / "
+                    f"{stats['p75']:.3f} / {stats['p90']:.3f}",
+                    f"  fraction > 0.5   : {stats['frac_above_0.5']:.1%}",
+                    f"  fraction > 0.7   : {stats['frac_above_0.7']:.1%}",
+                ]
+            )
         )
-        print(f"  fraction > 0.5   : {stats['frac_above_0.5']:.1%}")
-        print(f"  fraction > 0.7   : {stats['frac_above_0.7']:.1%}")
 
         if plot:
             try:
@@ -731,4 +738,4 @@ class QScore:
         io = MMCIFIO()
         io.set_structure(structure)
         io.save(cif_path)
-        print(f"[QScore] Written: {cif_path}  (B-factor = Q-score × 100)")
+        logger.info(f"QScore: written {cif_path} (B-factor = Q-score x 100)")

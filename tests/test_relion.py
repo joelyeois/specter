@@ -389,3 +389,20 @@ class TestScalarsAreWrittenAsNumbers:
         ):
             assert df[col].dtype.kind == "f", f"{col} is {df[col].dtype}, not numeric"
             assert float(df[col].iloc[0]) == pytest.approx(want, rel=1e-5)
+
+
+def test_extract_parameters_from_starfile_refuses_non_uniform_pixel_size(
+    tmp_path,
+) -> None:
+    """
+    A pixel size that varies across particles has no correct scalar, so it is
+    refused rather than handed back as a per-particle tensor that every caller
+    then fails to ``.item()``. [1.0, 1.2, 0.8, 1.0] has mean equal to its first
+    entry, which the old uniformity test accepted.
+    """
+    df = _single_block_star_df()
+    df["rlnImagePixelSize"] = [1.0, 1.2, 0.8, 1.0]
+    star_path = tmp_path / "particles.star"
+    starfile.write(df, star_path, overwrite=True)
+    with pytest.raises(ValueError, match=r"rlnImagePixelSize.*0\.8.*1\.2"):
+        extract_parameters_from_starfile(str(star_path))

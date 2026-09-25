@@ -88,6 +88,18 @@ class TomogramConfig:
             "al. 2016 generic cytosolic crowding reference)."
         ),
     )
+    # Off by default: every table species is then drawn with ratio 1, which
+    # is what shipped before the option existed and keeps seeded output
+    # unchanged. See build_filler_pool_specs for the normalisation.
+    filler_pei2016_abundance_weighting: bool = setting(
+        False,
+        help=(
+            "Only used with filler_from_pei2016: weight each PEI2016 species' "
+            "ratio by the paper's relative abundance (occurrence_freq), "
+            "normalised to a mean of 1 so the table keeps its share against "
+            "other filler. False = equal ratios."
+        ),
+    )
     filler_from_cryoetsim: bool = setting(
         False,
         help=(

@@ -291,7 +291,7 @@ def test_shifts_still_use_the_alignment_pixel_size(
 
 
 def test_absent_blob_psize_falls_back_and_warns(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     A passthrough with no blob columns cannot say what its images are sampled
@@ -299,6 +299,39 @@ def test_absent_blob_psize_falls_back_and_warns(
     value is used and the fallback is announced rather than silent.
     """
     monkeypatch.setattr(_cryosparc, "Dataset", _FakeDataset)
-    _, pixel_size, *_ = extract_parameters_from_csfile("fake.cs", halfset="all")
+    with pytest.warns(UserWarning, match="no blob/psize_A"):
+        _, pixel_size, *_ = extract_parameters_from_csfile("fake.cs", halfset="all")
     assert float(pixel_size) == pytest.approx(1.5)
-    assert "no blob/psize_A" in capsys.readouterr().out
+
+
+class _MixedVoltageDataset(_FakeDataset):
+    """A set whose voltage varies by 20% around a mean that equals its first entry."""
+
+    @classmethod
+    def load(cls, csfile_path: str) -> "_FakeDataset":
+        d = super().load(csfile_path)
+        kv = np.full_like(np.asarray(d["ctf/accel_kv"]), 300.0)
+        kv[1::3] = 360.0
+        kv[2::3] = 240.0
+        d["ctf/accel_kv"] = kv
+        return d
+
+
+def test_non_uniform_voltage_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    [300, 360, 240, ...] has its mean equal to its first entry, which the
+    old ``allclose(x[0], x.mean())`` test accepted; every entry is compared
+    now, and the refusal names the column and its range.
+    """
+    monkeypatch.setattr(_cryosparc, "Dataset", _MixedVoltageDataset)
+    with pytest.raises(ValueError, match=r"ctf/accel_kv.*240.*360"):
+        extract_parameters_from_csfile("fake.cs", halfset="all")
+
+
+def test_uniform_scalar_returns_the_common_value() -> None:
+    from specter.io._common import _uniform_scalar
+
+    out = _uniform_scalar(torch.full((5,), 1.25), "x", "f")
+    assert out.ndim == 0 and float(out) == 1.25
+    with pytest.raises(ValueError, match="x"):
+        _uniform_scalar(torch.tensor([1.0, 1.2, 0.8]), "x", "f")

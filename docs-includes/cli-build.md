@@ -40,6 +40,7 @@ specter build tomogram [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--filler_from_pei2016` | `True` \| `False` | `False` | Additive to filler: also pull filler species (location='cytosol') from the bundled PEI2016_CROWDING_TABLE (Pei et al. 2016 generic cytosolic crowding reference). |
+| `--filler_pei2016_abundance_weighting` | `True` \| `False` | `False` | Only used with filler_from_pei2016: weight each PEI2016 species' ratio by the paper's relative abundance (occurrence_freq), normalised to a mean of 1 so the table keeps its share against other filler. False = equal ratios. |
 | `--filler_from_cryoetsim` | `True` \| `False` | `False` | Additive to filler: also pull filler species (location='cytosol') from the bundled CRYOETSIM_PARTICLE_TABLE (CryoETSim dataset reference, Stojanovska et al. 2025). |
 | `--filler_table_max_mw_kda` | `FLOAT` | _none_ | Only used with filler_from_pei2016/filler_from_cryoetsim: exclude species above this mass, kDa. |
 | `--filler_table_min_mw_kda` | `FLOAT` | _none_ | Only used with filler_from_pei2016/filler_from_cryoetsim: exclude species below this mass, kDa. |

@@ -67,11 +67,12 @@ def draw_species_pool(
     """
     Draw a candidate instance pool (one row per sphere to attempt placing)
     whose combined volume reaches ``occupancy_fraction * box_volume``,
-    species drawn with probability proportional to `species_ratios`
-    (matching how
-    `specter.specimen.PEI2016_CROWDING_TABLE`'s
-    `occurrence_freq` is meant to be used as a relative-abundance weight,
-    not an absolute one).
+    species drawn with probability proportional to `species_ratios`.
+    Only the ratios between entries matter, which is how
+    `specter.specimen.PEI2016_CROWDING_TABLE`'s `occurrence_freq` enters
+    when abundance weighting is requested (see
+    `specter.specimen.build_filler_pool_specs`); by default every filler
+    species has ratio 1.
 
     Parameters
     ----------

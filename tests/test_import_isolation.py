@@ -167,3 +167,31 @@ def test_rotations_still_raises_attribute_error_for_unknown_names() -> None:
 
     with pytest.raises(AttributeError, match="no attribute 'definitely_not_here'"):
         rotations.definitely_not_here
+
+
+@pytest.mark.parametrize("heavy", ["torch", "numpy"])
+def test_cli_entry_point_does_not_import_torch(heavy: str) -> None:
+    """
+    Loading the `specter` command must not pay for torch or numpy.
+
+    `specter --help` and argument errors import only the CLI; torch alone is
+    ~3 s of it. `specter.seed` used to import both at module level, which
+    every `import specter` inherited.
+    """
+    assert heavy not in _loaded_modules("import specter.cli._cli")
+
+
+def test_specter_seed_still_seeds_every_generator() -> None:
+    """The lazily importing `specter.seed` seeds random, numpy and torch."""
+    import random
+
+    import numpy as np
+    import torch
+
+    import specter
+
+    draws = []
+    for _ in range(2):
+        specter.seed(1234)
+        draws.append((random.random(), float(np.random.rand()), float(torch.rand(1))))
+    assert draws[0] == draws[1]

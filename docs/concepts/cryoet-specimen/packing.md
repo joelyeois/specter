@@ -294,8 +294,12 @@ Left, PEI2016 species by mass and relative abundance. Right, the mass coverage o
 ///
 
 - **`PEI2016_CROWDING_TABLE`**: 20 species from Pei et al. (2016),
-  transcribed from that paper's supplementary Table S1, carrying its own
-  relative-abundance weighting. (The paper lists 21; the PDB obsoleted its
+  transcribed from that paper's supplementary Table S1, including its
+  relative-abundance column (`occurrence_freq`). The species are drawn at
+  equal ratios by default. `filler_pei2016_abundance_weighting = true`
+  weights each by its `occurrence_freq` instead, normalised to a mean of 1
+  over the selected species, so the table's combined share against other
+  filler is the same in both modes. (The paper lists 21; the PDB obsoleted its
   2AWB entry in 2014, and the table drops it rather than repointing it,
   since it would only have duplicated a ribosome-class size range.)
 - **`CRYOETSIM_PARTICLE_TABLE`**: broader and categorised, so you can
@@ -322,7 +326,7 @@ your own list breaks nothing downstream.
 | `packing_voxel_size` | Collide on a coarser grid than the render | auto |
 | `packing_max_retries` | Trial positions per instance | 1500 |
 | `clip_axes` | Per axis (z, y, x): may an instance's body poke past that wall? | all `False` |
-| `region_max_passes` | Pass/stall budget for a tight region | 300 |
+| `region_max_passes` | Placement passes for the gold-bead packer | 300 |
 | `region_density_threshold` | Shell threshold for classification | 5% of peak |
 
 ## Limitations

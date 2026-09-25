@@ -688,3 +688,22 @@ def test_ice_slab_blender_matches_whole_volume_blend(chunk):
         end = min(start + chunk, nz)
         blender.add(out, ice[:, start:end].clone(), start, end)
     assert torch.allclose(out, whole, rtol=1e-5, atol=1e-6)
+
+
+def test_slab_atoms_returns_empty_for_a_slab_with_no_molecules() -> None:
+    """
+    A slab whose buckets hold no molecule must yield an empty (0, 3) tensor
+    rather than failing on ``torch.cat([])``; the populated slab is unchanged.
+    """
+    import numpy as np
+
+    from specter.ice._blend import _slab_atoms
+
+    nz, dx, chunk = 40, 1.0, 10
+    # Two molecules, both in the first bucket (voxel z 1 and 2).
+    pos = torch.tensor([[0.0, 0.0, -19.0], [1.0, 1.0, -18.0]], dtype=torch.float64)
+    offsets = np.array([0, 2, 2, 2, 2])
+    empty = _slab_atoms(pos, offsets, chunk, nz, dx, 20, 30, "cpu")
+    assert empty.shape == (0, 3) and empty.dtype == torch.float64
+    full = _slab_atoms(pos, offsets, chunk, nz, dx, 0, 10, "cpu")
+    assert full.shape == (2, 3)

@@ -29,9 +29,11 @@ filler = [
     { pdb_source = "1fa2", location = "lumen" },  # beta amylase, as an example lumen filler
 ]
 
-# 20 generic cytosolic proteins, weighted by the abundances published with
-# them: Pei et al. 2016, BMC Bioinformatics 17:405.
+# 20 generic cytosolic proteins, Pei et al. 2016, BMC Bioinformatics 17:405,
+# at equal ratios. Set the next line to weight them by the abundances
+# published with them instead.
 filler_from_pei2016 = true
+# filler_pei2016_abundance_weighting = true
 # 161 species from the CryoETSim reference set, Stojanovska et al. 2025.
 # filler_from_cryoetsim = true
 # filler_table_categories = ["distractors", "nucleosomes"]  # cryoetsim only

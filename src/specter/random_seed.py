@@ -4,9 +4,6 @@ Global seed control, exported as `specter.seed`.
 
 import random
 
-import numpy as np
-import torch
-
 
 def set_seed(seed: int) -> None:
     """
@@ -33,6 +30,12 @@ def set_seed(seed: int) -> None:
     `torch.backends.cudnn.deterministic = True` and
     `torch.backends.cudnn.benchmark = False`.
     """
+    # Imported here rather than at module level: `specter/__init__.py`
+    # re-exports this function, so a top-level torch import would be paid by
+    # every `import specter`, including `specter --help` (~3 s).
+    import numpy as np
+    import torch
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

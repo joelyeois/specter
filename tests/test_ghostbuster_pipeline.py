@@ -295,6 +295,44 @@ def test_tomogram_test_run_bins_counts_by_sum_and_potential_by_mean(
     assert torch.allclose(model.V, torch.full((BOX // 2,) * 3, 0.5))
 
 
+def test_tomogram_ghostbuster_forwards_reconstructor_settings(
+    tilt_series: torch.Tensor,
+    tomo_ctf_params: dict[str, torch.Tensor],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """checkpoint_chunks, lr_decay and kmask reach the TomogramReconstructor."""
+    kmask = torch.ones(BOX, BOX, BOX)
+    tgb = TomogramGhostbuster(
+        tilt_series=tilt_series,
+        voxel_size=2.0,
+        voltage=300.0,
+        ctf_params=tomo_ctf_params,
+        dose_per_angstrom=1.0,
+        angles=[-20.0, 0.0, 20.0],
+        propagation=Propagation(scattering_model="projection"),
+        checkpoint_chunks=4,
+        lr_decay=0.3,
+        kmask=kmask,
+    )
+    monkeypatch.setattr(tgb, "_fit", lambda model, *args, **kwargs: model)
+    model = tgb.run(device="cpu")
+    assert model.checkpoint_chunks == 4
+    assert model.lr_decay == 0.3
+    assert torch.equal(model.kmask, kmask)
+    # test_run bins the volume, so the full-size mask cannot apply there.
+    assert tgb.test_run(bin_factor=2, device="cpu").kmask is None
+    with pytest.raises(ValueError, match="kmask"):
+        TomogramGhostbuster(
+            tilt_series=tilt_series,
+            voxel_size=2.0,
+            voltage=300.0,
+            ctf_params=tomo_ctf_params,
+            dose_per_angstrom=1.0,
+            angles=[-20.0, 0.0, 20.0],
+            kmask=torch.ones(2, 2, 2),
+        )
+
+
 def test_tomogram_ghostbuster_rejects_both_angles_and_quaternions(
     tilt_series: torch.Tensor, tomo_ctf_params: dict[str, torch.Tensor]
 ) -> None:

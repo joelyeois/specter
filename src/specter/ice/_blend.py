@@ -360,6 +360,69 @@ def blend_ice_into_volume(
     return out
 
 
+def _slab_atoms(
+    pos: torch.Tensor,
+    offsets: np.ndarray,
+    chunk: int,
+    nz: int,
+    dx: float,
+    lo: int,
+    hi: int,
+    device: torch.device | str,
+) -> torch.Tensor:
+    """
+    Molecules whose voxel z lies in ``[lo - 1, hi + 1)``, in slab-local coordinates.
+
+    The canvas ends are wrapped, since the whole-canvas convolution is
+    periodic in z. The splat maps ``coord / dx + depth // 2`` to the voxel
+    index, which must come out as ``zv - lo``.
+
+    Parameters
+    ----------
+    pos : torch.Tensor
+        Shape ``(N, 3)``, every molecule of the canvas in Å, sorted by z bucket.
+    offsets : numpy.ndarray
+        Start of each bucket in `pos`, with a final entry ``N``.
+    chunk : int
+        Voxels of z per bucket.
+    nz : int
+        Canvas depth in voxels.
+    dx : float
+        Voxel size in Å.
+    lo, hi : int
+        The slab's voxel z range, halo included.
+    device : torch.device or str
+        Device of the returned coordinates.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape ``(M, 3)`` on `device`, with the dtype of `pos`. ``M`` is zero
+        when no molecule falls in the slab, which a thin or sparsely drawn
+        canvas can produce.
+    """
+    n_buckets = len(offsets) - 1
+    depth = hi - lo
+    parts = []
+    for shift in (0, nz, -nz):
+        # Molecules with z + shift in [lo - 1, hi + 1) have z in
+        # [lo - 1 - shift, hi + 1 - shift); the buckets covering that.
+        b0 = max(0, math.floor((lo - 1 - shift) / chunk))
+        b1 = min(n_buckets, math.ceil((hi + 1 - shift) / chunk))
+        if b1 <= b0:
+            continue
+        xyz = pos[offsets[b0] : offsets[b1]].to(device)
+        z = xyz[:, 2] / dx + nz // 2 + shift
+        m = (z >= lo - 1) & (z < hi + 1)
+        if not bool(m.any()):
+            continue
+        z_local = (z[m] - lo - depth // 2) * dx
+        parts.append(torch.cat([xyz[m, :2], z_local[:, None]], dim=1))
+    if not parts:
+        return torch.zeros((0, 3), device=device, dtype=pos.dtype)
+    return torch.cat(parts, dim=0)
+
+
 def _blend_ice_slabwise(
     V: torch.Tensor,
     bank: IceBank,
@@ -432,34 +495,11 @@ def _blend_ice_slabwise(
     offsets = np.concatenate([[0], np.cumsum(np.bincount(key, minlength=n_buckets))])
     del key
 
-    def slab_atoms(lo: int, hi: int) -> torch.Tensor:
-        """Molecules with voxel z in [lo - 1, hi + 1), the canvas ends
-        wrapped (the whole-canvas convolution is periodic in z), on `device`
-        in slab-local coordinates: the splat maps coord/dx + depth//2 to the
-        index, which must come out as zv - lo."""
-        depth = hi - lo
-        parts = []
-        for shift in (0, nz, -nz):
-            # Molecules with z + shift in [lo - 1, hi + 1) have z in
-            # [lo - 1 - shift, hi + 1 - shift); the buckets covering that.
-            b0 = max(0, math.floor((lo - 1 - shift) / chunk))
-            b1 = min(n_buckets, math.ceil((hi + 1 - shift) / chunk))
-            if b1 <= b0:
-                continue
-            xyz = pos[offsets[b0] : offsets[b1]].to(device)
-            z = xyz[:, 2] / dx + nz // 2 + shift
-            m = (z >= lo - 1) & (z < hi + 1)
-            if not bool(m.any()):
-                continue
-            z_local = (z[m] - lo - depth // 2) * dx
-            parts.append(torch.cat([xyz[m, :2], z_local[:, None]], dim=1))
-        return torch.cat(parts, dim=0)
-
     for z0 in range(0, nz, chunk):
         z1 = min(z0 + chunk, nz)
         lo, hi = z0 - halo, z1 + halo
         depth = hi - lo
-        coords = slab_atoms(lo, hi)
+        coords = _slab_atoms(pos, offsets, chunk, nz, dx, lo, hi, device)
         deltas = torch.zeros(depth, n, n, device=device)
         # In atom chunks: the splat's per-corner index set is ~30 bytes per
         # molecule, and a 4096-pixel slab holds tens of millions of them.

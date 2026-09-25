@@ -830,6 +830,12 @@ class PotentialBuilder(L.LightningModule):
                     assert isinstance(key, int)
                     label = str(atom_symbol(key))
                     mask = self.atomic_numbers == key
+                    if self.shtyrov_groups:
+                        # A Peng fallback group takes only this element's
+                        # UNMATCHED atoms: the matched ones were rendered by
+                        # their species group, and selecting them here as
+                        # well rendered them twice.
+                        mask &= self._species_group_ids == -1
                 progress.update(
                     task,
                     description=f"Building element {label}",

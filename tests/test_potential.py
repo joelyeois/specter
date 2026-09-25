@@ -159,6 +159,34 @@ def test_species_group_ids_select_what_a_string_comparison_selects():
         assert pb.to("cuda")._species_group_ids.device.type == "cuda"
 
 
+def test_shtyrov_3d_renders_each_atom_once_when_its_element_also_falls_back():
+    """
+    An element with both matched and unmatched atoms gets a species group and
+    a Peng fallback group; each atom must land in exactly one of them. The
+    fallback used to select every atom of its element, so the matched atom was
+    rendered twice (as Shtyrov and again as Peng).
+    """
+    coords = torch.tensor([[[-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]]])
+    z = torch.tensor([8, 8], dtype=torch.long)
+
+    def total(idx: list[int], species: list[str | None]) -> float:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            pb = PotentialBuilder(
+                48,
+                1.0,
+                z[idx],
+                parameterization="shtyrov",
+                atom_species=[species[i] for i in idx],
+                progressbars=False,
+            )
+        return float(pb(coords[:, idx], method="3d").sum())
+
+    species = ["O(HH)", "O(unmatched)"]
+    both = total([0, 1], species)
+    assert both == pytest.approx(total([0], species) + total([1], species), rel=1e-5)
+
+
 def test_shtyrov_species_potential_matches_analytic_closed_form():
     """
     shtyrov_atomic_potential_3d_by_species must match the analytic 3D

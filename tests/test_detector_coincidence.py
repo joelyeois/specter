@@ -345,3 +345,26 @@ def test_batched_detection_matches_per_image_coincidence(weighted: bool) -> None
         ]
     )
     assert torch.equal(batched, per_image)
+
+
+def test_dose_weights_without_coincidence_loss() -> None:
+    """dose_weights with coincidence_radius=0 is a weighted sum of plain
+    Poisson frames; it used to divide by a zero coincidence-cell side."""
+    from specter.microscope import Detector
+
+    n, n_frames = 32, 4
+    det = Detector(
+        pixel_size=1.0,
+        noise_model="poisson",
+        n_frames=n_frames,
+        dose_weights=torch.ones(n_frames, 8),
+        dose_weights_max_frequency=0.5,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    img = torch.full((n, n), 50.0)
+    out = det.apply_coincidence(img, 50.0, 0.0)
+    assert out.shape == img.shape
+    assert torch.isfinite(out).all()
+    # Unit weights leave the signal untouched.
+    assert out.mean().item() == pytest.approx(50.0, rel=0.02)

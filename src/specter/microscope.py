@@ -398,6 +398,14 @@ class Detector(L.LightningModule):
         """
         device = intensity_map.device
 
+        if coinc_radius_pixels <= 0.0:
+            # No coincidence cells: the frame is its Poisson draw alone. Also
+            # the only safe path here -- a zero cell side divides by zero
+            # below, and a zero pad crops the frame to nothing.
+            h, w = intensity_map.shape
+            dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size**2)
+            return torch.poisson(intensity_map * (dose_per_pixel * h * w))
+
         # Nominal cell side, chosen so cell area == pi*r^2 (see Notes above).
         cell_size_nominal = coinc_radius_pixels * math.sqrt(math.pi)
 

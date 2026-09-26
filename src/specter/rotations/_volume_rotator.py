@@ -15,6 +15,7 @@ from torch.utils.checkpoint import checkpoint
 
 from ..fft import fft3, ifft3
 from ._volume import (
+    _isotropic_half_widths,
     _translation_per_axis,
     apply_fourier_translation,
     fourier_origin_displacement,
@@ -314,18 +315,19 @@ class VolumeRotator(L.LightningModule):
         self, device: str | torch.device, dtype: torch.dtype
     ) -> torch.Tensor:
         """
-        Per-axis scale factors mapping normalized [-1,1] deltas to isotropic pixel-like units.
+        Per-axis factors mapping normalized [-1, 1] deltas to voxels.
 
-        Only `sample_rotated_slices` uses these. ``(n - 1) / 2`` is the exact
-        half-width under ``align_corners=True`` only; under the default False
-        it is ``n / 2`` (see
-        :func:`~specter.rotations._volume._isotropic_half_widths`, which
-        :meth:`_build_grid` uses), so sampled slices carry an ``n / (n - 1)``
-        magnification per axis. Left as is: changing it changes every tilt
-        series.
+        Only `sample_rotated_slices` uses these. It builds its query points in
+        voxels and divides by these factors to reach normalized coordinates,
+        so they must be the exact half-widths of the ``grid_sample``
+        convention in use -- ``n / 2`` under ``align_corners=False``,
+        ``(n - 1) / 2`` under True (see
+        :func:`~specter.rotations._volume._isotropic_half_widths`) -- or every
+        sampled slice is magnified by their ratio. Unlike a pure rotation's
+        conjugation, this factor does not cancel on a cube.
         """
         return torch.tensor(
-            [(self.nx - 1) / 2, (self.ny - 1) / 2, (self.nz - 1) / 2],
+            _isotropic_half_widths(self.nz, self.ny, self.nx, self.align_corners),
             device=device,
             dtype=dtype,
         ).view(1, 1, 3)
@@ -344,22 +346,6 @@ class VolumeRotator(L.LightningModule):
         if align_corners is None:
             align_corners = self.align_corners
         return _translation_per_axis(t, self.nz, self.ny, self.nx, align_corners)
-
-    def _slice_translation_per_axis(self, t: torch.Tensor) -> torch.Tensor:
-        """
-        The translation factor matching `_isotropic_scale`'s half-widths.
-
-        `sample_rotated_slices` still maps pixel offsets to normalised
-        coordinates through ``(n - 1) / 2`` (see `_isotropic_scale`), so its
-        translation must be rescaled by the same half-widths to stay
-        consistent with its own rotation: ``(nx - 1) / (n - 1)`` per axis. A
-        cube is returned unchanged, bit for bit.
-        """
-        if self.nx == self.ny == self.nz:
-            return t
-        nz, ny, nx = self.nz, self.ny, self.nx
-        f = t.new_tensor([1.0, (nx - 1) / (ny - 1), (nx - 1) / (nz - 1)])
-        return t * f
 
     def _rotate_normalized_grid(
         self,
@@ -395,7 +381,7 @@ class VolumeRotator(L.LightningModule):
         torch.Tensor
             Rotated normalized sampling coordinates, shape (B, N, 3).
         """
-        t = self._slice_translation_per_axis(t)
+        t = self._translation_per_axis(t)
         if (origin or self.origin) == "relion":
             grid = (grid - self.center_dc) * scale
             grid = grid @ R.transpose(1, 2)

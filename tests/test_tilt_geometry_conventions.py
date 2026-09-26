@@ -110,3 +110,44 @@ def test_aretomo_shift_is_the_negative_of_the_correction(tmp_path: Path) -> None
     _write_aln(aln, rot=0.0, tx=6.0, ty=-4.0)
     _, translations = read_aretomo3_aln(str(aln), pixel_size=2.0)
     assert translations.numpy() == pytest.approx(np.tile([-12.0, 8.0], (3, 1)))
+
+
+@pytest.mark.parametrize("tilt_deg", [10.0, 40.0])
+def test_tilted_slices_are_not_magnified(tilt_deg: float) -> None:
+    """
+    A tilt about x leaves every x coordinate where it was.
+
+    The slice sampler converts its voxel-unit query points to normalized
+    coordinates, and used to divide by ``(n - 1) / 2`` where the
+    ``align_corners=False`` grid spans ``n / 2`` voxels per unit, magnifying
+    every slice by ``n / (n - 1)``: a bead 40 voxels out landed ~0.3 further.
+    """
+    n, nz = 128, 16
+    z, y, x = torch.meshgrid(
+        torch.arange(nz) - nz / 2,
+        torch.arange(n) - n / 2,
+        torch.arange(n) - n / 2,
+        indexing="ij",
+    )
+    volume = torch.exp(-((x - 40) ** 2 + y**2 + z**2) / (2 * 1.5**2))
+    rotvec = torch.tensor([[np.deg2rad(tilt_deg), 0.0, 0.0]], dtype=torch.float32)
+    generator = TiltSeriesGenerator(
+        volume=(2.0 * volume).reshape(1, nz, n, n),
+        micrograph_size=n,
+        pixel_size=PX,
+        ctf_params=None,
+        voltage=300.0,
+        dose_per_angstrom=1.0,
+        quaternions=roma.rotvec_to_unitquat(rotvec),
+        propagation=Propagation(scattering_model="projection"),
+        optics=None,
+        camera=Camera(noise_model=None),
+        verbose=False,
+        progressbars=False,
+    )
+    _, exitwaves, _ = generator.generate_tilt_series(torch.tensor([0]))
+    image = torch.angle(exitwaves[0, 0]).numpy()
+    band = image[n // 2 - 6 : n // 2 + 7, n // 2 + 30 : n // 2 + 51]
+    profile = band.sum(axis=0)
+    xs = np.arange(30, 51)
+    assert float((profile * xs).sum() / profile.sum()) == pytest.approx(40.0, abs=0.05)

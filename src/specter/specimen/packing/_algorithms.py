@@ -117,25 +117,38 @@ def draw_species_pool(
     target_volume = occupancy_fraction * box_volume
     probs = species_ratios / species_ratios.sum()
 
-    radii_list: list[float] = []
-    species_list: list[int] = []
+    # Drawn in batches sized to the expected remaining count rather than one
+    # `multinomial` per instance (~21k calls for a large filler pool). The
+    # stopping rule is unchanged: draws are kept up to and including the one
+    # whose volume takes the running total to the target.
+    radii_host = species_radii.detach().cpu()
+    if species_volumes is None:
+        volumes = (4.0 / 3.0) * torch.pi * radii_host.to(torch.float64) ** 3
+    else:
+        volumes = species_volumes.detach().cpu().to(torch.float64)
+    expected = float((probs.to(torch.float64) * volumes).sum())
+
+    drawn: list[torch.Tensor] = []
+    n_drawn = 0
     accumulated = 0.0
     # Defensive cap: a candidate pool this large is already absurd for this
     # use case (occupancy_fraction close to 1 with tiny radii, etc.).
-    for _ in range(1_000_000):
-        if accumulated >= target_volume:
-            break
-        k = int(torch.multinomial(probs, 1, generator=gen))
-        r = float(species_radii[k])
-        radii_list.append(r)
-        species_list.append(k)
-        if species_volumes is None:
-            accumulated += (4.0 / 3.0) * torch.pi * r**3
-        else:
-            accumulated += float(species_volumes[k])
+    max_draws = 1_000_000
+    while accumulated < target_volume and n_drawn < max_draws:
+        remaining = target_volume - accumulated
+        n = int(1.1 * remaining / expected) + 16 if expected > 0 else max_draws
+        n = min(n, max_draws - n_drawn)
+        k = torch.multinomial(probs, n, replacement=True, generator=gen)
+        running = accumulated + torch.cumsum(volumes[k], dim=0)
+        reached = torch.nonzero(running >= target_volume)
+        if reached.numel():
+            k = k[: int(reached[0]) + 1]
+        drawn.append(k)
+        n_drawn += k.numel()
+        accumulated = float(running[k.numel() - 1])
 
-    radii = torch.tensor(radii_list)
-    species_idx = torch.tensor(species_list, dtype=torch.long)
+    species_idx = torch.cat(drawn) if drawn else torch.zeros(0, dtype=torch.long)
+    radii = radii_host[species_idx].to(torch.float32)
     if radii.numel() > 0:
         perm = torch.argsort(radii, descending=True)
         radii, species_idx = radii[perm], species_idx[perm]

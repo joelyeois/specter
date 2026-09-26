@@ -48,6 +48,11 @@ def _project_to_surface(
     return x
 
 
+def _pairwise_distances(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Exact Euclidean distances between the rows of ``a`` and ``b``."""
+    return torch.linalg.norm(a[:, None, :] - b[None, :, :], dim=-1)
+
+
 def sample_surface_sites(
     field: MembraneField,
     n_sites: int,
@@ -109,41 +114,55 @@ def sample_surface_sites(
     )
     origin = field.origin_xyz.to(device)
 
-    accepted_sites: list[torch.Tensor] = []
-    accepted_normals: list[torch.Tensor] = []
+    # Candidates are screened on the host, one transfer per batch: a
+    # per-candidate `bool(valid_mask[i])` and spacing test is a device sync
+    # each, and re-stacking every accepted site per test is O(n^2). The
+    # accepted sites live in one preallocated host buffer, and the normals
+    # are taken in one batched gradient call once the sites are known.
+    accepted = torch.empty((n_sites, 3), dtype=field.phi.dtype)
+    n_accepted = 0
 
     attempts = 0
-    while len(accepted_sites) < n_sites and attempts < max_attempts:
+    while n_accepted < n_sites and attempts < max_attempts:
         batch = min(64, max_attempts - attempts)
+        attempts += batch
         candidates = (
             origin + torch.rand((batch, 3), generator=generator).to(device) * extent
         )
         projected = _project_to_surface(field, candidates, projection_iterations)
         phi_residual = field.sample(projected).abs()
-        valid_mask = phi_residual < phi_tolerance_angstrom
+        valid = (phi_residual < phi_tolerance_angstrom).cpu()
+        if not bool(valid.any()):
+            continue
+        cand = projected.detach().cpu()[valid]
 
-        for i in range(batch):
-            attempts += 1
-            if len(accepted_sites) >= n_sites:
+        # A candidate is rejected by any site accepted before this batch,
+        # or by an earlier candidate of this batch accepted ahead of it.
+        if n_accepted:
+            d_prev = _pairwise_distances(cand, accepted[:n_accepted])
+            clear = (d_prev >= min_spacing_angstrom).all(dim=1).tolist()
+        else:
+            clear = [True] * len(cand)
+        d_within = _pairwise_distances(cand, cand).tolist()
+        taken: list[int] = []
+        for i in range(len(cand)):
+            if n_accepted >= n_sites:
                 break
-            if not bool(valid_mask[i]):
+            if not clear[i]:
                 continue
-            candidate_site = projected[i]
-            if accepted_sites:
-                existing = torch.stack(accepted_sites)
-                dists = torch.linalg.norm(existing - candidate_site, dim=-1)
-                if bool((dists < min_spacing_angstrom).any()):
-                    continue
-            normal = field.gradient(candidate_site.unsqueeze(0))[0]
-            accepted_sites.append(candidate_site)
-            accepted_normals.append(normal)
+            if any(d_within[i][j] < min_spacing_angstrom for j in taken):
+                continue
+            taken.append(i)
+            accepted[n_accepted] = cand[i]
+            n_accepted += 1
 
-    if not accepted_sites:
+    if n_accepted == 0:
         return (
             torch.zeros((0, 3), device=device, dtype=field.phi.dtype),
             torch.zeros((0, 3), device=device, dtype=field.phi.dtype),
         )
-    return torch.stack(accepted_sites), torch.stack(accepted_normals)
+    sites = accepted[:n_accepted].to(device)
+    return sites, field.gradient(sites)
 
 
 def orientation_for_normal(

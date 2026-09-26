@@ -92,6 +92,11 @@ def _draw_uniform(rng: torch.Generator, low: float, high: float) -> float:
 # small (~1.2 GB at this budget).
 _UPSAMPLE_CHUNK_VOXELS = 100_000_000
 
+# Voxels of rotated transmembrane templates held at once while placing them
+# (512 MB of float32): `place_transmembrane` rotates a chunk of sites per
+# batched `rotate_volume` call rather than one site per call.
+_TRANSMEMBRANE_ROTATION_BATCH_VOXELS = 2**27
+
 
 # How much memory one membrane field generation may cost, and the measured
 # per-working-grid-voxel costs it converts through. Deliberately sized against
@@ -1387,27 +1392,58 @@ class MembraneGenerator:
             self.volume.shape, dtype=torch.int16, device=self.volume.device
         )
 
-        placements: list[TransmembranePlacement] = []
-        for i in range(sites_xyz.shape[0]):
-            chosen_idx = int(torch.multinomial(weights, 1, generator=chooser).item())
-            spec = self.transmembrane_specs[chosen_idx]
-            template = templates[spec.pdb_source]
-
-            site_seed = None if self.seed is None else self.seed + i
-            rotation = orientation_for_normal(normals_xyz[i], seed=site_seed)
-            theta = build_affine_matrix(rotation.to(self.device))
-            rotated = rotate_volume(template, theta, padding_mode="zeros")[0]
-
-            center_zyx = self._physical_to_voxel_index(sites_xyz[i])
-            self._insert_blend(rotated, center_zyx, instance_id=i + 1)
-
-            placements.append(
-                TransmembranePlacement(
-                    species_id=spec.pdb_source,
-                    center_xyz=sites_xyz[i].detach().cpu(),
-                    rotation_matrix=rotation.detach().cpu(),
-                )
+        # Every site's species in one draw, with replacement: the same
+        # distribution as one draw per site, without a host round trip each.
+        choices = (
+            torch.multinomial(
+                weights, n_found, replacement=True, generator=chooser
+            ).tolist()
+            if n_found
+            else []
+        )
+        rotations = [
+            orientation_for_normal(
+                normals_xyz[i], seed=None if self.seed is None else self.seed + i
             )
+            for i in range(n_found)
+        ]
+        sites_cpu = sites_xyz.detach().cpu()
+
+        # Templates are rotated a chunk of consecutive sites at a time, one
+        # batched `rotate_volume` per species in the chunk, and inserted in
+        # site order: `_insert_blend` replaces density, so where two
+        # templates overlap the order decides which one survives. The chunk
+        # bounds the rotated copies held at once to ~2^27 voxels.
+        largest = max(
+            (templates[spec.pdb_source].numel() for spec in self.transmembrane_specs),
+            default=1,
+        )
+        chunk = max(1, _TRANSMEMBRANE_ROTATION_BATCH_VOXELS // largest)
+
+        placements: list[TransmembranePlacement] = []
+        for c0 in range(0, n_found, chunk):
+            site_ids = range(c0, min(c0 + chunk, n_found))
+            rotated: dict[int, torch.Tensor] = {}
+            for species in sorted({choices[i] for i in site_ids}):
+                group = [i for i in site_ids if choices[i] == species]
+                template = templates[self.transmembrane_specs[species].pdb_source]
+                theta = build_affine_matrix(
+                    torch.stack([rotations[i] for i in group]).to(self.device)
+                )
+                volumes = rotate_volume(template, theta, padding_mode="zeros")
+                rotated.update(zip(group, volumes))
+
+            for i in site_ids:
+                spec = self.transmembrane_specs[choices[i]]
+                center_zyx = self._physical_to_voxel_index(sites_cpu[i])
+                self._insert_blend(rotated.pop(i), center_zyx, instance_id=i + 1)
+                placements.append(
+                    TransmembranePlacement(
+                        species_id=spec.pdb_source,
+                        center_xyz=sites_cpu[i],
+                        rotation_matrix=rotations[i].detach().cpu(),
+                    )
+                )
 
         self.placements = placements
         return placements

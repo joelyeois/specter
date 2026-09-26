@@ -9,12 +9,12 @@ import sys
 from typing import Any
 
 import rich_click as click
-from rich.console import Console
 from rich.table import Table
+
+from specter.progress import console
 
 from ._database import JobDatabase
 
-console = Console()
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 

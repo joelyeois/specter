@@ -82,7 +82,7 @@ specter build tomogram [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--output_dir` | `TEXT` | _none_ | Directory to save output files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to &lt;artifact&gt;/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
+| `--output_dir` | `TEXT` | _none_ | Directory to save output files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to tomograms/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
 | `--filename` | `TEXT` | `tomogram` | Base name for the output volume (no extension). |
 | `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs. Not required for tracking -- job_id alone also triggers it. The run lands in &lt;output_dir&gt;/[&lt;project&gt;/]tomograms/J00N/ with a job.json recording every parameter, the git commit and the run's status. When chained via --tomogram_config on `specter simulate tiltseries`, leaving this unset while tracking the tiltseries run cascades that project here automatically. |
 | `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. |
@@ -98,7 +98,7 @@ specter build tomogram [OPTIONS]
 | `--packing_max_retries` | `INTEGER` | `1500` | Trial positions per instance. Sets a packing stage's attempt ceiling; pairs with the packer's own stall_patience, which cuts that budget short once a species saturates. |
 | `--packing_voxel_size` | `FLOAT` | _none_ | Run protein collision on a coarser grid than the render, an integer multiple of voxel_size. Unset = automatic, which only coarsens once the packing grid would be too large to hold; ordinary boxes are unaffected. |
 | `--bead_roughness` | `TEXT` | `0.12` | How irregular each gold fiducial's boundary is, as an RMS fraction of its radius. One number, or a [low, high] pair drawn per bead so a population mixes near-round and misshapen particles. 0.0 gives clean spheres; 0.12-0.20 reads as an irregular particle. |
-| `--seed` | `INTEGER` | _none_ | Random seed. |
+| `--seed` | `INTEGER` | _none_ | RNG seed for specimen assembly: placement, orientations and membrane shapes. Tomogram i of --n_tomograms uses seed + i. Unset leaves the run unseeded, so every run differs. |
 
 ## `specter build ice` { #specter-build-ice }
 

@@ -4,14 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._common_fields import (
+    DDP_JOB_ID_NOTE,
+    job_id_setting,
+    output_dir_setting,
+    project_setting,
+    seed_setting,
+)
 from ._field import help_of, setting
 from typing import Literal
 
 from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
 from specter.options import (
+    AbsorptionModel,
     ConvBackend,
     DetectorModel,
+    DoseEnvelopeTarget,
     EwaldSphereSign,
     IceModel,
     NoiseModel,
@@ -83,7 +92,7 @@ class ParticleStackConfig:
     alpha: float = setting(
         0.1, help="Amplitude contrast ratio.", range=(0.0, 1.0)
     )  # unitless, amplitude contrast ratio
-    absorption_model: Literal["alpha", "inelastic_mfp"] = setting(
+    absorption_model: AbsorptionModel = setting(
         "alpha",
         help=(
             "Where the imaginary potential comes from. 'alpha' scales the real "
@@ -217,11 +226,8 @@ class ParticleStackConfig:
     # numbered job tree when tracked. `None` rather than a baked-in default
     # because which default applies is not knowable until tracking is -- see
     # pipelines._common.resolve_output_dir.
-    output_dir: str | None = setting(
-        None,
-        help=(
-            "Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to <artifact>/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked."
-        ),
+    output_dir: str | None = output_dir_setting(
+        "save .mrcs and .star files", "particles"
     )
     filename: str = setting(
         "particles", help="Base name for output files (no extension)."
@@ -236,26 +242,8 @@ class ParticleStackConfig:
     # behavior. Unlike `specter reconstruct particle`, which is always
     # tracked, this command runs far more often and more casually (quick
     # sanity checks, notebooks, CI), so tracking stays opt-in here.
-    project: str | None = setting(
-        None,
-        help=(
-            "Optional: number and track this run through specter.jobs. "
-            "Not required for tracking -- job_id alone also triggers it. The run "
-            "lands in "
-            "<output_dir>/[<project>/]particles/J00N/ with a job.json recording "
-            "every parameter, the git commit and the run's status."
-        ),
-    )
-    job_id: str | None = setting(
-        None,
-        help=(
-            "Pin the job directory (e.g. J001) rather than auto-assigning "
-            "the next one: resumes into it if it exists, creates it otherwise. "
-            "Mandatory when combining tracking with "
-            "multi-GPU device strings -- auto-numbering needs one process to "
-            "decide, but multi-GPU dispatch re-runs this pipeline once per rank."
-        ),
-    )
+    project: str | None = project_setting("particles")
+    job_id: str | None = job_id_setting(DDP_JOB_ID_NOTE)
 
     # --- Advanced ---
     # Relative to the current working directory, like any other CLI path
@@ -329,7 +317,7 @@ class ParticleStackConfig:
     dose_envelope: bool = setting(
         False, help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope."
     )
-    dose_envelope_target: Literal["transfer_function", "specimen"] = setting(
+    dose_envelope_target: DoseEnvelopeTarget = setting(
         "transfer_function",
         help=(
             "Where the dose envelope acts. 'transfer_function' filters the whole "
@@ -612,11 +600,11 @@ class ParticleStackConfig:
     )
 
     # --- Advanced: reproducibility ---
-    seed: int | None = setting(
-        None,
-        help=(
-            "RNG seed for pose/CTF/dose sampling. Auto-generated and logged if unset."
-        ),
+    seed: int | None = seed_setting(
+        "pose, CTF, dose, ice, crowding and noise sampling",
+        "Auto-generated and logged if unset. A set seed requires an integer "
+        "batchsize: 'auto' sizes batches to free memory, and batching decides "
+        "which draw reaches which particle.",
     )
 
     # --- Advanced: aberration richness for synthetic (non-.cs-driven) generation ---

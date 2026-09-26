@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._common_fields import (
+    job_id_setting,
+)
 from ._field import help_of, setting
 from typing import Literal
 from specter.options import EwaldSphereSign, ImageUnits, RotateMode, Scheduler
@@ -212,13 +215,11 @@ class ReconstructionConfig:
             "several, e.g. one shared scratch directory used across structures."
         ),
     )
-    job_id: str | None = setting(
-        None,
-        help=(
-            "Pin the job directory (e.g. J001) rather than auto-assigning "
-            "the next one: resumes into it if it exists, creates it otherwise. This "
-            "is how two halfset runs share one job."
-        ),
+    job_id: str | None = job_id_setting(
+        "This is how two halfset runs share one job. Mandatory with a multi-GPU "
+        "device string unless halfset is 'gold' -- auto-numbering needs one "
+        "process to decide, but multi-GPU dispatch re-runs this pipeline once "
+        "per rank.",
     )
     # Defaults to the project root discovered by walking up from cwd looking
     # for an existing .specter marker (find_specter_project_root()), the

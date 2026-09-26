@@ -69,15 +69,15 @@ specter match particles [OPTIONS]
 | --- | --- | --- | --- |
 | `--device` | `TEXT` | `cuda` | Device(s) to use: cpu \| cuda \| cuda:0 \| 0,1. Several devices share the probe simulations between them. |
 | `--probe_workers` | `INTEGER` | `0` | Worker processes that run probe simulations concurrently, dealt round-robin over the device(s). 0 is one per device, which on a single device runs every simulation in-process, one after another; processes sharing one GPU are time-sliced and gain nothing. |
-| `--seed` | `INTEGER` | _none_ | RNG seed for the probe and battery simulations. |
+| `--seed` | `INTEGER` | _none_ | RNG seed for the probe and battery simulations. Unset uses seed 0. |
 
 **Output & job tracking**{ #specter-match-particles-output-job-tracking }
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--output_dir` | `TEXT` | _none_ | Directory to write matched.toml and the report under when untracked; the root of the numbered job tree when --project or --job_id is set. |
-| `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs, under &lt;output_dir&gt;/[&lt;project&gt;/]match/J00N/. |
-| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one. |
+| `--output_dir` | `TEXT` | _none_ | Directory to write matched.toml and the report when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to match/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
+| `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs. Not required for tracking -- job_id alone also triggers it. The run lands in &lt;output_dir&gt;/[&lt;project&gt;/]match/J00N/ with a job.json recording every parameter, the git commit and the run's status. |
+| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. |
 
 **Advanced**{ #specter-match-particles-advanced }
 

@@ -73,9 +73,10 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
         ["normalize_particles", "save_exitwaves", "save_clean_exitwaves"],
     ),
     ("Compute", ["device", "batchsize"]),
-    # One panel, not two: --output_dir and the tracking flags are alternative
-    # answers to the same question, and split across separate panels nothing
-    # showed that setting the latter makes the former a no-op.
+    # One panel, not two: the tracking flags change what --output_dir means
+    # (the leaf the files land in untracked, the root of the numbered job
+    # tree tracked -- see pipelines._common.resolve_output_dir), and split
+    # across separate panels nothing showed that the two interact.
     (
         "Output & job tracking",
         ["output_dir", "filename", "project", "job_id"],

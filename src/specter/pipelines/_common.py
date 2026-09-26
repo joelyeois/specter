@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import glob
 import os
+import time
 from contextlib import contextmanager
 from typing import Any, Iterator, Sequence
 
 import torch
 
-from specter.progress import console
+import specter
+from specter.progress import console, format_elapsed
 from specter.config import (
     ScalarOrRange,
     default_output_dir,
@@ -221,6 +223,65 @@ def _tracked_output_dir(
     with jobs.Job(job_type, config.project, job_id=config.job_id, base_dir=root) as job:
         job.log(dataclasses.asdict(config))
         yield str(job.dir)
+
+
+def _seed_or_draw(seed: int | None, *, announce: bool = True) -> int:
+    """
+    Seed every draw from ``seed``, or from a freshly drawn seed that is printed.
+
+    Parameters
+    ----------
+    seed : int, optional
+        The configured seed, or ``None`` to draw one.
+    announce : bool, optional
+        Whether to print a drawn seed. A non-main DDP rank passes ``False``
+        so the notice appears once per run rather than once per rank.
+
+    Returns
+    -------
+    int
+        The seed the run was seeded with.
+    """
+    if seed is None:
+        seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
+        specter.seed(seed)
+        if announce:
+            console.print(f"[dim]No seed given -- using seed={seed}[/dim]")
+    else:
+        specter.seed(seed)
+    return seed
+
+
+def _crowd_min_distance(configured: float | None, max_diameter: float) -> float | None:
+    """
+    Resolve a config's ``crowd_min_distance``.
+
+    ``0`` disables the minimum distance (``None``), ``None`` defaults to the
+    template's own maximum diameter, and any other value is used as given.
+    """
+    if configured == 0:
+        return None
+    if configured is None:
+        return max_diameter
+    return configured
+
+
+def _mm_to_angstrom(value_mm: float) -> float:
+    """Convert a length in millimetres (a config's ``cs``/``cc``) to Angstrom."""
+    return value_mm * 1e7
+
+
+def _normalize_images(images: torch.Tensor) -> torch.Tensor:
+    """Standardise each (H, W) image of a stack to zero mean and unit std."""
+    mean = images.mean(dim=(-2, -1), keepdim=True)
+    std = images.std(dim=(-2, -1), keepdim=True)
+    return (images - mean) / std.clamp(min=1e-8)
+
+
+def _print_total_time(t_start: float) -> None:
+    """Print a run's closing ``Total time`` footer, measured from ``t_start``."""
+    elapsed = time.perf_counter() - t_start
+    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
 
 
 def _uniform_sample(value: ScalarOrRange, n: int) -> torch.Tensor:

@@ -4,10 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._common_fields import (
+    job_id_setting,
+    output_dir_setting,
+    project_setting,
+    seed_setting,
+)
 from ._field import help_of, setting
 from typing import Literal
 
 from ._paths import default_pdb_cache_dir
+from specter.options import AbsorptionModel
 
 
 @dataclass
@@ -107,7 +114,7 @@ class MatchConfig:
             "forward model cannot express."
         ),
     )  # None = not stated
-    absorption_model: Literal["alpha", "inelastic_mfp"] = setting(
+    absorption_model: AbsorptionModel = setting(
         "inelastic_mfp",
         help=(
             "Where the imaginary potential comes from, for every probe and for "
@@ -221,32 +228,16 @@ class MatchConfig:
             "another; processes sharing one GPU are time-sliced and gain nothing."
         ),
     )
-    seed: int | None = setting(
-        None, help="RNG seed for the probe and battery simulations."
+    seed: int | None = seed_setting(
+        "the probe and battery simulations", "Unset uses seed 0."
     )
 
     # --- Output & job tracking ---
-    output_dir: str | None = setting(
-        None,
-        help=(
-            "Directory to write matched.toml and the report under when "
-            "untracked; the root of the numbered job tree when --project or --job_id "
-            "is set."
-        ),
+    output_dir: str | None = output_dir_setting(
+        "write matched.toml and the report", "match"
     )
-    project: str | None = setting(
-        None,
-        help=(
-            "Optional: number and track this run through specter.jobs, "
-            "under <output_dir>/[<project>/]match/J00N/."
-        ),
-    )
-    job_id: str | None = setting(
-        None,
-        help=(
-            "Pin the job directory (e.g. J001) rather than auto-assigning the next one."
-        ),
-    )
+    project: str | None = project_setting("match")
+    job_id: str | None = job_id_setting()
 
     # --- Advanced ---
     pdb_cache_dir: str = setting(

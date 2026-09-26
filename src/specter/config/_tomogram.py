@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._common_fields import (
+    job_id_setting,
+    output_dir_setting,
+    project_setting,
+    seed_setting,
+)
 from ._field import help_of, setting
 from typing import Any, ClassVar, Literal
 
@@ -209,7 +215,11 @@ class TomogramConfig:
             "does not redirect it."
         ),
     )
-    seed: int | None = setting(None, help="Random seed.")
+    seed: int | None = seed_setting(
+        "specimen assembly: placement, orientations and membrane shapes",
+        "Tomogram i of --n_tomograms uses seed + i. Unset leaves the run "
+        "unseeded, so every run differs.",
+    )
 
     # --- Organic membrane (optional) ---
     # One or more dicts, [[membrane]] tables -- one membrane TEMPLATE each,
@@ -644,17 +654,7 @@ class TomogramConfig:
     # numbered job tree when tracked. `None` rather than a baked-in default
     # because which default applies is not knowable until tracking is -- see
     # pipelines._common.resolve_output_dir.
-    output_dir: str | None = setting(
-        None,
-        help=(
-            "Directory to save output files when untracked. Setting "
-            "--project or --job_id instead makes this the root of the numbered job "
-            "tree, so tracking organises output within the folder you chose rather "
-            "than moving it elsewhere. Unset defaults to <artifact>/ "
-            "untracked, and to the project root found by walking up from cwd for an "
-            "existing .specter marker when tracked."
-        ),
-    )
+    output_dir: str | None = output_dir_setting("save output files", "tomograms")
     filename: str = setting(
         "tomogram", help="Base name for the output volume (no extension)."
     )
@@ -671,26 +671,13 @@ class TomogramConfig:
     # chained call produces two separate, same-project jobs (one
     # "tomograms", one "tiltseries"), linked implicitly by the resulting
     # tiltseries job's volume_path pointing into this job's directory.
-    project: str | None = setting(
-        None,
-        help=(
-            "Optional: number and track this run through specter.jobs. "
-            "Not required for tracking -- job_id alone also triggers it. The run "
-            "lands in "
-            "<output_dir>/[<project>/]tomograms/J00N/ with a job.json recording "
-            "every parameter, the git commit and the run's status. When chained "
-            "via --tomogram_config on `specter simulate tiltseries`, leaving this "
-            "unset while tracking the tiltseries run cascades that project here "
-            "automatically."
-        ),
+    project: str | None = project_setting(
+        "tomograms",
+        "When chained via --tomogram_config on `specter simulate tiltseries`, "
+        "leaving this unset while tracking the tiltseries run cascades that "
+        "project here automatically.",
     )
-    job_id: str | None = setting(
-        None,
-        help=(
-            "Pin the job directory (e.g. J001) rather than auto-assigning "
-            "the next one: resumes into it if it exists, creates it otherwise."
-        ),
-    )
+    job_id: str | None = job_id_setting()
 
     #: Every field that can put something in the volume. A tomogram needs
     #: at least one of them, which is a DISJUNCTION and so cannot be

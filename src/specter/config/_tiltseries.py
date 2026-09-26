@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._common_fields import (
+    job_id_setting,
+    output_dir_setting,
+    project_setting,
+    seed_setting,
+)
 from ._field import help_of, setting
 from typing import Literal
 from specter.options import (
@@ -228,12 +234,7 @@ class TiltSeriesConfig:
     )  # falls back to CPU when none is available
 
     # --- Reproducibility ---
-    seed: int | None = setting(
-        None,
-        help=(
-            "RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset."
-        ),
-    )
+    seed: int | None = seed_setting("ice and noise sampling")
 
     # --- Output ---
     # One path field, not one per layout: this is the single directory a run
@@ -241,12 +242,7 @@ class TiltSeriesConfig:
     # numbered job tree when tracked. `None` rather than a baked-in default
     # because which default applies is not knowable until tracking is -- see
     # pipelines._common.resolve_output_dir.
-    output_dir: str | None = setting(
-        None,
-        help=(
-            "Directory to save output files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to <artifact>/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked."
-        ),
-    )
+    output_dir: str | None = output_dir_setting("save output files", "tiltseries")
     filename: str = setting(
         "tilt_series", help="Base name for output files (no extension)."
     )
@@ -258,23 +254,8 @@ class TiltSeriesConfig:
     # job.json recording the full parameter set, git commit and status.
     # Neither is required -- leaving both unset keeps today's exact flat
     # behavior.
-    project: str | None = setting(
-        None,
-        help=(
-            "Optional: number and track this run through specter.jobs. "
-            "Not required for tracking -- job_id alone also triggers it. The run "
-            "lands in "
-            "<output_dir>/[<project>/]tiltseries/J00N/ with a job.json "
-            "recording every parameter, the git commit and the run's status."
-        ),
-    )
-    job_id: str | None = setting(
-        None,
-        help=(
-            "Pin the job directory (e.g. J001) rather than auto-assigning "
-            "the next one: resumes into it if it exists, creates it otherwise."
-        ),
-    )
+    project: str | None = project_setting("tiltseries")
+    job_id: str | None = job_id_setting()
 
 
 TILT_SERIES_HELP: dict[str, str] = help_of(TiltSeriesConfig)

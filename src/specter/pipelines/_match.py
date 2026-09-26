@@ -297,7 +297,7 @@ def _bin_images(
             f"Fourier crop to {box_p} px produced {tuple(cropped.shape)}"
         )
     cropped = cropped * (std / cropped.std(dim=(-2, -1), keepdim=True).clamp_min(1e-8))
-    return cropped.contiguous(), pixel_size * box / box_p
+    return cropped.contiguous(), new_px
 
 
 def _profile_distance(sim: torch.Tensor, exp: torch.Tensor, first_bin: int) -> float:

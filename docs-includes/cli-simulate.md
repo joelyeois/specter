@@ -100,7 +100,7 @@ specter simulate particles [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--output_dir` | `TEXT` | _none_ | Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to &lt;artifact&gt;/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
+| `--output_dir` | `TEXT` | _none_ | Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to particles/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
 | `--filename` | `TEXT` | `particles` | Base name for output files (no extension). |
 | `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs. Not required for tracking -- job_id alone also triggers it. The run lands in &lt;output_dir&gt;/[&lt;project&gt;/]particles/J00N/ with a job.json recording every parameter, the git commit and the run's status. |
 | `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. Mandatory when combining tracking with multi-GPU device strings -- auto-numbering needs one process to decide, but multi-GPU dispatch re-runs this pipeline once per rank. |
@@ -149,7 +149,7 @@ specter simulate particles [OPTIONS]
 | `--crowd_seed` | `origin` \| `random` | `origin` | Crowding placement seed strategy: 'origin' (first point at the structure's center) or 'random'. |
 | `--crowd_move_to_cpu` | `True` \| `False` | `False` | Move crowding intermediates to CPU between steps, to trade speed for lower GPU memory. |
 | `--water_air_interface` | `True` \| `False` | `False` | Model a water-air interface when placing ice/crowding (bimodal density along z instead of uniform). |
-| `--seed` | `INTEGER` | _none_ | RNG seed for pose/CTF/dose sampling. Auto-generated and logged if unset. |
+| `--seed` | `INTEGER` | _none_ | RNG seed for pose, CTF, dose, ice, crowding and noise sampling. Auto-generated and logged if unset. A set seed requires an integer batchsize: 'auto' sizes batches to free memory, and batching decides which draw reaches which particle. |
 | `--astigmatism` | `TEXT` | `0.0` | Astigmatism magnitude (dfu - dfv) in Angstrom: a single value for constant, or 'low,high' ([low, high] in TOML) to sample uniformly per particle. |
 | `--astigmatism_angle` | `TEXT` | `[0.0, 180.0]` | Astigmatism angle in degrees: a single value or 'low,high' ([low, high] in TOML) range. Irrelevant when astigmatism is 0. |
 | `--phaseshift` | `TEXT` | `0.0` | Phase shift in radians (e.g. from a Volta phase plate): a single value or 'low,high' ([low, high] in TOML) range. |
@@ -226,7 +226,7 @@ specter simulate micrograph [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--output_dir` | `TEXT` | _none_ | Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to &lt;artifact&gt;/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
+| `--output_dir` | `TEXT` | _none_ | Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to micrographs/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
 | `--filename` | `TEXT` | `micrographs` | Base name for output files (no extension). |
 | `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs. Not required for tracking -- job_id alone also triggers it. The run lands in &lt;output_dir&gt;/[&lt;project&gt;/]micrographs/J00N/ with a job.json recording every parameter, the git commit and the run's status. |
 | `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. |
@@ -278,7 +278,7 @@ specter simulate micrograph [OPTIONS]
 | `--pad_fft` | `True` \| `False` | `False` | Pad the volume for FFT to avoid edge artifacts. |
 | `--save_exitwaves` | `True` \| `False` | `False` | Save exit wave magnitude and phase as separate .mrcs files. |
 | `--save_clean_exitwaves` | `True` \| `False` | `False` | Save clean (particle-only, no ice) exit wave magnitude and phase. |
-| `--seed` | `INTEGER` | _none_ | RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset. |
+| `--seed` | `INTEGER` | _none_ | RNG seed for CTF, dose, ice, crowding, pose and noise sampling. Auto-generated and logged if unset. |
 
 ## `specter simulate tiltseries` { #specter-simulate-tiltseries }
 
@@ -352,7 +352,7 @@ specter simulate tiltseries [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--output_dir` | `TEXT` | _none_ | Directory to save output files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to &lt;artifact&gt;/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
+| `--output_dir` | `TEXT` | _none_ | Directory to save output files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to tiltseries/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
 | `--filename` | `TEXT` | `tilt_series` | Base name for output files (no extension). |
 | `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs. Not required for tracking -- job_id alone also triggers it. The run lands in &lt;output_dir&gt;/[&lt;project&gt;/]tiltseries/J00N/ with a job.json recording every parameter, the git commit and the run's status. |
 | `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. |
@@ -376,4 +376,4 @@ specter simulate tiltseries [OPTIONS]
 | `--ice_relax_steps` | `INTEGER` | `0` | Local MLBOP relaxation steps used to heal ice tile seams (ice_model='gd' only). |
 | `--bulk_scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `kirkland` | Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain. |
 | `--pad_fft` | `True` \| `False` | `False` | Pad volume for FFT to avoid multislice edge-wraparound artifacts under tilt. |
-| `--seed` | `INTEGER` | _none_ | RNG seed for ice, crowding, pose and noise sampling. Auto-generated and logged if unset. |
+| `--seed` | `INTEGER` | _none_ | RNG seed for ice and noise sampling. Auto-generated and logged if unset. |

@@ -11,7 +11,6 @@ from typing import Any
 
 import logging
 import os
-import sys
 import time
 
 import torch
@@ -45,9 +44,13 @@ from specter.settings import (
     Propagation,
     bundle_from_config,
 )
-from specter.progress import console, format_elapsed, section, track
+from specter.progress import console, section, track
 
 from ._common import (
+    _crowd_min_distance,
+    _mm_to_angstrom,
+    _print_total_time,
+    _seed_or_draw,
     _generate_multi,
     _generate_single,
     _save_exitwave_pair,
@@ -197,7 +200,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
 
     # Convert cs from mm -> Å (1 mm = 1e7 Å); unused when
     # cs_path/star_path is set, since Cs then comes per-particle from the file.
-    cs_angstrom = config.cs * 1e7
+    cs_angstrom = _mm_to_angstrom(config.cs)
 
     # Only the main process (always global rank 0 for this single-node launcher)
     # builds V for real. Other DDP ranks hold a zero placeholder of the same
@@ -219,17 +222,13 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     coincidence_radius = _uniform_sample(config.coincidence_radius, n)
     potential_scale = _uniform_sample(config.potential_scale, n)
 
-    crowd_min_distance = (
-        None
-        if config.crowd_min_distance == 0
-        else config.crowd_min_distance
-        if config.crowd_min_distance is not None
-        else pdb.max_diameter
+    crowd_min_distance = _crowd_min_distance(
+        config.crowd_min_distance, pdb.max_diameter
     )
     n_frames = (
         config.n_frames if config.n_frames is not None else int(dose.mean().item())
     )
-    cc_angstrom = config.cc * 1e7 if config.cc is not None else None
+    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc is not None else None
 
     # --- Ice ---
     # resolve_icemaker derives (n, nz) for a fresh RandomIcemaker itself, so it
@@ -288,13 +287,10 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # any DDP workers _generate_multi spawns below independently reach this
     # same point (see run_particle_stack's own is_main handling), so
     # _tracked_output_dir's is_main split matters here: only is_main opens
-    # a real Job (mkdir/job.json/status), workers just compute the same
-    # path as a deterministic string join. Kept open (manually, not via
-    # `with`, so the ~80 lines below don't need re-indenting under one
-    # block) until the run finishes or fails.
-    _output_dir_cm = _tracked_output_dir(config, "particles", is_main=is_main)
-    output_dir = _output_dir_cm.__enter__()
-    try:
+    # a real Job (mkdir/job.json/status, marked "failed" if anything below
+    # raises), workers just compute the same path as a deterministic string
+    # join. A worker rank's early `return` leaves before the footer.
+    with _tracked_output_dir(config, "particles", is_main=is_main) as output_dir:
         if mode == "multi":
             assert isinstance(device_target, list)
             if is_main:
@@ -340,19 +336,8 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             potential_scale,
             is_main,
         )
-    except BaseException:
-        # Only meaningful for is_main (a worker's context manager never
-        # opened a real Job, so this just re-raises cleanly for it) --
-        # marks the job "failed" instead of leaving it stuck at "running".
-        _output_dir_cm.__exit__(*sys.exc_info())
-        raise
-    else:
-        # Not reached by a worker rank's early `return` above, so this
-        # (and the Job it may close) only ever runs for is_main.
-        _output_dir_cm.__exit__(None, None, None)
 
-    elapsed = time.perf_counter() - t_start
-    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
+    _print_total_time(t_start)
 
 
 def _seed_run(config: ParticleStackConfig, is_main: bool) -> None:
@@ -376,12 +361,7 @@ def _seed_run(config: ParticleStackConfig, is_main: bool) -> None:
                 "--batchsize 32) to make the run reproducible, or drop the "
                 "seed to accept a non-reproducible run."
             )
-        specter.seed(config.seed)
-    else:
-        generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
-        specter.seed(generated_seed)
-        if is_main:
-            console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
+    _seed_or_draw(config.seed, announce=is_main)
 
 
 def _resolve_imaging_parameters(
@@ -412,7 +392,7 @@ def _resolve_imaging_parameters(
         voltage = config.voltage
         alpha = config.alpha
 
-    if getattr(config, "absorption_model", "alpha") == "inelastic_mfp":
+    if config.absorption_model == "inelastic_mfp":
         # The dataset's amplitude contrast is not a measurement of absorption
         # -- CTF estimation takes it as an input and never fits it -- so under
         # this model it is dropped rather than allowed to override. Leaving it

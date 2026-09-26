@@ -207,3 +207,42 @@ def test_cpu_is_left_alone_with_no_warning(monkeypatch) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             assert resolve_available_device("cpu") == "cpu"
+
+
+def test_crowd_min_distance_zero_disables_none_defaults_to_diameter() -> None:
+    from specter.pipelines._common import _crowd_min_distance
+
+    assert _crowd_min_distance(0, 120.0) is None
+    assert _crowd_min_distance(0.0, 120.0) is None
+    assert _crowd_min_distance(None, 120.0) == 120.0
+    assert _crowd_min_distance(35.0, 120.0) == 35.0
+
+
+def test_seed_or_draw_reproduces_a_given_seed_and_announces_a_drawn_one(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import torch
+
+    from specter.pipelines._common import _seed_or_draw
+
+    assert _seed_or_draw(123) == 123
+    first = torch.rand(3)
+    _seed_or_draw(123)
+    assert torch.equal(first, torch.rand(3))
+    assert "No seed given" not in capsys.readouterr().out
+
+    drawn = _seed_or_draw(None)
+    assert f"seed={drawn}" in capsys.readouterr().out
+    _seed_or_draw(None, announce=False)
+    assert "No seed given" not in capsys.readouterr().out
+
+
+def test_normalize_images_standardises_each_image() -> None:
+    import torch
+
+    from specter.pipelines._common import _normalize_images
+
+    images = torch.randn(3, 16, 16) * torch.tensor([1.0, 5.0, 0.1])[:, None, None] + 7
+    out = _normalize_images(images)
+    assert torch.allclose(out.mean(dim=(-2, -1)), torch.zeros(3), atol=1e-5)
+    assert torch.allclose(out.std(dim=(-2, -1)), torch.ones(3), atol=1e-5)

@@ -41,9 +41,14 @@ from specter.settings import (
     Propagation,
     bundle_from_config,
 )
-from specter.progress import console, format_elapsed, section, track
+from specter.progress import console, section, track
 
 from ._common import (
+    _crowd_min_distance,
+    _mm_to_angstrom,
+    _normalize_images,
+    _print_total_time,
+    _seed_or_draw,
     _save_exitwave_pair,
     _tracked_output_dir,
     _uniform_sample,
@@ -110,12 +115,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     specter.set_verbosity(logging.INFO)
     t_start = time.perf_counter()
 
-    if config.seed is not None:
-        specter.seed(config.seed)
-    else:
-        generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
-        specter.seed(generated_seed)
-        console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
+    _seed_or_draw(config.seed)
 
     # --- Building 3D scattering potential ---
     section("Building 3D scattering potential")
@@ -133,7 +133,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         monomer_library_path=config.monomer_library_path,
     )
 
-    cs_angstrom = config.cs * 1e7
+    cs_angstrom = _mm_to_angstrom(config.cs)
 
     # Built on the compute device and moved to the host: the template is
     # one particle box (a few hundred MB at most), the analytic renderer is
@@ -153,12 +153,8 @@ def run_micrograph(config: MicrographConfig) -> None:
     n = config.n_micrographs
 
     ice_model = None if config.ice_model == "none" else config.ice_model
-    crowd_min_distance = (
-        None
-        if config.crowd_min_distance == 0
-        else config.crowd_min_distance
-        if config.crowd_min_distance is not None
-        else pdb.max_diameter
+    crowd_min_distance = _crowd_min_distance(
+        config.crowd_min_distance, pdb.max_diameter
     )
 
     # --- Sampling per-micrograph parameters ---
@@ -203,7 +199,7 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # Build once -- the first forward pass generates the first specimen.
     section("Building specimen and image generator")
-    cc_angstrom = config.cc * 1e7 if config.cc is not None else None
+    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc is not None else None
     specimen = MicrographSpecimenGenerator(
         V,
         config.pixel_size,
@@ -286,9 +282,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     # --- Post-processing ---
     section("Post-processing")
     if config.normalize_micrographs:
-        mean = images_t.mean(dim=(-2, -1), keepdim=True)
-        std = images_t.std(dim=(-2, -1), keepdim=True)
-        images_t = (images_t - mean) / std.clamp(min=1e-8)
+        images_t = _normalize_images(images_t)
 
     # --- Saving ---
     section("Saving .mrcs + .star")
@@ -336,5 +330,4 @@ def run_micrograph(config: MicrographConfig) -> None:
                 config.micrograph_size,
             )
 
-    elapsed = time.perf_counter() - t_start
-    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
+    _print_total_time(t_start)

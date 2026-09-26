@@ -35,8 +35,12 @@ from specter.settings import (
     TiltGeometry,
     bundle_from_config,
 )
-from specter.progress import console, format_elapsed, section
+from specter.progress import console, section
 from ._common import (
+    _mm_to_angstrom,
+    _normalize_images,
+    _print_total_time,
+    _seed_or_draw,
     _reserve_next_job_id,
     _save_exitwave_pair,
     _tracked_output_dir,
@@ -153,12 +157,7 @@ def run_tilt_series(
 
     t_start = time.perf_counter()
 
-    if config.seed is not None:
-        specter.seed(config.seed)
-    else:
-        generated_seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
-        specter.seed(generated_seed)
-        console.print(f"[dim]No seed given -- using seed={generated_seed}[/dim]")
+    _seed_or_draw(config.seed)
 
     # --- Loading specimen volume ---
     section(f"Loading specimen volume from {config.volume_path}")
@@ -181,8 +180,8 @@ def run_tilt_series(
         f"to {config.max_tilt_angle}°"
     )
 
-    cs_angstrom = config.cs * 1e7
-    cc_angstrom = config.cc * 1e7 if config.cc is not None else None
+    cs_angstrom = _mm_to_angstrom(config.cs)
+    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc is not None else None
 
     ctf_params = {
         "cs": torch.tensor([cs_angstrom]),
@@ -218,9 +217,7 @@ def run_tilt_series(
     # --- Post-processing ---
     if config.normalize_tilt_series:
         section("Normalizing")
-        mean = images.mean(dim=(-2, -1), keepdim=True)
-        std = images.std(dim=(-2, -1), keepdim=True)
-        images = (images - mean) / std.clamp(min=1e-8)
+        images = _normalize_images(images)
 
     # --- Saving ---
     section("Saving")
@@ -263,5 +260,4 @@ def run_tilt_series(
                 micrograph_size,
             )
 
-    elapsed = time.perf_counter() - t_start
-    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
+    _print_total_time(t_start)

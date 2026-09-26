@@ -63,8 +63,9 @@ from specter.specimen._parallel_render import (
 )
 
 from specter.devices import parse_device, resolve_available_device
-from specter.progress import console, format_elapsed, section
+from specter.progress import console, section
 from ._common import (
+    _print_total_time,
     _deterministic_tracked_path,
     _tracked_output_dir,
     resolve_output_dir,
@@ -800,5 +801,4 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             _write_label_mrc("_regions.mrc", regions_volume, "uint16")
             del regions_volume
 
-    elapsed = time.perf_counter() - t_start
-    console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
+    _print_total_time(t_start)

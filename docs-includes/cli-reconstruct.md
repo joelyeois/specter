@@ -77,7 +77,7 @@ specter reconstruct particle [OPTIONS]
 | --- | --- | --- | --- |
 | `--output_dir` | `TEXT` | _none_ | The one directory this run writes under. Every reconstruction is tracked, so this is always the root of the numbered job tree ([&lt;project&gt;/]reconstructions/J00N/), never the leaf the files land in directly. Defaults to the project root found by walking up from cwd looking for an existing .specter marker, the same way git finds the nearest .git -- so running from a subdirectory of an already-initialised project lands in the same project. |
 | `--project` | `TEXT` | _none_ | Name for a group of jobs, e.g. one structure's worth of runs. Optional: omitting it doesn't mean untracked -- every run is numbered and gets a job.json regardless -- it just drops the project-name segment, using output_dir's implicit default project instead of a named one. Pass this to split one output_dir into several, e.g. one shared scratch directory used across structures. |
-| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. This is how two halfset runs share one job. |
+| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. This is how two halfset runs share one job. Mandatory with a multi-GPU device string unless halfset is 'gold' -- auto-numbering needs one process to decide, but multi-GPU dispatch re-runs this pipeline once per rank. |
 
 **Reference maps**{ #specter-reconstruct-particle-reference-maps }
 

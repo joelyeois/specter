@@ -19,13 +19,12 @@ import shutil
 from pathlib import Path
 
 import rich_click as click
-from rich.console import Console
 
 from specter.config import default_pdb_cache_dir
 
-from ._click_options import CONTEXT_SETTINGS
+from specter.progress import console
 
-console = Console()
+from ._click_options import CONTEXT_SETTINGS
 
 
 def _cache_contents(cache_dir: Path) -> tuple[int, int]:

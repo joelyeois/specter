@@ -10,11 +10,10 @@ from __future__ import annotations
 import os
 
 import rich_click as click
-from rich.console import Console
+
+from specter.progress import console
 
 from ._click_options import CONTEXT_SETTINGS
-
-console = Console()
 
 
 def build_convert_group() -> click.RichGroup:

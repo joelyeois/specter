@@ -75,8 +75,10 @@ average is commensurate only with another plane average.
 An analytic two-Gaussian profile is wrong for a different reason. Two
 Gaussians standing on vacuum model a bilayer's *appearance* in a
 micrograph rather than its density, and deleting the acyl core that way
-costs 4.8x of the integrated potential -- invisible in a slice, dominant
-in a projection. The smoothing that makes real cryo-ET membranes look
+costs 4.8x of the integrated potential at the template's native 40 A
+thickness (4.5x at ``MembraneGenerator``'s default 38 A, since the
+integral scales with thickness). The loss is invisible in a slice and
+dominant in a projection. The smoothing that makes real cryo-ET membranes look
 continuous comes from the microscope's own resolution limits (CTF,
 multislice, detector MTF), applied to membrane and protein alike AFTER
 the ground truth is built, and downstream by ``_raster.py``'s

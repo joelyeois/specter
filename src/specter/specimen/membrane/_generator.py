@@ -1151,11 +1151,11 @@ class MembraneGenerator:
         torch.Tensor
             Density volume, shape ``target_shape``.
         """
-        # The MEASURED psi(z), not the analytic two-Gaussian form: the
-        # latter stands on vacuum and so discards the acyl core, which
-        # costs 4.8x of the bilayer's integrated potential and shows up
-        # as weak membranes in projection. See
-        # build_measured_bilayer_profile's docstring.
+        # The MEASURED psi(z), not a two-Gaussian form: two Gaussians on
+        # vacuum discard the acyl core, which carries most of the bilayer's
+        # integrated potential (4.5x at the default 38 A thickness, 4.8x at
+        # the template's native 40 A) and shows up as weak membranes in
+        # projection. See build_measured_bilayer_profile's docstring.
         self.profile = build_measured_bilayer_profile(
             thickness_angstrom=self.bilayer_thickness,
             extra_sigma_angstrom=self.bilayer_layer_sigma_angstrom,
@@ -1171,15 +1171,12 @@ class MembraneGenerator:
         #
         # Measured from where psi is actually non-negligible, NOT from the
         # table's full z-range. The measured profile carries a decaying
-        # tail out to +-32 A that the analytic two-Gaussian form did not,
-        # and taking the raw range let that tail COARSEN the field grid
-        # (spacing is capped at half_extent/8 below), which broke
-        # sample_surface_sites' Newton projection outright: transmembrane
-        # placement silently found zero sites. The 1% cutoff is the
-        # gentlest one that drops only the numerically irrelevant tail --
-        # it gives +-20 A here, tighter than the +-22.5 A the analytic
-        # profile reported, so the grid ends up finer than before rather
-        # than merely restored.
+        # tail out to +-32 A, and taking the raw range let that tail
+        # COARSEN the field grid (spacing is capped at half_extent/8
+        # below), which broke sample_surface_sites' Newton projection
+        # outright: transmembrane placement silently found zero sites. The
+        # 1% cutoff is the gentlest one that drops only the numerically
+        # irrelevant tail; it gives +-20 A here.
         psi_abs = self.profile.psi.abs()
         support = self.profile.distance_angstrom[psi_abs > 0.01 * float(psi_abs.max())]
         half_extent_angstrom = float(

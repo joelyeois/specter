@@ -170,15 +170,6 @@ class TomogramReconstructor(_BaseReconstructor):
         else:
             self.V = nn.Parameter(V.float())
 
-        # Informational: minimum XY size a forward model would need for this tilt range.
-        # TomogramReconstructor does NOT pre-pad to this size; it works at nxy throughout.
-        max_tilt_deg = tilt_geometry.infer_max_tilt_from_inputs(
-            angles=None, quaternions=quaternions
-        )
-        self.required_nxy = int(
-            tilt_geometry.estimate_required_nxy(self.nxy, self.nz, max_tilt_deg)
-        )
-
         # Expected electrons per pixel for each tilt, the scale of the
         # predicted counts and the Poisson variance the loss divides by.
         n_tilts = len(quaternions)
@@ -347,7 +338,7 @@ class TomogramReconstructor(_BaseReconstructor):
         Parameters
         ----------
         V_prepared : torch.Tensor
-            Tapered and padded volume, shape ``(Z, Y', X')``.
+            Tapered volume from ``_prepare_volume``, shape ``(Z, Y, X)``.
         tilt_idx : int
             Index into ``self.quaternions`` / ``self.translations``.
 
@@ -463,7 +454,7 @@ class TomogramReconstructor(_BaseReconstructor):
         """
         obs_images, tilt_indices = batch
 
-        # Prepare V once per step (taper + padding are deterministic transforms)
+        # Prepare V once per step (the taper is a deterministic transform)
         V_prepared = self._prepare_volume()
 
         total_norm_loss = torch.tensor(0.0, device=self.device)

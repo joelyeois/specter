@@ -211,7 +211,7 @@ class Aberration(L.LightningModule):
 
         if aberration_model == "linear":
             if alpha is None:
-                raise Exception("Specify alpha for the linear model.")
+                raise ValueError("Specify alpha for the linear model.")
             else:
                 self.alpha = alpha
         self.specimen_absorption = specimen_absorption

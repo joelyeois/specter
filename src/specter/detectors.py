@@ -52,14 +52,18 @@ _K3_FREQ = [
 ]
 
 
-def _k3_mtf(
+def _tabulated_mtf(
     n: int,
     dx: float,
     device: str | torch.device,
     return1d: bool,
     mtf_values: list[float],
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """Shared implementation for K3 MTF functions."""
+    """Shared implementation for MTF curves tabulated on the ``_K3_FREQ`` grid.
+
+    Used by every preset whose curve is sampled on Gatan's frequency grid:
+    the K3 and K2 MTFs and the Falcon 3EC DQE-derived MTF.
+    """
     k_data = torch.tensor(_K3_FREQ, dtype=torch.float32, device=device) / dx
     mtf = torch.tensor(mtf_values, dtype=torch.float32, device=device)
 
@@ -70,6 +74,12 @@ def _k3_mtf(
     kx, ky = torch.meshgrid(k, k, indexing="ij")
     k_rad = torch.sqrt(kx**2 + ky**2)
     return interp1d(k_data, mtf, k_rad.ravel()).reshape(n, n)
+
+
+# Falcon 4i DQE at 0, 0.5 and 1 x Nyquist. The zero-frequency entry is also
+# the counting efficiency in ``DQE0``, which reads it from here.
+_FALCON4I_300KV_DQE = [0.92, 0.72, 0.50]
+_FALCON4I_200KV_DQE = [0.91, 0.62, 0.33]
 
 
 def _falcon4i_mtf(
@@ -147,7 +157,7 @@ def k3_200kv(
     ----------
     https://www.gatan.com/sites/default/files/images/mtf_k3_standard_200kV_FL2.star
     """
-    return _k3_mtf(
+    return _tabulated_mtf(
         n,
         dx,
         device,
@@ -219,7 +229,7 @@ def k3_300kv(
     ----------
     https://www.gatan.com/sites/default/files/images/mtf_k3_standard_300kV_FL2.star
     """
-    return _k3_mtf(
+    return _tabulated_mtf(
         n,
         dx,
         device,
@@ -334,7 +344,7 @@ def k2_300kv(
     ----------
     https://www.gatan.com/sites/default/files/images/mtf_k2_300kV_FL2.star
     """
-    return _k3_mtf(
+    return _tabulated_mtf(
         n,
         dx,
         device,
@@ -459,7 +469,7 @@ def falcon3ec_300kv(
     """
     dqe0 = _FALCON3EC_300KV_DQE[0]
     mtf = [math.sqrt(d / dqe0) for d in _FALCON3EC_300KV_DQE]
-    return _k3_mtf(n, dx, device, return1d, mtf)
+    return _tabulated_mtf(n, dx, device, return1d, mtf)
 
 
 def falcon4i_300kv(
@@ -492,7 +502,7 @@ def falcon4i_300kv(
     ----------
     https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
     """
-    return _falcon4i_mtf(n, dx, device, return1d, [0.92, 0.72, 0.50])
+    return _falcon4i_mtf(n, dx, device, return1d, _FALCON4I_300KV_DQE)
 
 
 def falcon4i_200kv(
@@ -525,7 +535,7 @@ def falcon4i_200kv(
     ----------
     https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
     """
-    return _falcon4i_mtf(n, dx, device, return1d, [0.91, 0.62, 0.33])
+    return _falcon4i_mtf(n, dx, device, return1d, _FALCON4I_200KV_DQE)
 
 
 #: The bundled MTF presets by ``detector_model`` name.
@@ -629,8 +639,8 @@ def _as_tensor(x: torch.Tensor | tuple[torch.Tensor, torch.Tensor]) -> torch.Ten
 # Falcon 4i value is consistent with the low-flux limit measured from beam-only
 # micrographs (fitted zero-dose intercept 0.926 vs 0.92 published).
 DQE0: dict[str, float] = {
-    "falcon4i_300kv": 0.92,
-    "falcon4i_200kv": 0.91,
+    "falcon4i_300kv": _FALCON4I_300KV_DQE[0],
+    "falcon4i_200kv": _FALCON4I_200KV_DQE[0],
     # Falcon 3EC, HQ electron-counting mode at its lowest dose rate: the
     # zero-frequency end of the curve in ``_FALCON3EC_300KV_DQE``.
     "falcon3ec_300kv": 0.95,

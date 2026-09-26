@@ -232,7 +232,6 @@ class Reconstructor(_BaseReconstructor):
         # imaging models
         self.propagation = propagation
         self.optics = optics
-        self.scattering_model = propagation.scattering_model
         self._build_imagegenerator(bfactor)
         self._bind_refined_parameters()
 
@@ -733,7 +732,7 @@ class Reconstructor(_BaseReconstructor):
         return loss
 
     def _metrics_path_suffix(self) -> str:
-        """Filename suffix for saved metrics/volumes, from the halfset label."""
+        """Filename suffix for saved volumes and figures, from the halfset label."""
         return f"_{self._halfset_label}" if self._halfset_label is not None else ""
 
     def on_fit_start(self) -> None:

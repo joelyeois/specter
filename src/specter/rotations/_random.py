@@ -1,7 +1,4 @@
-"""
-Random rotations (quaternions, rotation vectors, matrices) and the angular
-distance between rotations.
-"""
+"""Random rotations (quaternions and rotation matrices)."""
 
 from __future__ import annotations
 
@@ -43,31 +40,6 @@ def random_quaternion(
     if batchsize == 1:
         return quats.squeeze(0)
     return quats
-
-
-def random_rotvec(
-    batchsize: int = 1, device: str | torch.device = "cpu"
-) -> torch.Tensor:
-    """
-    Generate uniformly random rotation vectors.
-
-    Parameters
-    ----------
-    batchsize : int
-        Number of rotation vectors to generate.
-    device : str or torch.device
-        Device for the output tensor.
-
-    Returns
-    -------
-    rotvecs : torch.Tensor
-        Tensor of shape (batchsize, 3) with rotation vectors (axis * angle).
-    """
-    rotvecs = roma.random_rotvec(size=(batchsize,), device=device)
-
-    if batchsize == 1:
-        return rotvecs.squeeze(0)
-    return rotvecs
 
 
 def random_rotation_matrix(
@@ -130,40 +102,3 @@ def random_rotation_matrix_from_generator(
     if torch.det(Q) < 0:
         Q[:, 0] *= -1
     return Q
-
-
-def rotations_angular_difference(
-    r1: torch.Tensor,
-    r2: torch.Tensor,
-    rotation_representation: Literal["quaternion", "rotvec"] = "rotvec",
-) -> torch.Tensor:
-    """
-    Compute the smallest angular difference between two batches of rotations.
-
-    Parameters
-    ----------
-    r1 : torch.Tensor
-        Batch of rotation representations, shape (N, ...).
-    r2 : torch.Tensor
-        Batch of rotation representations, shape (N, ...).
-    rotation_representation : str, optional
-        Input representation: 'quaternion' or 'rotvec'. Default is 'rotvec'.
-
-    Returns
-    -------
-    angles : torch.Tensor
-        Smallest angular difference in degrees, shape (N,).
-    """
-    if rotation_representation == "rotvec":
-        R1 = roma.rotvec_to_rotmat(r1)
-        R2 = roma.rotvec_to_rotmat(r2)
-    elif rotation_representation == "quaternion":
-        R1 = roma.unitquat_to_rotmat(r1)
-        R2 = roma.unitquat_to_rotmat(r2)
-    else:
-        raise ValueError(
-            f"Unknown rotation_representation '{rotation_representation}'. Must be 'quaternion' or 'rotvec'."
-        )
-
-    angles_rad = roma.rotmat_geodesic_distance(R1, R2)
-    return angles_rad / torch.pi * 180

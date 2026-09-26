@@ -589,12 +589,10 @@ class TiltSeriesGenerator(MicrographGenerator):
             cr_batch = self.coincidence_radius[
                 self._tilt_index(i, idx, B, self.coincidence_radius)
             ]
-            if self.anisomag is None:
-                image = self.detector(detector_waves, dose_batch, cr_batch, nxy=None)
-            else:
-                image = self.detector(
-                    detector_waves, dose_batch, cr_batch, self.anisomag[idx], nxy=None
-                )
+            anisomag = None if self.anisomag is None else self.anisomag[idx]
+            image = self.detector(
+                detector_waves, dose_batch, cr_batch, anisomag, nxy=None
+            )
 
             tilt_series.append(image.detach().cpu())
             exitwaves.append(exitwave.detach().cpu())

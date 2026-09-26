@@ -5,75 +5,6 @@ from __future__ import annotations
 import torch
 
 
-def tile_volume_from_blocks(
-    blocks: torch.Tensor,
-    target_shape: tuple[int, int, int, int],
-) -> torch.Tensor:
-    """
-    Tile a bank of 3-D blocks into a larger volume with random augmentation per tile.
-
-    Each placed tile receives an independent random roll, flip, and 90°-multiple
-    rotation before insertion, breaking periodicity that would otherwise create
-    visible seams at block boundaries.
-
-    Parameters
-    ----------
-    blocks : torch.Tensor
-        Pre-generated block bank, shape ``(N_blocks, S, S, S)``. Blocks must be cubic.
-    target_shape : tuple of int
-        Desired output shape ``(N_batch, A, B, C)``.
-
-    Returns
-    -------
-    torch.Tensor
-        Assembled volume cropped to ``target_shape``, shape ``(N_batch, A, B, C)``.
-    """
-    N_blocks, block_size, _, _ = blocks.shape
-    N_batch, A, B, C = target_shape
-
-    batch_volumes = []
-    for _ in range(N_batch):
-        n_a = (A + block_size - 1) // block_size
-        n_b = (B + block_size - 1) // block_size
-        n_c = (C + block_size - 1) // block_size
-
-        tile_idx = torch.randint(0, N_blocks, (n_a, n_b, n_c))
-
-        a_slices = []
-        for i in range(n_a):
-            b_slices = []
-            for j in range(n_b):
-                c_slices = []
-                for k in range(n_c):
-                    blk = blocks[tile_idx[i, j, k]].clone()
-
-                    # Random roll along all three axes
-                    shifts = (
-                        int(torch.randint(0, block_size, (1,)).item()),
-                        int(torch.randint(0, block_size, (1,)).item()),
-                        int(torch.randint(0, block_size, (1,)).item()),
-                    )
-                    blk = torch.roll(blk, shifts=shifts, dims=(0, 1, 2))
-
-                    # Random flip along each axis
-                    for dim in (0, 1, 2):
-                        if torch.rand(1).item() < 0.5:
-                            blk = torch.flip(blk, dims=(dim,))
-
-                    # Random 90° rotations in each plane
-                    for d0, d1 in ((0, 1), (0, 2), (1, 2)):
-                        k_rot = int(torch.randint(0, 4, (1,)).item())
-                        blk = torch.rot90(blk, k=k_rot, dims=(d0, d1))
-
-                    c_slices.append(blk)
-                b_slices.append(torch.cat(c_slices, dim=2))
-            a_slices.append(torch.cat(b_slices, dim=1))
-
-        batch_volumes.append(torch.cat(a_slices, dim=0))
-
-    return torch.stack(batch_volumes, dim=0)[:, :A, :B, :C]
-
-
 def tile_volume_from_blocks_blended(
     blocks: torch.Tensor,
     target_shape: tuple[int, int, int, int],
@@ -83,11 +14,11 @@ def tile_volume_from_blocks_blended(
     """
     Tile a bank of 3-D blocks into a larger volume using overlap-add blending.
 
-    Same per-tile random roll/flip/90-degree-rotation augmentation as
-    ``tile_volume_from_blocks``, but adjacent blocks are cross-faded with a
+    Each placed tile receives an independent random roll, flip and
+    90-degree-multiple rotation, and adjacent blocks are cross-faded with a
     raised-cosine taper over ``overlap_frac * block_size`` instead of being
-    concatenated edge-to-edge. ``tile_volume_from_blocks`` abuts blocks with a
-    hard edge; each block tiles seamlessly with itself (blocks are generated
+    concatenated edge-to-edge. Abutting blocks with a hard edge would leave a
+    seam: each block tiles seamlessly with itself (blocks are generated
     with periodic boundary conditions), but two different blocks placed side
     by side don't share matching boundary values, and that mismatch sits on
     the regular block-size lattice as an axis-aligned artifact in Fourier

@@ -10,11 +10,8 @@ from ._grids import (
     grid_3d,
     kgrid_1d,
     kgrid_2d,
-    kgrid_3d,
     radial_grid_2d,
     radial_grid_3d,
-    radial_kgrid_2d,
-    radial_kgrid_3d,
     real_to_kgrid_3d,
 )
 from ._reduce import count_nonzero_chunked
@@ -23,16 +20,14 @@ from ._padding import (
     centered_pad,
     center_crop,
     clip_insert_bounds,
-    coarse_occupancy_mask,
     compute_nz,
     downsample,
     fourier_crop,
-    pad_to_common_shape,
     pad_volume,
     radial_symmetrize,
 )
 from ._profiles import radial_profile_2d, radial_profile_3d
-from ._tiling import tile_volume_from_blocks, tile_volume_from_blocks_blended
+from ._tiling import tile_volume_from_blocks_blended
 from ._voxelize import (
     soft_voxelize_coordinates,
     soft_voxelize_coordinates_into,
@@ -44,7 +39,6 @@ __all__ = [
     "centered_pad",
     "center_crop",
     "clip_insert_bounds",
-    "coarse_occupancy_mask",
     "count_nonzero_chunked",
     "compute_nps_1d",
     "compute_nps_2d",
@@ -58,13 +52,9 @@ __all__ = [
     "grid_3d",
     "kgrid_1d",
     "kgrid_2d",
-    "kgrid_3d",
-    "pad_to_common_shape",
     "pad_volume",
     "radial_grid_2d",
     "radial_grid_3d",
-    "radial_kgrid_2d",
-    "radial_kgrid_3d",
     "radial_profile_2d",
     "radial_profile_3d",
     "radial_symmetrize",
@@ -72,6 +62,5 @@ __all__ = [
     "soft_voxelize_coordinates",
     "soft_voxelize_coordinates_into",
     "soft_voxelize_xy_coordinates",
-    "tile_volume_from_blocks",
     "tile_volume_from_blocks_blended",
 ]

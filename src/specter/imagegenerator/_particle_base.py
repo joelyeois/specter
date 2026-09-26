@@ -624,12 +624,7 @@ class ParticleGeneratorBase(BaseImager):
             logger.info(f"Applying detector and noise using {self.noise_model} model")
         dose_batch = self.dose_per_angstrom[idx]
         cr_batch = self.coincidence_radius[idx]
-        if self.anisomag is None:
-            images = self.detector(
-                self.detector_waves, dose_batch, cr_batch, nxy=self.nxy
-            )
-        else:
-            images = self.detector(
-                self.detector_waves, dose_batch, cr_batch, self.anisomag[idx], self.nxy
-            )
-        return images
+        anisomag = None if self.anisomag is None else self.anisomag[idx]
+        return self.detector(
+            self.detector_waves, dose_batch, cr_batch, anisomag, nxy=self.nxy
+        )

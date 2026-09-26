@@ -106,6 +106,36 @@ def _metadata_kwargs(config: MatchConfig) -> dict[str, str]:
     )
 
 
+def _recorded_pixel_size(metadata_path: str) -> float | None:
+    """
+    Pixel size the movies were recorded at, from the particle metadata.
+
+    CryoSPARC carries it as ``location/micrograph_psize_A``, RELION as
+    ``rlnMicrographOriginalPixelSize`` in the optics table. None when the
+    file does not say.
+    """
+    values: np.ndarray | None = None
+    if metadata_path.endswith(".cs"):
+        cs = np.load(metadata_path)
+        if "location/micrograph_psize_A" in (cs.dtype.names or ()):
+            values = np.asarray(cs["location/micrograph_psize_A"], dtype=float)
+    elif metadata_path.endswith(".star"):
+        import starfile
+
+        star = starfile.read(metadata_path)
+        tables = star.values() if isinstance(star, dict) else [star]
+        for table in tables:
+            if "rlnMicrographOriginalPixelSize" in getattr(table, "columns", ()):
+                values = np.asarray(
+                    table["rlnMicrographOriginalPixelSize"], dtype=float
+                )
+                break
+    if values is None or values.size == 0:
+        return None
+    value = float(np.median(values))
+    return value if value > 0 else None
+
+
 def _read_stack(path: str) -> torch.Tensor:
     with mrcfile.mmap(path, permissive=True) as m:
         return torch.as_tensor(np.asarray(m.data, dtype=np.float32).copy())
@@ -738,6 +768,19 @@ def _derive_detector_settings(
         )
     elif config.energy_filter is None:
         report.warnings.append("energy_filter not stated; recorded as unknown.")
+    # The MTF belongs to the physical pixel: a stack resampled after recording
+    # has to have it evaluated there, not stretched over its own Nyquist.
+    recorded = _recorded_pixel_size(config.metadata_path)
+    if recorded is not None and abs(recorded - pixel_size) > 1e-3 * pixel_size:
+        base.update(detector_pixel_size=recorded)
+        report.derived.append(
+            DerivedValue(
+                "detector_pixel_size",
+                round(recorded, 4),
+                "metadata",
+                f"movies recorded at {recorded:.4g} Å/px, particles at {pixel_size:.4g}",
+            )
+        )
     base.update(detector_model=detector_model, coincidence_radius=cr)
     # The same occupancy expressed in the probes' coarser pixel.
     cr_p = (
@@ -967,6 +1010,7 @@ def _write_matched_toml(
                 "n_frames",
                 "detector_model",
                 "coincidence_radius",
+                "detector_pixel_size",
                 "dose_envelope",
                 "dose_envelope_target",
                 "bfactor",

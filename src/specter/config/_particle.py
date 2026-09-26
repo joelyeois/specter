@@ -354,6 +354,16 @@ class ParticleStackConfig:
         ),
         check="non_negative_ordered",
     )  # pixels
+    detector_pixel_size: float | None = setting(
+        None,
+        help=(
+            "Pixel size in Angstrom at which the movies were recorded, when the "
+            "particles were resampled afterwards (Fourier-cropped or binned). The "
+            "detector MTF is evaluated on this physical pixel. Unset: the image "
+            "pixel is the physical pixel."
+        ),
+        check="positive",
+    )  # Å
     ice_model: IceModel = setting(
         "gd",
         help=(

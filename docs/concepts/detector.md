@@ -57,6 +57,23 @@ the Nyquist range, which three points would not capture. `"perfect"`
 is the ideal pixel-integration limit, \(\mathrm{sinc}(\pi k / 2 k_{Nyq})\),
 limited only by the finite pixel aperture.
 
+### Images resampled after recording
+
+An MTF is a property of the detector's physical pixel. A particle stack that
+was Fourier-cropped or binned from its micrographs has a coarser pixel, and its
+Nyquist frequency reaches only part of the detector's. Evaluating the MTF on
+the image pixel would stretch the whole curve over the resampled range and
+place the detector's Nyquist fall-off at the image's Nyquist. `detector_pixel_size`
+(Angstrom) names the pixel the movies were recorded at; the curve is then
+evaluated on that pixel and read off at the image's frequencies. For a stack
+recorded at 0.514 Å and cropped to 0.703 Å, the image's Nyquist is 0.73 of the
+detector's, where the Falcon 3EC MTF is 0.84 rather than the 0.62 it has at the
+detector's Nyquist. `specter match particles` reads the recording pixel from the
+particle metadata (`location/micrograph_psize_A` in a CryoSPARC `.cs` file,
+`rlnMicrographOriginalPixelSize` in a RELION `.star` file) and sets it when it
+differs from the particles'. Left unset, the image pixel is taken as the
+physical pixel.
+
 ## DQE(0): a separate counting efficiency
 
 \(\mathrm{DQE}(0)\), the fraction of incident electrons a detector

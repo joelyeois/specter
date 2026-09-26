@@ -123,6 +123,7 @@ specter simulate particles [OPTIONS]
 | `--dose_envelope_target` | `transfer_function` \| `specimen` | `transfer_function` | Where the dose envelope acts. 'transfer_function' filters the whole image, solvent included. 'specimen' damages the particle's own potential before the ice is added, with occupancy read from the undamaged particle, so the water keeps its 3.7 A ring (raw movies show it does not fade with dose); required for ice_motion_variance. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2. |
 | `--coincidence_radius` | `TEXT` | `0.0` | Effective coincidence exclusion radius in pixels (exclusion area = pi*r^2): a single value for constant radius, or 'low,high' ([low, high] in TOML) to sample uniformly per particle. |
+| `--detector_pixel_size` | `FLOAT` | _none_ | Pixel size in Angstrom at which the movies were recorded, when the particles were resampled afterwards (Fourier-cropped or binned). The detector MTF is evaluated on this physical pixel. Unset: the image pixel is the physical pixel. |
 | `--ice_model` | `gd` \| `random` \| `none` | `gd` | Ice model: 'gd' (samples the pre-generated IceBank cache), 'random' (cheap, low-realism), or 'none'. |
 | `--ice_cache_dir` | `TEXT` | _none_ | Directory of cached ice configs for ice_model='gd'. Defaults to the bundled ice_data/ice_cache. |
 | `--crowd_min_distance` | `FLOAT` | _none_ | Minimum distance between crowded particles in Angstrom. Unset disables crowding. |

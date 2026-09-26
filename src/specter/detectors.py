@@ -6,7 +6,9 @@ Falcon 4i, perfect), their DQE(0), and the coincidence-loss geometry per camera.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
+import numpy as np
 import torch
 from scipy.interpolate import interp1d as scipy_interp1d
 from torchinterp1d import interp1d
@@ -524,6 +526,83 @@ def falcon4i_200kv(
     https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
     """
     return _falcon4i_mtf(n, dx, device, return1d, [0.91, 0.62, 0.33])
+
+
+#: The bundled MTF presets by ``detector_model`` name.
+MTF_PRESETS: dict[
+    str, Callable[..., torch.Tensor | tuple[torch.Tensor, torch.Tensor]]
+] = {
+    "k3_300kv": k3_300kv,
+    "k3_200kv": k3_200kv,
+    "k2_300kv": k2_300kv,
+    "falcon4i_300kv": falcon4i_300kv,
+    "falcon4i_200kv": falcon4i_200kv,
+    "falcon3ec_300kv": falcon3ec_300kv,
+    "perfect": perfect_detector,
+}
+
+
+def detector_mtf(
+    detector_model: str | None,
+    n: int,
+    pixel_size: float,
+    physical_pixel_size: float | None = None,
+    device: str | torch.device = "cpu",
+) -> torch.Tensor | None:
+    """
+    The 2D MTF of a bundled detector on an image's Fourier grid.
+
+    An MTF is a property of the detector's physical pixel. An image that was
+    resampled after recording -- a particle stack Fourier-cropped or binned
+    from the micrographs -- has a coarser pixel, and its Nyquist frequency
+    reaches only part of the detector's. The curve is then evaluated on the
+    physical pixel and read off at the image's frequencies; applying it on the
+    image pixel instead would stretch the whole curve over the resampled range
+    and place the detector's Nyquist fall-off at the image's Nyquist.
+
+    Parameters
+    ----------
+    detector_model : str or None
+        A key of `MTF_PRESETS`. None, ``"none"`` or an unknown name returns None.
+    n : int
+        Image size in pixels along each axis.
+    pixel_size : float
+        Pixel size of the image in Angstrom.
+    physical_pixel_size : float, optional
+        Pixel size at which the movies were recorded, in Angstrom. Default
+        None, the image pixel is the physical pixel, which returns exactly
+        what the preset itself returns.
+    device : str or torch.device, optional
+        Device of the returned tensor. Default 'cpu'.
+
+    Returns
+    -------
+    torch.Tensor or None
+        ``(n, n)`` MTF in unshifted FFT order, or None for no detector.
+    """
+    fn = MTF_PRESETS.get(detector_model) if detector_model is not None else None
+    if fn is None:
+        return None
+    if physical_pixel_size is None or physical_pixel_size == pixel_size:
+        return _as_tensor(fn(n, pixel_size, device))
+    # The curve on the physical pixel, finely sampled, then interpolated at the
+    # image's radial frequencies; past the physical Nyquist (an image finer
+    # than the detector) it holds its last value.
+    k_curve, mtf_curve = fn(2048, physical_pixel_size, "cpu", return1d=True)
+    k = torch.fft.fftfreq(n, pixel_size, dtype=torch.float64)
+    k_rad = torch.sqrt(k[:, None] ** 2 + k[None, :] ** 2)
+    mtf = np.interp(
+        k_rad.numpy(),
+        k_curve.double().cpu().numpy(),
+        mtf_curve.double().cpu().numpy(),
+    )
+    return torch.as_tensor(mtf, dtype=torch.float32, device=device)
+
+
+def _as_tensor(x: torch.Tensor | tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+    """A preset called with ``return1d=False`` returns one tensor."""
+    assert isinstance(x, torch.Tensor)
+    return x
 
 
 # Zero-frequency detective quantum efficiency, DQE(0), per detector model.

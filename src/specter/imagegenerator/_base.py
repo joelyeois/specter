@@ -19,16 +19,7 @@ if TYPE_CHECKING:
 import lightning as L
 import torch
 
-from specter.detectors import (
-    dqe0_for_detector,
-    falcon3ec_300kv,
-    falcon4i_200kv,
-    falcon4i_300kv,
-    k2_300kv,
-    k3_200kv,
-    k3_300kv,
-    perfect_detector,
-)
+from specter.detectors import detector_mtf, dqe0_for_detector
 
 from ..aberrations import Aberration, aberration_model_for_scattering
 from ..aberrations._functions import shift_defocus_to_midplane
@@ -319,30 +310,16 @@ class BaseImager(L.LightningModule):
 
     def _init_detector_mtf(self) -> None:
         """Register the detector MTF buffer based on the model name."""
-        # return1d defaults to False, so these always return a single Tensor here.
-        if self.detector_model == "k3_300kv":
-            mtf = cast(torch.Tensor, k3_300kv(self.nxy, self.pixel_size))
-            self.register_buffer("detector_mtf", mtf)
-        elif self.detector_model == "k3_200kv":
-            mtf = cast(torch.Tensor, k3_200kv(self.nxy, self.pixel_size))
-            self.register_buffer("detector_mtf", mtf)
-        elif self.detector_model == "perfect":
-            mtf = cast(torch.Tensor, perfect_detector(self.nxy, self.pixel_size))
-            self.register_buffer("detector_mtf", mtf)
-        elif self.detector_model == "falcon4i_300kv":
-            mtf = cast(torch.Tensor, falcon4i_300kv(self.nxy, self.pixel_size))
-            self.register_buffer("detector_mtf", mtf)
-        elif self.detector_model == "falcon4i_200kv":
-            mtf = cast(torch.Tensor, falcon4i_200kv(self.nxy, self.pixel_size))
-            self.register_buffer("detector_mtf", mtf)
-        elif self.detector_model == "falcon3ec_300kv":
-            mtf = cast(torch.Tensor, falcon3ec_300kv(self.nxy, self.pixel_size))
-            self.register_buffer("detector_mtf", mtf)
-        elif self.detector_model == "k2_300kv":
-            mtf = cast(torch.Tensor, k2_300kv(self.nxy, self.pixel_size))
-            self.register_buffer("detector_mtf", mtf)
-        else:
+        mtf = detector_mtf(
+            self.detector_model,
+            self.nxy,
+            self.pixel_size,
+            physical_pixel_size=self.camera.detector_pixel_size,
+        )
+        if mtf is None:
             self.detector_mtf = None
+        else:
+            self.register_buffer("detector_mtf", mtf)
 
     def _apply_defocus_shift(
         self, shift_required: bool = True, shift: float | None = None

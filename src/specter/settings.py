@@ -310,6 +310,13 @@ class Camera:
     n_frames : int, optional
         Movie frames the dose is fractionated into, which sets how
         coincidence loss saturates. Default None, a single frame.
+    detector_pixel_size : float or None, optional
+        Pixel size, in Angstrom, at which the movies were recorded, when the
+        image was resampled afterwards (a particle stack Fourier-cropped or
+        binned from its micrographs). The detector MTF belongs to the physical
+        pixel, so it is evaluated there and read off at the image's
+        frequencies; see :func:`~specter.detectors.detector_mtf`. Default None,
+        the image pixel is the physical pixel.
     """
 
     detector_model: DetectorModel | None = None
@@ -317,8 +324,13 @@ class Camera:
     n_frames: int | None = None
     dose_weights_path: str | None = None
     dose_weights_max_frequency: float | None = None
+    detector_pixel_size: float | None = None
 
     def __post_init__(self) -> None:
+        if self.detector_pixel_size is not None and self.detector_pixel_size <= 0:
+            raise ValueError(
+                f"detector_pixel_size={self.detector_pixel_size} must be positive"
+            )
         if self.detector_model == "none":
             object.__setattr__(self, "detector_model", None)
         if self.noise_model == "none":

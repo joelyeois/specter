@@ -97,6 +97,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "dose_envelope_target",
             "bfactor",
             "coincidence_radius",
+            "detector_pixel_size",
             "ice_model",
             "ice_cache_dir",
             "crowd_min_distance",

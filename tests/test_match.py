@@ -340,3 +340,24 @@ def test_rescale_metadata_follows_a_fourier_cropped_stack(tmp_path: Path) -> Non
     assert float(r["alignments3D/shift"][0][0]) == pytest.approx(10.0, rel=1e-5)
     # Angstrom shift is invariant: 18 px * 0.5695 == 10 px * 1.0251
     assert 18.0 * 0.5695 == pytest.approx(10.0 * new_px, rel=1e-5)
+
+
+def test_recorded_pixel_size_is_read_from_the_metadata(tmp_path: Path) -> None:
+    """The movies' pixel comes from ``location/micrograph_psize_A`` when present."""
+    from specter.pipelines._match import _recorded_pixel_size
+
+    with_field = np.zeros(
+        3, dtype=[("blob/psize_A", "f4"), ("location/micrograph_psize_A", "f4")]
+    )
+    with_field["blob/psize_A"], with_field["location/micrograph_psize_A"] = (
+        0.7027,
+        0.514,
+    )
+    without = np.zeros(3, dtype=[("blob/psize_A", "f4")])
+    for name, arr in (("with.cs", with_field), ("without.cs", without)):
+        with open(tmp_path / name, "wb") as fh:
+            np.save(fh, arr)
+    assert _recorded_pixel_size(str(tmp_path / "with.cs")) == pytest.approx(
+        0.514, abs=1e-6
+    )
+    assert _recorded_pixel_size(str(tmp_path / "without.cs")) is None

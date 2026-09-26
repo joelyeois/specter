@@ -388,3 +388,43 @@ def test_falcon3ec_reproduces_its_published_dqe() -> None:
     assert at(0.5) == pytest.approx(0.776, abs=0.02)
     assert at(0.7) == pytest.approx(0.696, abs=0.02)
     assert bool((mtf[1:] <= mtf[:-1] + 1e-6).all())
+
+
+@pytest.mark.parametrize("preset", ["k3_300kv", "falcon4i_300kv", "falcon3ec_300kv"])
+def test_detector_mtf_without_a_physical_pixel_is_the_preset(preset: str) -> None:
+    """Unset (or equal) physical pixel: exactly what the preset returns."""
+    from specter import detectors
+
+    ref = getattr(detectors, preset)(96, 0.8, "cpu")
+    assert torch.equal(detectors.detector_mtf(preset, 96, 0.8), ref)
+    assert torch.equal(
+        detectors.detector_mtf(preset, 96, 0.8, physical_pixel_size=0.8), ref
+    )
+    assert detectors.detector_mtf(None, 96, 0.8) is None
+
+
+def test_detector_mtf_is_evaluated_on_the_physical_pixel() -> None:
+    """
+    A stack Fourier-cropped after recording (EMPIAR-10551: movies at 0.514 A,
+    particles at 0.7027 A) reaches only 0.73 of the detector's Nyquist. The MTF
+    at the image's Nyquist must be the detector's value there, not the value at
+    the detector's own Nyquist that evaluating on the image pixel would give.
+    """
+    from specter.detectors import detector_mtf, falcon3ec_300kv
+
+    n, img, phys = 480, 0.7027, 0.514
+    mtf = detector_mtf("falcon3ec_300kv", n, img, physical_pixel_size=phys)
+    k_curve, m_curve = falcon3ec_300kv(2048, phys, "cpu", return1d=True)
+    k_nyq_img = 1 / (2 * img)
+    expected = float(np.interp(k_nyq_img, k_curve.numpy(), m_curve.numpy()))
+    naive = float(falcon3ec_300kv(n, img, "cpu")[0, n // 2])
+    assert float(mtf[0, n // 2]) == pytest.approx(expected, abs=1e-3)
+    assert float(mtf[0, n // 2]) > naive + 0.1  # 0.84 against 0.62
+    assert float(mtf[0, 0]) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_camera_rejects_a_non_positive_detector_pixel() -> None:
+    from specter.settings import Camera
+
+    with pytest.raises(ValueError, match="detector_pixel_size"):
+        Camera(detector_pixel_size=0.0)

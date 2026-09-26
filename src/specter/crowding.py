@@ -670,10 +670,15 @@ class CrowdWithDuplicates(L.LightningModule):
             self._generate_coordinates_shape()
             return
         if self.poisson_disc_method == "2d":
+            # The sampler works in the units of `min_distance`, Angstrom, and
+            # its coordinates are read as Angstrom downstream, so the box must
+            # be too: passing `nxy_out` in pixels confined the duplicates to
+            # the central 1 / dx of the box's width.
+            extent = self.nxy_out * self.dx
             coords = poisson_disk_neighbors(
                 self.min_distance,
                 n_points=self.n_points,
-                box=(self.nxy_out, self.nxy_out),
+                box=(extent, extent),
                 seed=self.seed,
             )
             # add z-coordinates

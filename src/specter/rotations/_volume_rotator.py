@@ -6,7 +6,7 @@ gradients.
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Literal, Sequence
 
 import lightning as L
 import torch
@@ -313,21 +313,53 @@ class VolumeRotator(L.LightningModule):
     def _isotropic_scale(
         self, device: str | torch.device, dtype: torch.dtype
     ) -> torch.Tensor:
-        """Per-axis scale factors mapping normalized [-1,1] deltas to isotropic pixel-like units."""
+        """
+        Per-axis scale factors mapping normalized [-1,1] deltas to isotropic pixel-like units.
+
+        Only `sample_rotated_slices` uses these. ``(n - 1) / 2`` is the exact
+        half-width under ``align_corners=True`` only; under the default False
+        it is ``n / 2`` (see
+        :func:`~specter.rotations._volume._isotropic_half_widths`, which
+        :meth:`_build_grid` uses), so sampled slices carry an ``n / (n - 1)``
+        magnification per axis. Left as is: changing it changes every tilt
+        series.
+        """
         return torch.tensor(
             [(self.nx - 1) / 2, (self.ny - 1) / 2, (self.nz - 1) / 2],
             device=device,
             dtype=dtype,
         ).view(1, 1, 3)
 
-    def _translation_per_axis(self, t: torch.Tensor) -> torch.Tensor:
+    def _translation_per_axis(
+        self, t: torch.Tensor, align_corners: bool | None = None
+    ) -> torch.Tensor:
         """
         Re-express an x-normalised translation on each axis's own scale.
 
         See :func:`~specter.rotations._volume._translation_per_axis`. A cube
-        is returned unchanged, bit for bit.
+        is returned unchanged, bit for bit. `align_corners` defaults to the
+        rotator's own; the Fourier path passes False, the phase ramp's fixed
+        convention.
         """
-        return _translation_per_axis(t, self.nz, self.ny, self.nx)
+        if align_corners is None:
+            align_corners = self.align_corners
+        return _translation_per_axis(t, self.nz, self.ny, self.nx, align_corners)
+
+    def _slice_translation_per_axis(self, t: torch.Tensor) -> torch.Tensor:
+        """
+        The translation factor matching `_isotropic_scale`'s half-widths.
+
+        `sample_rotated_slices` still maps pixel offsets to normalised
+        coordinates through ``(n - 1) / 2`` (see `_isotropic_scale`), so its
+        translation must be rescaled by the same half-widths to stay
+        consistent with its own rotation: ``(nx - 1) / (n - 1)`` per axis. A
+        cube is returned unchanged, bit for bit.
+        """
+        if self.nx == self.ny == self.nz:
+            return t
+        nz, ny, nx = self.nz, self.ny, self.nx
+        f = t.new_tensor([1.0, (nx - 1) / (ny - 1), (nx - 1) / (nz - 1)])
+        return t * f
 
     def _rotate_normalized_grid(
         self,
@@ -363,7 +395,7 @@ class VolumeRotator(L.LightningModule):
         torch.Tensor
             Rotated normalized sampling coordinates, shape (B, N, 3).
         """
-        t = self._translation_per_axis(t)
+        t = self._slice_translation_per_axis(t)
         if (origin or self.origin) == "relion":
             grid = (grid - self.center_dc) * scale
             grid = grid @ R.transpose(1, 2)
@@ -376,7 +408,10 @@ class VolumeRotator(L.LightningModule):
         return grid
 
     def _build_grid(
-        self, theta: torch.Tensor, origin: str | None = None
+        self,
+        theta: torch.Tensor,
+        origin: str | None = None,
+        domain: Literal["real", "fourier"] = "real",
     ) -> torch.Tensor:
         """
         Build a sampling grid from the affine parameters.
@@ -402,13 +437,18 @@ class VolumeRotator(L.LightningModule):
             self.nx,
             "relion" if resolved == "relion" else "center",
             self.align_corners,
+            domain,
         )
 
     # ------------------------------------------------------------------
     # Real-space rotation
     # ------------------------------------------------------------------
     def rotate_real(
-        self, V: torch.Tensor, theta: torch.Tensor, origin: str | None = None
+        self,
+        V: torch.Tensor,
+        theta: torch.Tensor,
+        origin: str | None = None,
+        domain: Literal["real", "fourier"] = "real",
     ) -> torch.Tensor:
         """
         Rotate a volume in real space.
@@ -416,12 +456,15 @@ class VolumeRotator(L.LightningModule):
         theta: (B, 3, 4)
         origin: overrides self.origin for this call; used by `rotate_fourier`,
             whose spectrum must always be rotated about the DC term.
+        domain: "fourier" when `V` is one part of an fftshifted spectrum, as
+            `rotate_fourier` passes it; see
+            :func:`~specter.rotations.rotation_sampling_grid`.
         Returns: (B, Z, Y, X)
         """
         B = theta.shape[0]
 
         def sample(vol: torch.Tensor, theta_b: torch.Tensor) -> torch.Tensor:
-            grid = self._build_grid(theta_b, origin=origin)
+            grid = self._build_grid(theta_b, origin=origin, domain=domain)
             vin = vol[None, None].expand(theta_b.shape[0], 1, self.nz, self.ny, self.nx)
             return F.grid_sample(
                 vin,
@@ -463,15 +506,20 @@ class VolumeRotator(L.LightningModule):
         V_f = fft3(V, shift=True)  # complex, (Z, Y, X)
 
         theta_rot, displacement = split_affine_translation(theta)
-        # x-normalised, like `rotate_real`'s translation; see there.
-        displacement = self._translation_per_axis(displacement)
+        # x-normalised, like `rotate_real`'s translation; see there. The phase
+        # ramp reads n / 2 voxels per normalised unit whatever align_corners is.
+        displacement = self._translation_per_axis(displacement, align_corners=False)
         if self.origin == "center":
             displacement = displacement + fourier_origin_displacement(
                 theta, self.nz, self.ny, self.nx
             )
 
-        V_f_rot_real = self.rotate_real(V_f.real, theta_rot, origin="relion")
-        V_f_rot_imag = self.rotate_real(V_f.imag, theta_rot, origin="relion")
+        V_f_rot_real = self.rotate_real(
+            V_f.real, theta_rot, origin="relion", domain="fourier"
+        )
+        V_f_rot_imag = self.rotate_real(
+            V_f.imag, theta_rot, origin="relion", domain="fourier"
+        )
 
         V_f_rot = apply_fourier_translation(
             torch.complex(V_f_rot_real, V_f_rot_imag), displacement

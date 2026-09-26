@@ -500,8 +500,14 @@ def _relion_rotation_grid_sixpass(
     null_rot[:, 2, 2] = 1.0
     grid = F.affine_grid(null_rot, [B, 1, nz, ny, nx], align_corners=align_corners)
 
+    # An axis's half-width in voxels: (n - 1) / 2 between the outer voxel
+    # centres under align_corners=True, n / 2 between the outer voxel edges
+    # otherwise. The pre-fusion code used (n - 1) / 2 for both, which is
+    # exact only on a cube (where the factor cancels) and made a non-cubic
+    # rotation ~1% anisotropic.
+    off = 1 if align_corners else 0
     scale = torch.tensor(
-        [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2],
+        [(nx - off) / 2, (ny - off) / 2, (nz - off) / 2],
         device=theta.device,
         dtype=theta.dtype,
     ).view(1, 1, 3)
@@ -605,9 +611,8 @@ def _six_pass_reference(
     g = F.affine_grid(eye, [1, 1, nz, ny, nx], align_corners=False)
     g = g.expand(B, -1, -1, -1, -1).reshape(B, -1, 3)
     R, t = theta[..., :3], theta[..., 3]
-    s = torch.tensor(
-        [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2], dtype=torch.float64
-    ).view(1, 1, 3)
+    # Half-widths under align_corners=False, the grid built above.
+    s = torch.tensor([nx / 2, ny / 2, nz / 2], dtype=torch.float64).view(1, 1, 3)
     if origin == "relion":
         c = torch.tensor(
             [
@@ -783,3 +788,104 @@ def test_rotate_volume_non_cubic_is_isotropic_and_matches_volume_rotator(
 
     rot = VolumeRotator(nz, ny, nx, origin=origin, padding_mode="zeros").double()
     assert torch.equal(out, rot.rotate_real(V, theta)[0])
+
+
+def _gaussian_blob(shape: tuple[int, int, int], c_zyx: torch.Tensor) -> torch.Tensor:
+    z, y, x = torch.meshgrid(
+        *(torch.arange(n, dtype=torch.float64) for n in shape), indexing="ij"
+    )
+    r2 = (z - c_zyx[0]) ** 2 + (y - c_zyx[1]) ** 2 + (x - c_zyx[2]) ** 2
+    return torch.exp(-r2 / (2 * 2.0**2))
+
+
+def _centroid_zyx(v: torch.Tensor) -> torch.Tensor:
+    z, y, x = torch.meshgrid(
+        *(torch.arange(n, dtype=v.dtype) for n in v.shape), indexing="ij"
+    )
+    m = v.sum()
+    return torch.stack([(v * z).sum() / m, (v * y).sum() / m, (v * x).sum() / m])
+
+
+def _oblique_rotation(angle: float = 0.6) -> torch.Tensor:
+    """(x, y, z)-frame rotation about an axis that mixes all three, float64."""
+    import math
+
+    a = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)
+    a = a / a.norm()
+    K = torch.tensor(
+        [[0.0, -a[2], a[1]], [a[2], 0.0, -a[0]], [-a[1], a[0], 0.0]],
+        dtype=torch.float64,
+    )
+    return (
+        torch.eye(3, dtype=torch.float64)
+        + math.sin(angle) * K
+        + (1 - math.cos(angle)) * (K @ K)
+    )
+
+
+@pytest.mark.parametrize("align_corners", [False, True])
+@pytest.mark.parametrize("origin", ["relion", "center"])
+@pytest.mark.parametrize("shift", [False, True])
+def test_non_cubic_rotation_centroid_matches_analytic_rotation(
+    align_corners: bool, origin: str, shift: bool
+) -> None:
+    """
+    A non-cubic rotation is conjugated by each axis's half-width in voxels,
+    which is ``n / 2`` under ``align_corners=False`` and ``(n - 1) / 2`` under
+    ``align_corners=True``. Using ``(n - 1) / 2`` for both made the default
+    convention ~1% anisotropic: a blob 6 voxels off-centre landed 0.02 voxel
+    from the analytic rotation. The translation factor is pinned alongside,
+    since it rescales by the same half-widths.
+    """
+    shape = (48, 64, 80)
+    nz, ny, nx = shape
+    if origin == "relion":
+        o = torch.tensor([nz // 2, ny // 2, nx // 2], dtype=torch.float64)
+    else:
+        o = torch.tensor([(nz - 1) / 2, (ny - 1) / 2, (nx - 1) / 2])
+    off = torch.tensor([4.0, -5.0, 6.0], dtype=torch.float64)  # (z, y, x)
+    V = _gaussian_blob(shape, o + off)
+    R = _oblique_rotation()
+    T_vox = torch.tensor([[2.0, -3.0]]) if shift else torch.zeros(1, 2)
+    theta = build_affine_matrix(R[None], translations_angstrom_to_torch(T_vox, nx, 1.0))
+    # grid_sample reads the input at R x, so the density moves by R^-1 = R^T,
+    # and then by -T in the lab frame (build_affine_matrix's convention).
+    shift_zyx = torch.tensor([0.0, float(T_vox[0, 1]), float(T_vox[0, 0])])
+    want = o + (R.T @ off.flip(0)).flip(0) - shift_zyx
+
+    out = rotate_volume(
+        V, theta, origin=origin, padding_mode="zeros", align_corners=align_corners
+    )[0]
+    assert (_centroid_zyx(out) - want).abs().max() < 0.005
+
+    rot = VolumeRotator(
+        nz, ny, nx, origin=origin, align_corners=align_corners, padding_mode="zeros"
+    ).double()
+    assert torch.equal(out, rot.rotate_real(V, theta)[0])
+
+
+@pytest.mark.parametrize("shape", [(40, 56, 72), (64, 64, 96)])
+def test_non_cubic_fourier_rotation_matches_real_space(
+    shape: tuple[int, int, int],
+) -> None:
+    """
+    An fftshifted spectrum's index ``j`` on an axis of length ``n`` is the
+    frequency ``j / n``, so its isotropic unit is the frequency, not the voxel,
+    and the Fourier path must not borrow the real-space half-widths. Borrowing
+    them rotated a non-cubic spectrum anisotropically: 0.84 correlation with
+    the real-space rotation and a 0.9 voxel centroid error. Fixed, a non-cubic
+    box does as well as a cube (0.9992 correlation, 0.2 voxel, the residual
+    being trilinear interpolation of the spectrum).
+    """
+    o = torch.tensor([n // 2 for n in shape], dtype=torch.float64)
+    off = torch.tensor([3.0, -4.0, 5.0], dtype=torch.float64)
+    V = _gaussian_blob(shape, o + off)
+    theta = build_affine_matrix(_oblique_rotation(0.5)[None])
+    real = rotate_volume(V, theta, padding_mode="zeros")[0]
+    four = rotate_volume_fourier(V, theta, padding_mode="zeros")[0]
+    corr = float((four * real).sum() / four.norm() / real.norm())
+    assert corr > 0.998
+    assert (_centroid_zyx(four) - _centroid_zyx(real)).abs().max() < 0.4
+
+    rot = VolumeRotator(*shape, padding_mode="zeros", mode="fourier").double()
+    assert torch.allclose(rot(V, theta)[0], four, atol=1e-10)

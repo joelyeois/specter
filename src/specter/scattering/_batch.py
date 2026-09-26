@@ -467,7 +467,10 @@ class Scattering(L.LightningModule):
         Parameters
         ----------
         V : torch.Tensor
-            Complex-valued 3D potential volume with shape (B, Z, Y, X).
+            3D potential volume with shape (B, Z, Y, X). Real, in which case
+            the amplitude-contrast factor ``self.alpha`` is applied (as a
+            scalar on the projected potential, the model being linear in V);
+            or already complex (absorptive), used as given.
 
         Returns
         -------
@@ -479,10 +482,15 @@ class Scattering(L.LightningModule):
         The exit wave is computed as:
         ψ = exp(i σ Σ_z V(z))
         This is valid only for thin specimens where propagation effects are negligible.
+
+        The real volume is summed over z before the complex amplitude-contrast
+        scalar is applied, rather than rotating a complex copy of the whole
+        volume first: at 512^3 that copy is 1 GiB of peak memory. The two
+        orderings agree to float rounding (~2e-7 relative).
         """
         V_sum = torch.sum(V, 1)
         exitwave = torch.exp(
-            1j * self.sigma * self.pixel_size * V_sum
+            self._phase_scale(V) * V_sum
             - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1]
         )
         return exitwave
@@ -547,7 +555,8 @@ class Scattering(L.LightningModule):
             # model is linear in V), not materialised as a complex volume.
             return self.rytov(V)
         elif self.scattering_model == "projection":
-            V = apply_amplitude_contrast(V, alpha=self.alpha)
+            # amplitude contrast applied to the projected potential, as for
+            # rytov; see `projection`.
             return self.projection(V)
         elif self.scattering_model == "firstborn":
             return self.firstborn(V)

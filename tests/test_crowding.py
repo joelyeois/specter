@@ -380,3 +380,33 @@ def test_crowd_forward_into_matches_accumulate_then_add():
     assert ret is got
     assert crowd.N > 1
     assert torch.allclose(got, want, atol=1e-6, rtol=0)
+
+
+@pytest.mark.parametrize("dx", [2.0, 4.0])
+def test_2d_placement_spans_the_whole_box_in_angstrom(dx: float) -> None:
+    """
+    The 2D Poisson-disk sampler works in Angstrom, like `min_distance` and the
+    coordinates it returns, so its box must be ``nxy_out * dx``. It was given
+    ``nxy_out`` in pixels, which at 2 A/px confined every duplicate to the
+    central half of the box (64 of the 128 px half-width) and at 4 A/px to a
+    quarter.
+    """
+    torch.manual_seed(0)
+    n = 256
+    crowd = CrowdWithDuplicates(
+        torch.zeros(8, 8, 8),
+        dx,
+        min_distance=20.0,
+        nxy_out=n,
+        method="2d",
+        progressbars=False,
+    )
+    crowd.generate_coordinates()
+    xy_px = crowd.coords[:, :2] / dx
+    assert crowd.coords.shape[1] == 3 and bool((crowd.coords[:, 2] == 0).all())
+    # Inside the box, and reaching within one spacing of each of its edges.
+    reach = 20.0 / dx
+    assert float(xy_px.abs().max()) <= n / 2
+    for axis in range(2):
+        assert float(xy_px[:, axis].max()) > n / 2 - reach
+        assert float(xy_px[:, axis].min()) < -n / 2 + reach

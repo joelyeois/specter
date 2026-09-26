@@ -69,12 +69,63 @@ def affine_sampling_grid(
     return (gx + gy) + gz
 
 
+def _isotropic_half_widths(
+    nz: int,
+    ny: int,
+    nx: int,
+    align_corners: bool,
+    domain: Literal["real", "fourier"] = "real",
+) -> list[float]:
+    """
+    Per-axis factors converting normalised coordinates to isotropic units.
+
+    Parameters
+    ----------
+    nz, ny, nx : int
+        Volume dimensions.
+    align_corners : bool
+        The ``grid_sample`` convention the grid is read under.
+    domain : {"real", "fourier"}, optional
+        "real" for a volume of voxels, "fourier" for an fftshifted spectrum of
+        one. Default "real".
+
+    Returns
+    -------
+    list of float
+        One factor per axis, in (x, y, z) order.
+
+    Notes
+    -----
+    A rotation is isotropic in voxels, so it is conjugated by these factors.
+    In real space the factor is an axis's half-width in voxels: ``n / 2``
+    under ``align_corners=False``, where the normalised range [-1, 1] spans
+    the outer voxel edges, and ``(n - 1) / 2`` under ``align_corners=True``,
+    where it spans the outer voxel centres. In Fourier space the isotropic
+    unit is the frequency, and index ``j`` of an axis of length ``n`` is the
+    frequency ``j / n``: one normalised unit is ``1 / 2`` cycle per voxel on
+    every axis under ``align_corners=False`` (a common factor, set to 1), and
+    ``(n - 1) / (2 n)`` under ``align_corners=True``. Only the ratios between
+    axes matter. A cube never reaches this function: its callers keep the
+    original ``(n - 1) / 2`` arithmetic, which is exact there because the
+    common factor cancels, and changing it would change float rounding.
+    """
+    dims = (nx, ny, nz)
+    if domain == "fourier":
+        if align_corners:
+            return [(n - 1) / n for n in dims]
+        return [1.0, 1.0, 1.0]
+    if align_corners:
+        return [(n - 1) / 2 for n in dims]
+    return [n / 2 for n in dims]
+
+
 def _relion_rotation_grid(
     theta: torch.Tensor,
     nz: int,
     ny: int,
     nx: int,
     align_corners: bool,
+    domain: Literal["real", "fourier"] = "real",
 ) -> torch.Tensor:
     """
     Build a sampling grid for RELION-convention rotation about [nz//2, ny//2, nx//2].
@@ -87,6 +138,9 @@ def _relion_rotation_grid(
         Volume dimensions.
     align_corners : bool
         Passed to affine_grid.
+    domain : {"real", "fourier"}, optional
+        What the volume holds, which sets the per-axis scale of a non-cubic
+        box (see :func:`_isotropic_half_widths`). Default "real".
 
     Returns
     -------
@@ -135,8 +189,14 @@ def _relion_rotation_grid(
             (2.0 * (ny // 2) + 1.0) / ny - 1.0,
             (2.0 * (nz // 2) + 1.0) / nz - 1.0,
         ]
+    if nx == ny == nz:
+        # The common factor cancels on a cube; this arithmetic is kept as it
+        # was so a cubic grid is unchanged to the last bit.
+        half_widths = [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2]
+    else:
+        half_widths = _isotropic_half_widths(nz, ny, nx, align_corners, domain)
     consts = torch.tensor(
-        [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2] + center_xyz,
+        half_widths + center_xyz,
         device=device,
         dtype=dtype,
     )
@@ -156,7 +216,9 @@ def _relion_rotation_grid(
     return affine_sampling_grid(composed, nz, ny, nx, align_corners)
 
 
-def _translation_per_axis(t: torch.Tensor, nz: int, ny: int, nx: int) -> torch.Tensor:
+def _translation_per_axis(
+    t: torch.Tensor, nz: int, ny: int, nx: int, align_corners: bool = False
+) -> torch.Tensor:
     """
     Re-express a translation on each axis's own normalised scale.
 
@@ -164,12 +226,13 @@ def _translation_per_axis(t: torch.Tensor, nz: int, ny: int, nx: int) -> torch.T
     volume's x width, and `build_affine_matrix` pre-rotates the in-plane
     shift into the volume frame, which gives it a y and z component too.
     ``grid_sample`` reads each component in units of that axis's own
-    half-width, so for a volume that is not a cube -- a tilt-series slab --
-    the rotated z component was shrunk by ``(nx - 1) / (nz - 1)``: the
-    in-image shift perpendicular to the tilt axis came out as ``t cos^2`` of
-    the tilt instead of ``t``. Rescaling y and z to x's scale restores a
-    lab-frame shift of ``-t`` at any rotation. A cube is returned unchanged,
-    bit for bit.
+    half-width, so each component is rescaled from the x-normalised scale
+    (``nx / 2`` voxels per unit) to its own axis's half-width, which restores
+    a lab-frame shift of ``-t`` at any rotation. The half-width is ``n / 2``
+    under ``align_corners=False`` and ``(n - 1) / 2`` under
+    ``align_corners=True`` (see :func:`_isotropic_half_widths`), so under the
+    latter even the x component, and a cube's, is rescaled. A cube under
+    ``align_corners=False`` is returned unchanged, bit for bit.
 
     Parameters
     ----------
@@ -177,15 +240,20 @@ def _translation_per_axis(t: torch.Tensor, nz: int, ny: int, nx: int) -> torch.T
         Translations in x-normalised units, shape (B, 3), (x, y, z) order.
     nz, ny, nx : int
         Volume dimensions.
+    align_corners : bool, optional
+        The ``grid_sample`` convention the translation is read under.
+        Default False.
 
     Returns
     -------
     torch.Tensor
         Translations on each axis's own normalised scale, shape (B, 3).
     """
-    if nx == ny == nz:
+    if nx == ny == nz and not align_corners:
         return t
-    f = t.new_tensor([1.0, (nx - 1) / (ny - 1), (nx - 1) / (nz - 1)])
+    hx, hy, hz = _isotropic_half_widths(nz, ny, nx, align_corners)
+    unit = nx / 2  # voxels per x-normalised unit, translations_angstrom_to_torch
+    f = t.new_tensor([unit / hx, unit / hy, unit / hz])
     return t * f
 
 
@@ -196,6 +264,7 @@ def rotation_sampling_grid(
     nx: int,
     origin: Literal["relion", "center"] = "relion",
     align_corners: bool = False,
+    domain: Literal["real", "fourier"] = "real",
 ) -> torch.Tensor:
     """
     Sampling grid for an isotropic rotation and translation of a (Z, Y, X) volume.
@@ -216,6 +285,12 @@ def rotation_sampling_grid(
         ``[(nz - 1) / 2, (ny - 1) / 2, (nx - 1) / 2]``. Default "relion".
     align_corners : bool, optional
         As for ``grid_sample``. Default False.
+    domain : {"real", "fourier"}, optional
+        "real" rotates a volume of voxels; "fourier" rotates an fftshifted
+        spectrum, whose isotropic unit is the frequency rather than the voxel
+        (see :func:`_isotropic_half_widths`). They differ only on a non-cubic
+        box. A "fourier" grid is meant for a translation-free `theta`, since a
+        spectrum is displaced by a phase ramp instead. Default "real".
 
     Returns
     -------
@@ -228,22 +303,25 @@ def rotation_sampling_grid(
     the rotation is conjugated by the per-axis half-widths (a rotation must
     preserve distances in voxels) and the translation is re-expressed on each
     axis's scale (:func:`_translation_per_axis`). On a cube both are
-    identities and are skipped, so a cubic grid is exactly
-    ``affine_sampling_grid(theta)`` for "center" and
-    ``_relion_rotation_grid(theta)`` for "relion".
+    identities under ``align_corners=False`` and are skipped, so a cubic grid
+    is exactly ``affine_sampling_grid(theta)`` for "center" and
+    ``_relion_rotation_grid(theta)`` for "relion". Under
+    ``align_corners=True`` a cube's translation is still rescaled, since the
+    x-normalised units of :func:`translations_angstrom_to_torch` assume the
+    ``n / 2`` half-width.
     """
     cubic = nx == ny == nz
+    if not cubic or align_corners:
+        t = _translation_per_axis(theta[..., 3], nz, ny, nx, align_corners)
+        theta = torch.cat([theta[..., :3], t.unsqueeze(-1)], dim=-1)
     if origin == "relion":
-        if not cubic:
-            t = _translation_per_axis(theta[..., 3], nz, ny, nx)
-            theta = torch.cat([theta[..., :3], t.unsqueeze(-1)], dim=-1)
-        return _relion_rotation_grid(theta, nz, ny, nx, align_corners)
+        return _relion_rotation_grid(theta, nz, ny, nx, align_corners, domain)
     if cubic:
         return affine_sampling_grid(theta, nz, ny, nx, align_corners)
     # PyTorch centre: ((g * s) @ R.T) / s + t  ==  g @ A + t
-    t = _translation_per_axis(theta[..., 3], nz, ny, nx)
+    t = theta[..., 3]
     scale = torch.tensor(
-        [(nx - 1) / 2, (ny - 1) / 2, (nz - 1) / 2],
+        _isotropic_half_widths(nz, ny, nx, align_corners, domain),
         device=theta.device,
         dtype=theta.dtype,
     )
@@ -259,6 +337,7 @@ def rotate_volume(
     origin: Literal["relion", "center"] = "relion",
     padding_mode: Literal["zeros", "border", "reflection"] = "border",
     align_corners: bool = False,
+    domain: Literal["real", "fourier"] = "real",
 ) -> torch.Tensor:
     """
     Rotates a single 3D volume based on the batch of 3x4 affine transform matrices.
@@ -285,6 +364,12 @@ def rotate_volume(
         for odd-sized ones. Default "relion".
     padding_mode : str, optional
         Padding mode for grid_sample. Default "border".
+    align_corners : bool, optional
+        As for ``grid_sample``. Default False.
+    domain : {"real", "fourier"}, optional
+        "fourier" when `V` is one part of an fftshifted spectrum, as
+        :func:`rotate_volume_fourier` passes it; see
+        :func:`rotation_sampling_grid`. Default "real".
 
     Returns
     -------
@@ -296,7 +381,9 @@ def rotate_volume(
     nz, ny, nx = V.size()
 
     def sample(vol: torch.Tensor, theta_b: torch.Tensor) -> torch.Tensor:
-        grid = rotation_sampling_grid(theta_b, nz, ny, nx, origin, align_corners)
+        grid = rotation_sampling_grid(
+            theta_b, nz, ny, nx, origin, align_corners, domain
+        )
         vin = vol[None, None].expand(theta_b.shape[0], 1, nz, ny, nx)
         return F.grid_sample(
             vin, grid, align_corners=align_corners, padding_mode=padding_mode
@@ -509,7 +596,10 @@ def rotate_volume_fourier(
     theta_rot, displacement = split_affine_translation(theta)
     # The displacement is still in x-normalised units; the phase ramp reads
     # each component on its own axis's scale, as the real-space grid does.
-    displacement = _translation_per_axis(displacement, *V.shape)
+    # The ramp's scale is n / 2 voxels per normalised unit whatever
+    # `align_corners` is, hence the fixed convention here.
+    nz, ny, nx = V.shape
+    displacement = _translation_per_axis(displacement, nz, ny, nx, False)
     if origin == "center":
         displacement = displacement + fourier_origin_displacement(theta, *V.shape)
 
@@ -520,6 +610,7 @@ def rotate_volume_fourier(
         origin="relion",
         padding_mode=padding_mode,
         align_corners=align_corners,
+        domain="fourier",
     )
     V_f_rot_imag = rotate_volume(
         V_f.imag,
@@ -527,6 +618,7 @@ def rotate_volume_fourier(
         origin="relion",
         padding_mode=padding_mode,
         align_corners=align_corners,
+        domain="fourier",
     )
     V_f_rot = apply_fourier_translation(
         torch.complex(V_f_rot_real, V_f_rot_imag), displacement

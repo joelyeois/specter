@@ -750,3 +750,82 @@ def test_propagator_stack_is_the_per_slice_stack(sign):
         model._propagator(torch.zeros(1, nz, n, n, dtype=torch.float64)),
         traversal.to(torch.complex128),
     )
+
+
+# ---------------------------------------------------------------------------
+# projection: the real volume is summed over z before the complex
+# amplitude-contrast scalar is applied, so no complex copy of the volume is
+# materialised. The model is linear in V, so only rounding moves.
+# ---------------------------------------------------------------------------
+
+
+def _projection_complex_volume_reference(scat, V):
+    """Pre-change projection: rotate the whole volume into the complex plane,
+    then sum over z."""
+    Vc = apply_amplitude_contrast(V, alpha=scat.alpha)
+    return torch.exp(
+        1j * scat.sigma * scat.pixel_size * torch.sum(Vc, 1)
+        - scat.sigma * scat.pixel_size * scat.uniform_absorption * V.shape[1]
+    )
+
+
+@pytest.mark.parametrize("alpha", [0.0, 0.07])
+@pytest.mark.parametrize("uniform_absorption", [0.0, 0.02])
+def test_projection_matches_complex_volume_formula(alpha, uniform_absorption):
+    n, nz = 32, 24
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model="projection",
+        alpha=alpha,
+        uniform_absorption=uniform_absorption,
+        nz=nz,
+        progressbars=False,
+    )
+    torch.manual_seed(0)
+    V = torch.rand(2, nz, n, n) * 4.0
+    got = scat(V)
+    want = _projection_complex_volume_reference(scat, V)
+    rel = float((got - want).abs().max() / want.abs().max())
+    assert rel < 1e-6
+    if alpha == 0.0:
+        # No complex scalar to reorder: the result is unchanged bit for bit.
+        assert torch.equal(got, want)
+    # An already-complex (absorptive) volume is used as given.
+    Vc = apply_amplitude_contrast(V, alpha=0.05)
+    assert torch.allclose(
+        scat(Vc), _projection_complex_volume_reference(scat, Vc), rtol=1e-6
+    )
+
+
+def test_projection_does_not_materialise_a_complex_volume():
+    """The pre-change form's complex copy was 8 bytes per voxel on top of the
+    real volume; the sum-first form needs only (B, Y, X) temporaries."""
+    if not torch.cuda.is_available():
+        pytest.skip("peak memory is measured with the CUDA allocator")
+    n = 128
+    scat = Scattering(
+        nxy=n,
+        pixel_size=1.0,
+        voltage=300.0,
+        scattering_model="projection",
+        alpha=0.07,
+        nz=n,
+        progressbars=False,
+    ).to("cuda")
+    V = torch.rand(1, n, n, n, device="cuda")
+
+    def peak(fn):
+        torch.cuda.synchronize(V.device)
+        torch.cuda.reset_peak_memory_stats(V.device)
+        base = torch.cuda.memory_allocated(V.device)
+        fn()
+        torch.cuda.synchronize(V.device)
+        return torch.cuda.max_memory_allocated(V.device) - base
+
+    complex_volume_bytes = V.numel() * 8
+    new = peak(lambda: scat(V))
+    old = peak(lambda: _projection_complex_volume_reference(scat, V))
+    assert old >= complex_volume_bytes
+    assert new < complex_volume_bytes / 8

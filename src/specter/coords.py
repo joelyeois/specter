@@ -15,7 +15,7 @@ from .cpu_threads import limited_cpu_threads
 def poisson_disk_neighbors(
     min_distance: float,
     n_points: int | float = torch.inf,
-    box: tuple[int, int] = (256, 256),  # (height, width)
+    box: tuple[float, float] = (256, 256),  # (height, width)
     k: int = 30,
     seed: Literal["origin", "random"] = "origin",
 ) -> torch.Tensor:
@@ -28,8 +28,9 @@ def poisson_disk_neighbors(
         Minimum spacing between points.
     n_points : int
         Total number of points to generate (including seed).
-    box : tuple of int
-        (height, width) of the bounding box in pixels. Origin is at (0,0).
+    box : tuple of float
+        (height, width) of the bounding box, in the units of `min_distance`.
+        Origin is at (0,0).
         Valid coordinates are y in [-H/2, H/2), x in [-W/2, W/2).
     k : int
         Number of candidate points to try per active point.

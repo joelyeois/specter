@@ -48,7 +48,12 @@ are derived instead from three published DQE points (0,
 \(\mathrm{DQE}(k) \approx \mathrm{MTF}(k)^2\), so SPECTER recovers the
 *shape* as \(\mathrm{MTF}(k) = \sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\),
 normalized by the zero-frequency value so it comes out as a proper MTF,
-with quadratic interpolation between the three points. `"perfect"`
+with quadratic interpolation between the three points. The Falcon 3EC
+(`falcon3ec_300kv`, High Quality electron-counting mode at 300 kV) uses the same
+conversion on a full DQE curve rather than three points: the curve measured by
+McMullan and Henderson and published in Thermo Fisher's Falcon 3EC datasheet,
+digitised onto the K3 frequency grid. It falls steeply over the last fifth of
+the Nyquist range, which three points would not capture. `"perfect"`
 is the ideal pixel-integration limit, \(\mathrm{sinc}(\pi k / 2 k_{Nyq})\),
 limited only by the finite pixel aperture.
 
@@ -69,9 +74,10 @@ reduced signal *and* the correct (reduced) shot noise; folding
 DQE(0) per detector model.
 ///
 
-Only Falcon 4i has a traceable low-dose-rate published value; K3's
-datasheet publishes an MTF with no accompanying DQE(0) figure, so it
-defaults to 1.0 (an ideal counter) rather than guessing. These values
+Falcon 4i, Falcon 3EC and K2 have traceable low-dose-rate published values
+(0.92, 0.95 and 0.80 at 300 kV); K3's datasheet publishes an MTF with no
+accompanying DQE(0) figure, so it defaults to 1.0 (an ideal counter) rather
+than guessing. These values
 must be *low-dose-rate* DQE(0): published DQE falls with dose rate
 largely because of coincidence loss, which SPECTER already models
 separately (below). Using a high-flux figure here would count that

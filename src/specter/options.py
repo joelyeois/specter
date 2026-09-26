@@ -34,6 +34,7 @@ DetectorModel = Literal[
     "k2_300kv",
     "falcon4i_300kv",
     "falcon4i_200kv",
+    "falcon3ec_300kv",
 ]
 
 #: Amorphous-ice generator: the bundled ``IceBank`` library, a

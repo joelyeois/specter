@@ -1,6 +1,6 @@
 """
-Direct electron detector models: the bundled MTF curves (K2, K3, Falcon 4i,
-perfect), their DQE(0), and the coincidence-loss geometry per camera.
+Direct electron detector models: the bundled MTF curves (K2, K3, Falcon 3EC,
+Falcon 4i, perfect), their DQE(0), and the coincidence-loss geometry per camera.
 """
 
 from __future__ import annotations
@@ -375,6 +375,91 @@ def k2_300kv(
     )
 
 
+# Falcon 3EC in High Quality electron-counting mode at 300 kV, DQE on the
+# ``_K3_FREQ`` grid (cycles per physical pixel). Digitised from Fig. 3 of the
+# Thermo Fisher Falcon 3EC datasheet (DS0236-EN-10-2018), the curve measured by
+# G. McMullan and R. Henderson (2017); the datasheet's own specification at
+# half Nyquist is 0.7 in HQ EC mode (0.7 e/px/s) and 0.6 in EC mode (1 e/px/s).
+# The embedded figure is 300 x 247 px, so each value is good to about +-0.02;
+# the last grid point (1.016 x Nyquist) is extrapolated from the curve's end.
+_FALCON3EC_300KV_DQE = [
+    0.954,
+    0.942,
+    0.929,
+    0.916,
+    0.898,
+    0.883,
+    0.867,
+    0.855,
+    0.845,
+    0.834,
+    0.824,
+    0.816,
+    0.809,
+    0.804,
+    0.797,
+    0.789,
+    0.775,
+    0.765,
+    0.755,
+    0.742,
+    0.727,
+    0.712,
+    0.694,
+    0.671,
+    0.645,
+    0.618,
+    0.586,
+    0.550,
+    0.509,
+    0.463,
+    0.414,
+    0.363,
+    0.311,
+]
+
+
+def falcon3ec_300kv(
+    n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """
+    Return the MTF of a Thermo Fisher Falcon 3EC detector at 300 kV.
+
+    High Quality electron-counting mode. The published data are a DQE curve
+    (see ``_FALCON3EC_300KV_DQE``), so the shape is recovered as
+    ``MTF(k) = sqrt(DQE(k) / DQE(0))`` under the same white-noise
+    approximation as the Falcon 4i presets, with ``DQE(0)`` applied
+    separately as a counting efficiency (``DQE0``). The curve is tabulated on
+    the K2/K3 frequency grid rather than reduced to three points, because it
+    falls steeply over the last fifth of the Nyquist range.
+
+    Parameters
+    ----------
+    n : int
+        Number of pixels along each axis of the output MTF.
+    dx : float
+        Pixel size of the simulated image, taken as the physical pixel.
+    device : str or torch.device, optional
+        Device to create tensors on ('cpu' or 'cuda'). Default is 'cpu'.
+    return1d : bool, optional
+        If True, return 1D MTF sampled at radial frequencies. Default is False.
+
+    Returns
+    -------
+    mtf : torch.Tensor
+        - If return1d=False: 2D NxN MTF array.
+        - If return1d=True: Tuple (k_data, mtf_values) for 1D MTF.
+
+    References
+    ----------
+    Thermo Fisher Scientific, Falcon 3EC Direct Electron Detector datasheet,
+    DS0236-EN-10-2018, Fig. 3 (measurement by G. McMullan and R. Henderson).
+    """
+    dqe0 = _FALCON3EC_300KV_DQE[0]
+    mtf = [math.sqrt(d / dqe0) for d in _FALCON3EC_300KV_DQE]
+    return _k3_mtf(n, dx, device, return1d, mtf)
+
+
 def falcon4i_300kv(
     n: int, dx: float, device: str | torch.device = "cpu", return1d: bool = False
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
@@ -467,6 +552,9 @@ def falcon4i_200kv(
 DQE0: dict[str, float] = {
     "falcon4i_300kv": 0.92,
     "falcon4i_200kv": 0.91,
+    # Falcon 3EC, HQ electron-counting mode at its lowest dose rate: the
+    # zero-frequency end of the curve in ``_FALCON3EC_300KV_DQE``.
+    "falcon3ec_300kv": 0.95,
     # K2 Summit counting mode at 300 kV, low dose rate: McMullan, Faruqi,
     # Clare & Henderson, Ultramicroscopy 147, 156-163 (2014).
     "k2_300kv": 0.80,

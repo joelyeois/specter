@@ -172,6 +172,7 @@ def test_larger_radius_loses_more_electrons() -> None:
         "k2_300kv",
         "falcon4i_200kv",
         "falcon4i_300kv",
+        "falcon3ec_300kv",
         "perfect_detector",
     ],
 )
@@ -368,3 +369,22 @@ def test_dose_weights_without_coincidence_loss() -> None:
     assert torch.isfinite(out).all()
     # Unit weights leave the signal untouched.
     assert out.mean().item() == pytest.approx(50.0, rel=0.02)
+
+
+def test_falcon3ec_reproduces_its_published_dqe() -> None:
+    """
+    DQE(0) * MTF(k)**2 must give back the published Falcon 3EC curve.
+
+    The preset stores the digitised DQE and converts it to an MTF shape plus a
+    separate counting efficiency; this checks the round trip at the points
+    read off the source figure (0.776 at half Nyquist, 0.696 at 0.7 Nyquist),
+    and that the MTF only ever falls.
+    """
+    from specter.detectors import dqe0_for_detector, falcon3ec_300kv
+
+    k, mtf = falcon3ec_300kv(n=256, dx=1.0, device="cpu", return1d=True)
+    dqe = dqe0_for_detector("falcon3ec_300kv") * mtf**2
+    at = lambda f: float(dqe[torch.argmin((k - f / 2).abs())])  # noqa: E731
+    assert at(0.5) == pytest.approx(0.776, abs=0.02)
+    assert at(0.7) == pytest.approx(0.696, abs=0.02)
+    assert bool((mtf[1:] <= mtf[:-1] + 1e-6).all())

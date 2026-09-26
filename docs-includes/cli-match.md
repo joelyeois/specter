@@ -39,7 +39,7 @@ specter match particles [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--detector_model` | `unknown` \| `perfect` \| `k3_300kv` \| `k3_200kv` \| `k2_300kv` \| `falcon4i_300kv` \| `falcon4i_200kv` | `unknown` | Detector the data were recorded on. Supplies the MTF, DQE(0), the coincidence exclusion radius and the hardware frame rate. 'unknown' applies none of them and is reported as such. |
+| `--detector_model` | `unknown` \| `perfect` \| `k3_300kv` \| `k3_200kv` \| `k2_300kv` \| `falcon4i_300kv` \| `falcon4i_200kv` \| `falcon3ec_300kv` | `unknown` | Detector the data were recorded on. Supplies the MTF, DQE(0), the coincidence exclusion radius and the hardware frame rate. 'unknown' applies none of them and is reported as such. |
 | `--dose` | `FLOAT` | _none_ | Total electron dose per movie in e-/Angstrom^2, from the methods section or the EMDB record. Drives the radiation-damage envelope. |
 | `--dose_rate` | `FLOAT` | _none_ | Incident dose rate in electrons per physical pixel per second, from the acquisition notes. Sets the coincidence-loss occupancy. Unset falls back to the detector's typical operating rate, and the report says so. |
 | `--energy_filter` | `True` \| `False` | _none_ | Whether an energy filter (slit) was used. Recorded in the report: on today's evidence unfiltered data carry a residual the forward model cannot express. |

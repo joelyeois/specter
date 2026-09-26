@@ -177,6 +177,7 @@ PARTICLES = CommandSpec(
         Flag("detector_model", "k3_200kv"),
         Flag("detector_model", "falcon4i_300kv"),
         Flag("detector_model", "falcon4i_200kv"),
+        Flag("detector_model", "falcon3ec_300kv"),
         Flag("coincidence_radius", "2.0", context=DETECTOR),
         Flag("ews_curvature_sign", "negative"),
         Flag("klim", "0.10"),

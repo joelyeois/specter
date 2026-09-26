@@ -21,6 +21,7 @@ import torch
 
 from specter.detectors import (
     dqe0_for_detector,
+    falcon3ec_300kv,
     falcon4i_200kv,
     falcon4i_300kv,
     k2_300kv,
@@ -333,6 +334,9 @@ class BaseImager(L.LightningModule):
             self.register_buffer("detector_mtf", mtf)
         elif self.detector_model == "falcon4i_200kv":
             mtf = cast(torch.Tensor, falcon4i_200kv(self.nxy, self.pixel_size))
+            self.register_buffer("detector_mtf", mtf)
+        elif self.detector_model == "falcon3ec_300kv":
+            mtf = cast(torch.Tensor, falcon3ec_300kv(self.nxy, self.pixel_size))
             self.register_buffer("detector_mtf", mtf)
         elif self.detector_model == "k2_300kv":
             mtf = cast(torch.Tensor, k2_300kv(self.nxy, self.pixel_size))

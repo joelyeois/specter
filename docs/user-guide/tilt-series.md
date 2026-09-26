@@ -59,7 +59,7 @@ tomogram`](#chaining-with-specter-build-tomogram) below.
   `firstborn`/`projection`/`ctf` are cheaper approximations; see
   [Scattering](../concepts/scattering/index.md)), `noise_model` (`poisson`
   or `none`), `detector_model` (`none`, `perfect`, `k3_300kv`, `k3_200kv`,
-  `k2_300kv`).
+  `k2_300kv`, `falcon4i_300kv`, `falcon4i_200kv`, `falcon3ec_300kv`).
 
 Everything else (envelopes, ice, output naming) lives under its own panel
 in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).

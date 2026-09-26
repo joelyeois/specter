@@ -24,8 +24,10 @@ from specter.arrays import radial_profile_2d
 from specter.detectors import (
     DQE0,
     dqe0_for_detector,
+    falcon3ec_300kv,
     falcon4i_200kv,
     falcon4i_300kv,
+    k2_300kv,
     k3_200kv,
     k3_300kv,
     perfect_detector,
@@ -46,6 +48,8 @@ def figure_mtf_overlay() -> None:
         ("K3, 300 kV", k3_300kv, "-"),
         ("Falcon 4i, 200 kV", falcon4i_200kv, "--"),
         ("Falcon 4i, 300 kV", falcon4i_300kv, "--"),
+        ("Falcon 3EC, 300 kV", falcon3ec_300kv, "-."),
+        ("K2, 300 kV", k2_300kv, "-."),
         ("Perfect (pixel sinc)", perfect_detector, ":"),
     ]
     palette = _deep_palette(len(curves))
@@ -75,12 +79,22 @@ def figure_mtf_overlay() -> None:
 
 
 def figure_dqe0_bar() -> None:
-    models = ["k3_200kv", "k3_300kv", "falcon4i_200kv", "falcon4i_300kv", "perfect"]
+    models = [
+        "k3_200kv",
+        "k3_300kv",
+        "k2_300kv",
+        "falcon4i_200kv",
+        "falcon4i_300kv",
+        "falcon3ec_300kv",
+        "perfect",
+    ]
     labels = [
         "K3\n200 kV",
         "K3\n300 kV",
+        "K2\n300 kV",
         "Falcon 4i\n200 kV",
         "Falcon 4i\n300 kV",
+        "Falcon 3EC\n300 kV",
         "Perfect",
     ]
     values = [dqe0_for_detector(m) for m in models]

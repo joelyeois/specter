@@ -81,6 +81,7 @@ class MatchConfig:
         "k2_300kv",
         "falcon4i_300kv",
         "falcon4i_200kv",
+        "falcon3ec_300kv",
     ] = setting(
         "unknown",
         help=(

@@ -79,7 +79,7 @@ specter simulate particles [OPTIONS]
 | --- | --- | --- | --- |
 | `--scattering_model` | `multislice` \| `firstborn` \| `projection` \| `ctf` | `multislice` | Scattering model. |
 | `--noise_model` | `poisson` \| `none` | `poisson` | Noise model. Use 'none' for no noise. |
-| `--detector_model` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` \| `k2_300kv` \| `falcon4i_300kv` \| `falcon4i_200kv` | `none` | Detector model. |
+| `--detector_model` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` \| `k2_300kv` \| `falcon4i_300kv` \| `falcon4i_200kv` \| `falcon3ec_300kv` | `none` | Detector model. |
 
 **Post-processing**{ #specter-simulate-particles-post-processing }
 
@@ -206,7 +206,7 @@ specter simulate micrograph [OPTIONS]
 | --- | --- | --- | --- |
 | `--scattering_model` | `multislice` \| `firstborn` \| `projection` \| `ctf` | `multislice` | Scattering model. |
 | `--noise_model` | `poisson` \| `none` | `poisson` | Noise model. Use 'none' for no noise. |
-| `--detector_model` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` \| `k2_300kv` \| `falcon4i_300kv` \| `falcon4i_200kv` | `none` | Detector model. |
+| `--detector_model` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` \| `k2_300kv` \| `falcon4i_300kv` \| `falcon4i_200kv` \| `falcon3ec_300kv` | `none` | Detector model. |
 
 **Dataset**{ #specter-simulate-micrograph-dataset }
 
@@ -332,7 +332,7 @@ specter simulate tiltseries [OPTIONS]
 | --- | --- | --- | --- |
 | `--scattering_model` | `multislice` \| `firstborn` \| `projection` \| `ctf` | `multislice` | Scattering model. |
 | `--noise_model` | `poisson` \| `none` | `poisson` | Noise model. Use 'none' for no noise. |
-| `--detector_model` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` \| `k2_300kv` \| `falcon4i_300kv` \| `falcon4i_200kv` | `none` | Detector model. |
+| `--detector_model` | `none` \| `perfect` \| `k3_300kv` \| `k3_200kv` \| `k2_300kv` \| `falcon4i_300kv` \| `falcon4i_200kv` \| `falcon3ec_300kv` | `none` | Detector model. |
 
 **Post-processing**{ #specter-simulate-tiltseries-post-processing }
 

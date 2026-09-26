@@ -160,20 +160,10 @@ class GemmiPotentialBuilder:
 
         Notes
         -----
-        Uses only the first atom from the structure and applies custom
-        form factors from the mmCIF file. Atoms are recentered to grid center.
+        Applies the custom form factors from the mmCIF file to every atom of
+        the first model. Atoms are recentered to grid center.
         """
         st = gemmi.read_structure(mmcif_filepath)
-
-        # --- keep only the first atom ---
-        # first_atom = st[0][0][0][0]
-        # new_st = gemmi.Structure()
-        # model = new_st.add_model(gemmi.Model(1))
-        # chain = model.add_chain("A")
-        # residue = chain.add_residue(gemmi.Residue())
-        # residue.add_atom(first_atom.clone())
-        # st = new_st
-        # --------------------------------
 
         block = gemmi.cif.read_file(mmcif_filepath).sole_block()
         ctable = block.find(
@@ -201,8 +191,6 @@ class GemmiPotentialBuilder:
         for row in itable:
             serial, scat_id = row
             custom_form_factors[int(serial)] = coefs[int(scat_id)]
-            # print(scat_id)
-            # break
         gemmi.set_custom_form_factors(custom_form_factors.tolist())
         dencalc = gemmi.DensityCalculatorC()
 

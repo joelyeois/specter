@@ -21,7 +21,6 @@ from ._helpers import (
     molar_mass_of_water,
     ndensity_of_amorphous_ice,
     rfftn,
-    torch_peak_local_max,
 )
 from ._mdsim import ExtXYZDump, MDSimDump
 from ._profile import IceProfile, IceProfileMode
@@ -52,5 +51,4 @@ __all__ = [
     "molar_mass_of_water",
     "ndensity_of_amorphous_ice",
     "rfftn",
-    "torch_peak_local_max",
 ]

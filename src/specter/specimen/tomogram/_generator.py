@@ -66,14 +66,12 @@ filament/microtubule stage and pick export are mixins it inherits from
 
 from __future__ import annotations
 
-import math
 import os
 import warnings
 from typing import Literal
 
 import numpy as np
 import torch
-from scipy import ndimage
 
 from ...config import ScalarOrRange
 from ...arrays import count_nonzero_chunked
@@ -105,10 +103,12 @@ from ..packing import (
 )
 from ._helpers import (
     _MAX_PACKING_GRID_VOXELS,
+    _allowed_region_exclusion_field,
+    _coarsen_grid_by,
+    _coarsen_grid_to_budget,
     _downsample_mask_maxpool,
     _insert_instance_labels,
     _insert_rotated_copies,
-    _resolve_exclusion_field_grid,
     _wants_atom_species,
     resolve_accumulator_device,
 )
@@ -1040,19 +1040,8 @@ class TomogramSpecimenGenerator(
             forbidden = forbidden | obstacle_mask.cpu()
         allowed = ~forbidden
 
-        field_voxel_size, field_shape, field_factor = _resolve_exclusion_field_grid(
-            target_shape, voxel_size
-        )
-        allowed_field = (
-            _downsample_mask_maxpool(allowed, field_factor, field_shape)
-            if field_factor > 1
-            else allowed
-        )
-        exclusion_field = (
-            torch.from_numpy(
-                ndimage.distance_transform_edt(allowed_field.numpy())
-            ).float()
-            * field_voxel_size
+        allowed_field, exclusion_field, field_voxel_size = (
+            _allowed_region_exclusion_field(allowed, target_shape, voxel_size)
         )
 
         # Radii are drawn here, before packing, so each bead's own size is
@@ -1133,7 +1122,7 @@ class TomogramSpecimenGenerator(
             instance_labels = _insert_instance_labels(
                 binarized,
                 coords[i : i + 1],
-                pixel_size=voxel_size,
+                voxel_size=voxel_size,
                 labels=instance_labels,
             )
 
@@ -1153,16 +1142,13 @@ class TomogramSpecimenGenerator(
     ) -> tuple[float, tuple[int, int, int], int]:
         """Coarse collision grid for `packing_voxel_size`: (voxel, shape, factor)."""
         if self.packing_voxel_size is None:
-            n = target_shape[0] * target_shape[1] * target_shape[2]
-            if n <= _MAX_PACKING_GRID_VOXELS:
-                return voxel_size, target_shape, 1
-            factor = max(1, math.ceil((n / _MAX_PACKING_GRID_VOXELS) ** (1.0 / 3.0)))
-        elif self.packing_voxel_size <= voxel_size:
+            return _coarsen_grid_to_budget(
+                target_shape, voxel_size, _MAX_PACKING_GRID_VOXELS
+            )
+        if self.packing_voxel_size <= voxel_size:
             return voxel_size, target_shape, 1
-        else:
-            factor = max(1, int(round(self.packing_voxel_size / voxel_size)))
-        shape = tuple(-(-n // factor) for n in target_shape)
-        return voxel_size * factor, shape, factor  # type: ignore[return-value]
+        factor = max(1, int(round(self.packing_voxel_size / voxel_size)))
+        return _coarsen_grid_by(target_shape, voxel_size, factor)
 
     def _species_mask(self, pdb: PDB, voxel_size: float) -> torch.Tensor:
         """

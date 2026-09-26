@@ -430,3 +430,41 @@ class MLBOP:
             return nan_result
 
         return self._energy_from_pairs(n_atoms, i_idx_t, j_idx_t, rij_t, vec_t)
+
+
+def mlbop_energy_summary(
+    positions: torch.Tensor,
+    box_size: tuple[float, float, float] | float | torch.Tensor,
+    pbc: bool,
+    model: MLBOP | None = None,
+) -> dict[str, float]:
+    """
+    Score one configuration against ML-BOP and return plain Python floats.
+
+    The shared body of every icemaker's ``mlbop_energy`` diagnostic:
+    evaluates :meth:`MLBOP.compute_energy` without gradients and converts
+    each returned scalar tensor to a ``float``.
+
+    Parameters
+    ----------
+    positions : torch.Tensor
+        Bead positions, shape ``(N, 3)``, in Angstroms.
+    box_size : tuple of float or float or torch.Tensor
+        Box lengths or ``(3, 3)`` cell matrix; see
+        :meth:`MLBOP.compute_energy`.
+    pbc : bool
+        Whether to apply periodic boundary conditions.
+    model : MLBOP or None, optional
+        A model to reuse across calls (e.g. when scoring many frames).
+        Default None builds one on ``positions.device``.
+
+    Returns
+    -------
+    dict[str, float]
+        See :meth:`MLBOP.compute_energy` for the fields returned.
+    """
+    if model is None:
+        model = MLBOP(device=positions.device)
+    with torch.no_grad():
+        result = model.compute_energy(positions, box_size=box_size, pbc=pbc)
+    return {k: v.item() for k, v in result.items()}

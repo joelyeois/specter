@@ -7,7 +7,6 @@ from __future__ import annotations
 
 
 import torch
-import torch.nn.functional as F
 from scipy import constants as _sc
 
 
@@ -41,53 +40,3 @@ def rfftn(array: torch.Tensor) -> torch.Tensor:
         torch.fft.rfftn(torch.fft.ifftshift(array, dim=(-3, -2, -1)), dim=(-3, -2, -1)),
         dim=(-3, -2),
     )
-
-
-def torch_peak_local_max(
-    image: torch.Tensor, min_distance: int = 1, n_peaks: int | None = None
-) -> torch.Tensor:
-    """
-    Find local maxima in batched 3D images and return fixed number of peaks per batch.
-
-    Parameters
-    ----------
-    image : torch.Tensor
-        Input tensor of shape (B, D, H, W).
-    min_distance : int, optional
-        Minimum separation between peaks (voxels). Default is 1.
-    n_peaks : int, optional
-        Number of peaks to return per batch (must be <= total peaks in each batch).
-        If None, uses the minimum number of peaks found in any batch item. Default is None.
-
-    Returns
-    -------
-    peaks : torch.LongTensor
-        Peak coordinates (z, y, x) for each batch. Shape (B, n_peaks, 3).
-    """
-    B, D, H, W = image.shape
-    x = image.unsqueeze(1)  # (B, 1, D, H, W)
-    k = 2 * min_distance + 1
-    pooled = F.max_pool3d(x, kernel_size=k, stride=1, padding=min_distance)
-    mask = (x == pooled).squeeze(1)  # (B, D, H, W)
-
-    # Flatten spatial dims
-    flat_mask = mask.view(B, -1)
-    flat_image = image.view(B, -1)
-
-    # Mask non-maxima
-    flat_image_masked = flat_image.clone()
-    flat_image_masked[~flat_mask] = -float("inf")
-
-    if n_peaks is None:
-        n_peaks = int(flat_mask.sum(dim=1).min().item())  # take min available peaks
-
-    # Top-k per batch
-    _, topk_idx = flat_image_masked.topk(n_peaks, dim=1)
-
-    # Convert flat indices back to 3D coords
-    z = topk_idx // (H * W)
-    y = (topk_idx % (H * W)) // W
-    x_ = topk_idx % W
-
-    peaks = torch.stack([z, y, x_], dim=2)  # (B, n_peaks, 3)
-    return peaks

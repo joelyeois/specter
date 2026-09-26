@@ -23,7 +23,7 @@ from ..arrays import (
 )
 from ..progress import track
 from ..rotations import random_rotation_matrix_from_generator
-from ._energy import MLBOP
+from ._energy import mlbop_energy_summary
 from ..potential import (
     potential_from_deltas,
 )
@@ -427,10 +427,7 @@ class IceBank(_IceTiling, L.LightningModule):
             self.box_x is not None and self.box_y is not None and self.box_z is not None
         )
         box = (self.box_x, self.box_y, self.box_z)
-        model = MLBOP(device=self.positions.device)
-        with torch.no_grad():
-            result = model.compute_energy(self.positions, box_size=box, pbc=pbc)
-        return {k: v.item() for k, v in result.items()}
+        return mlbop_energy_summary(self.positions, box, pbc)
 
     def plot_diagnostics(
         self, save_path: str | None = None, show: bool = True

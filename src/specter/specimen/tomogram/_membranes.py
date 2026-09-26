@@ -13,20 +13,18 @@ import gc
 import warnings
 
 import torch
-from scipy import ndimage
 
 from ...arrays import clip_insert_bounds
 from ...progress import TqdmProgress, phase_done, phase_start, status
 from ..membrane import TransmembranePlacement
 from ..packing import pack_hard_spheres_3d
 from ._helpers import (
-    _downsample_mask_maxpool,
+    _allowed_region_exclusion_field,
     _insert_local_labels,
     _insert_shell_label,
     _insert_volume_max,
     _instance_bounding_radius,
     _position_to_center_index,
-    _resolve_exclusion_field_grid,
 )
 from ._regions import classify_membrane_regions
 from ._specs import MembraneInstance
@@ -164,20 +162,10 @@ class _MembraneStageMixin:
                 ]
             )
             if carbon_mask is not None:
-                field_voxel_size, field_shape, field_factor = (
-                    _resolve_exclusion_field_grid(target_shape, voxel_size)
-                )
-                allowed = (~carbon_mask).cpu()
-                allowed_field = (
-                    _downsample_mask_maxpool(allowed, field_factor, field_shape)
-                    if field_factor > 1
-                    else allowed
-                )
-                exclusion_field = (
-                    torch.from_numpy(
-                        ndimage.distance_transform_edt(allowed_field.numpy())
-                    ).float()
-                    * field_voxel_size
+                allowed_field, exclusion_field, field_voxel_size = (
+                    _allowed_region_exclusion_field(
+                        (~carbon_mask).cpu(), target_shape, voxel_size
+                    )
                 )
             with status(
                 f"Placing {len(self.membrane_instances)} membrane instance(s)",

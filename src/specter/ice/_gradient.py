@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from ..arrays import radial_profile_3d, soft_voxelize_coordinates
 from ..fft import fft3, fftconvolve
 from ..progress import ProgressManager, track
-from ._energy import MLBOP, NeighborListCache
+from ._energy import MLBOP, NeighborListCache, mlbop_energy_summary
 from ._helpers import ndensity_of_amorphous_ice
 from ._kernels import build_water_kernel
 from ._kernels import (
@@ -942,7 +942,4 @@ class GradientSKIcemaker(L.LightningModule):
         """
         assert self.positions is not None, "Call optimize() or init_* first"
         box = (self.box_x, self.box_y, self.box_z)
-        model = MLBOP(device=self.positions.device)
-        with torch.no_grad():
-            result = model.compute_energy(self.positions, box_size=box, pbc=pbc)
-        return {k: v.item() for k, v in result.items()}
+        return mlbop_energy_summary(self.positions, box, pbc)

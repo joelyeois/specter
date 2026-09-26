@@ -33,25 +33,10 @@ def _wants_atom_species(parameterization: str) -> bool:
     return parameterization == "shtyrov"
 
 
-# A region covering at least this fraction of the whole tomogram box (e.g.
-# a large cytosol with no membrane, or with just one small organelle in a
-# big box) behaves like an open box for RSA packing purposes -- it
-# saturates fast, so pack_hard_spheres_3d's own default stall_patience
-# (15) is enough. Below this threshold (e.g. a small vesicle lumen), the
-# region-restricted sampling_mask docstring's own reasoning applies: many
-# more consecutive misses can be needed before a geometrically valid spot
-# turns up, so region_max_passes' own (much larger) value is used instead.
-# Verified directly on a 200x600x600 box (see PR discussion): stall_patience
-# =15 packed the same PEI2016 candidate pool to within ~3% of stall_patience
-# =300's own density in roughly half the wall time.
-_TIGHT_REGION_FRACTION_THRESHOLD = 0.25
-_OPEN_REGION_STALL_PATIENCE = 15  # matches pack_hard_spheres_3d's own default
-
-
 def _insert_instance_labels(
     binarized: torch.Tensor,
     positions: torch.Tensor,
-    pixel_size: float,
+    voxel_size: float,
     labels: torch.Tensor,
 ) -> torch.Tensor:
     """Stamp per-instance integer labels into a shared label volume.
@@ -64,7 +49,7 @@ def _insert_instance_labels(
     N, Zp, Yp, Xp = binarized.shape
     Z, Y, X = labels.shape
     positions = positions.to(device)
-    positions_int = (positions / pixel_size).round().long()
+    positions_int = (positions / voxel_size).round().long()
     cz_center, cy_center, cx_center = Z // 2, Y // 2, X // 2
 
     # One host transfer per chunk, not three device syncs per instance --
@@ -153,7 +138,7 @@ def _insert_rotated_copies(
         instance_labels = _insert_instance_labels(
             binarized,
             positions[start:end],
-            pixel_size=voxel_size,
+            voxel_size=voxel_size,
             labels=instance_labels,
         )
     return volume, instance_labels
@@ -306,12 +291,33 @@ def _resolve_exclusion_field_grid(
     factor : int
         Integer downsampling factor (1 if no coarsening was needed).
     """
+    return _coarsen_grid_to_budget(
+        target_shape, voxel_size, _MAX_EXCLUSION_FIELD_VOXELS
+    )
+
+
+def _coarsen_grid_by(
+    target_shape: tuple[int, int, int], voxel_size: float, factor: int
+) -> tuple[float, tuple[int, int, int], int]:
+    """Coarsen a grid by an integer ``factor``: ``(voxel, ceil(shape / factor), factor)``."""
+    shape = tuple(math.ceil(s / factor) for s in target_shape)
+    return voxel_size * factor, shape, factor  # type: ignore[return-value]
+
+
+def _coarsen_grid_to_budget(
+    target_shape: tuple[int, int, int], voxel_size: float, max_voxels: int
+) -> tuple[float, tuple[int, int, int], int]:
+    """
+    Coarsen ``(voxel_size, target_shape)`` by the smallest integer factor
+    that brings the voxel count to at most ``max_voxels`` (per-axis factor
+    ``ceil((n / max_voxels) ** (1/3))``); returned unchanged, with factor 1,
+    when the grid already fits.
+    """
     n = target_shape[0] * target_shape[1] * target_shape[2]
-    if n <= _MAX_EXCLUSION_FIELD_VOXELS:
+    if n <= max_voxels:
         return voxel_size, target_shape, 1
-    factor = max(1, math.ceil((n / _MAX_EXCLUSION_FIELD_VOXELS) ** (1.0 / 3.0)))
-    field_shape = tuple(math.ceil(s / factor) for s in target_shape)
-    return voxel_size * factor, field_shape, factor
+    factor = max(1, math.ceil((n / max_voxels) ** (1.0 / 3.0)))
+    return _coarsen_grid_by(target_shape, voxel_size, factor)
 
 
 def _downsample_mask_maxpool(
@@ -338,107 +344,51 @@ def _downsample_mask_maxpool(
     return pooled > 0
 
 
-def _diagnose_zero_placements(
-    region_mask_field: torch.Tensor,
-    exclusion_field: torch.Tensor,
-    field_voxel_size: float,
-    box: tuple[float, float, float],
-    radius: float,
-    gap: float,
-    clip_axes: tuple[bool, bool, bool],
-) -> tuple[int, float]:
+def _allowed_region_exclusion_field(
+    allowed: torch.Tensor,
+    target_shape: tuple[int, int, int],
+    voxel_size: float,
+) -> tuple[torch.Tensor, torch.Tensor, float]:
     """
-    Diagnose a 0-accepted `pack_hard_spheres_3d` call: how many field voxels
-    are ACTUALLY viable for a sphere of this radius, and what the largest
-    real clearance among them is.
+    Build the sampling mask and clearance field `pack_hard_spheres_3d`
+    takes from a boolean ``allowed`` mask on the render grid.
 
-    Exists because `exclusion_field[region_mask_field].max()` alone --
-    clearance from the shell/exclusion source, ignoring the box wall -- can
-    dramatically overstate how much room exists: it was reporting a
-    misleadingly large number (found directly: 166 A "available", 72 A
-    "needed", read as ample room) for a case with genuinely ZERO viable
-    positions, because the voxels far enough from the shell were ALL too
-    close to the box wall for this radius. `pack_hard_spheres_3d` itself
-    already enforces the box-wall constraint (see its own `required_margin`
-    check) -- this replicates just enough of that same logic, honoring
-    `clip_axes`, to report a number a caller can actually act on instead of
-    one that sends them looking in the wrong place.
+    The grid is coarsened per `_resolve_exclusion_field_grid`, ``allowed``
+    max-pooled onto it (`_downsample_mask_maxpool`), and the clearance is
+    the Euclidean distance, in Å, from each allowed voxel to the nearest
+    forbidden one.
 
     Parameters
     ----------
-    region_mask_field : torch.Tensor
-        Boolean, shape ``(Z, Y, X)`` -- same grid `exclusion_field` is on.
-    exclusion_field : torch.Tensor
-        Physical clearance to the nearest forbidden voxel, Å, same
-        shape as `region_mask_field`.
-    field_voxel_size : float
-        Voxel size of both fields, Å.
-    box : tuple of float
-        ``(D, H, W)`` box extents in Å (z, y, x) -- same convention
-        `pack_hard_spheres_3d` takes.
-    radius : float
-        Sphere radius being diagnosed, Å.
-    gap : float
-        Extra required clearance beyond touching, Å.
-    clip_axes : tuple of bool
-        ``(z, y, x)`` -- True means only the CENTER needs to stay in-bounds
-        on that axis (matching `pack_hard_spheres_3d`'s own parameter).
+    allowed : torch.Tensor
+        Boolean CPU mask, shape ``target_shape``; True where a centre may go.
+    target_shape : tuple of int
+        ``(Z, Y, X)`` render grid shape.
+    voxel_size : float
+        Render voxel size, Å.
 
     Returns
     -------
-    viable_voxels : int
-        Voxels satisfying region membership, clearance, AND box containment
-        all at once -- the true count `pack_hard_spheres_3d` was sampling
-        from. Can be 0 even when `region_mask_field` and the raw clearance
-        check both look generous.
-    best_clearance_angstrom : float
-        The largest clearance among voxels that are at least IN the region
-        and box-valid for this radius (ignoring the clearance requirement
-        itself) -- 0.0 if no such voxel exists at all. Lets the warning
-        report "this is the most room this species could ever get here",
-        distinct from `exclusion_field`'s unconstrained max.
+    allowed_field : torch.Tensor
+        ``allowed`` on the (possibly coarsened) field grid.
+    exclusion_field : torch.Tensor
+        float32 clearance, Å, same shape as ``allowed_field``.
+    field_voxel_size : float
+        Voxel size of both fields, Å.
     """
-    nz, ny, nx = region_mask_field.shape
-    # exclusion_field is deliberately CPU-resident at the call site (see its
-    # own comment there); region_mask_field can be on a different device
-    # (self.device) since it's just a downsampled view of a GPU-resident
-    # region classification. This diagnostic only runs on a zero-placement
-    # cold path, so a one-time device copy here is fine.
-    device = exclusion_field.device
-    region_mask_field = region_mask_field.to(device)
-    zz, yy, xx = torch.meshgrid(
-        torch.arange(nz, device=device),
-        torch.arange(ny, device=device),
-        torch.arange(nx, device=device),
-        indexing="ij",
+    field_voxel_size, field_shape, field_factor = _resolve_exclusion_field_grid(
+        target_shape, voxel_size
     )
-    extent = (
-        torch.tensor([nx, ny, nz], dtype=torch.float32, device=device)
+    allowed_field = (
+        _downsample_mask_maxpool(allowed, field_factor, field_shape)
+        if field_factor > 1
+        else allowed
+    )
+    exclusion_field = (
+        torch.from_numpy(ndimage.distance_transform_edt(allowed_field.numpy())).float()
         * field_voxel_size
     )
-    origin = -0.5 * extent
-    center_x = origin[0] + (xx.float() + 0.5) * field_voxel_size
-    center_y = origin[1] + (yy.float() + 0.5) * field_voxel_size
-    center_z = origin[2] + (zz.float() + 0.5) * field_voxel_size
-
-    half_x, half_y, half_z = box[2] / 2, box[1] / 2, box[0] / 2
-    margin_x = 0.0 if clip_axes[2] else radius
-    margin_y = 0.0 if clip_axes[1] else radius
-    margin_z = 0.0 if clip_axes[0] else radius
-    within_box = (
-        (center_x.abs() + margin_x <= half_x)
-        & (center_y.abs() + margin_y <= half_y)
-        & (center_z.abs() + margin_z <= half_z)
-    )
-
-    box_valid_region = region_mask_field & within_box
-    best_clearance_angstrom = (
-        float(exclusion_field[box_valid_region].max())
-        if bool(box_valid_region.any())
-        else 0.0
-    )
-    viable = box_valid_region & (exclusion_field >= radius + gap)
-    return int(viable.sum()), best_clearance_angstrom
+    return allowed_field, exclusion_field, field_voxel_size
 
 
 # Bytes/voxel for each accumulator tensor (volume: float32, instance_labels

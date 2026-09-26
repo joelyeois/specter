@@ -23,7 +23,7 @@ from ..arrays import (
 from ..coords import radial_distribution_function
 from ..fft import fft3
 from ..progress import track
-from ._energy import MLBOP
+from ._energy import MLBOP, mlbop_energy_summary
 
 
 class MDSimDump:
@@ -444,9 +444,9 @@ class MDSimDump:
             disable=not progressbar,
             transient=True,
         ):
-            with torch.no_grad():
-                result = model.compute_energy(coords, box_size=self.trim_size, pbc=pbc)
-            results.append({k: v.item() for k, v in result.items()})
+            results.append(
+                mlbop_energy_summary(coords, self.trim_size, pbc, model=model)
+            )
         return results
 
     def generate_ice(
@@ -932,9 +932,7 @@ class ExtXYZDump:
             positions = torch.as_tensor(atoms.positions, dtype=torch.float32)
             cell = torch.as_tensor(atoms.cell.array, dtype=torch.float32)
             pbc = bool(np.any(atoms.pbc))
-            with torch.no_grad():
-                result = model.compute_energy(positions, box_size=cell, pbc=pbc)
-            results.append({k: v.item() for k, v in result.items()})
+            results.append(mlbop_energy_summary(positions, cell, pbc, model=model))
         return results
 
     def generate_ice(

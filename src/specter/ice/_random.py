@@ -11,7 +11,7 @@ import torch
 
 from ..arrays import soft_voxelize_coordinates
 from ..fft import fftconvolve
-from ._energy import MLBOP
+from ._energy import mlbop_energy_summary
 from ._helpers import ndensity_of_amorphous_ice
 from ._kernels import build_water_kernel
 from specter.options import IceModel, ScatteringFactors
@@ -222,7 +222,4 @@ class RandomIcemaker(L.LightningModule):
         """
         assert self.positions is not None, "No positions — call init_random() first"
         box = (self.box_x, self.box_y, self.box_z)
-        model = MLBOP(device=self.positions.device)
-        with torch.no_grad():
-            result = model.compute_energy(self.positions, box_size=box, pbc=pbc)
-        return {k: v.item() for k, v in result.items()}
+        return mlbop_energy_summary(self.positions, box, pbc)

@@ -15,7 +15,7 @@ import torch
 from ..arrays import (
     soft_voxelize_coordinates,
 )
-from ._energy import MLBOP
+from ._energy import MLBOP, mlbop_energy_summary
 
 if TYPE_CHECKING:
     from ._bank import IceBank
@@ -41,11 +41,11 @@ def plot_ice_bank_diagnostics(
             config["dx"],
         )
         labels.append(os.path.basename(path))
-        with torch.no_grad():
-            result = model.compute_energy(
-                pos.to(bank.device), box_size=(box_L,) * 3, pbc=True
+        energies.append(
+            mlbop_energy_summary(
+                pos.to(bank.device), (box_L,) * 3, pbc=True, model=model
             )
-        energies.append({k: v.item() for k, v in result.items()})
+        )
         vox = soft_voxelize_coordinates(
             pos, grid_shape=(n, n, n), voxel_size=dx, periodic=True
         )

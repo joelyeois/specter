@@ -345,7 +345,7 @@ class _FilamentStageMixin:
     ) -> torch.Tensor:
         """Voxels enclosed by a placed microtubule's wall, lumen included.
 
-        Built by stamping a disc of the tube's own radius at every ring of
+        Built by stamping a sphere of the tube's own radius at every ring of
         every axis polyline. Consecutive rings are one dimer repeat apart
         (82 A) while the radius is ~111 A, so the stamped spheres overlap
         and seal the tube along its whole length without needing a real

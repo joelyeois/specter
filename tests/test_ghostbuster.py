@@ -14,6 +14,7 @@ identity. Delete the corresponding .pt file and re-run to regenerate.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import mrcfile
 import pytest
@@ -1043,3 +1044,55 @@ def test_kmask_half_spectrum_matches_the_shifted_round_trip():
         torch.zeros(int((kmask == 0).sum()), dtype=spectrum.dtype),
         atol=1e-4,
     )
+
+
+def _halfmap_recorder(run_dir: Path) -> Any:
+    """The attributes `Reconstructor._record_halfmap_resolutions` reads, with
+    halfset B finishing an epoch second, after A's volume is already on disk."""
+    from types import SimpleNamespace
+
+    (run_dir / "epochs").mkdir(parents=True)
+    torch.manual_seed(0)
+    for label in ("A", "B"):
+        with mrcfile.new(str(run_dir / "epochs" / f"001_{label}.mrc")) as mrc:
+            mrc.set_data(torch.randn(16, 16, 16).numpy())
+    return SimpleNamespace(
+        _run_dir=run_dir,
+        _halfset_label="B",
+        voxel_size=1.0,
+        fsc_mask=1,
+        _epoch_resolutions=[],
+        _mask_for=lambda volume: None,
+    )
+
+
+def test_halfmap_figure_is_written_and_recorded(tmp_path: Path) -> None:
+    """The second worker to finish an epoch writes a non-empty figure and
+    records the gold-standard resolution. The claim file is created empty, so
+    checking only that the PNG exists cannot tell the two apart."""
+    recorder = _halfmap_recorder(tmp_path)
+
+    Reconstructor._record_halfmap_resolutions(recorder, 1)
+
+    figure = tmp_path / "epochs" / "fsc_halfmap_001.png"
+    assert figure.stat().st_size > 0
+    assert recorder._epoch_resolutions[0]["resolution_gold_standard"]
+
+
+def test_failed_halfmap_figure_drops_its_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`save_halfmap_fsc_figure` swallows its own errors and returns None. That
+    must drop the empty claim file and record nothing, not leave a 0-byte PNG
+    behind next to a resolution that no figure shows."""
+    from specter.ghostbuster import _reconstructor
+
+    monkeypatch.setattr(
+        _reconstructor, "save_halfmap_fsc_figure", lambda *args, **kwargs: None
+    )
+    recorder = _halfmap_recorder(tmp_path)
+
+    Reconstructor._record_halfmap_resolutions(recorder, 1)
+
+    assert not (tmp_path / "epochs" / "fsc_halfmap_001.png").exists()
+    assert recorder._epoch_resolutions == []

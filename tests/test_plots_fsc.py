@@ -103,3 +103,25 @@ def test_fsc_resolution_reports_no_crossing(threshold):
     k = torch.linspace(0.0, 0.5, 8)
     fsc = torch.ones(8)
     assert fsc_resolution(k, fsc, threshold) == ">Nyquist"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_halfmap_plot_accepts_a_mask_on_another_device():
+    """A reconstructor's ``fsc_mask`` is a buffer on the GPU, but the half-maps
+    `_record_halfmap_resolutions` reads back from disk are on the CPU. The
+    masked curve has to follow the volumes' device rather than fail, which it
+    used to do silently, leaving an empty ``fsc_halfmap_<NNN>.png``."""
+    from specter.plots import plot_halfmap_fsc
+
+    volume_a, volume_b = _band_limited_pair(24, 1.0, seed=3)
+    mask = torch.ones(24, 24, 24, device="cuda")
+
+    fig, resolutions = plot_halfmap_fsc(
+        [volume_a], [volume_b], voxel_size=1.0, mask=mask, show=False
+    )
+
+    _, cpu_resolutions = plot_halfmap_fsc(
+        [volume_a], [volume_b], voxel_size=1.0, mask=mask.cpu(), show=False
+    )
+    assert fig is not None
+    assert resolutions == cpu_resolutions

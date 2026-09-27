@@ -734,7 +734,9 @@ def plot_halfmap_fsc(
         )
 
         if mask is not None:
-            m = mask.float()
+            # A reconstructor's fsc_mask is a registered buffer on the GPU,
+            # while half-maps read back from disk are on the CPU.
+            m = mask.detach().to(volume_a_f.device).float()
             k_m, fsc_m = fourier_shell_correlation(
                 volume_a_f * m, volume_b_f * m, pixel_size=voxel_size
             )

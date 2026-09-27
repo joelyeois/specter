@@ -513,7 +513,9 @@ def test_gold_standard_writes_no_json_but_job_json(
     for entry in epochs:
         assert entry["resolution_gold_standard"]
         assert entry["computed_by_halfset"] in ("A", "B")
-        assert (job_dir / "epochs" / f"fsc_halfmap_{entry['epoch']:03d}.png").exists()
+        figure = job_dir / "epochs" / f"fsc_halfmap_{entry['epoch']:03d}.png"
+        # The claim file is created empty, so existence alone proves nothing.
+        assert figure.stat().st_size > 0
 
 
 def _fsc_fixtures(tmp_path: Path) -> tuple[Path, Path]:

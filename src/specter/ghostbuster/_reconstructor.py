@@ -991,13 +991,19 @@ class Reconstructor(_BaseReconstructor):
             volume_a, volume_b = (
                 (own, sib) if self._halfset_label == "A" else (sib, own)
             )
-            save_halfmap_fsc_figure(
-                figure_path,
-                volume_a,
-                volume_b,
-                self.voxel_size,
-                fsc_mask=self.fsc_mask,
-            )
+            # save_halfmap_fsc_figure swallows its own errors and returns None,
+            # which would otherwise leave the empty claim file standing.
+            if (
+                save_halfmap_fsc_figure(
+                    figure_path,
+                    volume_a,
+                    volume_b,
+                    self.voxel_size,
+                    fsc_mask=self.fsc_mask,
+                )
+                is None
+            ):
+                raise RuntimeError("half-map FSC figure could not be produced")
             # Computed rather than taken from the figure: plot_halfmap_fsc
             # returns the unmasked resolution even when it draws a masked
             # curve, so the masked number has to come from its own call.

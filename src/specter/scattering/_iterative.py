@@ -553,6 +553,9 @@ class IterativeScattering(L.LightningModule):
             )
         if V.device != source.device or V.dtype != source.dtype:
             raise ValueError("paired fields must share device and dtype")
+        # Match forward(): geometry follows host-resident fields when slices
+        # are streamed to a different compute device.
+        theta_matrix = theta_matrix.to(V.device)
         if slice_batchsize < 1 or (
             checkpoint_chunks is not None and checkpoint_chunks < 1
         ):

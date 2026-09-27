@@ -502,6 +502,75 @@ def aperture_lowpass(
     return out
 
 
+def aperture_lowpass_isotropic(
+    v: torch.Tensor,
+    pixel_size: float,
+    aperture_mrad: float,
+    voltage_kv: float,
+) -> torch.Tensor:
+    r"""
+    Remove a potential's 3D detail beyond the objective aperture, in any frame.
+
+    The rotation-invariant counterpart of :func:`aperture_lowpass`, for a
+    volume imaged along more than one beam direction. :func:`aperture_lowpass`
+    removes transverse frequencies :math:`|\mathbf{k}_\perp| > k_{ap}` of each
+    beam-frame slice, a cylinder in 3D frequency space whose axis is the beam.
+    That cylinder rotates with the beam, so it cannot be applied once to a
+    volume that is later tilted. This filter removes
+    :math:`|\mathbf{k}| > k_{ap}` instead, a sphere, which commutes with every
+    rotation.
+
+    The two agree where the image is formed. At first order the exit wave at
+    transverse frequency :math:`\mathbf{q}` is the potential on the Ewald
+    sphere, at :math:`k_z = \lambda q^2/2`, and there
+    :math:`|\mathbf{k}| = q\sqrt{1 + (\lambda q/2)^2}`, which exceeds
+    :math:`q` by :math:`\theta^2/8` relative at scattering angle
+    :math:`\theta = \lambda q`: 1.8e-5 at the edge of a 12 mrad aperture.
+    Both filters therefore keep the same scattering inside the aperture and
+    remove the same scattering outside it. They differ only off the Ewald
+    sphere, at large :math:`k_z` and small :math:`q`, which contributes to
+    no scattered beam at first order.
+
+    A no-op under the same criterion as :func:`aperture_lowpass`: when the
+    aperture lies outside the grid's Nyquist frequency.
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Real potential, shape ``(..., Z, Y, X)``, in any frame.
+    pixel_size : float
+        Voxel size in Angstrom.
+    aperture_mrad : float
+        Objective aperture semi-angle in milliradians.
+    voltage_kv : float
+        Accelerating voltage in kV.
+
+    Returns
+    -------
+    torch.Tensor
+        The filtered potential, same shape and dtype as `v`. Returned as the
+        input object when the filter would do nothing.
+
+    Notes
+    -----
+    The transform is taken over the whole volume at once, so its working set
+    is about twice the volume. It is reached only at voxel sizes below
+    ``0.5 / k_ap`` (0.82 A at 12 mrad and 300 kV), which few tomograms use.
+    """
+    k_ap = _aperture_k(aperture_mrad, voltage_kv)
+    if k_ap >= 0.5 / pixel_size:
+        return v
+    nz, ny, nx = v.shape[-3], v.shape[-2], v.shape[-1]
+    kz = torch.fft.fftfreq(nz, d=pixel_size, device=v.device)
+    ky = torch.fft.fftfreq(ny, d=pixel_size, device=v.device)
+    kx = torch.fft.rfftfreq(nx, d=pixel_size, device=v.device)
+    mask = (
+        kz[:, None, None] ** 2 + ky[None, :, None] ** 2 + kx[None, None, :] ** 2
+    ) <= k_ap**2
+    spectrum = torch.fft.rfftn(v, dim=(-3, -2, -1)) * mask
+    return torch.fft.irfftn(spectrum, s=(nz, ny, nx), dim=(-3, -2, -1)).to(v.dtype)
+
+
 #: Voxels the occupancy blur is allowed to touch in one call. The blur is
 #: separable, and its first pass reshapes to ``(-1, 1, X)`` and pads, so its
 #: working set is a few multiples of the input. Whole-volume evaluation asked

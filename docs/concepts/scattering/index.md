@@ -144,12 +144,31 @@ kinematic retain their respective linear and single-scattering
 approximations; they do not become exact Beer–Lambert propagators for thick
 absorbing specimens. The `ctf` model rejects uniform absorption.
 
-`MicrographGenerator`, `TiltSeriesGenerator`, and `TomogramReconstructor`
-reject `absorption_model="inelastic_mfp"` explicitly. Their iterative paths
-need material information that distinguishes specimen, solvent, and vacuum;
-a pre-solvated real potential is insufficient for the existing occupancy
-estimator. These paths still support `alpha`. This restriction does not
-remove the low-level propagators' support for supplied complex potentials.
+`TiltSeriesGenerator` applies the same model to a tilt series. The absorption
+field is computed from the dry specimen volume before ice is blended into it,
+with the occupancy that weights the ice, and with the mean free paths the
+particle generators resolve: the solvent value or its voltage-dependent
+default, the optional specimen value, and the objective-aperture rate
+described below. The solvent term is present only when ice is blended. The
+field receives the same tilt padding and edge taper as the elastic volume, and
+`IterativeScattering.multislice_absorptive` samples both through the same
+rotated slices, so absorption follows the specimen at every tilt. Without a
+specimen mean free path the field is uniform, but it is constructed as a
+constant over the volume rather than applied as a scalar. A tilted slice
+extends past the rotated slab into vacuum, so a scalar would absorb where the
+beam crosses no material; the field is zero there, and a slab of thickness
+\(t\) attenuates as \(\exp(-t/(\Lambda\cos	heta))\) at tilt \(	heta\). An
+explicit `absorption_potential` supplied to the constructor takes precedence
+over the mean-free-path settings. The field is a second volume of the padded
+size, which doubles the resident memory of the specimen.
+
+`MicrographGenerator` and `TomogramReconstructor` reject
+`absorption_model="inelastic_mfp"` explicitly. Their iterative paths need
+material information that distinguishes specimen, solvent, and vacuum, and a
+pre-solvated real potential is insufficient for the occupancy estimator.
+These paths still support `alpha`.
+This restriction does not remove the low-level propagators' support for
+supplied complex potentials.
 
 A possible extension is described in [the Himes-style design sketch](himes-inelastic-design.md).
 
@@ -179,7 +198,13 @@ interference) and for the standard protein composition
 rate adds to the inelastic one, and where the aperture lies inside the grid's
 Nyquist frequency the potential is low-passed at the aperture
 (`potential.aperture_lowpass`) so that the scattering the grid does carry is
-not also counted. The aperture requires `absorption_model="inelastic_mfp"`,
+not also counted. A tilt series cannot use that filter, because it acts on
+transverse frequencies of the beam frame and the beam direction changes from
+tilt to tilt. `TiltSeriesGenerator` instead removes all 3D frequencies beyond
+the aperture (`potential.aperture_lowpass_isotropic`), a spherical filter that
+commutes with rotation. On the Ewald sphere the two filters coincide to within
+\(	heta^2/8\) relative at scattering angle \(	heta\), so they keep and remove
+the same first-order scattering. The aperture requires `absorption_model="inelastic_mfp"`,
 because the `alpha` model's fitted constant already represents this loss.
 
 On a 6BDF particle in 400 Å of ice at 300 kV, a 12 mrad aperture raises the

@@ -5,6 +5,7 @@ bundles, per-image parameters, the optics stage and the detector.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from collections.abc import Callable, Sequence
 
@@ -38,9 +39,162 @@ from ..settings import Camera, Envelopes, Optics, Propagation
 
 __all__ = [
     "BaseImager",
+    "RemovalMFPs",
     "compute_nz",
+    "mfp_absorption_field",
     "pad_volume",
+    "resolve_removal_mfps",
 ]
+
+
+@dataclass(frozen=True)
+class RemovalMFPs:
+    """
+    Resolved mean free paths for an electron leaving the image, in Angstrom.
+
+    Built by :func:`resolve_removal_mfps` from the settings every generator
+    shares, so the particle generators and `TiltSeriesGenerator` charge the
+    same loss for the same configuration.
+
+    Attributes
+    ----------
+    inelastic_solvent : float
+        Inelastic mean free path of the solvent: the configured
+        ``inelastic_mfp_solvent``, else the measured or estimated value for
+        amorphous ice at this voltage.
+    inelastic_specimen : float or None
+        Inelastic mean free path of the specimen, or None when the specimen
+        absorbs at the solvent's rate.
+    objective_aperture : float or None
+        Objective aperture semi-angle in milliradians, or None.
+    voltage : float
+        Accelerating voltage in kV.
+    """
+
+    inelastic_solvent: float
+    inelastic_specimen: float | None
+    objective_aperture: float | None
+    voltage: float
+
+    def removal(self, material: str) -> float:
+        """
+        Mean free path for leaving the image, inelastic plus aperture, in A.
+
+        Two independent loss channels add as rates. Without an objective
+        aperture this is the configured inelastic mean free path unchanged.
+
+        Parameters
+        ----------
+        material : {"solvent", "specimen"}
+            Which material. ``"specimen"`` requires ``inelastic_specimen``.
+
+        Returns
+        -------
+        float
+            Mean free path in Angstrom.
+        """
+        if material == "solvent":
+            inelastic = self.inelastic_solvent
+        else:
+            inelastic = cast(float, self.inelastic_specimen)
+        if self.objective_aperture is None:
+            return inelastic
+        aperture = (
+            aperture_mfp_ice if material == "solvent" else aperture_mfp_protein
+        )(self.objective_aperture, self.voltage)
+        return 1.0 / (1.0 / inelastic + 1.0 / aperture)
+
+
+def resolve_removal_mfps(
+    propagation: Propagation, optics: Optics | None, voltage: float
+) -> RemovalMFPs | None:
+    """
+    Resolve the mean-free-path absorption settings, or None under ``"alpha"``.
+
+    Resolved once, where the voltage is known, so a voltage with no measured
+    ice value fails or warns at construction rather than mid-run.
+
+    Parameters
+    ----------
+    propagation : Propagation
+        Supplies ``absorption_model`` and the two mean-free-path overrides.
+    optics : Optics or None
+        Supplies the objective aperture, if any.
+    voltage : float
+        Accelerating voltage in kV.
+
+    Returns
+    -------
+    RemovalMFPs or None
+        The resolved mean free paths, or None when
+        ``absorption_model != "inelastic_mfp"``.
+    """
+    if propagation.absorption_model != "inelastic_mfp":
+        return None
+    return RemovalMFPs(
+        inelastic_solvent=(
+            propagation.inelastic_mfp_solvent
+            if propagation.inelastic_mfp_solvent is not None
+            else ice_inelastic_mfp(voltage)
+        ),
+        inelastic_specimen=propagation.inelastic_mfp_specimen,
+        objective_aperture=None if optics is None else optics.objective_aperture,
+        voltage=voltage,
+    )
+
+
+def mfp_absorption_field(
+    specimen: torch.Tensor,
+    pixel_size: float,
+    removal_mfps: RemovalMFPs,
+    has_solvent: bool,
+    full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
+) -> torch.Tensor:
+    """
+    The imaginary potential of a dry specimen from its removal mean free paths.
+
+    :func:`~specter.potential.inelastic_absorption_potential` with the
+    solvent and specimen rates of `removal_mfps`: inelastic plus, with an
+    objective aperture, elastic scattering beyond it. Shared by the particle
+    generators and `TiltSeriesGenerator`.
+
+    Parameters
+    ----------
+    specimen : torch.Tensor
+        The potential of the specimen alone, before any solvent was blended
+        in, shape ``(..., Z, Y, X)``. Occupancy read off a solvated volume is
+        full everywhere.
+    pixel_size : float
+        Voxel size in Angstrom.
+    removal_mfps : RemovalMFPs
+        The resolved mean free paths.
+    has_solvent : bool
+        Whether solvent surrounds the specimen. Without it the solvent term
+        is dropped: vacuum absorbs nothing.
+    full_potential : float or torch.Tensor, optional
+        Occupancy reference. Default
+        :data:`~specter.potential.FULL_OCCUPANCY_POTENTIAL_V`.
+
+    Returns
+    -------
+    torch.Tensor
+        Absorption potential in volts, same shape as `specimen`. Uniform when
+        `removal_mfps` has no specimen mean free path.
+    """
+    return inelastic_absorption_potential(
+        specimen,
+        pixel_size,
+        removal_mfps.voltage,
+        mfp_solvent_A=(
+            removal_mfps.removal("solvent") if has_solvent else float("inf")
+        ),
+        mfp_specimen_A=(
+            None
+            if removal_mfps.inelastic_specimen is None
+            else removal_mfps.removal("specimen")
+        ),
+        full_potential=full_potential,
+    )
 
 
 class BaseImager(L.LightningModule):
@@ -193,13 +347,9 @@ class BaseImager(L.LightningModule):
                 )
         # Resolved here, where the voltage is known, so a voltage with no
         # measured ice value fails at construction rather than mid-run.
-        self._inelastic_mfp_solvent: float | None = None
-        if self.absorption_model == "inelastic_mfp":
-            self._inelastic_mfp_solvent = (
-                self.propagation.inelastic_mfp_solvent
-                if self.propagation.inelastic_mfp_solvent is not None
-                else ice_inelastic_mfp(self.voltage)
-            )
+        self._removal_mfps = resolve_removal_mfps(
+            self.propagation, self.optics, self.voltage
+        )
         self.klim = self.propagation.klim
         self.ews_curvature_sign = self.propagation.ews_curvature_sign
         self.noise_model = self.camera.noise_model
@@ -383,8 +533,8 @@ class BaseImager(L.LightningModule):
         """
         Mean free path for leaving the image, inelastic plus aperture, in A.
 
-        Two independent loss channels add as rates. Without an objective
-        aperture this is the configured inelastic mean free path unchanged.
+        See :meth:`RemovalMFPs.removal`, which this delegates to so that the
+        generators resolving the same settings agree.
 
         Parameters
         ----------
@@ -397,16 +547,7 @@ class BaseImager(L.LightningModule):
         float
             Mean free path in Angstrom.
         """
-        if material == "solvent":
-            inelastic = cast(float, self._inelastic_mfp_solvent)
-        else:
-            inelastic = cast(float, self.propagation.inelastic_mfp_specimen)
-        if self.objective_aperture is None:
-            return inelastic
-        aperture = (
-            aperture_mfp_ice if material == "solvent" else aperture_mfp_protein
-        )(self.objective_aperture, self.voltage)
-        return 1.0 / (1.0 / inelastic + 1.0 / aperture)
+        return cast(RemovalMFPs, self._removal_mfps).removal(material)
 
     def _absorption_field(
         self,
@@ -458,15 +599,11 @@ class BaseImager(L.LightningModule):
         if self.propagation.inelastic_mfp_specimen is None:
             # Uniform, so it goes to `Scattering` as a scalar instead.
             return None
-        has_solvent = getattr(self, "icemaker", None) is not None
-        return inelastic_absorption_potential(
+        return mfp_absorption_field(
             specimen,
             self.pixel_size,
-            self.voltage,
-            mfp_solvent_A=(
-                self._removal_mfp("solvent") if has_solvent else float("inf")
-            ),
-            mfp_specimen_A=self._removal_mfp("specimen"),
+            cast(RemovalMFPs, self._removal_mfps),
+            has_solvent=getattr(self, "icemaker", None) is not None,
             full_potential=full_potential,
         )
 

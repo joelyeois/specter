@@ -9,6 +9,7 @@ from specter import logger
 
 from dataclasses import replace
 from typing import Any, Sequence
+import warnings
 
 import roma
 import torch
@@ -17,7 +18,9 @@ from ..progress import status, track
 from .. import rotations
 from .. import tilt as tilt_geometry
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
+from ..potential import aperture_lowpass_isotropic
 from ..settings import Camera, Envelopes, Ice, Optics, Propagation, TiltGeometry
+from ._base import RemovalMFPs, mfp_absorption_field, resolve_removal_mfps
 from ._micrograph import MicrographGenerator
 from ..scattering import IterativeScattering
 
@@ -105,6 +108,21 @@ class TiltSeriesGenerator(MicrographGenerator):
     icemaker : IceBank or RandomIcemaker, optional
         A pre-built icemaker instance to blend into ``volume`` directly. When
         supplied, ``ice.model`` and ``ice.cache_dir`` are ignored.
+    absorption_potential : torch.Tensor, optional
+        Explicit nonnegative imaginary potential in volts, with the same shape,
+        dtype and device as ``volume`` before geometry padding. Compute it
+        from the dry specimen and the solvent support, not from ice-filled
+        density. It receives the same tilt padding and edge taper as the
+        elastic volume and requires multislice with ``alpha=0``. An explicit
+        field takes precedence: it supplies all absorption, the mean-free-path
+        settings are not used to build or modify it, and ``potential_scale``
+        scales only the elastic potential. With an objective aperture the
+        field is expected to include the aperture loss, since the elastic
+        volume is low-passed at the aperture regardless of where the field
+        came from. Default None, which builds the field from the
+        mean-free-path settings under
+        ``Propagation(absorption_model="inelastic_mfp")`` (see Notes) and
+        uses no field under ``"alpha"``.
     fft_pad_margin : int, optional
         Padding added on each side of the propagation canvas when
         ``propagation.pad_fft`` is set.
@@ -151,6 +169,39 @@ class TiltSeriesGenerator(MicrographGenerator):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+
+    Notes
+    -----
+    Under ``Propagation(absorption_model="inelastic_mfp")`` absorption is
+    modelled as in the particle generators. The imaginary potential is
+    :func:`~specter.potential.inelastic_absorption_potential` of the DRY
+    ``volume``, read before ice is blended in, with the same occupancy
+    :func:`~specter.ice.blend_ice_into_volume` uses to weight the ice. Its
+    rates are resolved by :func:`~specter.imagegenerator._base.resolve_removal_mfps`:
+    the solvent takes ``inelastic_mfp_solvent`` or the ice value at this
+    voltage (:func:`~specter.potential.ice_inelastic_mfp`), the specimen
+    takes ``inelastic_mfp_specimen``, and an objective aperture adds its
+    elastic loss to each as a rate. The solvent term is present only when
+    ice is blended. The field is padded and tapered with the volume and
+    propagated alongside it by
+    :meth:`~specter.scattering.IterativeScattering.multislice_absorptive`,
+    one slice at a time in the beam frame.
+
+    Two cases differ from the particle path by construction. Without a
+    specimen mean free path the field is uniform, but it is built as a
+    constant over the volume's box rather than applied as a scalar: a tilted
+    slice extends past the rotated slab into vacuum, where nothing may
+    absorb, so the path length must come from the geometry. Without ice and
+    without a specimen mean free path nothing absorbs and no field is built,
+    as in the particle path. An objective aperture low-passes the elastic
+    volume with :func:`~specter.potential.aperture_lowpass_isotropic`, a
+    spherical filter in 3D frequency space that commutes with every tilt,
+    where the particle path filters each beam-frame slice; the two keep the
+    same scattering on the Ewald sphere.
+
+    The field is a second real volume of the padded size, so it doubles the
+    resident memory of the specimen. Both are placed on the compute device
+    together, or both streamed from the host when they do not fit.
     """
 
     _dose_weighted = False  # a tilt is a plain sum, not an exposure-filtered one
@@ -186,21 +237,68 @@ class TiltSeriesGenerator(MicrographGenerator):
         tilt: TiltGeometry = TiltGeometry(),
         coincidence_radius: float | torch.Tensor = 0.0,
         bfactor: float | torch.Tensor | None = None,
+        absorption_potential: torch.Tensor | None = None,
         **kwargs: Any,
     ):
-        if propagation.absorption_model == "inelastic_mfp":
-            raise ValueError(
-                "TiltSeriesGenerator does not support absorption_model='inelastic_mfp': "
-                "its iterative volume path requires explicit material/solvent "
-                "information to construct the absorption field. Use 'alpha' "
-                "or the particle ImageGenerator with the MFP model."
-            )
         if volume is None:
             raise ValueError("'volume' must be provided for TiltSeriesGenerator.")
 
+        mfp_absorption = propagation.absorption_model == "inelastic_mfp"
+        objective_aperture = None if optics is None else optics.objective_aperture
+        if objective_aperture is not None and not mfp_absorption:
+            raise ValueError(
+                "Optics(objective_aperture=...) requires "
+                "Propagation(absorption_model='inelastic_mfp'): under 'alpha' the "
+                "fitted amplitude contrast already stands in for aperture loss, "
+                "and applying both would count it twice."
+            )
+        if (mfp_absorption or absorption_potential is not None) and (
+            propagation.scattering_model != "multislice" or propagation.alpha != 0
+        ):
+            raise ValueError(
+                "TiltSeriesGenerator's absorption field (absorption_model="
+                "'inelastic_mfp' or an explicit absorption_potential) requires "
+                "multislice and alpha=0"
+            )
+
+        if absorption_potential is not None:
+            if (
+                absorption_potential.shape != volume.shape
+                or absorption_potential.dtype != volume.dtype
+                or absorption_potential.device != volume.device
+                or not absorption_potential.is_floating_point()
+                or not torch.isfinite(absorption_potential).all()
+                or (absorption_potential < 0).any()
+            ):
+                raise ValueError(
+                    "absorption_potential must be finite, nonnegative, real and "
+                    "match volume shape, dtype and device"
+                )
+
         self.ice = ice
+        volume_icemaker = resolve_icemaker(
+            ice.model,
+            pixel_size,
+            nxy=volume.shape[-1],
+            nz=volume.shape[-3],
+            ice_cache_dir=ice.cache_dir,
+            icemaker=icemaker,
+            parameterization=ice.parameterization,
+        )
+        # Resolved before the parent's constructor, which is handed "alpha"
+        # below: the field must be read off the DRY specimen, before ice is
+        # blended into it.
+        removal_mfps = resolve_removal_mfps(propagation, optics, voltage)
+        if absorption_potential is None and removal_mfps is not None:
+            with torch.no_grad():
+                absorption_potential = self._mfp_absorption_field(
+                    volume,
+                    pixel_size,
+                    removal_mfps,
+                    has_solvent=volume_icemaker is not None,
+                )
         volume = self._blend_ice(
-            volume, ice, icemaker, pixel_size, verbose, progressbars
+            volume, ice, volume_icemaker, pixel_size, verbose, progressbars
         )
 
         if isinstance(micrograph_size, int):
@@ -229,6 +327,27 @@ class TiltSeriesGenerator(MicrographGenerator):
             z_taper_width,
             pad_volume,
         )
+        if absorption_potential is not None:
+            absorption_potential = self._fit_volume_to_tilt(
+                absorption_potential,
+                desired_nxy,
+                angles,
+                quaternions,
+                edge_margin,
+                taper_width,
+                z_taper_width,
+                pad_volume,
+            )
+        # Scattering beyond the aperture is charged as absorption
+        # (`RemovalMFPs.removal`), so the share of it the grid carries is
+        # filtered out of the elastic potential, as the particle path does.
+        # The filter is isotropic in 3D rather than per beam-frame slice, so
+        # that it commutes with every tilt (see aperture_lowpass_isotropic).
+        if objective_aperture is not None:
+            with torch.no_grad():
+                volume = aperture_lowpass_isotropic(
+                    volume, pixel_size, objective_aperture, voltage
+                )
 
         super().__init__(
             specimen=volume,
@@ -247,8 +366,17 @@ class TiltSeriesGenerator(MicrographGenerator):
             # self.iterative_scattering always returns at self.nxy. This class's
             # own pad_fft controls IterativeScattering's internal multislice-canvas
             # padding only (see below), entirely independent of the parent's.
-            propagation=replace(propagation, pad_fft=False),
-            optics=optics,
+            # The parent cannot construct material fields and rejects the MFP
+            # model; this class builds the field above and propagates it
+            # itself. The aperture is stripped as well, because the
+            # parent accepts one only under the MFP model; both are restored
+            # below.
+            propagation=replace(propagation, pad_fft=False, absorption_model="alpha"),
+            optics=(
+                replace(optics, objective_aperture=None)
+                if optics is not None and objective_aperture is not None
+                else optics
+            ),
             envelopes=envelopes,
             camera=camera,
             progressbars=progressbars,
@@ -259,6 +387,13 @@ class TiltSeriesGenerator(MicrographGenerator):
             **kwargs,
         )
         self.propagation = propagation
+        self.optics = optics
+        self.absorption_model = propagation.absorption_model
+        self.objective_aperture = objective_aperture
+        self._removal_mfps = removal_mfps
+        # Like volume, keep this outside registered buffers for bounded-memory
+        # paired placement rather than unconditional Module.to() uploads.
+        self.absorption_potential = absorption_potential
         # MicrographGenerator.__init__ (just above) registered self.volume as a
         # buffer, which would otherwise be dragged onto the compute device by
         # any later `.to(device)` call on this module (e.g. the CLI pipelines'
@@ -364,6 +499,34 @@ class TiltSeriesGenerator(MicrographGenerator):
     # Forward methods                                                      #
     # ------------------------------------------------------------------ #
 
+    def _ensure_volume_placed(self) -> None:
+        if self.absorption_potential is None:
+            super()._ensure_volume_placed()
+            return
+        if (
+            self.volume.device == self.device
+            and self.absorption_potential.device == self.device
+        ):
+            return
+        volume = None
+        try:
+            volume = self.volume.to(self.device)
+            absorption = self.absorption_potential.to(self.device)
+        except torch.cuda.OutOfMemoryError:
+            volume = None
+            self.volume = self.volume.cpu()
+            self.absorption_potential = self.absorption_potential.cpu()
+            torch.cuda.empty_cache()
+            if not self._warned_volume_on_host:
+                warnings.warn(
+                    "Paired tilt potentials do not fit on the device; streaming both from CPU.",
+                    stacklevel=2,
+                )
+                self._warned_volume_on_host = True
+        else:
+            self.volume = volume
+            self.absorption_potential = absorption
+
     @staticmethod
     def _blend_ice(
         volume: torch.Tensor,
@@ -377,25 +540,69 @@ class TiltSeriesGenerator(MicrographGenerator):
         Blend ice into the raw input volume before any tilt-coverage or
         taper padding, so the padding operates on (and, for the
         reflect-padded XY margin, extends) the ice-filled volume.
+
+        ``icemaker`` is the one :func:`~specter.ice.resolve_icemaker` returned
+        for this volume, resolved by the caller because whether there is ice
+        also decides whether the absorption field has a solvent term.
         """
-        volume_icemaker = resolve_icemaker(
-            ice.model,
-            pixel_size,
-            nxy=volume.shape[-1],
-            nz=volume.shape[-3],
-            ice_cache_dir=ice.cache_dir,
-            icemaker=icemaker,
-            parameterization=ice.parameterization,
-        )
-        if volume_icemaker is not None:
+        if icemaker is not None:
             if verbose:
                 logger.info(f"Adding ice to volume using {ice.model} model")
             with torch.no_grad(), status("Tiling ice volume", disable=not progressbars):
                 volume = blend_ice_into_volume(
-                    volume, volume_icemaker, pixel_size, relax_steps=ice.relax_steps
+                    volume, icemaker, pixel_size, relax_steps=ice.relax_steps
                 )
 
         return volume
+
+    @staticmethod
+    def _mfp_absorption_field(
+        dry: torch.Tensor,
+        pixel_size: float,
+        removal_mfps: RemovalMFPs,
+        has_solvent: bool,
+    ) -> torch.Tensor | None:
+        """
+        The mean-free-path absorption field of the dry specimen, or None.
+
+        The same field the particle generators build
+        (:func:`~specter.imagegenerator._base.mfp_absorption_field`), read off
+        the specimen before ice is blended into it, with the occupancy
+        reference :func:`~specter.ice.blend_ice_into_volume` uses to weight
+        the ice, so specimen and solvent absorb in the voxels that hold them.
+
+        Unlike the particle path, the uniform case (no specimen mean free
+        path) is a field and not a scalar. A scalar factorises out of the
+        transmission function only when every slice is full of material. A
+        tilted slice is not: past the edges of the rotated slab it samples
+        vacuum, which the slicer zero-fills. A constant field over the
+        volume's box is sampled with the volume, so it absorbs where the
+        tilted beam crosses ice and nowhere else, and its path length grows
+        as ``t / cos(theta)`` as the ice's does.
+
+        Parameters
+        ----------
+        dry : torch.Tensor
+            The specimen potential before ice is blended in, shape
+            ``(1, Z, Y, X)``.
+        pixel_size : float
+            Voxel size in Angstrom.
+        removal_mfps : RemovalMFPs
+            The resolved mean free paths.
+        has_solvent : bool
+            Whether ice will be blended into the volume. Without it the
+            specimen is surrounded by vacuum, which does not absorb.
+
+        Returns
+        -------
+        torch.Tensor or None
+            The absorption potential in volts, or None when nothing absorbs:
+            no ice and no specimen mean free path, the case in which the
+            particle path's uniform absorption is zero too.
+        """
+        if removal_mfps.inelastic_specimen is None and not has_solvent:
+            return None
+        return mfp_absorption_field(dry, pixel_size, removal_mfps, has_solvent)
 
     def _fit_volume_to_tilt(
         self,
@@ -560,9 +767,17 @@ class TiltSeriesGenerator(MicrographGenerator):
             )
             theta_matrix = rotations.build_affine_matrix(R_mat, T_torch)
 
-            exitwave = self.iterative_scattering(
-                volume_scaled, theta_matrix, slice_batchsize=self.slice_batchsize
-            )
+            if self.absorption_potential is None:
+                exitwave = self.iterative_scattering(
+                    volume_scaled, theta_matrix, slice_batchsize=self.slice_batchsize
+                )
+            else:
+                exitwave = self.iterative_scattering.multislice_absorptive(
+                    volume_scaled,
+                    self.absorption_potential,
+                    theta_matrix,
+                    slice_batchsize=self.slice_batchsize,
+                )
 
             # Per-tilt parameters (defocus, dose, pre-exposure, coincidence
             # radius) are stored one entry per TILT, so they are selected by

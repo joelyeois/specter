@@ -476,7 +476,7 @@ def test_every_resolve_icemaker_call_forwards_a_parameterization():
     src = Path(__file__).resolve().parent.parent / "src" / "specter"
     offenders = []
     for path in src.rglob("*.py"):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue

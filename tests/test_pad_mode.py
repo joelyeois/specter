@@ -42,7 +42,7 @@ EXPECTED_MODE = {
 
 
 def _pad_volume_calls(path: Path) -> list[ast.Call]:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     return [
         node
         for node in ast.walk(tree)

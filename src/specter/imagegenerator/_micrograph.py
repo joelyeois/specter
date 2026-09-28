@@ -5,24 +5,29 @@
 
 from __future__ import annotations
 
+import math
 import warnings
-from typing import Any
+from typing import Any, cast
 
 import torch
 
 from specter import logger
 
-from ._base import BaseImager, pad_volume
+from ._base import BaseImager, RemovalMFPs, mfp_absorption_field, pad_volume
 from ..ice import (
     IceBank,
     RandomIcemaker,
     blend_ice_into_volume,
     resolve_icemaker,
 )
+from ..ice._blend import AbsorptionTarget
+from ..ice._profile import IceProfile
+from ..potential import absorption_potential, aperture_lowpass
 from ..progress import status
 from ..scattering import IterativeScattering
 from ..settings import Camera, Envelopes, Ice, Optics, Propagation
 from ..specimen import MicrographSpecimenGenerator
+from ..specimen._single_particle import AbsorptionRates
 
 
 class MicrographGenerator(BaseImager):
@@ -94,6 +99,40 @@ class MicrographGenerator(BaseImager):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+
+    Notes
+    -----
+    Under ``Propagation(absorption_model="inelastic_mfp")`` absorption is
+    modelled as in the particle generators: the imaginary potential is the
+    field of :func:`~specter.potential.inelastic_absorption_potential`, read
+    off the DRY specimen with the occupancy that also weights its ice, with
+    mean free paths resolved by
+    :func:`~specter.imagegenerator._base.resolve_removal_mfps`. The ice exists
+    separately from the specimen only while it is being blended, so the
+    field is written by the blend itself, a slab at a time from the same
+    occupancy read (:class:`~specter.ice._blend.AbsorptionTarget`); for a
+    `MicrographSpecimenGenerator` that happens in
+    :meth:`~specter.specimen.MicrographSpecimenGenerator.assemble`, once per
+    specimen. The field is propagated alongside the potential by
+    :meth:`~specter.scattering.IterativeScattering.multislice_absorptive`,
+    and requires ``scattering_model="multislice"``.
+
+    Without a specimen mean free path, and with ice filling the box, the
+    field is uniform and no field is built. The beam is untilted, so every
+    slice of the box is full of material, including the reflect-padded
+    margin under ``pad_fft``, and a constant absorption factorises out of
+    each slice's transmission function: the exit wave is multiplied by
+    ``exp(-sigma * t * V_ab)`` for a box ``t`` thick, which is exact for the
+    multislice recursion. An :class:`~specter.ice.IceProfile` leaves vacuum
+    in part of the box and needs the field. With no ice and no specimen mean
+    free path nothing absorbs, as in the particle path. An objective aperture
+    low-passes each slice of the specimen volume with
+    :func:`~specter.potential.aperture_lowpass`, in place, as the particle
+    path does in its beam frame.
+
+    The field is a second canvas the size of the specimen. It is placed on
+    the compute device together with the volume, or both are streamed from
+    the host when they do not fit.
     """
 
     def __init__(
@@ -130,12 +169,14 @@ class MicrographGenerator(BaseImager):
         else:
             raise ValueError("micrograph_size must have same dimensions in x and y.")
 
-        if propagation.absorption_model == "inelastic_mfp":
+        if (
+            propagation.absorption_model == "inelastic_mfp"
+            and propagation.scattering_model != "multislice"
+        ):
             raise ValueError(
-                "MicrographGenerator does not support absorption_model='inelastic_mfp': "
-                "its iterative volume path requires explicit material/solvent "
-                "information to construct the absorption field. Use 'alpha' "
-                "or the particle ImageGenerator with the MFP model."
+                f"{type(self).__name__}'s absorption_model='inelastic_mfp' "
+                "requires scattering_model='multislice': the absorption field "
+                "is propagated by IterativeScattering.multislice_absorptive."
             )
         self.pad_fft = propagation.pad_fft
         self.pad_nxy = nxy + (nxy // 2) * 2 if self.pad_fft else nxy
@@ -246,6 +287,17 @@ class MicrographGenerator(BaseImager):
         )
 
         self.save_clean_exitwaves = save_clean_exitwaves
+        # Like `volume` in TiltSeriesGenerator, kept out of the registered
+        # buffers so that `.to(device)` does not upload a second canvas
+        # unconditionally; `_ensure_volume_placed` places the two together.
+        self.absorption_potential: torch.Tensor | None = None
+        self._uniform_absorption_V = 0.0
+        self._absorption_rates: AbsorptionRates | None = None
+
+        if specimen_gen is not None:
+            self._init_absorption(
+                specimen_gen.icemaker is not None, specimen_gen.ice_profile
+            )
 
         if volume is not None:
             volume_icemaker = resolve_icemaker(
@@ -257,9 +309,26 @@ class MicrographGenerator(BaseImager):
                 icemaker=icemaker,
                 parameterization=ice.parameterization,
             )
+            self._init_absorption(volume_icemaker is not None, ice.profile)
+            rates = self._absorption_rates
+            field: torch.Tensor | None = None
+            if rates is not None and volume_icemaker is None:
+                # Vacuum around the specimen: only the specimen absorbs.
+                with torch.no_grad():
+                    field = mfp_absorption_field(
+                        volume,
+                        pixel_size,
+                        cast(RemovalMFPs, self._removal_mfps),
+                        has_solvent=False,
+                    )
+            dry = volume
             if volume_icemaker is not None:
                 if self.verbose:
                     logger.info(f"Adding ice to volume using {ice.model} model")
+                target = None
+                if rates is not None:
+                    field = torch.empty_like(volume)
+                    target = AbsorptionTarget(field, rates.specimen, rates.solvent)
                 with (
                     torch.no_grad(),
                     status("Tiling ice volume", disable=not self.progressbars),
@@ -270,17 +339,85 @@ class MicrographGenerator(BaseImager):
                         pixel_size,
                         relax_steps=ice.relax_steps,
                         profile=ice.profile,
+                        absorption=target,
                     )
+            # In place only on a canvas this class allocated, never on the
+            # caller's tensor.
+            volume = self._apply_aperture(volume, inplace=volume is not dry)
             self.register_buffer("volume", volume)
+            self.absorption_potential = field
+
+    def _init_absorption(self, has_ice: bool, profile: IceProfile | None) -> None:
+        """
+        Decide how the mean-free-path absorption is applied, if at all.
+
+        Sets ``_absorption_rates`` when a field has to be built (see
+        :meth:`~specter.specimen.MicrographSpecimenGenerator.assemble`), or
+        ``_uniform_absorption_V`` when a scalar serves, which the class Notes
+        explain. Neither under ``absorption_model="alpha"``.
+
+        Parameters
+        ----------
+        has_ice : bool
+            Whether ice is blended into the specimen.
+        profile : IceProfile or None
+            The ice's lateral profile; one leaves vacuum in the box.
+        """
+        removal = self._removal_mfps
+        if removal is None:
+            return
+        solvent = absorption_potential(removal.removal("solvent"), self.voltage)
+        if removal.inelastic_specimen is not None:
+            self._absorption_rates = AbsorptionRates(
+                specimen=absorption_potential(
+                    removal.removal("specimen"), self.voltage
+                ),
+                solvent=solvent if has_ice else 0.0,
+            )
+        elif has_ice and profile is None:
+            self._uniform_absorption_V = solvent
+        elif has_ice:
+            self._absorption_rates = AbsorptionRates(specimen=solvent, solvent=solvent)
+
+    def _apply_aperture(
+        self, volume: torch.Tensor, inplace: bool = True
+    ) -> torch.Tensor:
+        """
+        Low-pass the specimen at the objective aperture, in place by default.
+
+        Scattering beyond the aperture is charged as absorption
+        (``RemovalMFPs.removal``), so the share of it the grid carries is
+        filtered out of the elastic potential, as the particle path does. The
+        beam is untilted, so the volume's slices are the beam frame's. A
+        no-op without an aperture, and at voxel sizes coarse enough that it
+        lies outside Nyquist.
+        """
+        if self.objective_aperture is None:
+            return volume
+        nxy = volume.shape[-1] * volume.shape[-2]
+        with torch.no_grad():
+            return aperture_lowpass(
+                volume,
+                self.pixel_size,
+                self.objective_aperture,
+                self.voltage,
+                max_slices_per_chunk=max(1, min(64, 2**26 // nxy)),
+                out=volume if inplace else None,
+            )
 
     def _generate_volume(self) -> None:
         if self.verbose:
             logger.info(
                 "Generating specimen volume (this may take a while for large micrographs)"
             )
-        self.volume = self.specimen_gen.generate()
+        assembled = self.specimen_gen.assemble(absorption=self._absorption_rates)
+        self.volume = assembled.volume
+        self.absorption_potential = assembled.absorption
         if self.move_to_cpu:
             self.volume = self.volume.cpu()
+            if self.absorption_potential is not None:
+                self.absorption_potential = self.absorption_potential.cpu()
+        self.volume = self._apply_aperture(self.volume)
 
     def regenerate_specimen(self) -> None:
         """
@@ -325,12 +462,42 @@ class MicrographGenerator(BaseImager):
         CLI user whose run had silently taken the slow path.
 
         A no-op once the volume has settled on a device.
+
+        With an absorption field the two are placed together or not at all:
+        the propagator reads both slice by slice and needs them on one
+        device.
         """
-        if self.volume.device == self.device:
+        if self.absorption_potential is None:
+            if self.volume.device == self.device:
+                return
+            placed = self._place_on_device(self.volume, "specimen volume")
+            if placed is not None:
+                self.volume = placed
             return
-        placed = self._place_on_device(self.volume, "specimen volume")
-        if placed is not None:
-            self.volume = placed
+        if (
+            self.volume.device == self.device
+            and self.absorption_potential.device == self.device
+        ):
+            return
+        try:
+            pair = (
+                self.volume.to(self.device),
+                self.absorption_potential.to(self.device),
+            )
+        except torch.cuda.OutOfMemoryError:
+            self.volume = self.volume.cpu()
+            self.absorption_potential = self.absorption_potential.cpu()
+            torch.cuda.empty_cache()
+            if not self._warned_volume_on_host:
+                warnings.warn(
+                    f"{type(self).__name__}: the specimen volume and its "
+                    f"absorption field do not fit on {self.device} together; "
+                    "streaming both from the host.",
+                    stacklevel=2,
+                )
+                self._warned_volume_on_host = True
+        else:
+            self.volume, self.absorption_potential = pair
 
     def _place_on_device(self, V: torch.Tensor, what: str) -> torch.Tensor | None:
         """
@@ -438,9 +605,35 @@ class MicrographGenerator(BaseImager):
             )
             self.clean_exitwaves = to_batch(self.clean_exitwaves)
 
-        self.exitwaves = self.iterative_scattering(
-            V, pose=0, slice_batchsize=self.slice_batchsize
-        )
+        if self.absorption_potential is None:
+            self.exitwaves = self.iterative_scattering(
+                V, pose=0, slice_batchsize=self.slice_batchsize
+            )
+            if self._uniform_absorption_V:
+                # A constant absorption factorises out of every slice's
+                # transmission function (see the class Notes).
+                self.exitwaves = self.exitwaves * math.exp(
+                    -self.iterative_scattering.sigma
+                    * self.pixel_size
+                    * V.shape[1]
+                    * self._uniform_absorption_V
+                )
+        else:
+            field = pad_volume(
+                self.absorption_potential.expand(n_propagate, -1, -1, -1),
+                self.nxy,
+                self.nz,
+                None,
+                self.pad_fft,
+                xy_pad_mode="reflect",
+            )
+            self.exitwaves = self.iterative_scattering(
+                V,
+                pose=0,
+                slice_batchsize=self.slice_batchsize,
+                absorption_source=field,
+            )
+            del field
         self.exitwaves = to_batch(self.exitwaves)
 
         self.detector_waves = self._aberrate(self.exitwaves, self._ctf_batch(idx))

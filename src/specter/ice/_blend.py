@@ -21,6 +21,8 @@ the ice as a seam.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 
 from ..potential import (
@@ -42,6 +44,70 @@ from specter.options import IceModel, ScatteringFactors
 
 if TYPE_CHECKING:
     from ._profile import IceProfile
+
+
+@dataclass(frozen=True)
+class AbsorptionTarget:
+    r"""
+    The mean-free-path absorption field an ice blend writes as it goes.
+
+    The blend reads the occupancy of the dry specimen slab by slab, which is
+    exactly the material fraction
+    :func:`~specter.potential.inelastic_absorption_potential` needs. Writing
+    the field from that same read keeps specimen and solvent absorbing in
+    the voxels that hold them, and costs no second pass over the volume.
+
+    Each voxel receives
+
+    .. math:: o\,V_{spec} + (1 - o)\,w\,V_{solv},
+
+    with :math:`o` the occupancy and :math:`w` the ice's presence: the
+    :class:`~specter.ice.IceProfile` window, or 1 when ice fills the box.
+    Without a profile this is ``inelastic_absorption_potential``'s field.
+
+    Attributes
+    ----------
+    out : torch.Tensor
+        Destination, the shape of the blended volume, on any device. Written
+        a slab at a time.
+    specimen : float
+        Absorption potential of fully occupied material, in volts.
+    solvent : float
+        Absorption potential of the ice, in volts.
+    """
+
+    out: torch.Tensor
+    specimen: float
+    solvent: float
+
+    def write(
+        self,
+        occupancy: torch.Tensor,
+        start: int,
+        end: int,
+        window: torch.Tensor | None = None,
+    ) -> None:
+        """
+        Write the field for slices ``[start, end)`` from their occupancy.
+
+        Parameters
+        ----------
+        occupancy : torch.Tensor
+            Occupancy of the dry specimen over the slab, ``(B, end - start,
+            Y, X)``, in [0, 1]. Not modified.
+        start, end : int
+            The slab's z range.
+        window : torch.Tensor or None, optional
+            The ice's presence over the slab, broadcastable to `occupancy`.
+            None when ice fills the box.
+        """
+        if window is None:
+            field = occupancy * (self.specimen - self.solvent) + self.solvent
+        else:
+            field = occupancy * self.specimen + (1.0 - occupancy) * (
+                window * self.solvent
+            )
+        self.out[:, start:end] = field.to(self.out.device, self.out.dtype)
 
 
 class IceSlabBlender:
@@ -87,6 +153,8 @@ class IceSlabBlender:
         start: int,
         end: int,
         free: torch.Tensor | None = None,
+        absorption: AbsorptionTarget | None = None,
+        window: torch.Tensor | None = None,
     ) -> None:
         """
         Weight `ice` by the free fraction of ``V[:, start:end]`` and add it.
@@ -108,10 +176,20 @@ class IceSlabBlender:
             occupancy from a volume other than the one being blended into:
             the undamaged specimen, when the dose envelope has since been
             applied to it. Any dtype; cast per slab.
+        absorption : AbsorptionTarget or None, optional
+            Also write the mean-free-path absorption field for the slab, from
+            the same occupancy that weights the ice. Default None.
+        window : torch.Tensor or None, optional
+            The ice's presence over the slab (the profile window `ice` has
+            already been multiplied by), read only by `absorption`. None when
+            ice fills the box.
         """
         nz = V.shape[1]
         if free is not None:
-            ice.mul_(free[:, start:end].to(ice.device, ice.dtype))
+            free_slab = free[:, start:end].to(ice.device, ice.dtype)
+            if absorption is not None:
+                absorption.write(1.0 - free_slab, start, end, window)
+            ice.mul_(free_slab)
             if V.device == ice.device:
                 V[:, start:end].add_(ice)
             else:
@@ -131,6 +209,8 @@ class IceSlabBlender:
             sigma_angstrom=self.sigma_angstrom,
             full_potential=self.full_potential,
         )[:, core]
+        if absorption is not None:
+            absorption.write(occ, start, end, window)
         # In place, and reusing `occ`: `(1 - occ).clamp(0, 1)` would
         # allocate two more slabs to produce a value consumed once.
         ice.mul_(occ.neg_().add_(1.0).clamp_(0.0, 1.0))
@@ -227,6 +307,7 @@ def blend_ice_into_volume(
     profile: "IceProfile | None" = None,
     inplace: bool = False,
     sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
+    absorption: AbsorptionTarget | None = None,
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, weighted by how much room
@@ -275,7 +356,12 @@ def blend_ice_into_volume(
         :func:`~specter.potential.potential_occupancy`. Ignored when
         ``occupancy`` is given. Default
         :data:`~specter.potential.WATER_COARSE_GRAIN_SIGMA_ANGSTROM`.
-
+    absorption : AbsorptionTarget, optional
+        Also write the mean-free-path absorption field of the specimen and
+        the ice into ``absorption.out``, from the occupancy of ``V`` as it was
+        before any ice was added: the same read that weights the ice, so the
+        two agree voxel for voxel and the volume is not blurred twice. Default
+        None.
     Returns
     -------
     torch.Tensor
@@ -307,6 +393,15 @@ def blend_ice_into_volume(
                 relax_steps=relax_steps,
                 profile=profile,
                 sigma_angstrom=sigma_angstrom,
+                absorption=(
+                    None
+                    if absorption is None
+                    else AbsorptionTarget(
+                        absorption.out[b : b + 1],
+                        absorption.specimen,
+                        absorption.solvent,
+                    )
+                ),
             )
         return out
     if isinstance(icemaker, IceBank):
@@ -356,7 +451,16 @@ def blend_ice_into_volume(
     )
     for start in range(0, nz, chunk):
         end = min(start + chunk, nz)
-        blender.add(out, ice[:, start:end], start, end)
+        window = (
+            profile.window(
+                nz, nxy, voxel_size, z_slice=slice(start, end), device=ice.device
+            )[None]
+            if absorption is not None and profile is not None
+            else None
+        )
+        blender.add(
+            out, ice[:, start:end], start, end, absorption=absorption, window=window
+        )
     return out
 
 
@@ -432,6 +536,7 @@ def _blend_ice_slabwise(
     profile: "IceProfile | None" = None,
     sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     slab_voxels: int = 2**27,
+    absorption: AbsorptionTarget | None = None,
 ) -> torch.Tensor:
     """
     :func:`blend_ice_into_volume` for one host-resident volume, slab by slab
@@ -459,6 +564,8 @@ def _blend_ice_slabwise(
     slab_voxels : int, optional
         Voxels per slab core; the working canvases are a few times this.
         Default ``2**27`` (0.5 GB of float32).
+    absorption
+        As for :func:`blend_ice_into_volume`.
 
     Returns
     -------
@@ -495,8 +602,7 @@ def _blend_ice_slabwise(
     offsets = np.concatenate([[0], np.cumsum(np.bincount(key, minlength=n_buckets))])
     del key
 
-    for z0 in range(0, nz, chunk):
-        z1 = min(z0 + chunk, nz)
+    def ice_slab(z0: int, z1: int) -> torch.Tensor:
         lo, hi = z0 - halo, z1 + halo
         depth = hi - lo
         coords = _slab_atoms(pos, offsets, chunk, nz, dx, lo, hi, device)
@@ -512,13 +618,20 @@ def _blend_ice_slabwise(
             :, 0
         ]
         del deltas
-        ice = spatial_convolve3d_same(padded, kernel)[
+        return spatial_convolve3d_same(padded, kernel)[
             :, halo : halo + (z1 - z0), kr:-kr, kr:-kr
         ]
-        del padded
-        if profile is not None:
-            ice *= profile.window(nz, n, dx, z_slice=slice(z0, z1), device=device)[None]
 
-        blender.add(V, ice, z0, z1)
-        del ice
+    for z0 in range(0, nz, chunk):
+        z1 = min(z0 + chunk, nz)
+        ice = ice_slab(z0, z1)
+        window = None
+        if profile is not None:
+            window = profile.window(nz, n, dx, z_slice=slice(z0, z1), device=device)[
+                None
+            ]
+            ice *= window
+
+        blender.add(V, ice, z0, z1, absorption=absorption, window=window)
+        del ice, window
     return V

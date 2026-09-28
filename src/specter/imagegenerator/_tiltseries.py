@@ -9,7 +9,6 @@ from specter import logger
 
 from dataclasses import replace
 from typing import Any, Sequence
-import warnings
 
 import roma
 import torch
@@ -498,34 +497,6 @@ class TiltSeriesGenerator(MicrographGenerator):
     # ------------------------------------------------------------------ #
     # Forward methods                                                      #
     # ------------------------------------------------------------------ #
-
-    def _ensure_volume_placed(self) -> None:
-        if self.absorption_potential is None:
-            super()._ensure_volume_placed()
-            return
-        if (
-            self.volume.device == self.device
-            and self.absorption_potential.device == self.device
-        ):
-            return
-        volume = None
-        try:
-            volume = self.volume.to(self.device)
-            absorption = self.absorption_potential.to(self.device)
-        except torch.cuda.OutOfMemoryError:
-            volume = None
-            self.volume = self.volume.cpu()
-            self.absorption_potential = self.absorption_potential.cpu()
-            torch.cuda.empty_cache()
-            if not self._warned_volume_on_host:
-                warnings.warn(
-                    "Paired tilt potentials do not fit on the device; streaming both from CPU.",
-                    stacklevel=2,
-                )
-                self._warned_volume_on_host = True
-        else:
-            self.volume = volume
-            self.absorption_potential = absorption
 
     @staticmethod
     def _blend_ice(

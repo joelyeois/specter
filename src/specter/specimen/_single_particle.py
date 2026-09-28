@@ -5,6 +5,8 @@ particle template plus amorphous ice.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 import lightning as L
 
@@ -17,9 +19,52 @@ from ..ice import (
     blend_ice_into_volume,
     resolve_icemaker,
 )
-from ..potential import template_occupancy_reference
+from ..ice._blend import AbsorptionTarget
+from ..potential import potential_occupancy_slabs, template_occupancy_reference
 from ..progress import status
 from ..settings import Crowding, Ice, Packing
+
+
+@dataclass(frozen=True)
+class AbsorptionRates:
+    """
+    Absorption potentials, in volts, for a specimen's two materials.
+
+    What :meth:`MicrographSpecimenGenerator.assemble` needs to build the
+    mean-free-path absorption field: each voxel receives
+    ``o * specimen + (1 - o) * w * solvent``, with ``o`` the occupancy the
+    ice blend reads and ``w`` the ice's presence.
+
+    Attributes
+    ----------
+    specimen : float
+        Absorption potential of fully occupied material. Equal to `solvent`
+        when the specimen absorbs at the ice's rate.
+    solvent : float
+        Absorption potential of the ice. Ignored when there is no ice, since
+        vacuum does not absorb.
+    """
+
+    specimen: float
+    solvent: float
+
+
+@dataclass(frozen=True)
+class AssembledSpecimen:
+    """
+    One assembled micrograph specimen.
+
+    Attributes
+    ----------
+    volume : torch.Tensor
+        The scattering potential with its ice, ``(1, Z, Y, X)``.
+    absorption : torch.Tensor or None
+        The mean-free-path absorption field, same shape, or None when none
+        was requested or nothing absorbs.
+    """
+
+    volume: torch.Tensor
+    absorption: torch.Tensor | None = None
 
 
 class MicrographSpecimenGenerator(L.LightningModule):
@@ -237,6 +282,32 @@ class MicrographSpecimenGenerator(L.LightningModule):
         V : torch.Tensor
             Populated 3D volume of shape (1, Z, Y, X).
         """
+        return self.assemble().volume
+
+    def assemble(self, absorption: AbsorptionRates | None = None) -> AssembledSpecimen:
+        """
+        Generate the populated volume, and the fields read off its dry form.
+
+        The specimen exists without its ice only inside this method: the
+        blend writes the ice into the assembled canvas in place. Everything
+        that must be read off the DRY specimen is therefore done here.
+
+        Parameters
+        ----------
+        absorption : AbsorptionRates, optional
+            Build the mean-free-path absorption field alongside the volume.
+            With ice it is written by the blend itself, a slab at a time from
+            the occupancy that weights the ice (see
+            :class:`~specter.ice._blend.AbsorptionTarget`), so it costs one
+            extra canvas and no extra blur. Without ice only the specimen
+            term remains, and nothing is built unless the specimen absorbs.
+            Default None.
+
+        Returns
+        -------
+        AssembledSpecimen
+            The volume and, when requested, its absorption field.
+        """
         device = self.device
         # Assemble on CPU when move_to_cpu is set — avoids holding two copies of the
         # full micrograph volume in VRAM simultaneously (crowd accumulator + V).
@@ -264,18 +335,51 @@ class MicrographSpecimenGenerator(L.LightningModule):
         if keep_clean:
             self.clean_V = V.clone()
 
-        # 2. Add ice
-        if self.icemaker is not None:
-            with torch.no_grad():
-                with status("Tiling ice volume", disable=not self.progressbars):
-                    V = blend_ice_into_volume(
-                        V,
-                        self.icemaker,
-                        self.pixel_size,
-                        full_potential=self._occupancy_reference(),
-                        relax_steps=self.ice_relax_steps,
-                        profile=self.ice_profile,
-                        inplace=True,
-                    )
+        field: torch.Tensor | None = None
+        target: AbsorptionTarget | None = None
+        if absorption is not None and self.icemaker is not None:
+            field = torch.empty_like(V)
+            target = AbsorptionTarget(field, absorption.specimen, absorption.solvent)
+        elif absorption is not None and absorption.specimen > 0.0:
+            # No ice: vacuum surrounds the specimen and only it absorbs.
+            field = self._specimen_absorption(V, absorption.specimen)
 
-        return V
+        if self.icemaker is None:
+            return AssembledSpecimen(V, field)
+
+        # 2. Add ice
+        with torch.no_grad():
+            with status("Tiling ice volume", disable=not self.progressbars):
+                V = blend_ice_into_volume(
+                    V,
+                    self.icemaker,
+                    self.pixel_size,
+                    full_potential=self._occupancy_reference(),
+                    relax_steps=self.ice_relax_steps,
+                    profile=self.ice_profile,
+                    inplace=True,
+                    absorption=target,
+                )
+
+        return AssembledSpecimen(V, field)
+
+    def _specimen_absorption(self, V: torch.Tensor, specimen: float) -> torch.Tensor:
+        """
+        ``occupancy * specimen`` over a specimen with no ice around it.
+
+        Read a z-slab at a time on the icemaker-free compute device, with the
+        same occupancy reference the blend would use, and written into a
+        field on `V`'s device.
+        """
+        field = torch.empty_like(V)
+        chunk = max(1, 2**24 // (self.nxy * self.nxy))
+        with torch.no_grad():
+            for z0, z1, occ in potential_occupancy_slabs(
+                V,
+                self.pixel_size,
+                chunk,
+                full_potential=self._occupancy_reference(),
+                device=self.device,
+            ):
+                field[:, z0:z1] = (occ * specimen).to(field.device)
+        return field

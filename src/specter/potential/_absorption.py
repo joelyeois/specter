@@ -454,6 +454,7 @@ def aperture_lowpass(
     aperture_mrad: float,
     voltage_kv: float,
     max_slices_per_chunk: int = 64,
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Remove a potential's transverse detail beyond the objective aperture.
@@ -480,6 +481,10 @@ def aperture_lowpass(
     max_slices_per_chunk : int, optional
         Z-slices transformed at once, bounding the complex working set.
         Default 64.
+    out : torch.Tensor, optional
+        Where to write the result, which may be `v` itself: each chunk is
+        transformed before it is written back, so filtering in place is
+        safe and saves a whole canvas. Default None allocates one.
 
     Returns
     -------
@@ -494,7 +499,8 @@ def aperture_lowpass(
     ky = torch.fft.fftfreq(ny, d=pixel_size, device=v.device)
     kx = torch.fft.rfftfreq(nx, d=pixel_size, device=v.device)
     mask = (ky[:, None] ** 2 + kx[None, :] ** 2) <= k_ap**2
-    out = torch.empty_like(v)
+    if out is None:
+        out = torch.empty_like(v)
     for z0 in range(0, v.shape[-3], max_slices_per_chunk):
         z1 = min(z0 + max_slices_per_chunk, v.shape[-3])
         chunk = torch.fft.rfft2(v[..., z0:z1, :, :]) * mask

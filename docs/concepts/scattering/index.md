@@ -157,18 +157,36 @@ specimen mean free path the field is uniform, but it is constructed as a
 constant over the volume rather than applied as a scalar. A tilted slice
 extends past the rotated slab into vacuum, so a scalar would absorb where the
 beam crosses no material; the field is zero there, and a slab of thickness
-\(t\) attenuates as \(\exp(-t/(\Lambda\cos	heta))\) at tilt \(	heta\). An
+\(t\) attenuates as \(\exp(-t/(\Lambda\cos\theta))\) at tilt \(\theta\). An
 explicit `absorption_potential` supplied to the constructor takes precedence
 over the mean-free-path settings. The field is a second volume of the padded
 size, which doubles the resident memory of the specimen.
 
-`MicrographGenerator` and `TomogramReconstructor` reject
-`absorption_model="inelastic_mfp"` explicitly. Their iterative paths need
-material information that distinguishes specimen, solvent, and vacuum, and a
-pre-solvated real potential is insufficient for the occupancy estimator.
-These paths still support `alpha`.
-This restriction does not remove the low-level propagators' support for
-supplied complex potentials.
+`MicrographGenerator` applies the model to a micrograph. The dry specimen
+exists without its ice only while the ice is being blended into it, so the
+field is written by the blend itself, one z-slab at a time, from the occupancy
+read that also weights the ice. For a `MicrographSpecimenGenerator` this takes
+place in its `assemble` method, once per specimen; for a pre-assembled volume,
+at construction. The field is therefore computed on the same device as the
+ice, a slab at a time, and costs one additional canvas and no additional
+occupancy pass. It is propagated alongside the potential by
+`IterativeScattering.multislice_absorptive`, which requires
+`scattering_model="multislice"`. Without a specimen mean free path and with
+ice filling the box, the absorption is uniform and no field is built: the beam
+is untilted, every slice is filled with material (the reflect-padded margin
+under `pad_fft` included), and a constant imaginary potential \(V_{ab}\)
+factorises out of each slice's transmission function. The exit wave of a box
+of thickness \(t\) is then multiplied by \(\exp(-\sigma t V_{ab})\), which
+is exact for the multislice recursion. An `IceProfile` leaves vacuum in part
+of the box, so the uniform case with a profile builds a field that is zero
+where the profile window excludes ice.
+
+`TomogramReconstructor` rejects `absorption_model="inelastic_mfp"`
+explicitly. Its iterative path needs material information that distinguishes
+specimen, solvent, and vacuum, and a pre-solvated real potential is
+insufficient for the occupancy estimator. It still supports `alpha`. This
+restriction does not remove the low-level propagators' support for supplied
+complex potentials.
 
 A possible extension is described in [the Himes-style design sketch](himes-inelastic-design.md).
 
@@ -198,12 +216,13 @@ interference) and for the standard protein composition
 rate adds to the inelastic one, and where the aperture lies inside the grid's
 Nyquist frequency the potential is low-passed at the aperture
 (`potential.aperture_lowpass`) so that the scattering the grid does carry is
-not also counted. A tilt series cannot use that filter, because it acts on
+not also counted. `MicrographGenerator` applies the same per-slice filter to
+its untilted specimen volume. A tilt series cannot use that filter, because it acts on
 transverse frequencies of the beam frame and the beam direction changes from
 tilt to tilt. `TiltSeriesGenerator` instead removes all 3D frequencies beyond
 the aperture (`potential.aperture_lowpass_isotropic`), a spherical filter that
 commutes with rotation. On the Ewald sphere the two filters coincide to within
-\(	heta^2/8\) relative at scattering angle \(	heta\), so they keep and remove
+\(\theta^2/8\) relative at scattering angle \(\theta\), so they keep and remove
 the same first-order scattering. The aperture requires `absorption_model="inelastic_mfp"`,
 because the `alpha` model's fitted constant already represents this loss.
 

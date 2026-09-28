@@ -258,6 +258,7 @@ def potential_occupancy_slabs(
     slab: int,
     full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
     sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
+    device: torch.device | str | None = None,
 ) -> Iterator[tuple[int, int, torch.Tensor]]:
     """
     :func:`potential_occupancy`, evaluated a z-slab at a time.
@@ -280,6 +281,10 @@ def potential_occupancy_slabs(
     sigma_angstrom : float, optional
         Coarse-graining length in Angstrom. Default
         :data:`WATER_COARSE_GRAIN_SIGMA_ANGSTROM`.
+    device : torch.device or str, optional
+        Where each widened slab is blurred, and where the yielded occupancy
+        lives. A host volume too large for the device is read a slab at a
+        time this way. Default None, `V`'s own device.
 
     Yields
     ------
@@ -294,8 +299,9 @@ def potential_occupancy_slabs(
     for z0 in range(0, nz, slab):
         z1 = min(z0 + slab, nz)
         lo, hi = max(0, z0 - halo), min(nz, z1 + halo)
+        src = V[..., lo:hi, :, :]
         wide = potential_occupancy(
-            V[..., lo:hi, :, :],
+            src if device is None else src.to(device),
             voxel_size,
             sigma_angstrom=sigma_angstrom,
             full_potential=full_potential,

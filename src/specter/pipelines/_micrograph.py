@@ -37,6 +37,7 @@ from specter.settings import (
     Crowding,
     Envelopes,
     Ice,
+    Optics,
     Packing,
     Propagation,
     bundle_from_config,
@@ -134,6 +135,9 @@ def run_micrograph(config: MicrographConfig) -> None:
     )
 
     cs_angstrom = _mm_to_angstrom(config.cs)
+    # The mean-free-path model replaces the amplitude-contrast ratio as the
+    # source of the imaginary potential; keeping both would absorb twice.
+    alpha = 0.0 if config.absorption_model == "inelastic_mfp" else config.alpha
 
     # Built on the compute device and moved to the host: the template is
     # one particle box (a few hundred MB at most), the analytic renderer is
@@ -241,7 +245,8 @@ def run_micrograph(config: MicrographConfig) -> None:
         ctf_params,
         config.voltage,
         dose,
-        propagation=bundle_from_config(Propagation, config),
+        propagation=bundle_from_config(Propagation, config, alpha=alpha),
+        optics=bundle_from_config(Optics, config),
         envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
         camera=bundle_from_config(Camera, config, n_frames=n_frames),
         bfactor=config.bfactor,
@@ -299,7 +304,7 @@ def run_micrograph(config: MicrographConfig) -> None:
             n,
             voltage=config.voltage,
             pixel_size=config.pixel_size,
-            alpha=config.alpha,
+            alpha=alpha,
             ctf_params=ctf_params,
             output_dir=output_dir,
             filename=config.filename,

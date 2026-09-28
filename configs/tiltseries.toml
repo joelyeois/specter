@@ -31,6 +31,13 @@ max_tilt_angle = 45.0              # degrees
 n_tilts = 61
 tilt_axis = "y"                    # x | y
 
+[absorption]
+absorption_model = "alpha"         # alpha | inelastic_mfp -- inelastic_mfp derives the
+                                   # imaginary potential per material and sets alpha to 0
+# inelastic_mfp_solvent = 3950.0   # Å; unset = measured ice value at the run's voltage
+# inelastic_mfp_specimen = 2460.0  # Å; unset = the ice's value (no absorption contrast)
+# objective_aperture = 12.0        # mrad, inelastic_mfp only (70 µm on a Krios)
+
 [models]
 scattering_model = "multislice"    # multislice | firstborn | projection | ctf
 noise_model = "poisson"            # poisson | none
@@ -68,12 +75,14 @@ energy_spread = 0.7                # eV (FWHM)
 deltaV_V = 0.06e-6                 # unitless (ΔV/V)
 deltaI_I = 0.01e-6                 # unitless (ΔI/I)
 dose_envelope = false
+# dose_envelope_target = "specimen"  # damage each tilt's specimen, not the ice
 coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
 
 # --- Ice ---
 ice_model = "gd"                   # gd | random | none
 # ice_cache_dir = "ice"            # defaults to the cache bundled in the package
 ice_relax_steps = 0                # local MLBOP seam-relaxation steps, ice_model="gd" only
+# ice_motion_variance = 0.38       # Å² per e⁻/Å²; needs the same dose on every tilt
 bulk_scattering_factors = "kirkland"  # kirkland | lobato | shtyrov; the ice and any
                                    # other non-biomolecular material
 

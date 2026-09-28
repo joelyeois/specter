@@ -116,3 +116,124 @@ def seed_setting(draws: str, unset: str = "Auto-generated and logged if unset.")
     dataclasses.Field
     """
     return setting(None, help=f"RNG seed for {draws}. {unset}")
+
+
+# --- Absorption and exposure physics ---------------------------------------
+#
+# Shared by the particle, micrograph and tilt-series configs, which model the
+# same physics through the same settings groups (`Propagation`, `Optics`,
+# `Envelopes`, `Ice`), so the fields read the same in every command's help.
+
+
+def absorption_model_setting() -> Any:
+    """The ``absorption_model`` field."""
+    return setting(
+        "alpha",
+        help=(
+            "Where the imaginary potential comes from. 'alpha' scales the real "
+            "potential by the amplitude-contrast ratio, tying absorption to every "
+            "atomic cusp. 'inelastic_mfp' derives it per material from a measured "
+            "inelastic mean free path instead, and ignores alpha (including a "
+            ".cs/.star file's, which CTF estimation takes as an input and never "
+            "fits)."
+        ),
+    )
+
+
+def inelastic_mfp_solvent_setting() -> Any:
+    """The ``inelastic_mfp_solvent`` field, in Angstrom."""
+    return setting(
+        None,
+        help=(
+            "Inelastic mean free path of the ice, in Angstrom, for "
+            "absorption_model='inelastic_mfp'. Unset takes the measured value for "
+            "the run's voltage (3950 at 300 kV, 2030 at 120 kV), and elsewhere an "
+            "estimate from those two with a warning (200 kV: 3040 +/- 7%; 100 kV: "
+            "1730 +/- 20%)."
+        ),
+        check="positive",
+    )
+
+
+def inelastic_mfp_specimen_setting() -> Any:
+    """The ``inelastic_mfp_specimen`` field, in Angstrom."""
+    return setting(
+        None,
+        help=(
+            "Inelastic mean free path of the specimen, in Angstrom, for "
+            "absorption_model='inelastic_mfp'. Unset gives the specimen the ice's "
+            "value, so it absorbs like the water it displaces and carries no "
+            "absorption contrast. 2460 is the derived value for protein at 300 kV."
+        ),
+        check="positive",
+    )
+
+
+def objective_aperture_setting() -> Any:
+    """The ``objective_aperture`` field, in milliradians."""
+    return setting(
+        None,
+        help=(
+            "Objective aperture semi-angle in milliradians (a 70 um aperture on a "
+            "Krios is ~12 mrad), for absorption_model='inelastic_mfp'. Electrons "
+            "scattered elastically beyond it leave the image; the loss is charged "
+            "per material from the scattering cross section, since no practical "
+            "grid carries it (2.7% of the beam through 400 Angstrom of ice at "
+            "12 mrad, 300 kV). Unset: no aperture."
+        ),
+        check="positive",
+    )
+
+
+def dose_envelope_target_setting(owner: str, note: str = "") -> Any:
+    """
+    The ``dose_envelope_target`` field.
+
+    Parameters
+    ----------
+    owner : str
+        What is damaged, e.g. ``"particle"`` or ``"specimen"``.
+    note : str, optional
+        A command-specific sentence appended to the help.
+
+    Returns
+    -------
+    dataclasses.Field
+    """
+    help_text = (
+        "Where the dose envelope acts. 'transfer_function' filters the whole "
+        f"image, solvent included. 'specimen' damages the {owner}'s own "
+        "potential before the ice is added, with occupancy read from the "
+        f"undamaged {owner}, so the water keeps its 3.7 A ring (raw movies "
+        "show it does not fade with dose); required for ice_motion_variance."
+    )
+    return setting(
+        "transfer_function", help=f"{help_text} {note}" if note else help_text
+    )
+
+
+def ice_motion_variance_setting(note: str = "") -> Any:
+    """
+    The ``ice_motion_variance`` field, in A^2 per e-/A^2.
+
+    Parameters
+    ----------
+    note : str, optional
+        A command-specific sentence appended to the help.
+
+    Returns
+    -------
+    dataclasses.Field
+    """
+    help_text = (
+        "Beam-induced displacement of the water, per axis, in A^2 per e-/A^2 "
+        "(McMullan et al. 2015's sigma0^2, 0.38 for their 300 kV exposure, "
+        "as measured from the 3.7 A ring). The ice fluctuation is filtered to "
+        "what survives the summed exposure, frame weights included, using a "
+        "decorrelation measured on relaxed ice trajectories; its mean is kept. "
+        "With dose_envelope on, needs dose_envelope_target='specimen'. Unset: "
+        "frozen ice."
+    )
+    return setting(
+        None, help=f"{help_text} {note}" if note else help_text, check="non_negative"
+    )

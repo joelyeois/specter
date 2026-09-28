@@ -6,6 +6,12 @@ from dataclasses import dataclass
 
 from ._common_fields import (
     DDP_JOB_ID_NOTE,
+    absorption_model_setting,
+    dose_envelope_target_setting,
+    ice_motion_variance_setting,
+    inelastic_mfp_solvent_setting,
+    inelastic_mfp_specimen_setting,
+    objective_aperture_setting,
     job_id_setting,
     output_dir_setting,
     project_setting,
@@ -92,28 +98,8 @@ class ParticleStackConfig:
     alpha: float = setting(
         0.1, help="Amplitude contrast ratio.", range=(0.0, 1.0)
     )  # unitless, amplitude contrast ratio
-    absorption_model: AbsorptionModel = setting(
-        "alpha",
-        help=(
-            "Where the imaginary potential comes from. 'alpha' scales the real "
-            "potential by the amplitude-contrast ratio, tying absorption to every "
-            "atomic cusp. 'inelastic_mfp' derives it per material from a measured "
-            "inelastic mean free path instead, and ignores alpha (including a "
-            ".cs/.star file's, which CTF estimation takes as an input and never "
-            "fits)."
-        ),
-    )
-    inelastic_mfp_solvent: float | None = setting(
-        None,
-        help=(
-            "Inelastic mean free path of the ice, in Angstrom, for "
-            "absorption_model='inelastic_mfp'. Unset takes the measured value for "
-            "the run's voltage (3950 at 300 kV, 2030 at 120 kV), and elsewhere an "
-            "estimate from those two with a warning (200 kV: 3040 +/- 7%; 100 kV: "
-            "1730 +/- 20%)."
-        ),
-        check="positive",
-    )  # Å
+    absorption_model: AbsorptionModel = absorption_model_setting()
+    inelastic_mfp_solvent: float | None = inelastic_mfp_solvent_setting()  # Å
     dose_weights_path: str | None = setting(
         None,
         help=(
@@ -135,28 +121,8 @@ class ParticleStackConfig:
         ),
         check="positive",
     )
-    inelastic_mfp_specimen: float | None = setting(
-        None,
-        help=(
-            "Inelastic mean free path of the specimen, in Angstrom, for "
-            "absorption_model='inelastic_mfp'. Unset gives the specimen the ice's "
-            "value, so it absorbs like the water it displaces and carries no "
-            "absorption contrast. 2460 is the derived value for protein at 300 kV."
-        ),
-        check="positive",
-    )  # Å
-    objective_aperture: float | None = setting(
-        None,
-        help=(
-            "Objective aperture semi-angle in milliradians (a 70 um aperture on a "
-            "Krios is ~12 mrad), for absorption_model='inelastic_mfp'. Electrons "
-            "scattered elastically beyond it leave the image; the loss is charged "
-            "per material from the scattering cross section, since no practical "
-            "grid carries it (2.7% of the beam through 400 Angstrom of ice at "
-            "12 mrad, 300 kV). Unset: no aperture."
-        ),
-        check="positive",
-    )  # mrad
+    inelastic_mfp_specimen: float | None = inelastic_mfp_specimen_setting()  # Å
+    objective_aperture: float | None = objective_aperture_setting()  # mrad
 
     # --- Sampling (basic) ---
     defocus: ScalarOrRange = setting(
@@ -317,16 +283,7 @@ class ParticleStackConfig:
     dose_envelope: bool = setting(
         False, help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope."
     )
-    dose_envelope_target: DoseEnvelopeTarget = setting(
-        "transfer_function",
-        help=(
-            "Where the dose envelope acts. 'transfer_function' filters the whole "
-            "image, solvent included. 'specimen' damages the particle's own "
-            "potential before the ice is added, with occupancy read from the "
-            "undamaged particle, so the water keeps its 3.7 A ring (raw movies "
-            "show it does not fade with dose); required for ice_motion_variance."
-        ),
-    )
+    dose_envelope_target: DoseEnvelopeTarget = dose_envelope_target_setting("particle")
     bfactor: float | None = setting(
         None, help="Isotropic B-factor envelope in Angstrom^2.", check="non_negative"
     )  # Å²
@@ -539,19 +496,7 @@ class ParticleStackConfig:
         ),
         check="non_negative",
     )
-    ice_motion_variance: float | None = setting(
-        None,
-        help=(
-            "Beam-induced displacement of the water, per axis, in A^2 per e-/A^2 "
-            "(McMullan et al. 2015's sigma0^2, 0.38 for their 300 kV exposure, "
-            "as measured from the 3.7 A ring). The ice fluctuation is filtered to "
-            "what survives the summed exposure, frame weights included, using a "
-            "decorrelation measured on relaxed ice trajectories; its mean is kept. "
-            "With dose_envelope on, needs dose_envelope_target='specimen'. Unset: "
-            "frozen ice."
-        ),
-        check="non_negative",
-    )
+    ice_motion_variance: float | None = ice_motion_variance_setting()
 
     # --- Advanced: crowding ---
     crowd_chunk_size: int = setting(

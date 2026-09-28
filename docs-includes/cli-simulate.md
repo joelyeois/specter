@@ -201,6 +201,15 @@ specter simulate micrograph [OPTIONS]
 | `--cs` | `FLOAT` | `2.0` | Spherical aberration in mm (1-3 mm typical). |
 | `--alpha` | `FLOAT` | `0.1` | Amplitude contrast ratio. |
 
+**Absorption**{ #specter-simulate-micrograph-absorption }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--absorption_model` | `alpha` \| `inelastic_mfp` | `alpha` | Where the imaginary potential comes from. 'alpha' scales the real potential by the amplitude-contrast ratio, tying absorption to every atomic cusp. 'inelastic_mfp' derives it per material from a measured inelastic mean free path instead, and ignores alpha (including a .cs/.star file's, which CTF estimation takes as an input and never fits). |
+| `--inelastic_mfp_solvent` | `FLOAT` | _none_ | Inelastic mean free path of the ice, in Angstrom, for absorption_model='inelastic_mfp'. Unset takes the measured value for the run's voltage (3950 at 300 kV, 2030 at 120 kV), and elsewhere an estimate from those two with a warning (200 kV: 3040 +/- 7%; 100 kV: 1730 +/- 20%). |
+| `--inelastic_mfp_specimen` | `FLOAT` | _none_ | Inelastic mean free path of the specimen, in Angstrom, for absorption_model='inelastic_mfp'. Unset gives the specimen the ice's value, so it absorbs like the water it displaces and carries no absorption contrast. 2460 is the derived value for protein at 300 kV. |
+| `--objective_aperture` | `FLOAT` | _none_ | Objective aperture semi-angle in milliradians (a 70 um aperture on a Krios is ~12 mrad), for absorption_model='inelastic_mfp'. Electrons scattered elastically beyond it leave the image; the loss is charged per material from the scattering cross section, since no practical grid carries it (2.7% of the beam through 400 Angstrom of ice at 12 mrad, 300 kV). Unset: no aperture. |
+
 **Models**{ #specter-simulate-micrograph-models }
 
 | Flag | Type | Default | Description |
@@ -247,6 +256,7 @@ specter simulate micrograph [OPTIONS]
 | `--deltaV_V` | `FLOAT` | `6e-08` | Relative high-voltage instability, used by the Cc envelope. |
 | `--deltaI_I` | `FLOAT` | `1e-08` | Relative objective-lens current instability, used by the Cc envelope. |
 | `--dose_envelope` | `True` \| `False` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope. |
+| `--dose_envelope_target` | `transfer_function` \| `specimen` | `transfer_function` | Where the dose envelope acts. 'transfer_function' filters the whole image, solvent included. 'specimen' damages the specimen's own potential before the ice is added, with occupancy read from the undamaged specimen, so the water keeps its 3.7 A ring (raw movies show it does not fade with dose); required for ice_motion_variance. Each micrograph's specimen is built for its own dose. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2. |
 | `--klim` | `FLOAT` | _none_ | Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but discards real spatial frequency content above it. Unset (the default) keeps the full Nyquist range and accepts the aliasing. |
 | `--coincidence_radius` | `TEXT` | `0.0` | Effective coincidence exclusion radius in pixels (exclusion area = pi*r^2): a single value for constant radius, or 'low,high' ([low, high] in TOML) to sample uniformly per micrograph. |
@@ -260,6 +270,7 @@ specter simulate micrograph [OPTIONS]
 | `--ice_hole_offset` | `TEXT` | `0.0` | ice_profile='meniscus' only: position of the hole's centre in field coordinates as 'x,y' in Angstrom ([x, y] in TOML). A micrograph is a small patch of a hole, so this is what decides whether it looks flat, wedged, or strongly curved. |
 | `--ice_tilt` | `FLOAT` | `0.0` | Slope of the ice slab's mid-plane, in Angstrom of z per Angstrom laterally. Moves both surfaces together, leaving thickness unchanged -- a tilted specimen rather than a varying one. Applies to every ice_profile mode. |
 | `--ice_cache_dir` | `TEXT` | _none_ | Directory of cached ice configs for ice_model='gd'. Defaults to the bundled ice_data/ice_cache. |
+| `--ice_motion_variance` | `FLOAT` | _none_ | Beam-induced displacement of the water, per axis, in A^2 per e-/A^2 (McMullan et al. 2015's sigma0^2, 0.38 for their 300 kV exposure, as measured from the 3.7 A ring). The ice fluctuation is filtered to what survives the summed exposure, frame weights included, using a decorrelation measured on relaxed ice trajectories; its mean is kept. With dose_envelope on, needs dose_envelope_target='specimen'. Unset: frozen ice. |
 | `--crowd_min_distance` | `FLOAT` | _none_ | Minimum distance between crowded particles in Angstrom. Defaults to the structure's max diameter; set to 0 to disable crowding. |
 | `--crowd_max_distance_z` | `FLOAT` | _none_ | Maximum z-distance between crowded particles in Angstrom. |
 | `--crowd_chunk_size` | `INTEGER` | `1` | Crowding duplicate volumes rotated per batch. Lowering it to 1 costs no wall time: at micrograph scale wall time is flat in this while peak memory grows linearly with it, so raising it above the default buys nothing. |
@@ -327,6 +338,15 @@ specter simulate tiltseries [OPTIONS]
 | `--n_tilts` | `INTEGER` | `61` | Number of tilt angles (evenly spaced from min to max). |
 | `--tilt_axis` | `x` \| `y` | `y` | Tilt axis. |
 
+**Absorption**{ #specter-simulate-tiltseries-absorption }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--absorption_model` | `alpha` \| `inelastic_mfp` | `alpha` | Where the imaginary potential comes from. 'alpha' scales the real potential by the amplitude-contrast ratio, tying absorption to every atomic cusp. 'inelastic_mfp' derives it per material from a measured inelastic mean free path instead, and ignores alpha (including a .cs/.star file's, which CTF estimation takes as an input and never fits). |
+| `--inelastic_mfp_solvent` | `FLOAT` | _none_ | Inelastic mean free path of the ice, in Angstrom, for absorption_model='inelastic_mfp'. Unset takes the measured value for the run's voltage (3950 at 300 kV, 2030 at 120 kV), and elsewhere an estimate from those two with a warning (200 kV: 3040 +/- 7%; 100 kV: 1730 +/- 20%). |
+| `--inelastic_mfp_specimen` | `FLOAT` | _none_ | Inelastic mean free path of the specimen, in Angstrom, for absorption_model='inelastic_mfp'. Unset gives the specimen the ice's value, so it absorbs like the water it displaces and carries no absorption contrast. 2460 is the derived value for protein at 300 kV. |
+| `--objective_aperture` | `FLOAT` | _none_ | Objective aperture semi-angle in milliradians (a 70 um aperture on a Krios is ~12 mrad), for absorption_model='inelastic_mfp'. Electrons scattered elastically beyond it leave the image; the loss is charged per material from the scattering cross section, since no practical grid carries it (2.7% of the beam through 400 Angstrom of ice at 12 mrad, 300 kV). Unset: no aperture. |
+
 **Models**{ #specter-simulate-tiltseries-models }
 
 | Flag | Type | Default | Description |
@@ -368,12 +388,14 @@ specter simulate tiltseries [OPTIONS]
 | `--deltaV_V` | `FLOAT` | `6e-08` | Relative high-voltage instability, used by the Cc envelope. |
 | `--deltaI_I` | `FLOAT` | `1e-08` | Relative objective-lens current instability, used by the Cc envelope. |
 | `--dose_envelope` | `True` \| `False` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope. |
+| `--dose_envelope_target` | `transfer_function` \| `specimen` | `transfer_function` | Where the dose envelope acts. 'transfer_function' filters the whole image, solvent included. 'specimen' damages the specimen's own potential before the ice is added, with occupancy read from the undamaged specimen, so the water keeps its 3.7 A ring (raw movies show it does not fade with dose); required for ice_motion_variance. Each tilt is damaged by its own dose after the pre-exposure of the tilts before it. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2. |
 | `--klim` | `FLOAT` | _none_ | Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but discards real spatial frequency content above it. Unset (the default) keeps the full Nyquist range and accepts the aliasing. |
 | `--coincidence_radius` | `FLOAT` | `0.0` | Effective coincidence exclusion radius in pixels (exclusion area = pi*r^2) for direct-detector modelling. |
 | `--ice_model` | `gd` \| `random` \| `none` | `gd` | Ice generation algorithm: 'gd' (IceBank cache), 'random' (cheap RandomIcemaker), or 'none'. |
 | `--ice_cache_dir` | `TEXT` | _none_ | Directory of cached ice configs for ice_model='gd'. Defaults to the bundled ice_data/ice_cache. |
 | `--ice_relax_steps` | `INTEGER` | `0` | Local MLBOP relaxation steps used to heal ice tile seams (ice_model='gd' only). |
+| `--ice_motion_variance` | `FLOAT` | _none_ | Beam-induced displacement of the water, per axis, in A^2 per e-/A^2 (McMullan et al. 2015's sigma0^2, 0.38 for their 300 kV exposure, as measured from the 3.7 A ring). The ice fluctuation is filtered to what survives the summed exposure, frame weights included, using a decorrelation measured on relaxed ice trajectories; its mean is kept. With dose_envelope on, needs dose_envelope_target='specimen'. Unset: frozen ice. Needs the same dose on every tilt. |
 | `--bulk_scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `kirkland` | Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain. |
 | `--pad_fft` | `True` \| `False` | `False` | Pad volume for FFT to avoid multislice edge-wraparound artifacts under tilt. |
 | `--seed` | `INTEGER` | _none_ | RNG seed for ice and noise sampling. Auto-generated and logged if unset. |

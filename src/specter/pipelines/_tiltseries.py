@@ -31,6 +31,7 @@ from specter.settings import (
     Camera,
     Envelopes,
     Ice,
+    Optics,
     Propagation,
     TiltGeometry,
     bundle_from_config,
@@ -181,6 +182,9 @@ def run_tilt_series(
     )
 
     cs_angstrom = _mm_to_angstrom(config.cs)
+    # The mean-free-path model replaces the amplitude-contrast ratio as the
+    # source of the imaginary potential; keeping both would absorb twice.
+    alpha = 0.0 if config.absorption_model == "inelastic_mfp" else config.alpha
     cc_angstrom = _mm_to_angstrom(config.cc) if config.cc is not None else None
 
     ctf_params = {
@@ -196,7 +200,8 @@ def run_tilt_series(
         config.voltage,
         config.dose_per_tilt,
         angles=angles,
-        propagation=bundle_from_config(Propagation, config),
+        propagation=bundle_from_config(Propagation, config, alpha=alpha),
+        optics=bundle_from_config(Optics, config),
         envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
         camera=bundle_from_config(Camera, config),
         ice=bundle_from_config(
@@ -239,7 +244,7 @@ def run_tilt_series(
             n=config.n_tilts,
             voltage=config.voltage,
             pixel_size=dx,
-            alpha=config.alpha,
+            alpha=alpha,
             ctf_params=ctf_params_broadcast,
             output_dir=output_dir,
             filename=config.filename,

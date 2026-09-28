@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._common_fields import (
+    absorption_model_setting,
+    dose_envelope_target_setting,
+    ice_motion_variance_setting,
+    inelastic_mfp_solvent_setting,
+    inelastic_mfp_specimen_setting,
     job_id_setting,
+    objective_aperture_setting,
     output_dir_setting,
     project_setting,
     seed_setting,
@@ -13,7 +19,9 @@ from ._common_fields import (
 from ._field import help_of, setting
 from typing import Literal
 from specter.options import (
+    AbsorptionModel,
     DetectorModel,
+    DoseEnvelopeTarget,
     IceModel,
     NoiseModel,
     ScatteringFactors,
@@ -87,6 +95,10 @@ class TiltSeriesConfig:
     alpha: float = setting(
         0.1, help="Amplitude contrast ratio.", range=(0.0, 1.0)
     )  # unitless, amplitude contrast ratio
+    absorption_model: AbsorptionModel = absorption_model_setting()
+    inelastic_mfp_solvent: float | None = inelastic_mfp_solvent_setting()  # Å
+    inelastic_mfp_specimen: float | None = inelastic_mfp_specimen_setting()  # Å
+    objective_aperture: float | None = objective_aperture_setting()  # mrad
 
     # --- Envelopes ---
     convergence_angle: float | None = setting(
@@ -122,6 +134,10 @@ class TiltSeriesConfig:
     )  # unitless (ΔI/I)
     dose_envelope: bool = setting(
         False, help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope."
+    )
+    dose_envelope_target: DoseEnvelopeTarget = dose_envelope_target_setting(
+        "specimen",
+        "Each tilt is damaged by its own dose after the pre-exposure of the tilts before it.",
     )
 
     # --- Defocus ---
@@ -182,6 +198,9 @@ class TiltSeriesConfig:
         ),
         check="non_negative",
     )  # local MLBOP seam-relaxation steps for ice_model="gd"
+    ice_motion_variance: float | None = ice_motion_variance_setting(
+        "Needs the same dose on every tilt."
+    )
     # Everything specter renders that is NOT a biomolecule: the ice.
     # Kept separate from `scattering_factors` on purpose -- Shtyrov fits bonded
     # species of biomolecules over 0.011-0.62 1/A, so bulk materials are out of

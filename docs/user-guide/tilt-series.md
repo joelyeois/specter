@@ -76,6 +76,24 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
   summed dose of the tilts before it, in index order, so supply the tilt
   geometry in acquisition order for a dose-symmetric scheme. See
   [Aberrations](../concepts/aberrations.md).
+- **Absorption**: `absorption_model = "inelastic_mfp"` replaces the
+  amplitude-contrast ratio with an imaginary potential derived from measured
+  inelastic mean free paths (`inelastic_mfp_solvent`,
+  `inelastic_mfp_specimen`) and, optionally, the elastic loss beyond an
+  `objective_aperture`; `alpha` is then set to 0, including in the `.star`
+  file. The field is a second volume of the padded size and follows the
+  specimen through every tilt. Multislice only. See
+  [Scattering](../concepts/scattering/index.md#mean-free-path-absorption-support).
+- **Radiation damage on the specimen**: `dose_envelope_target = "specimen"`
+  damages the specimen's potential rather than the whole image, so the ice
+  keeps its structure. Each tilt is damaged by its own dose after the
+  pre-exposure of the tilts before it. The dry specimen is kept as its 3D
+  spectrum, which costs four resident volumes instead of one and an inverse
+  transform per tilt (0.03 s on a GPU at 200 × 576 × 576 voxels). See
+  [Aberrations](../concepts/aberrations.md).
+- **Solvent motion**: `ice_motion_variance` filters the ice to what survives
+  one tilt's exposure. One filtered ice volume serves every tilt, so every
+  tilt must receive the same dose. See [Ice structure](../concepts/ice.md).
 - **Ice**: `ice_model`: `"gd"` (default, `IceBank`'s cached
   `GradientSKIcemaker` configs, realistic and near-free at this
   cache size), `"random"` (cheap, low-fidelity `RandomIcemaker`), or `"none"`

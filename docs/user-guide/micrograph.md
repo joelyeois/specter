@@ -116,6 +116,34 @@ thickness varies inside it. A hole centred on the field is symmetric and steps
 by nothing, and even the 4500 Å offset used above steps by only 128 Å, which is
 not measurable. Lateral variation on its own is harmless.
 
+## Absorption, radiation damage and solvent motion
+
+The micrograph command models the same absorption and exposure physics as
+[particle generation](particle-stack.md), with the same fields.
+
+- **Absorption**: `absorption_model = "inelastic_mfp"` replaces the
+  amplitude-contrast ratio with an imaginary potential derived from measured
+  inelastic mean free paths (`inelastic_mfp_solvent`, `inelastic_mfp_specimen`)
+  and, optionally, the elastic loss beyond an `objective_aperture`. `alpha` is
+  then set to 0, including in the `.star` file. The field is read off the
+  specimen before its ice is added, with the occupancy that weights the ice.
+  Without `inelastic_mfp_specimen` and with a flat slab of ice, the
+  absorption is a uniform attenuation of the exit wave and costs nothing; a
+  specimen mean free path or an `ice_profile` other than a flat untilted slab
+  needs a second canvas the size of the specimen. Multislice only. See
+  [Scattering](../concepts/scattering/index.md#mean-free-path-absorption-support).
+- **Radiation damage**: `dose_envelope_target = "specimen"` (with
+  `dose_envelope = true`) damages the specimen's potential and leaves its ice
+  undamaged, rather than filtering the whole image. Each micrograph's
+  specimen is built for its own dose. The ice is blended into a copy of the
+  undamaged specimen, so assembly holds a second canvas while it runs. See
+  [Aberrations](../concepts/aberrations.md).
+- **Solvent motion**: `ice_motion_variance` filters the ice to what survives
+  the summed exposure. It requires `dose_envelope_target = "specimen"` when
+  `dose_envelope` is on. With the host-resident canvas of a large micrograph
+  the ice is then built into a second host canvas and filtered there before
+  it is blended. See [Ice structure](../concepts/ice.md).
+
 ## Chunking and memory
 
 `crowd_chunk_size` is how many crowding duplicate volumes are rotated in one

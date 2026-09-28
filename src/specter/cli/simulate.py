@@ -162,6 +162,15 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
         ["min_tilt_angle", "max_tilt_angle", "n_tilts", "tilt_axis"],
     ),
     (
+        "Absorption",
+        [
+            "absorption_model",
+            "inelastic_mfp_solvent",
+            "inelastic_mfp_specimen",
+            "objective_aperture",
+        ],
+    ),
+    (
         "Models",
         ["scattering_model", "noise_model", "detector_model"],
     ),
@@ -184,12 +193,14 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
             "deltaV_V",
             "deltaI_I",
             "dose_envelope",
+            "dose_envelope_target",
             "bfactor",
             "klim",
             "coincidence_radius",
             "ice_model",
             "ice_cache_dir",
             "ice_relax_steps",
+            "ice_motion_variance",
             "bulk_scattering_factors",
             "pad_fft",
             "seed",
@@ -226,6 +237,15 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
         ["voltage", "dose", "defocus", "cs", "alpha"],
     ),
     (
+        "Absorption",
+        [
+            "absorption_model",
+            "inelastic_mfp_solvent",
+            "inelastic_mfp_specimen",
+            "objective_aperture",
+        ],
+    ),
+    (
         "Models",
         ["scattering_model", "noise_model", "detector_model"],
     ),
@@ -252,6 +272,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "deltaV_V",
             "deltaI_I",
             "dose_envelope",
+            "dose_envelope_target",
             "bfactor",
             "klim",
             "coincidence_radius",
@@ -266,6 +287,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "ice_hole_offset",
             "ice_tilt",
             "ice_cache_dir",
+            "ice_motion_variance",
             # Crowding
             "crowd_min_distance",
             "crowd_max_distance_z",

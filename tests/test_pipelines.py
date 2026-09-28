@@ -494,3 +494,91 @@ def test_report_devices_names_a_split_accumulator(
 
     _report_devices(_FakeGenerator(device, accumulator), raw)
     assert capsys.readouterr().out.strip() == expected
+
+
+class _Captured(Exception):
+    """Raised by a stub generator once it has recorded its arguments."""
+
+
+def _capture(monkeypatch: pytest.MonkeyPatch, module: object, name: str) -> dict:
+    seen: dict = {}
+
+    def stub(*args: object, **kwargs: object) -> None:
+        seen.update(kwargs)
+        raise _Captured
+
+    monkeypatch.setattr(module, name, stub)
+    return seen
+
+
+_EXPOSURE_FIELDS = dict(
+    absorption_model="inelastic_mfp",
+    inelastic_mfp_solvent=3000.0,
+    inelastic_mfp_specimen=2460.0,
+    objective_aperture=12.0,
+    dose_envelope=True,
+    dose_envelope_target="specimen",
+    ice_motion_variance=0.38,
+)
+
+
+def _assert_exposure_bundles(seen: dict) -> None:
+    propagation = seen["propagation"]
+    assert propagation.absorption_model == "inelastic_mfp"
+    assert propagation.alpha == 0.0  # the config's 0.1 is dropped, not doubled
+    assert propagation.inelastic_mfp_solvent == 3000.0
+    assert propagation.inelastic_mfp_specimen == 2460.0
+    assert seen["optics"].objective_aperture == 12.0
+    assert seen["envelopes"].dose_envelope_target == "specimen"
+
+
+def test_run_micrograph_forwards_absorption_and_exposure_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import specter.pipelines._micrograph as pipeline
+
+    seen = _capture(monkeypatch, pipeline, "MicrographGenerator")
+    specimen: dict = {}
+    monkeypatch.setattr(
+        pipeline,
+        "MicrographSpecimenGenerator",
+        lambda *a, **k: specimen.update(k) or object(),
+    )
+    config = MicrographConfig(
+        pdb_source="6bdf",
+        n_pixels=32,
+        micrograph_size=64,
+        ice_model="random",
+        device="cpu",
+        output_dir=str(tmp_path),
+        **_EXPOSURE_FIELDS,
+    )
+    with pytest.raises(_Captured):
+        run_micrograph(config)
+    _assert_exposure_bundles(seen)
+    assert specimen["ice"].motion_variance == 0.38
+
+
+def test_run_tilt_series_forwards_absorption_and_exposure_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import torch
+
+    import specter.pipelines._tiltseries as pipeline
+
+    seen = _capture(monkeypatch, pipeline, "TiltSeriesGenerator")
+    volume_path = tmp_path / "volume.pt"
+    torch.save(torch.rand(16, 32, 32) * 0.01, volume_path)
+    config = TiltSeriesConfig(
+        volume_path=str(volume_path),
+        voxel_size=4.0,
+        n_tilts=3,
+        ice_model="random",
+        device="cpu",
+        output_dir=str(tmp_path),
+        **_EXPOSURE_FIELDS,
+    )
+    with pytest.raises(_Captured):
+        run_tilt_series(config)
+    _assert_exposure_bundles(seen)
+    assert seen["ice"].motion_variance == 0.38

@@ -257,8 +257,8 @@ class Envelopes:
         own 3D potential before the ice is added, so the solvent keeps its
         structure: its water ring does not fade under exposure, and it loses
         coherence between frames instead (``Ice.motion_variance``). Supported
-        by the particle generators only; micrographs and tilt series receive
-        a volume with the ice already in it.
+        by every generator; a micrograph or tilt series damages its specimen
+        before, or apart from, the ice blended into it.
     """
 
     convergence_angle: float | None = None
@@ -407,7 +407,9 @@ class Ice:
         weights included (:func:`~specter.ice.apply_solvent_exposure`, relaxed
         coherence model); its mean is kept. Requires the dose envelope, if
         on, to act on the specimen, or the solvent would lose its structure
-        twice. Particle generators only. Default None: frozen ice.
+        twice. A tilt series filters its one ice volume at the dose of one
+        tilt, which must then be the same on every tilt. Default None:
+        frozen ice.
     """
 
     model: IceModel | None = None

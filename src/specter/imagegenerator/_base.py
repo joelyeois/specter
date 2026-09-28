@@ -30,12 +30,13 @@ from ..microscope import Detector
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
     absorption_potential,
+    dose_damage_envelope,
     aperture_mfp_ice,
     aperture_mfp_protein,
     ice_inelastic_mfp,
     inelastic_absorption_potential,
 )
-from ..settings import Camera, Envelopes, Optics, Propagation
+from ..settings import Camera, Envelopes, Ice, Optics, Propagation
 
 __all__ = [
     "BaseImager",
@@ -43,8 +44,109 @@ __all__ = [
     "compute_nz",
     "mfp_absorption_field",
     "pad_volume",
+    "read_dose_weights",
     "resolve_removal_mfps",
+    "solvent_exposure_filter",
 ]
+
+
+def read_dose_weights(camera: Camera) -> tuple[torch.Tensor | None, float | None]:
+    """
+    The exposure filter's per-frame weights and their frequency axis, if any.
+
+    Both come from :func:`~specter.io.load_dose_weights`, which derives the
+    axis from the motion-correction job's own files rather than letting a
+    caller assume one.
+
+    Parameters
+    ----------
+    camera : Camera
+        Supplies ``dose_weights_path``, ``dose_weights_max_frequency`` and
+        ``n_frames``.
+
+    Returns
+    -------
+    tuple of (torch.Tensor or None, float or None)
+        Weights of shape ``(n_frames, n_bins)`` and the frequency of their
+        last bin in 1/Angstrom, or ``(None, None)`` without a weights file.
+
+    Raises
+    ------
+    ValueError
+        If weights are given without ``n_frames``, or the frame count
+        disagrees with the file's.
+    """
+    path = camera.dose_weights_path
+    if path is None:
+        return None, None
+    if camera.n_frames is None:
+        raise ValueError("dose_weights_path requires n_frames to be set.")
+    from ..io import load_dose_weights
+
+    w, max_freq = load_dose_weights(
+        path, max_frequency=camera.dose_weights_max_frequency
+    )
+    if w.shape[0] != camera.n_frames:
+        raise ValueError(
+            f"{path} has {w.shape[0]} frames but n_frames={camera.n_frames}"
+        )
+    return w, max_freq
+
+
+def solvent_exposure_filter(
+    ice: Ice,
+    camera: Camera,
+    pixel_size: float,
+    dose: float,
+    weights: torch.Tensor | None,
+    weights_max_frequency: float | None,
+) -> Callable[[torch.Tensor], None] | None:
+    """
+    The in-place solvent-exposure filter for one exposure, or None.
+
+    :func:`~specter.ice.apply_solvent_exposure` with the exposure's frame
+    structure: ``camera.n_frames`` frames (one when unset) summed under
+    `weights`. Shared by the micrograph and tilt-series generators, which
+    filter a whole ice canvas before it is blended; the particle generators
+    apply the same filter in ``ParticleGeneratorBase.solvate``.
+
+    Parameters
+    ----------
+    ice : Ice
+        Supplies ``motion_variance``; None returns None.
+    camera : Camera
+        Supplies ``n_frames``.
+    pixel_size : float
+        Voxel size in Angstrom.
+    dose : float
+        The exposure's dose in e-/A^2.
+    weights, weights_max_frequency
+        As returned by :func:`read_dose_weights`.
+
+    Returns
+    -------
+    callable or None
+        Filters a ``(B, Z, Y, X)`` ice canvas in place.
+    """
+    if ice.motion_variance is None:
+        return None
+    from ..ice._exposure import apply_solvent_exposure
+
+    variance = ice.motion_variance
+    n_frames = camera.n_frames or 1
+
+    def apply(canvas: torch.Tensor) -> None:
+        apply_solvent_exposure(
+            canvas,
+            pixel_size,
+            dose,
+            variance,
+            n_frames,
+            weights,
+            weights_max_frequency,
+        )
+
+    return apply
 
 
 @dataclass(frozen=True)
@@ -707,23 +809,70 @@ class BaseImager(L.LightningModule):
             If weights are given without ``n_frames``, or the frame count
             disagrees with the file's.
         """
-        self._dose_weights_max_frequency: float | None = None
-        path = self.camera.dose_weights_path
-        if path is None:
-            return None
-        if self.n_frames is None:
-            raise ValueError("dose_weights_path requires n_frames to be set.")
-        from ..io import load_dose_weights
-
-        w, max_freq = load_dose_weights(
-            path, max_frequency=self.camera.dose_weights_max_frequency
-        )
-        if w.shape[0] != self.n_frames:
-            raise ValueError(
-                f"{path} has {w.shape[0]} frames but n_frames={self.n_frames}"
-            )
-        self._dose_weights_max_frequency = max_freq
+        w, max_freq = read_dose_weights(self.camera)
+        self._dose_weights_max_frequency: float | None = max_freq
         return w
+
+    def _specimen_damage_envelope(
+        self, dose: float, pre_exposure: float = 0.0
+    ) -> Callable[[torch.Tensor], torch.Tensor]:
+        """
+        The dose envelope on the specimen potential for one exposure.
+
+        The envelope :func:`~specter.potential.apply_dose_damage` applies for
+        this imager's settings: the closed form ``_dose_weighted`` selects, or
+        with ``n_frames`` the explicit frame sum under the run's own weights.
+
+        Parameters
+        ----------
+        dose : float
+            The exposure's dose in e-/A^2.
+        pre_exposure : float, optional
+            Dose already received when the exposure started. Default 0.
+
+        Returns
+        -------
+        callable
+            Maps |k| in 1/Angstrom to the amplitude envelope.
+        """
+        return dose_damage_envelope(
+            dose,
+            pre_exposure,
+            weighted=self._dose_weighted,
+            voltage=self.voltage,
+            n_frames=self.n_frames,
+            frame_weights=self.detector.dose_weights,
+            frame_weights_max_frequency=self._dose_weights_max_frequency,
+        )
+
+    def _single_dose(self, idx: torch.Tensor | int, what: str) -> float:
+        """
+        The one dose a batch shares, for a filter that serves the whole batch.
+
+        Parameters
+        ----------
+        idx : torch.Tensor or int
+            Batch indices.
+        what : str
+            The setting that needs it, named in the error.
+
+        Returns
+        -------
+        float
+            The dose in e-/A^2.
+
+        Raises
+        ------
+        ValueError
+            If the batch's doses differ.
+        """
+        doses = self.dose_per_angstrom[idx].flatten()
+        if doses.numel() > 1 and not torch.allclose(doses, doses[0].expand_as(doses)):
+            raise ValueError(
+                f"{what} needs one dose for every image in a batch: the "
+                "specimen it filters is shared by the batch"
+            )
+        return float(doses[0])
 
     def _aberrate(
         self, exitwave: torch.Tensor, ctf_batch: dict[str, torch.Tensor]

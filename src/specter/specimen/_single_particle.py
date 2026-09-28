@@ -5,6 +5,7 @@ particle template plus amorphous ice.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
@@ -284,7 +285,12 @@ class MicrographSpecimenGenerator(L.LightningModule):
         """
         return self.assemble().volume
 
-    def assemble(self, absorption: AbsorptionRates | None = None) -> AssembledSpecimen:
+    def assemble(
+        self,
+        absorption: AbsorptionRates | None = None,
+        damage: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        ice_filter: Callable[[torch.Tensor], None] | None = None,
+    ) -> AssembledSpecimen:
         """
         Generate the populated volume, and the fields read off its dry form.
 
@@ -302,6 +308,19 @@ class MicrographSpecimenGenerator(L.LightningModule):
             extra canvas and no extra blur. Without ice only the specimen
             term remains, and nothing is built unless the specimen absorbs.
             Default None.
+        damage : callable, optional
+            Applied to the dry specimen potential before the ice is added,
+            in place, returning it: the dose envelope on the specimen
+            (:func:`~specter.potential.apply_dose_damage`). The ice is still
+            weighted by the occupancy of the UNDAMAGED specimen, and the
+            absorption field is read off it too, since how much room a
+            molecule takes up does not depend on its radiation history. With
+            ice this costs a second canvas while the blend runs: the ice is
+            blended into a copy of the undamaged specimen, and the difference
+            is added back once the specimen has been damaged. Default None.
+        ice_filter : callable, optional
+            Applied in place to the unweighted ice canvas before it is
+            blended: the solvent-exposure filter. Default None.
 
         Returns
         -------
@@ -345,23 +364,49 @@ class MicrographSpecimenGenerator(L.LightningModule):
             field = self._specimen_absorption(V, absorption.specimen)
 
         if self.icemaker is None:
+            if damage is not None:
+                with torch.no_grad():
+                    V = damage(V)
             return AssembledSpecimen(V, field)
 
         # 2. Add ice
         with torch.no_grad():
             with status("Tiling ice volume", disable=not self.progressbars):
-                V = blend_ice_into_volume(
-                    V,
-                    self.icemaker,
-                    self.pixel_size,
-                    full_potential=self._occupancy_reference(),
-                    relax_steps=self.ice_relax_steps,
-                    profile=self.ice_profile,
-                    inplace=True,
-                    absorption=target,
-                )
+                if damage is None:
+                    V = self._blend(V, target, ice_filter, inplace=True)
+                else:
+                    # The ice is weighted by the undamaged specimen's
+                    # occupancy, so it is blended into a copy of it and the
+                    # difference, which is the weighted ice alone, is added to
+                    # the specimen once that has been damaged.
+                    solvent = self._blend(V, target, ice_filter, inplace=False)
+                    solvent.sub_(V)
+                    V = damage(V)
+                    V.add_(solvent)
+                    del solvent
 
         return AssembledSpecimen(V, field)
+
+    def _blend(
+        self,
+        V: torch.Tensor,
+        absorption: AbsorptionTarget | None,
+        ice_filter: Callable[[torch.Tensor], None] | None,
+        inplace: bool,
+    ) -> torch.Tensor:
+        """This specimen's ice blend, :func:`~specter.ice.blend_ice_into_volume`."""
+        assert self.icemaker is not None
+        return blend_ice_into_volume(
+            V,
+            self.icemaker,
+            self.pixel_size,
+            full_potential=self._occupancy_reference(),
+            relax_steps=self.ice_relax_steps,
+            profile=self.ice_profile,
+            inplace=inplace,
+            absorption=absorption,
+            ice_filter=ice_filter,
+        )
 
     def _specimen_absorption(self, V: torch.Tensor, specimen: float) -> torch.Tensor:
         """

@@ -189,19 +189,24 @@ def test_free_fraction_path_matches_reading_occupancy_off_the_volume(small_volum
     assert torch.allclose(precomputed, inline, atol=2e-3 * float(inline.abs().max()))
 
 
-def test_micrograph_generator_refuses_the_specimen_target(small_volume_4d):
-    with pytest.raises(ValueError, match="cannot apply the dose envelope"):
-        MicrographGenerator(
-            small_volume_4d,
-            micrograph_size=32,
-            pixel_size=2.0,
-            ctf_params=_ctf_params(),
-            voltage=300.0,
-            dose_per_angstrom=40.0,
-            envelopes=Envelopes(dose_envelope=True, dose_envelope_target="specimen"),
-            verbose=False,
-            progressbars=False,
-        )
+def test_micrograph_generator_accepts_the_specimen_target(small_volume_4d):
+    """
+    MicrographGenerator damages its specimen itself; the transfer function
+    then carries no dose envelope. See test_exposure_micrograph_tilt.
+    """
+    gen = MicrographGenerator(
+        small_volume_4d,
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=_ctf_params(),
+        voltage=300.0,
+        dose_per_angstrom=40.0,
+        envelopes=Envelopes(dose_envelope=True, dose_envelope_target="specimen"),
+        verbose=False,
+        progressbars=False,
+    )
+    assert gen._specimen_spectrum is not None
+    assert not gen.aberration.dose_envelope
 
 
 # --- solvent exposure --------------------------------------------------------

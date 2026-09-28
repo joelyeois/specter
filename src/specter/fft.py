@@ -714,26 +714,56 @@ def _apply_radial_envelope_on_device_(
     envelope: Callable[[torch.Tensor], torch.Tensor],
 ) -> None:
     """:func:`apply_radial_envelope_` on `v`'s own device, with no fallback."""
-    nz, ny, nx = v.shape
-    dev = v.device
-    nkx = nx // 2 + 1
-    # The half-spectrum is as large as the volume itself, and it is the one
-    # transient this keeps. A single rfftn/irfftn pair is not that: cuFFT's
-    # 3D workspace took the peak to 5x the canvas (26.8 GiB for 5.3 GiB at
-    # 1368 x 1024^2), which is exactly the thick-ice case that matters. So
-    # the transform is done separably and chunked -- rfft2 over (Y, X) a
-    # z-slab at a time into a preallocated spectrum, fft along Z a y-chunk
-    # at a time in place, and the inverse the same way back into `v` --
-    # so no chunk's scratch exceeds ~2^26 elements.
+    spectrum = _radial_rfft3(v)
+    _multiply_radial_envelope(spectrum, spectrum, v.shape, pixel_size, envelope)
+    _radial_irfft3_into(spectrum, v)
+    del spectrum
+
+
+def _radial_chunks(nz: int, ny: int, nkx: int) -> tuple[int, int]:
+    """The z-slab and y-chunk sizes that bound each FFT's scratch to ~2^26."""
     slab = max(1, min(nz, (1 << 26) // max(1, ny * nkx)))
     ychunk = max(1, min(ny, (1 << 26) // max(1, nz * nkx)))
-    spectrum = torch.empty((nz, ny, nkx), dtype=torch.complex64, device=dev)
+    return slab, ychunk
+
+
+def _radial_rfft3(v: torch.Tensor) -> torch.Tensor:
+    """
+    The 3D half-spectrum of a ``(Z, Y, X)`` volume, computed separably.
+
+    The half-spectrum is as large as the volume itself, and it is the one
+    transient this keeps. A single rfftn/irfftn pair is not that: cuFFT's
+    3D workspace took the peak to 5x the canvas (26.8 GiB for 5.3 GiB at
+    1368 x 1024^2), which is exactly the thick-ice case that matters. So
+    the transform is done separably and chunked -- rfft2 over (Y, X) a
+    z-slab at a time into a preallocated spectrum, fft along Z a y-chunk
+    at a time in place, and the inverse the same way back -- so no chunk's
+    scratch exceeds ~2^26 elements.
+    """
+    nz, ny, nx = v.shape
+    nkx = nx // 2 + 1
+    slab, ychunk = _radial_chunks(nz, ny, nkx)
+    spectrum = torch.empty((nz, ny, nkx), dtype=torch.complex64, device=v.device)
     for z0 in range(0, nz, slab):
         z1 = min(nz, z0 + slab)
         spectrum[z0:z1] = torch.fft.rfft2(v[z0:z1])
     for y0 in range(0, ny, ychunk):
         y1 = min(ny, y0 + ychunk)
         spectrum[:, y0:y1] = torch.fft.fft(spectrum[:, y0:y1], dim=0)
+    return spectrum
+
+
+def _multiply_radial_envelope(
+    spectrum: torch.Tensor,
+    out: torch.Tensor,
+    shape: Sequence[int],
+    pixel_size: float,
+    envelope: Callable[[torch.Tensor], torch.Tensor],
+) -> None:
+    """``out = spectrum * envelope(|k|)``, a z-slab at a time; `out` may be `spectrum`."""
+    nz, ny, nx = shape
+    dev = spectrum.device
+    slab, _ = _radial_chunks(nz, ny, nx // 2 + 1)
     kz = torch.fft.fftfreq(nz, d=pixel_size, device=dev)
     ky = torch.fft.fftfreq(ny, d=pixel_size, device=dev)
     kx = torch.fft.rfftfreq(nx, d=pixel_size, device=dev)
@@ -759,12 +789,98 @@ def _apply_radial_envelope_on_device_(
         frac = pos - lo
         i0 = lo.long()
         i1 = (i0 + 1).clamp_(max=n_table - 1)
-        spectrum[z0:z1] *= torch.lerp(env_table[i0], env_table[i1], frac)
-        del k, pos, lo, frac, i0, i1
+        weight = torch.lerp(env_table[i0], env_table[i1], frac)
+        if out is spectrum:
+            spectrum[z0:z1] *= weight
+        else:
+            torch.mul(spectrum[z0:z1], weight, out=out[z0:z1])
+        del k, pos, lo, frac, i0, i1, weight
+
+
+def _radial_irfft3_into(spectrum: torch.Tensor, v: torch.Tensor) -> None:
+    """Invert :func:`_radial_rfft3` into `v`, overwriting `spectrum` on the way."""
+    nz, ny, nx = v.shape
+    slab, ychunk = _radial_chunks(nz, ny, nx // 2 + 1)
     for y0 in range(0, ny, ychunk):
         y1 = min(ny, y0 + ychunk)
         spectrum[:, y0:y1] = torch.fft.ifft(spectrum[:, y0:y1], dim=0)
     for z0 in range(0, nz, slab):
         z1 = min(nz, z0 + slab)
         v[z0:z1] = torch.fft.irfft2(spectrum[z0:z1], s=(ny, nx))
-    del spectrum
+
+
+class RadialSpectrum:
+    """
+    A volume's 3D spectrum, kept for filtering it by many radial envelopes.
+
+    :func:`apply_radial_envelope_` transforms a volume, filters it and
+    transforms it back, once. A caller that needs the same volume under
+    several envelopes (one damage state per tilt of a series) would repeat
+    the forward transform each time; this keeps its result instead, so each
+    filtered copy costs one inverse transform. Every copy is identical to
+    :func:`apply_radial_envelope_` applied to a copy of the volume.
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Real volume, ``(Z, Y, X)``. Not modified, and not referenced after
+        construction.
+    pixel_size : float
+        Voxel size in Angstrom.
+
+    Notes
+    -----
+    Resident memory is the half-spectrum, about the volume's own size in
+    complex64, plus a second half-spectrum of scratch allocated on the first
+    :meth:`filter_into`, which the separable inverse transform overwrites.
+    """
+
+    def __init__(self, v: torch.Tensor, pixel_size: float) -> None:
+        if v.ndim != 3:
+            raise ValueError(f"expected a (Z, Y, X) volume, got shape {v.shape}")
+        self.shape = tuple(v.shape)
+        self.dtype = v.dtype
+        self.pixel_size = pixel_size
+        self.spectrum = _radial_rfft3(v)
+        self._work: torch.Tensor | None = None
+
+    @property
+    def device(self) -> torch.device:
+        """Where the spectrum, and every filtered copy, lives."""
+        return self.spectrum.device
+
+    def to(self, device: torch.device | str) -> RadialSpectrum:
+        """Move the spectrum to `device`, in place, returning ``self``."""
+        self.spectrum = self.spectrum.to(device)
+        self._work = None
+        return self
+
+    def filter_into(
+        self,
+        out: torch.Tensor,
+        envelope: Callable[[torch.Tensor], torch.Tensor],
+    ) -> torch.Tensor:
+        """
+        Write the volume filtered by `envelope` into `out`.
+
+        Parameters
+        ----------
+        out : torch.Tensor
+            Real ``(Z, Y, X)`` destination on :attr:`device`.
+        envelope : callable
+            As for :func:`apply_radial_envelope_`.
+
+        Returns
+        -------
+        torch.Tensor
+            `out`.
+        """
+        if tuple(out.shape) != self.shape or out.device != self.device:
+            raise ValueError("out must match the spectrum's volume shape and device")
+        if self._work is None:
+            self._work = torch.empty_like(self.spectrum)
+        _multiply_radial_envelope(
+            self.spectrum, self._work, self.shape, self.pixel_size, envelope
+        )
+        _radial_irfft3_into(self._work, out)
+        return out

@@ -21,6 +21,7 @@ the ice as a seam.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
@@ -308,6 +309,7 @@ def blend_ice_into_volume(
     inplace: bool = False,
     sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     absorption: AbsorptionTarget | None = None,
+    ice_filter: Callable[[torch.Tensor], None] | None = None,
 ) -> torch.Tensor:
     """
     Add ice into a scattering-potential volume, weighted by how much room
@@ -362,6 +364,13 @@ def blend_ice_into_volume(
         before any ice was added: the same read that weights the ice, so the
         two agree voxel for voxel and the volume is not blurred twice. Default
         None.
+    ice_filter : callable, optional
+        Applied in place to the whole unweighted ice canvas ``(B, Z, Y, X)``
+        before it is confined to `profile` and weighted by occupancy: the
+        solvent-exposure filter (:func:`~specter.ice.apply_solvent_exposure`),
+        which acts on the ice's own structure, not on the hole the specimen
+        cuts into it. Default None.
+
     Returns
     -------
     torch.Tensor
@@ -402,6 +411,7 @@ def blend_ice_into_volume(
                         absorption.solvent,
                     )
                 ),
+                ice_filter=ice_filter,
             )
         return out
     if isinstance(icemaker, IceBank):
@@ -422,6 +432,8 @@ def blend_ice_into_volume(
         )
     else:
         ice = icemaker.generate_ice(batchsize=batchsize).to(V.device)
+    if ice_filter is not None:
+        ice_filter(ice)
     if profile is not None:
         # Chunked in z so the (nz, nxy, nxy) window never exists in full
         # alongside the ice volume it multiplies -- at micrograph_size both are
@@ -537,6 +549,7 @@ def _blend_ice_slabwise(
     sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     slab_voxels: int = 2**27,
     absorption: AbsorptionTarget | None = None,
+    ice_filter: Callable[[torch.Tensor], None] | None = None,
 ) -> torch.Tensor:
     """
     :func:`blend_ice_into_volume` for one host-resident volume, slab by slab
@@ -564,8 +577,12 @@ def _blend_ice_slabwise(
     slab_voxels : int, optional
         Voxels per slab core; the working canvases are a few times this.
         Default ``2**27`` (0.5 GB of float32).
-    absorption
-        As for :func:`blend_ice_into_volume`.
+    absorption, ice_filter
+        As for :func:`blend_ice_into_volume`. A filter needs the whole ice
+        canvas at once, which this path otherwise never holds: the ice slabs
+        are then built into a host canvas the size of `V`, filtered there,
+        and blended from it slab by slab. That second host canvas, and the
+        filter's own transient spectrum, are the cost of the filter.
 
     Returns
     -------
@@ -622,9 +639,20 @@ def _blend_ice_slabwise(
             :, halo : halo + (z1 - z0), kr:-kr, kr:-kr
         ]
 
+    ice_canvas: torch.Tensor | None = None
+    if ice_filter is not None:
+        ice_canvas = torch.empty_like(V)
+        for z0 in range(0, nz, chunk):
+            z1 = min(z0 + chunk, nz)
+            ice_canvas[:, z0:z1] = ice_slab(z0, z1).to(V.device)
+        ice_filter(ice_canvas)
+
     for z0 in range(0, nz, chunk):
         z1 = min(z0 + chunk, nz)
-        ice = ice_slab(z0, z1)
+        if ice_canvas is None:
+            ice = ice_slab(z0, z1)
+        else:
+            ice = ice_canvas[:, z0:z1].to(device, copy=True)
         window = None
         if profile is not None:
             window = profile.window(nz, n, dx, z_slice=slice(z0, z1), device=device)[
@@ -634,4 +662,5 @@ def _blend_ice_slabwise(
 
         blender.add(V, ice, z0, z1, absorption=absorption, window=window)
         del ice, window
+    del ice_canvas
     return V

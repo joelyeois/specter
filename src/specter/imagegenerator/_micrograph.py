@@ -13,7 +13,14 @@ import torch
 
 from specter import logger
 
-from ._base import BaseImager, RemovalMFPs, mfp_absorption_field, pad_volume
+from ._base import (
+    BaseImager,
+    RemovalMFPs,
+    mfp_absorption_field,
+    pad_volume,
+    solvent_exposure_filter,
+)
+from ..fft import RadialSpectrum, apply_radial_envelope_
 from ..ice import (
     IceBank,
     RandomIcemaker,
@@ -133,7 +140,27 @@ class MicrographGenerator(BaseImager):
     The field is a second canvas the size of the specimen. It is placed on
     the compute device together with the volume, or both are streamed from
     the host when they do not fit.
+
+    ``Envelopes(dose_envelope_target="specimen")`` damages the specimen's
+    potential and not its ice, and ``Ice(motion_variance=...)`` filters the
+    ice to what survives the exposure, as in the particle generators. A
+    `MicrographSpecimenGenerator`'s specimen is built for the one exposure
+    that images it: :meth:`regenerate_specimen` defers the build to the next
+    forward pass, which knows the dose, and a specimen built for one dose
+    refuses to be imaged at another. A pre-assembled volume is imaged at
+    every dose it is given, so it is kept as the spectrum of its dry form and
+    its ice (:meth:`_init_dose_series`), and damaged per forward pass. Every
+    image of a batch must then share its dose. The solvent filter acts once,
+    on the ice blended at construction, and needs one dose for every
+    micrograph of that volume.
     """
+
+    # The specimen exists without its ice while it is assembled, so the dose
+    # envelope can act on it alone (see `_generate_volume`, `_init_dose_series`).
+    _supports_specimen_damage = True
+    # TiltSeriesGenerator hands this constructor an already padded, solvated
+    # volume and sets up its own damage series from the dry one.
+    _defers_dose_series = False
 
     def __init__(
         self,
@@ -293,6 +320,10 @@ class MicrographGenerator(BaseImager):
         self.absorption_potential: torch.Tensor | None = None
         self._uniform_absorption_V = 0.0
         self._absorption_rates: AbsorptionRates | None = None
+        # Set by _init_dose_series for a fixed specimen damaged per exposure.
+        self._specimen_spectrum: RadialSpectrum | None = None
+        self._solvent: torch.Tensor | None = None
+        self._rendered_exposure: tuple[float, float] | None = None
 
         if specimen_gen is not None:
             self._init_absorption(
@@ -329,6 +360,23 @@ class MicrographGenerator(BaseImager):
                 if rates is not None:
                     field = torch.empty_like(volume)
                     target = AbsorptionTarget(field, rates.specimen, rates.solvent)
+                # One exposure filters the one ice canvas, so every
+                # micrograph of this volume must share the dose.
+                ice_filter = (
+                    solvent_exposure_filter(
+                        ice,
+                        camera,
+                        pixel_size,
+                        self._single_dose(
+                            torch.arange(len(self.dose_per_angstrom)),
+                            "Ice(motion_variance=...) on a pre-assembled volume",
+                        ),
+                        self.detector.dose_weights,
+                        self._dose_weights_max_frequency,
+                    )
+                    if ice.motion_variance is not None
+                    else None
+                )
                 with (
                     torch.no_grad(),
                     status("Tiling ice volume", disable=not self.progressbars),
@@ -340,12 +388,73 @@ class MicrographGenerator(BaseImager):
                         relax_steps=ice.relax_steps,
                         profile=ice.profile,
                         absorption=target,
+                        ice_filter=ice_filter,
                     )
+            has_ice = volume_icemaker is not None
             # In place only on a canvas this class allocated, never on the
             # caller's tensor.
-            volume = self._apply_aperture(volume, inplace=volume is not dry)
+            volume = self._apply_aperture(volume, inplace=has_ice)
+            if self._damages_potential and not self._defers_dose_series:
+                if volume is dry:
+                    # Each exposure is rendered into the volume, which must
+                    # not be the caller's tensor.
+                    volume = volume.clone()
+                    dry = volume
+                self._init_dose_series(
+                    self._apply_aperture(dry, inplace=False) if has_ice else volume,
+                    volume,
+                )
             self.register_buffer("volume", volume)
             self.absorption_potential = field
+
+    def _init_dose_series(self, dry: torch.Tensor, volume: torch.Tensor) -> None:
+        """
+        Keep a fixed specimen in the form each exposure's damage is made from.
+
+        The dose envelope on the specimen damages the dry specimen and not
+        the ice, and a pre-assembled volume (or a tilt series' one volume)
+        is imaged at more than one exposure. It is therefore held as the 3D
+        spectrum of the dry specimen (:class:`~specter.fft.RadialSpectrum`)
+        and the ice it was blended with, ``volume - dry``, from which
+        :meth:`_render_exposure` makes the damaged volume for an exposure
+        with one inverse transform. The ice was weighted by the occupancy of
+        the undamaged specimen, which a molecule keeps whatever its dose.
+
+        Parameters
+        ----------
+        dry : torch.Tensor
+            The specimen without its ice, ``(1, Z, Y, X)``.
+        volume : torch.Tensor
+            The same specimen with its ice, ``(1, Z, Y, X)``; `dry` itself
+            when there is none.
+        """
+        self._specimen_spectrum = RadialSpectrum(dry[0], self.pixel_size)
+        self._solvent = None if volume is dry else volume - dry
+        self._rendered_exposure = None
+
+    def _render_exposure(self, dose: float, pre_exposure: float) -> None:
+        """
+        Write the specimen damaged for one exposure into ``self.volume``.
+
+        A no-op when ``self.volume`` already holds that exposure. The damage
+        envelope is :meth:`_specimen_damage_envelope`. Falls back to the host,
+        with everything it is paired with, when the device cannot also hold
+        the inverse transform's scratch.
+        """
+        key = (dose, pre_exposure)
+        if self._rendered_exposure == key:
+            return
+        spectrum = cast(RadialSpectrum, self._specimen_spectrum)
+        envelope = self._specimen_damage_envelope(dose, pre_exposure)
+        with torch.no_grad():
+            try:
+                spectrum.filter_into(self.volume[0], envelope)
+            except torch.cuda.OutOfMemoryError:
+                self._paired_to_host()
+                spectrum.filter_into(self.volume[0], envelope)
+            if self._solvent is not None:
+                self.volume.add_(self._solvent)
+        self._rendered_exposure = key
 
     def _init_absorption(self, has_ice: bool, profile: IceProfile | None) -> None:
         """
@@ -405,12 +514,46 @@ class MicrographGenerator(BaseImager):
                 out=volume if inplace else None,
             )
 
-    def _generate_volume(self) -> None:
+    @property
+    def _exposure_dependent_specimen(self) -> bool:
+        """Whether the specimen itself depends on the exposure imaging it."""
+        return self._damages_potential or self.ice.motion_variance is not None
+
+    def _generate_volume(self, idx: torch.Tensor | int | None = None) -> None:
         if self.verbose:
             logger.info(
                 "Generating specimen volume (this may take a while for large micrographs)"
             )
-        assembled = self.specimen_gen.assemble(absorption=self._absorption_rates)
+        damage = None
+        ice_filter = None
+        if self._exposure_dependent_specimen:
+            # The specimen is damaged, and its ice decorrelated, for the one
+            # exposure that images it, so it is built for that exposure.
+            if idx is None:
+                raise RuntimeError("an exposure-dependent specimen needs its dose")
+            dose = self._single_dose(
+                idx, "dose_envelope_target='specimen' or Ice(motion_variance=...)"
+            )
+            self._volume_dose: float | None = dose
+            if self._damages_potential:
+                envelope = self._specimen_damage_envelope(dose)
+
+                def damage(V: torch.Tensor) -> torch.Tensor:
+                    for item in V:
+                        apply_radial_envelope_(item, self.pixel_size, envelope)
+                    return V
+
+            ice_filter = solvent_exposure_filter(
+                self.ice,
+                self.camera,
+                self.pixel_size,
+                dose,
+                self.detector.dose_weights,
+                self._dose_weights_max_frequency,
+            )
+        assembled = self.specimen_gen.assemble(
+            absorption=self._absorption_rates, damage=damage, ice_filter=ice_filter
+        )
         self.volume = assembled.volume
         self.absorption_potential = assembled.absorption
         if self.move_to_cpu:
@@ -437,6 +580,14 @@ class MicrographGenerator(BaseImager):
                 "regenerate_specimen() requires the model to have been constructed "
                 "with a MicrographSpecimenGenerator, not a pre-built volume."
             )
+        if self._exposure_dependent_specimen:
+            # Deferred to the next forward pass, which knows the dose the
+            # specimen must be damaged for; the random draws happen in the
+            # same order either way.
+            if hasattr(self, "volume"):
+                del self.volume
+            self.absorption_potential = None
+            return
         self._generate_volume()
 
     def _ensure_volume_placed(self) -> None:
@@ -463,41 +614,61 @@ class MicrographGenerator(BaseImager):
 
         A no-op once the volume has settled on a device.
 
-        With an absorption field the two are placed together or not at all:
-        the propagator reads both slice by slice and needs them on one
-        device.
+        With an absorption field, or the damage-series fields of
+        :meth:`_init_dose_series`, everything is placed together or not at
+        all: the propagator reads the volume and the field slice by slice,
+        and the damaged volume is made from the spectrum and the ice.
         """
-        if self.absorption_potential is None:
+        names = self._paired_names()
+        spectrum = self._specimen_spectrum
+        if len(names) == 1 and spectrum is None:
             if self.volume.device == self.device:
                 return
             placed = self._place_on_device(self.volume, "specimen volume")
             if placed is not None:
                 self.volume = placed
             return
-        if (
-            self.volume.device == self.device
-            and self.absorption_potential.device == self.device
+        if all(getattr(self, n).device == self.device for n in names) and (
+            spectrum is None or spectrum.device == self.device
         ):
             return
         try:
-            pair = (
-                self.volume.to(self.device),
-                self.absorption_potential.to(self.device),
+            moved = [getattr(self, n).to(self.device) for n in names]
+            moved_spectrum = (
+                None if spectrum is None else spectrum.spectrum.to(self.device)
             )
         except torch.cuda.OutOfMemoryError:
-            self.volume = self.volume.cpu()
-            self.absorption_potential = self.absorption_potential.cpu()
-            torch.cuda.empty_cache()
-            if not self._warned_volume_on_host:
-                warnings.warn(
-                    f"{type(self).__name__}: the specimen volume and its "
-                    f"absorption field do not fit on {self.device} together; "
-                    "streaming both from the host.",
-                    stacklevel=2,
-                )
-                self._warned_volume_on_host = True
+            self._paired_to_host()
         else:
-            self.volume, self.absorption_potential = pair
+            for n, t in zip(names, moved, strict=True):
+                setattr(self, n, t)
+            if spectrum is not None and moved_spectrum is not None:
+                spectrum.spectrum = moved_spectrum
+                spectrum._work = None
+
+    def _paired_names(self) -> list[str]:
+        """The volume and whichever fields must share its device."""
+        names = ["volume"]
+        for n in ("absorption_potential", "_solvent"):
+            if getattr(self, n, None) is not None:
+                names.append(n)
+        return names
+
+    def _paired_to_host(self) -> None:
+        """Move the volume and its paired fields to the host, warning once."""
+        for n in self._paired_names():
+            setattr(self, n, getattr(self, n).cpu())
+        if self._specimen_spectrum is not None:
+            self._specimen_spectrum.to("cpu")
+        torch.cuda.empty_cache()
+        if not self._warned_volume_on_host:
+            warnings.warn(
+                f"{type(self).__name__}: the specimen volume and the fields "
+                f"paired with it do not fit on {self.device} together; "
+                "streaming both from the host.",
+                stacklevel=3,
+            )
+            self._warned_volume_on_host = True
 
     def _place_on_device(self, V: torch.Tensor, what: str) -> torch.Tensor | None:
         """
@@ -560,9 +731,24 @@ class MicrographGenerator(BaseImager):
             Simulated micrographs.
         """
         if not hasattr(self, "volume"):
-            self._generate_volume()
+            self._generate_volume(idx)
+        elif self._exposure_dependent_specimen and hasattr(self, "specimen_gen"):
+            dose = self._single_dose(
+                idx, "dose_envelope_target='specimen' or Ice(motion_variance=...)"
+            )
+            if dose != self._volume_dose:
+                raise ValueError(
+                    f"The specimen was built for a dose of {self._volume_dose} "
+                    f"e-/A^2 and cannot be imaged at {dose}: its damage and its "
+                    "ice depend on the exposure. Call regenerate_specimen() "
+                    "first."
+                )
         batchsize = len(idx) if isinstance(idx, torch.Tensor) else 1
         self._ensure_volume_placed()
+        if self._specimen_spectrum is not None:
+            self._render_exposure(
+                self._single_dose(idx, "dose_envelope_target='specimen'"), 0.0
+            )
         # Every image in the batch sees the same specimen at the same pose, so
         # with a unit potential scale the B exit waves are identical: the
         # volume is propagated once and the exit wave expanded to B before

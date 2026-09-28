@@ -199,8 +199,16 @@ Under the Gaussian model a 141-frame summed spectrum of pure ice shows a bright
 low-frequency disc with Thon rings that McMullan et al.'s Fig. 1(a) does not;
 under the relaxed model it is flat there, as theirs is.
 
-In a particle stack this is ``Ice(motion_variance=...)``
-(`ice_motion_variance` in the particle config). It needs the dose envelope,
+In every generator this is ``Ice(motion_variance=...)``
+(`ice_motion_variance` in the particle, micrograph and tilt-series configs).
+The filter acts on the unweighted ice canvas before it is blended around the
+specimen, since the cavity a molecule cuts into the ice moves with the
+molecule and does not decorrelate. A micrograph is one exposure, filtered at
+its own dose and frame count. Each tilt of a tilt series is a short exposure
+of its own frames, and the coherence between two frames depends only on the
+dose between them, so every tilt retains the same fraction of the ice
+structure and one filtered ice volume serves the series. This requires the
+same dose on every tilt. It needs the dose envelope,
 if one is applied, to act on the specimen
 (``Envelopes(dose_envelope_target="specimen")``, see
 [Aberrations](aberrations.md)): on the transfer function the envelope would
@@ -236,6 +244,10 @@ fade the solvent that the exposure filter already decorrelates.
   particle stack alone, \(\sigma_0^2\) trades off against ice thickness.
   The filter also acts before multislice, which is exact only for the
   projected, linear image.
+- **A tilt series shares one ice realisation across its tilts.** Each
+  tilt's image has the second-order ice statistics of its own exposure, but
+  the ice of consecutive tilts is identical, whereas the real ice has
+  rearranged between them.
 - **Long-wavelength ice power differs between library and relaxed ice.**
   After many kick-and-relax steps the ice carries 0.5 to 0.9 of the
   library's density fluctuation at 10 to 90 Å. Both are outputs of the same

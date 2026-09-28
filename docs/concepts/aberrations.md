@@ -211,8 +211,8 @@ the factor RELION and MotionCor2 also apply, and 0.50 at 100 kV.
 
 Where the envelope acts is a choice, ``Envelopes(dose_envelope_target=...)``.
 The default, `"transfer_function"`, multiplies the transfer function and so
-filters the whole exit wave, solvent included. The particle generators can
-instead apply it to the specimen's three-dimensional potential before the
+filters the whole exit wave, solvent included. Every generator can instead
+apply it to the specimen's three-dimensional potential before the
 solvent is added (`"specimen"`, `potential.apply_dose_damage`), as a radial
 envelope in 3D Fourier space. By the projection-slice theorem this is the same
 filter on the projected specimen, but the ice blended in afterwards is left
@@ -224,6 +224,27 @@ water ring per fraction is constant to within about 10 % across 40 to
 50 e⁻/Å², where the protein-calibrated critical exposure (about 5 e⁻/Å² at
 3.7 Å) would leave under 2 % of the ring amplitude by the final fraction. The
 solvent loses coherence between frames instead (see [Ice](ice.md)).
+
+`MicrographGenerator` damages the specimen while it is assembled. A
+`MicrographSpecimenGenerator` builds its specimen for the one exposure that
+images it, so a regenerated specimen is damaged for the dose of the next
+micrograph; the ice is blended into a copy of the undamaged specimen, and the
+difference, which is the weighted ice alone, is added once the specimen has
+been damaged. A pre-assembled volume, and the single volume of a tilt series,
+are imaged at more than one exposure. They are held as the 3D spectrum of the
+dry specimen (`fft.RadialSpectrum`) together with the ice blended into it, and
+each exposure's damaged volume is produced by one inverse transform of the
+spectrum under that exposure's envelope. For a tilt series the exposure of
+tilt \(i\) is its own dose after the pre-exposure of the tilts before it, as
+for the transfer-function envelope above. At 200 × 576 × 576 voxels this costs
+0.03 s per tilt on a GPU (0.55 s on the host), against 0.3 s for the tilt's
+multislice, and resident memory of four volumes (the volume, the spectrum, the
+inverse transform's scratch and the ice) where the transfer-function path
+holds one. The damage filter is applied to the padded, tapered volume that is
+tilted. It is periodic, so it couples opposite faces of that volume over its
+real-space width: laterally this lies in the padding beyond the coverage any
+tilt samples, and at the Z faces it is the same approximation the particle
+generators make on their box.
 
 On the specimen path the envelope is the explicit frame sum
 (`potential.frame_damage_envelope`) rather than either closed form. A movie
@@ -304,14 +325,14 @@ per-particle quantity; `"legacy"` has no equivalent.
 
 ## Limitations
 
-- **Only the particle generators can damage the specimen alone.**
-  `MicrographGenerator` and `TiltSeriesGenerator` image a volume the ice has
-  already been blended into, so for them the envelope stays on the transfer
-  function and attenuates the water ring as hard as the protein. Moving it
-  would mean damaging each template before placement (micrographs) or the
-  tomogram per tilt (tilt series). The specimen path is also not yet the
-  default: its effect on matching real particle stacks is still being
-  validated.
+- **The specimen path is not the default.** Its effect on matching real
+  particle stacks is still being validated. In a tilt series the damaged
+  specimen is a radial filter of one 3D volume, so a structure is damaged
+  by the dose it has received, not by the direction it was received from.
+- **A pre-assembled specimen requires one dose per forward pass.** Every
+  image of a batch shares one specimen volume, and the damage filter serves
+  the batch; images with different doses must be simulated in separate
+  calls.
 
 - **`torch_ctf` cannot express tetrafoil.** `LegacyAberrationAdapter` has no
   `tetrafoil1`-`tetrafoil4` mapping. Passing a nonzero one raises

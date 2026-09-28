@@ -41,7 +41,7 @@ applying the run's real weights and the real noise gain they cause. Prefer
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import torch
 
@@ -191,26 +191,69 @@ def apply_dose_damage(
         p = float(pre_t[i if pre_t.numel() > 1 else 0])
         if d == 0.0 and p == 0.0:
             continue
-
-        def envelope(k: torch.Tensor, d: float = d, p: float = p) -> torch.Tensor:
-            if n_frames is None:
-                return dose_envelope(
-                    k,
-                    torch.tensor(d, device=k.device),
-                    pre_exposure=p,
-                    weighted=weighted,
-                    voltage=voltage,
-                )
-            return frame_damage_envelope(
-                k,
-                d,
-                n_frames,
-                weights=frame_weights,
-                weights_max_frequency=frame_weights_max_frequency,
-                pre_exposure=p,
-                voltage=voltage,
-            )
-
+        envelope = dose_damage_envelope(
+            d,
+            p,
+            weighted=weighted,
+            voltage=voltage,
+            n_frames=n_frames,
+            frame_weights=frame_weights,
+            frame_weights_max_frequency=frame_weights_max_frequency,
+        )
         # Falls back to the host on a CUDA out-of-memory error (see there).
         apply_radial_envelope_(V[i], pixel_size, envelope)
     return V.squeeze(0) if squeeze else V
+
+
+def dose_damage_envelope(
+    dose: float,
+    pre_exposure: float = 0.0,
+    weighted: bool = True,
+    voltage: float | None = None,
+    n_frames: int | None = None,
+    frame_weights: torch.Tensor | None = None,
+    frame_weights_max_frequency: float | None = None,
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    """
+    The damage envelope :func:`apply_dose_damage` applies, as a function of |k|.
+
+    For a caller that filters one volume by several exposures, such as a
+    tilt series, which damages the same specimen once per tilt
+    (:class:`~specter.fft.RadialSpectrum`).
+
+    Parameters
+    ----------
+    dose : float
+        Exposure accumulated in the image, in e-/A^2.
+    pre_exposure : float, optional
+        Exposure already received when the image started. Default 0.
+    weighted, voltage, n_frames, frame_weights, frame_weights_max_frequency
+        As for :func:`apply_dose_damage`.
+
+    Returns
+    -------
+    callable
+        Maps a tensor of |k| in 1/Angstrom to the amplitude envelope, 1 at
+        k = 0.
+    """
+
+    def envelope(k: torch.Tensor) -> torch.Tensor:
+        if n_frames is None:
+            return dose_envelope(
+                k,
+                torch.tensor(dose, device=k.device),
+                pre_exposure=pre_exposure,
+                weighted=weighted,
+                voltage=voltage,
+            )
+        return frame_damage_envelope(
+            k,
+            dose,
+            n_frames,
+            weights=frame_weights,
+            weights_max_frequency=frame_weights_max_frequency,
+            pre_exposure=pre_exposure,
+            voltage=voltage,
+        )
+
+    return envelope

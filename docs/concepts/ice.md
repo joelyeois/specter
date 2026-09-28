@@ -182,8 +182,7 @@ were evolved by such Gaussian kicks, each followed by the library's own
 coherence was measured without a grid, from the structure factor of all
 527,178 molecules at reciprocal-lattice vectors of the box, over lags of 1 to
 60 steps. It is compressed rather than exponential: every shell from 90 Å to
-1.4 Å fits \(
-ho = \exp[-(x/x_0(k))^{\beta(k)}]\) in accumulated kick
+1.4 Å fits \(\rho = \exp[-(x/x_0(k))^{\beta(k)}]\) in accumulated kick
 variance \(x\) to within 0.012, with \(\beta \approx 1.1\). Its time scale is
 fixed so that the ring's correlation has the same area as the Gaussian
 model's for the same \(\sigma_0^2\), which is the quantity a multi-frame fit

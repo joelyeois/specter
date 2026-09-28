@@ -192,6 +192,9 @@ def run_tilt_series(
         "dfu": torch.tensor([config.defocus]),
     }
 
+    ice = bundle_from_config(
+        Ice, config, prefix="ice_", parameterization=config.bulk_scattering_factors
+    )
     model = TiltSeriesGenerator(
         volume.unsqueeze(0),  # add batch dim: (1, Z, Y, X)
         micrograph_size,
@@ -204,9 +207,7 @@ def run_tilt_series(
         optics=bundle_from_config(Optics, config),
         envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
         camera=bundle_from_config(Camera, config),
-        ice=bundle_from_config(
-            Ice, config, prefix="ice_", parameterization=config.bulk_scattering_factors
-        ),
+        ice=ice,
         bfactor=config.bfactor,
         tilt=bundle_from_config(TiltGeometry, config),
         coincidence_radius=config.coincidence_radius,
@@ -254,7 +255,10 @@ def run_tilt_series(
         )
 
         if config.save_exitwaves:
-            ew_prefix = "exitwave" if model.ice.model is not None else "clean_exitwave"
+            # From the settings this run built, not `model.ice`: the
+            # MicrographGenerator base resets that attribute, so it always
+            # read as no ice and every exit wave was named "clean".
+            ew_prefix = "exitwave" if ice.model is not None else "clean_exitwave"
             section(f"Saving {ew_prefix.replace('_', ' ')}")
             _save_exitwave_pair(
                 exitwaves,

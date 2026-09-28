@@ -582,3 +582,34 @@ def test_run_tilt_series_forwards_absorption_and_exposure_settings(
         run_tilt_series(config)
     _assert_exposure_bundles(seen)
     assert seen["ice"].motion_variance == 0.38
+
+
+@pytest.mark.parametrize(
+    ("ice_model", "suffix"), [("random", "exitwave"), ("none", "clean_exitwave")]
+)
+def test_tilt_series_exitwaves_are_named_by_whether_ice_was_added(
+    tmp_path: Path, ice_model: str, suffix: str
+) -> None:
+    """
+    Exit waves with ice are ``exitwave``, without it ``clean_exitwave``.
+
+    The pipeline used to read ``model.ice``, which the MicrographGenerator base
+    resets, so a run with ice also labelled its exit waves "clean".
+    """
+    volume_path = tmp_path / "volume.pt"
+    torch.save(torch.rand(8, 24, 24) * 0.01, volume_path)
+    config = TiltSeriesConfig(
+        volume_path=str(volume_path),
+        voxel_size=4.0,
+        n_tilts=2,
+        ice_model=ice_model,
+        save_exitwaves=True,
+        noise_model="none",
+        device="cpu",
+        output_dir=str(tmp_path / "out"),
+        filename="ts",
+    )
+    run_tilt_series(config)
+    out = tmp_path / "out"
+    assert (out / f"ts_{suffix}_magnitude.mrcs").exists()
+    assert (out / f"ts_{suffix}_phase.mrcs").exists()

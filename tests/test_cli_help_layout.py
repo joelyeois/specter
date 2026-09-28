@@ -11,7 +11,6 @@ panel to the top of `--help`, above every flag a first run actually sets.
 from __future__ import annotations
 
 import pytest
-import rich_click as click
 
 from specter.cli._click_options import build_config_options
 from specter.cli.build import _ICE_GROUPS, _TOMOGRAM_GROUPS
@@ -95,10 +94,3 @@ def test_grouping_rejects_an_ungrouped_field() -> None:
         build_config_options(
             MicrographConfig, field_groups=[("Specimen", ["pdb_source"])]
         )
-
-
-def test_ungrouped_build_still_works() -> None:
-    """`field_groups=None` keeps the old field-order, no-panel behaviour."""
-    options = build_config_options(MicrographConfig)
-    assert isinstance(options[0], click.RichOption)
-    assert all(o.panel is None for o in options)

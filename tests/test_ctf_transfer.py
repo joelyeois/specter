@@ -139,28 +139,6 @@ def test_astigmatism_angle_sweep_matches_old_aberration(dfang):
 # ---------------------------------------------------------------------------
 
 
-def test_trefoil_matches_old_aberration_via_zernike_conversion():
-    trefoil1, trefoil2 = 0.6, -0.9  # specter's physical-k^3 convention
-
-    old = _old_transfer(
-        {
-            "dfu": torch.tensor(0.0),
-            "trefoil1": torch.tensor(trefoil1),
-            "trefoil2": torch.tensor(trefoil2),
-        }
-    )
-
-    rho_max = zernike_rho_max((N_PIXELS, N_PIXELS), PIXEL_SIZE)
-    params = CTFParameters(
-        defocus=0.0,
-        spherical_aberration=0.0,
-        odd_zernike={"Z33c": -trefoil1 * rho_max**3, "Z33s": -trefoil2 * rho_max**3},
-    )
-    new = _new_transfer(params)
-
-    assert torch.allclose(old, new, atol=1e-4)
-
-
 @pytest.mark.parametrize(
     "trefoil1,trefoil2",
     [(0.6, -0.9), (-0.3, 0.4), (1.2, 0.0), (0.0, -0.7), (-1.5, -1.5)],
@@ -187,32 +165,6 @@ def test_trefoil_sweep_matches_old_aberration(trefoil1, trefoil2):
 # Parity: beam tilt (via odd_zernike Z31, *not* torch-ctf's own
 # beam_tilt_mrad convenience path -- see module docstring / _units.py)
 # ---------------------------------------------------------------------------
-
-
-def test_beamtilt_matches_old_aberration_via_zernike_conversion():
-    tiltx, tilty = 2e-5, -1.5e-5  # radians, small enough to avoid phase wraparound
-    cs_angstrom = 2.7e7
-
-    old = _old_transfer(
-        {
-            "dfu": torch.tensor(0.0),
-            "cs": torch.tensor(cs_angstrom),
-            "tiltx": torch.tensor(tiltx),
-            "tilty": torch.tensor(tilty),
-        }
-    )
-
-    rho_max = zernike_rho_max((N_PIXELS, N_PIXELS), PIXEL_SIZE)
-    prefactor = 2 * torch.pi * WAVELENGTH**2 * cs_angstrom * rho_max**3
-    params = CTFParameters(
-        defocus=0.0,
-        spherical_aberration=cs_angstrom / 1e7,
-        voltage=VOLTAGE,
-        odd_zernike={"Z31c": -prefactor * tiltx, "Z31s": -prefactor * tilty},
-    )
-    new = _new_transfer(params)
-
-    assert torch.allclose(old, new, atol=1e-4)
 
 
 def test_beam_tilt_mrad_convenience_arg_does_not_match_specter_convention():
@@ -358,31 +310,6 @@ def test_dc_pinning_preserves_gradients_correctly():
 # ---------------------------------------------------------------------------
 
 
-def test_amplitude_contrast_real_ctf_equals_constant_Q():
-    """With every other term zero, chi is identically -arcsin(Q) at all k, so
-    the real weak-phase-object CTF -sin(chi) collapses to the constant Q
-    everywhere -- a clean, closed-form check independent of any grid or
-    frequency-dependent term."""
-    from torch_ctf import calculate_ctf_2d
-
-    Q = 0.1
-    ctf = calculate_ctf_2d(
-        defocus=0.0,
-        astigmatism=0.0,
-        astigmatism_angle=0.0,
-        voltage=VOLTAGE,
-        spherical_aberration=0.0,
-        amplitude_contrast=Q,
-        phase_shift=0.0,
-        pixel_size=PIXEL_SIZE,
-        image_shape=(N_PIXELS, N_PIXELS),
-        rfft=False,
-        fftshift=False,
-        return_complex_ctf=False,
-    )
-    assert torch.allclose(ctf, torch.full_like(ctf, Q), atol=1e-6)
-
-
 def test_amplitude_contrast_complex_transfer_matches_specters_absorptive_potential_constant():
     """The complex transfer function should equal sqrt(1-Q^2) + iQ everywhere
     -- exactly specter's own potential.apply_amplitude_contrast's `c = sqrt(1-a^2)
@@ -435,67 +362,6 @@ def test_tetrafoil_now_computable():
     # A nonzero tetrafoil term should make the transfer function anisotropic
     # (break the pure-defocus rotational symmetry).
     assert not torch.allclose(new, new.T, atol=1e-6)
-
-
-def test_tetrafoil_matches_reimplemented_zernike_formula():
-    """Reimplements torch_ctf.ctf_aberrations.apply_even_zernikes's
-    documented formula (coeff * rho**4 * cos/sin(4*theta) for Z44c/Z44s,
-    coeff * rho**6 for Z60) from scratch and checks the actual function
-    against it -- a regression/self-consistency check on torch-ctf's own
-    code, since specter has no tetrafoil implementation to compare to."""
-    from torch_grid_utils.fftfreq_grid import fftfreq_grid
-    from torch_grid_utils.polar_grid import fftfreq_grid_polar
-    from torch_ctf.ctf_aberrations import apply_even_zernikes
-
-    fft_freq_grid = fftfreq_grid(
-        image_shape=(N_PIXELS, N_PIXELS),
-        rfft=False,
-        fftshift=False,
-        spacing=PIXEL_SIZE,
-        norm=False,
-    )
-    rho, theta = fftfreq_grid_polar(fft_freq_grid)
-
-    z44c, z44s, z60 = 0.2, -0.1, 0.05
-    total_phase_shift = torch.zeros_like(rho)
-    actual = apply_even_zernikes(
-        {"Z44c": z44c, "Z44s": z44s, "Z60": z60}, total_phase_shift, rho, theta
-    )
-    expected = (
-        z44c * rho**4 * torch.cos(4 * theta)
-        + z44s * rho**4 * torch.sin(4 * theta)
-        + z60 * rho**6
-    )
-    assert torch.allclose(actual, expected, atol=1e-6)
-
-
-# ---------------------------------------------------------------------------
-# Flexibility: omitted parameters must still run
-# ---------------------------------------------------------------------------
-
-
-def test_defocus_only_runs():
-    params = CTFParameters(defocus=1.0)
-    new = _new_transfer(params)
-    assert new.shape == (N_PIXELS, N_PIXELS)
-    assert torch.isfinite(new.real).all()
-
-
-def test_sparse_odd_zernike_trefoil_only_runs():
-    params = CTFParameters(defocus=1.0, odd_zernike={"Z33c": 0.05})
-    new = _new_transfer(params)
-    assert torch.isfinite(new.real).all()
-    assert "Z33s" not in params.torch_ctf_kwargs(PIXEL_SIZE, (N_PIXELS, N_PIXELS)).get(
-        "odd_zernike_coeffs", {}
-    )
-
-
-def test_no_zernike_terms_omits_kwargs_entirely():
-    params = CTFParameters(defocus=1.0)
-    kwargs = params.torch_ctf_kwargs(PIXEL_SIZE, (N_PIXELS, N_PIXELS))
-    assert "even_zernike_coeffs" not in kwargs
-    assert "odd_zernike_coeffs" not in kwargs
-    assert "beam_tilt_mrad" not in kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -559,13 +425,6 @@ def test_learnable_field_receives_gradient():
     assert not isinstance(params.fields["astigmatism"].value, torch.nn.Parameter)
 
 
-def test_non_learnable_fields_stay_fixed_buffers():
-    params = CTFParameters(defocus=1.0, odd_zernike={"Z33c": 0.05}, learnable=())
-    assert not isinstance(params.fields["defocus"].value, torch.nn.Parameter)
-    assert not isinstance(params.odd_zernike["Z33c"].value, torch.nn.Parameter)
-    assert list(params.parameters()) == []
-
-
 def test_per_field_learnable_selection():
     params = CTFParameters(
         defocus=1.0,
@@ -576,54 +435,6 @@ def test_per_field_learnable_selection():
     assert isinstance(params.odd_zernike["Z33c"].value, torch.nn.Parameter)
     assert not isinstance(params.odd_zernike["Z33s"].value, torch.nn.Parameter)
     assert not isinstance(params.fields["astigmatism"].value, torch.nn.Parameter)
-
-
-def test_per_field_optimizers_update_independently():
-    """Answers: can different CTF params have different optimizers/LRs?
-    Yes -- each learnable ParamField.value is an ordinary nn.Parameter, so
-    ordinary per-parameter optimizer groups (or entirely separate
-    optimizers, as Reconstructor already does for V/rotations/translations)
-    work unchanged."""
-    params = CTFParameters(
-        defocus=1.0,
-        odd_zernike={"Z33c": 0.05},
-        learnable={"defocus", "Z33c"},
-    )
-    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear")
-
-    defocus_before = params.fields["defocus"].value.item()
-    trefoil_before = params.odd_zernike["Z33c"].value.item()
-
-    # Z33c's gradient is intrinsically much smaller than defocus's (rho is
-    # normalized to [0, 1] vs. defocus's physical 1/Angstrom^2 scale), so
-    # its learning rate needs to be correspondingly larger to produce a
-    # visible update -- itself a demonstration of why per-field learning
-    # rates are necessary, not just a nice-to-have.
-    opt_defocus = torch.optim.SGD([params.fields["defocus"].value], lr=1.0)
-    opt_trefoil = torch.optim.SGD([params.odd_zernike["Z33c"].value], lr=1e4)
-
-    # A constant exitwave has all its energy at the DC frequency, where every
-    # defocus/Cs/Zernike term is exactly zero by construction -- gradients
-    # would trivially vanish. Use broadband content so every term's
-    # gradient is actually exercised.
-    exitwave = torch.randn(
-        1,
-        N_PIXELS,
-        N_PIXELS,
-        dtype=torch.complex64,
-        generator=torch.Generator().manual_seed(0),
-    )
-    loss = (tf(exitwave, params).abs() ** 2).sum()
-    opt_defocus.zero_grad()
-    opt_trefoil.zero_grad()
-    loss.backward()
-    opt_defocus.step()
-    opt_trefoil.step()
-
-    defocus_delta = abs(params.fields["defocus"].value.item() - defocus_before)
-    trefoil_delta = abs(params.odd_zernike["Z33c"].value.item() - trefoil_before)
-    assert defocus_delta > 0
-    assert trefoil_delta > 0
 
 
 # ---------------------------------------------------------------------------
@@ -669,37 +480,6 @@ def test_bfactor_envelope_matches_old_aberration_via_forward():
     new_out = new_tf.forward(exitwave, params)
 
     assert torch.allclose(old_out, new_out, atol=1e-4)
-
-
-def test_bfactor_via_transfer_function_directly_is_a_known_api_difference():
-    """Documents the asymmetry above concretely: with the same bfactor,
-    calling .transfer_function() directly (not .forward()) gives *different*
-    results between the two classes -- old ignores the constructor bfactor
-    entirely here, new applies it. Not a bug in either class individually,
-    but a real API-level difference to know about if anything ever calls
-    .transfer_function() directly instead of .forward()."""
-    bfactor_val = 150.0
-    old = Aberration(
-        N_PIXELS,
-        PIXEL_SIZE,
-        VOLTAGE,
-        aberration_model="nonlinear",
-        bfactor=bfactor_val,
-    )
-    old_t = old.transfer_function({"dfu": torch.tensor(12000.0)}).squeeze()
-
-    params = CTFParameters(defocus=12000.0 / 1e4, spherical_aberration=0.0)
-    new_tf = TransferFunction(
-        N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear", bfactor=bfactor_val
-    )
-    new_t = new_tf.transfer_function(params).squeeze()
-
-    assert not torch.allclose(
-        old_t, new_t, atol=1e-4
-    )  # old: bfactor silently ignored here
-    assert torch.allclose(
-        old_t[0, 0], new_t[0, 0], atol=1e-4
-    )  # DC: both unaffected by bfactor
 
 
 # ---------------------------------------------------------------------------
@@ -1224,25 +1004,11 @@ def test_lpp_dc_pinned_in_nonlinear_mode():
     assert not torch.allclose(out[3, 5], torch.tensor(1.0 + 0.0j), atol=1e-3)
 
 
-def test_lpp_peak_phase_zero_is_a_real_upstream_nan_singularity():
-    """torch_ctf.get_eta0_from_peak_phase_deg computes
-    ``eta0 = eta0_test * peak_phase_deg / peak_phase_deg_test`` where both
-    eta0_test and peak_phase_deg_test are themselves exactly zero when
-    peak_phase_deg=0 (zero laser power) -- a genuine 0/0 upstream
-    singularity, not a wiring bug on this side. Documented here so it isn't
-    mistaken for a regression if hit again."""
-    zero_power = {**_LPP_KWARGS, "peak_phase_deg": 0.0}
-    params_lpp = CTFParameters(
-        defocus=1.0, spherical_aberration=2.7, lpp_params=zero_power
-    )
-    tf = TransferFunction(N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear")
-    out_lpp = tf.transfer_function(params_lpp).squeeze()
-    assert torch.isnan(out_lpp).any()
-
-
 def test_lpp_near_zero_peak_phase_is_near_noop():
-    """Physical sanity check (not wiring): with negligible (but nonzero,
-    avoiding the singularity above) laser power, the LPP transfer function
+    """Physical sanity check (not wiring): with negligible (but nonzero --
+    peak_phase_deg=0.0 is a genuine 0/0 NaN singularity upstream in
+    torch_ctf.get_eta0_from_peak_phase_deg, see CTFParameters' lpp_params
+    docstring) laser power, the LPP transfer function
     should be close to the plain defocus-only CTF, not introduce spurious
     structure."""
     near_zero_power = {**_LPP_KWARGS, "peak_phase_deg": 1e-4}

@@ -16,30 +16,6 @@ from specter.coords import (
 )
 
 
-def test_poisson_disk_neighbors_3d_respects_min_distance():
-    """The spacing guarantee, asserted for the 3D sampler only.
-
-    The 2D sampler tests each candidate against ``torch.stack(pts)``, rebuilt
-    from the accepted list every iteration, so asserting the spacing of what
-    it returns just re-runs its own acceptance rule and cannot fail. The 3D
-    sampler instead tests against ``pts_t``, an incrementally grown *copy* of
-    that list (a rewrite for speed -- the per-candidate grid scan it replaced
-    cost 0.18 s for eight points). Appending to the list and concatenating to
-    the copy are two separate statements, and if they ever fall out of step
-    the distance test runs against a stale set while the returned points
-    silently overlap. That is what this covers.
-    """
-    torch.manual_seed(2)
-    min_distance = 15.0
-    pts = poisson_disk_neighbors_3d(min_distance, box=(80.0, 80.0, 80.0))
-
-    assert pts.shape[0] > 1
-    assert pts.shape[1] == 3
-    dists = torch.cdist(pts, pts)
-    dists.fill_diagonal_(torch.inf)
-    assert bool((dists.min(dim=1).values >= min_distance - 1e-4).all())
-
-
 def test_poisson_disk_samplers_respect_a_non_cubic_box():
     """Box extents are given in the reverse order of the columns returned:
     the 2D sampler takes (H, W) and returns (y, x), the 3D one takes
@@ -147,6 +123,14 @@ def test_radial_distribution_function_modes_agree():
 
 @pytest.mark.parametrize("seed", ["origin", "random"])
 def test_poisson_disk_3d_respects_min_distance_and_is_deterministic(seed):
+    """The spacing guarantee is meaningful for the 3D sampler in particular:
+    it tests each candidate against ``pts_t``, an incrementally grown *copy*
+    of the accepted list (a speed rewrite), and if the append and the
+    concatenation ever fall out of step the distance test runs against a
+    stale set while the returned points silently overlap. The 2D sampler
+    rebuilds ``torch.stack(pts)`` every iteration, so the same assertion there
+    would only re-run its own acceptance rule.
+    """
     torch.manual_seed(5)
     pts = poisson_disk_neighbors_3d(10.0, box=(60.0, 80.0, 70.0), seed=seed)
     assert len(pts) > 20

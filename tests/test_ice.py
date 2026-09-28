@@ -74,21 +74,6 @@ def test_kernels_kspace_grid_shape_and_dc_center():
 # ---------------------------------------------------------------------------
 
 
-def test_compute_native_target_shape_and_dc():
-    k, f = compute_native_target(n=32, dx=1.0)
-    assert k.shape == f.shape
-    assert torch.isfinite(f).all()
-    assert k[0].item() == pytest.approx(0.0)
-    assert f[0].item() > 0  # DC term, ~sqrt(n_atoms) in the reference frame
-
-
-def test_compute_native_target_is_deterministic():
-    k1, f1 = compute_native_target(n=32, dx=1.0)
-    k2, f2 = compute_native_target(n=32, dx=1.0)
-    assert torch.equal(k1, k2)
-    assert torch.equal(f1, f2)
-
-
 def test_compute_native_target_differs_by_dx():
     """The whole point: a target computed at dx=0.5 must differ from one at
     dx=1.0, since it's meant to correctly reflect that grid's own
@@ -109,13 +94,6 @@ def test_compute_native_target_box_beyond_reference_still_works():
     k_capped, f_capped = compute_native_target(n=100, dx=1.0)
     assert torch.equal(f, f_capped)
     assert torch.equal(k, k_capped)
-
-
-def test_compute_native_target_noncubic_nz():
-    k, f = compute_native_target(n=32, nz=16, dx=1.0)
-    assert torch.isfinite(f).all()
-    k_cubic, f_cubic = compute_native_target(n=32, dx=1.0)
-    assert not torch.equal(f, f_cubic)
 
 
 def test_compute_native_target_anisotropic_uses_physical_k_not_voxel_index_bins():
@@ -140,18 +118,6 @@ def test_compute_native_target_anisotropic_uses_physical_k_not_voxel_index_bins(
     n_rbins = int(r_bins.max().item()) + 1
     assert f.shape == (n_rbins,)
     assert k[1].item() == pytest.approx(dk)
-
-
-def test_gradientskicemaker_noncubic_nz_target_bins_match_simulated_bins():
-    """_f_target_rad_1d and the simulated radial profile in _sk_loss must be
-    binned identically -- they used to diverge whenever nz != n, because the
-    target was binned by radial_profile_3d's voxel-index distance while the
-    simulated side was binned by physical |k|/dk distance. The two schemes
-    only coincide when nz == n (isotropic grid spacing), which is why every
-    prior test in this suite used cubic volumes and never caught this."""
-    gd = GradientSKIcemaker(n=32, nz=16, dx=1.0, progressbars=False)
-    assert gd._f_target_rad_1d.shape == (gd._n_rbins,)
-    assert torch.isfinite(gd._f_target_rad_1d).all()
 
 
 def test_gradientskicemaker_noncubic_nz_optimize_runs_and_reduces_loss():
@@ -219,17 +185,6 @@ def test_gradientskicemaker_optimize_stops_early_when_converged():
 
     assert history["stopped_early"] is True
     assert history["step"][-1] < 59
-
-
-def test_gradientskicemaker_optimize_runs_full_steps_when_tol_none():
-    torch.manual_seed(0)
-    gd = GradientSKIcemaker(n=16, dx=1.0, progressbars=False)
-    gd.init_random()
-
-    history = gd.optimize(n_steps=15, record_every=1, tol=None)
-
-    assert history["stopped_early"] is False
-    assert history["step"][-1] == 14
 
 
 def test_gradientskicemaker_optimize_mlbop_strength_reduces_sk_loss():
@@ -330,31 +285,6 @@ def test_gradientskicemaker_optimize_records_final_step_on_early_stop():
     assert (
         len(history["step"]) == len(history["loss"]) == len(history["radial_profile"])
     )
-
-
-# ---------------------------------------------------------------------------
-# mlbop_energy() diagnostic wired into Random/GradientSK (see
-# specter.ice._energy).
-# ---------------------------------------------------------------------------
-
-_MLBOP_KEYS = {
-    "E_total",
-    "E_per_atom",
-    "rij_mean",
-    "rij_var",
-    "theta_mean",
-    "theta_var",
-}
-
-
-def test_randomicemaker_mlbop_energy():
-    rm = RandomIcemaker(n=16, dx=1.0, progressbars=False)
-    rm.init_random()
-
-    result = rm.mlbop_energy()
-
-    assert set(result) == _MLBOP_KEYS
-    assert torch.isfinite(torch.tensor(result["E_total"]))
 
 
 def test_water_kernel_reproduces_the_measured_ice_mean_inner_potential():

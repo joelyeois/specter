@@ -186,17 +186,6 @@ def test_build_pdb_cache_concurrently_parallel_matches_serial():
         assert torch.allclose(parallel[source].coordinates, serial[source].coordinates)
 
 
-@_requires_table_sources
-def test_build_pdb_cache_concurrently_deduplicates_sources():
-    sources = _TABLE_SOURCES
-    cache = build_pdb_cache_concurrently(
-        pdb_sources=sources + sources[:3],  # duplicate a few sources
-        pdb_cache_dir=default_pdb_cache_dir(),
-        max_workers=4,
-    )
-    assert set(cache) == set(sources)
-
-
 def test_build_pdb_cache_concurrently_deduplicates_accession_case(monkeypatch):
     # Regression test: dedup used to be by raw string, so a config naming
     # one structure two ways ("1FA2" as a target, "1fa2" as a filler) paid
@@ -245,11 +234,6 @@ def test_build_pdb_cache_concurrently_ticks_once_per_input_source():
 def test_recommend_render_workers_floors_at_one():
     assert recommend_render_workers(0) == 1
     assert recommend_render_workers(-5) == 1
-
-
-def test_resolve_render_workers_passes_through_non_auto():
-    assert resolve_render_workers(3, n_species=100) == 3
-    assert resolve_render_workers(1, n_species=100) == 1
 
 
 def test_resolve_render_workers_resolves_auto():

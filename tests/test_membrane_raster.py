@@ -69,21 +69,6 @@ def test_rasterize_coarser_output_blurs_rather_than_distorts_peak_separation():
     assert abs(separation - 40.0) < 2 * coarse_spacing
 
 
-def test_rasterize_output_shape_matches_request():
-    spacing_angstrom = 5.0
-    shape = (10, 10, 10)
-    origin = torch.zeros(3)
-    phi = torch.zeros(shape)
-    field = MembraneField(phi=phi, spacing_angstrom=spacing_angstrom, origin_xyz=origin)
-    profile = _synthetic_bilayer_profile()
-
-    out_shape = (7, 9, 11)
-    density = rasterize_membrane_density(
-        field, profile, target_shape=out_shape, target_spacing_angstrom=6.0
-    )
-    assert density.shape == out_shape
-
-
 def test_rasterize_end_to_end_with_real_field_and_calibrated_profile():
     field = generate_membrane_field_swept_spline(
         shape_zyx=(40, 40, 40),

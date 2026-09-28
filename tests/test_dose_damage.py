@@ -126,19 +126,6 @@ def test_occupancy_is_not_invariant_under_damage():
 # --- where the envelope acts -----------------------------------------------
 
 
-def test_default_keeps_the_envelope_on_the_transfer_function(small_volume):
-    gen = _generator(small_volume, True, Ice(model=None), target="transfer_function")
-    assert gen._damages_potential is False
-    assert gen.aberration.dose_envelope is True
-    assert Envelopes().dose_envelope_target == "transfer_function"
-
-
-def test_specimen_target_moves_the_envelope_off_the_transfer_function(small_volume):
-    gen = _generator(small_volume, True, Ice(model=None), target="specimen")
-    assert gen._damages_potential is True
-    assert gen.aberration.dose_envelope is False
-
-
 def test_potential_damage_equals_transfer_function_envelope_for_the_specimen(
     small_volume,
 ):

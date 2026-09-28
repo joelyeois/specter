@@ -27,7 +27,6 @@ from specter.potential import (
 )
 from specter.fft import fftconvolve, spatial_convolve3d_same
 from specter.potential._builders import _deltas_backend
-from specter.ice._kernels import build_water_kernel
 
 
 # A small cluster of 5 carbon atoms (Z=6) spread over ~6 Å.
@@ -887,6 +886,12 @@ def test_recommended_rcut_shtyrov_species_and_peng_fallback():
     recommended_rcut for parameterization="shtyrov" should use the species
     table for matched atoms and the per-element Peng table as a fallback
     for unmatched/None species, taking the max across all atoms present.
+
+    The exact O(HH) value also pins the mixed-sign-Gaussian-term bug found
+    while building the table: O(HH) has two negative-amplitude terms that
+    decay slower than its positive ones, so a naive bisection assuming the
+    captured-integral fraction is monotonic in radius converged on 0.6 A
+    (~17.5% too much total potential); the corrected entry is 3.6 A.
     """
     atomic_numbers = torch.tensor([8, 6], dtype=torch.long)
 
@@ -898,21 +903,6 @@ def test_recommended_rcut_shtyrov_species_and_peng_fallback():
     # atom_species=None entirely -> every atom uses the Peng table.
     r_no_species = recommended_rcut(atomic_numbers, "shtyrov", atom_species=None)
     assert r_no_species < 3.0  # O and C are both fast-decaying in Peng's table
-
-
-def test_recommended_rcut_handles_shtyrov_mixed_sign_species():
-    """
-    Regression test for the mixed-sign-Gaussian-term bug found while
-    building this table: Shtyrov's O(HH) has two negative-amplitude terms
-    (a=-0.60, b=64.2 and a=-0.15, b=121.4) that decay slower than its
-    positive terms, so a naive bisection assuming the captured-integral
-    fraction is monotonic in radius converges on a radius far too small
-    (found: 0.6A, giving ~17.5% too much total potential in practice).
-    The corrected, monotonicity-robust table entry must be large enough
-    to actually be safe.
-    """
-    r = recommended_rcut(torch.tensor([8]), "shtyrov", atom_species=["O(HH)"])
-    assert r >= 3.5
 
 
 def test_potential_builder_default_rcut_is_auto_detected():
@@ -1011,11 +1001,6 @@ def test_potential_builder_kernels_match_standalone_builder(parameterization):
         )
 
 
-def test_build_atomic_potential_kernel_rejects_unknown_parameterization():
-    with pytest.raises(ValueError, match="Unknown parameterization"):
-        build_atomic_potential_kernel(1.0, parameterization="nonesuch")
-
-
 @pytest.mark.parametrize("dx", [1.0, 1.5])
 def test_conv_backends_agree_including_even_kernels(dx):
     """
@@ -1046,13 +1031,6 @@ def test_conv_backends_agree_including_even_kernels(dx):
         out[backend] = pb(coords, method="3d")
 
     torch.testing.assert_close(out["fftconvolve"], out["conv3d"], atol=1e-4, rtol=1e-4)
-
-
-def test_potential_from_deltas_rejects_unknown_backend():
-    with pytest.raises(ValueError, match="Unknown backend"):
-        potential_from_deltas(
-            torch.zeros(1, 4, 4, 4), torch.ones(3, 3, 3), backend="nope"
-        )
 
 
 @pytest.mark.parametrize("backend", ["fftconvolve", "conv3d"])
@@ -1572,22 +1550,3 @@ def test_potential_from_deltas_backends_agree(k):
     assert torch.equal(c, a if k == 3 else b)
     assert torch.allclose(a[0], fftconvolve(deltas[0], kernel, mode="same"), atol=1e-4)
     assert torch.equal(a, spatial_convolve3d_same(deltas, kernel))
-
-
-@pytest.mark.parametrize("dx", [0.731, 1.0])
-def test_periodic_conv3d_chunking_matches_fft(dx):
-    """The chunked circular-pad conv3d path equals the FFT path, with the
-    chunk forced small enough that a volume spans several chunks."""
-    from specter.potential import _builders
-
-    k = build_water_kernel(dx)
-    g = torch.Generator().manual_seed(0)
-    d = torch.rand(1, 40, 24, 20, generator=g)
-    a = potential_from_deltas(d, k, backend="fftconvolve", boundary="periodic")
-    old = _builders._DELTAS_FFT_MAX_VOXELS
-    _builders._DELTAS_FFT_MAX_VOXELS = 24 * 20 * 7
-    try:
-        b = potential_from_deltas(d, k, backend="conv3d", boundary="periodic")
-    finally:
-        _builders._DELTAS_FFT_MAX_VOXELS = old
-    assert torch.allclose(a, b, rtol=1e-4, atol=1e-4 * float(a.abs().max()))

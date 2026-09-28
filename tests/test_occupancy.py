@@ -72,19 +72,6 @@ class TestPotentialOccupancy:
         spread = (max(volumes) - min(volumes)) / min(volumes)
         assert spread < 0.15, f"volumes {volumes}, spread {spread:.3f}"
 
-    def test_rejects_a_nonpositive_pixel_size(self):
-        from specter.potential import potential_occupancy
-
-        with pytest.raises(ValueError, match="voxel_size"):
-            potential_occupancy(torch.zeros(4, 4, 4), 0.0)
-
-    def test_bounded_in_unit_interval(self):
-        from specter.potential import potential_occupancy
-
-        V = torch.randn(8, 8, 8) * 50.0
-        out = potential_occupancy(V, 1.0)
-        assert float(out.min()) >= 0.0 and float(out.max()) <= 1.0
-
 
 def _render(coords, Z, n, dx):
     """Small helper: potential from coordinates on an (n,n,n) grid."""

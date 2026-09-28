@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from specter.arrays import soft_voxelize_coordinates
-from specter.ice import GradientSKIcemaker, IceBank, RandomIcemaker
+from specter.ice import GradientSKIcemaker, IceBank
 from specter.ice import (
     blend_ice_into_volume,
     build_ice_cache,
@@ -457,32 +457,6 @@ def test_build_one_ice_config_writes_fixed_point_coordinates(tmp_path):
     assert raw["n_steps_actual"] == 2
 
 
-def test_blend_ice_into_volume_random_icemaker_noncubic_nxy_nz():
-    """
-    blend_ice_into_volume's docstring states that a RandomIcemaker's own
-    fixed (n, dx, nz) "must already match V" -- it has no tiling support,
-    unlike IceBank. Regression test for a real bug found in the micrograph
-    pipeline (then demo-scripts/generate_micrograph.py, now
-    specter.pipelines.run_micrograph) and the matching notebook: both
-    constructed RandomIcemaker with n=config.n_pixels (the separate,
-    usually much smaller, particle-potential resolution) instead of
-    n=config.micrograph_size, and relied on RandomIcemaker's nz defaulting
-    to n (a cube) instead of the actual, generally much smaller nz derived
-    from ice_thickness -- causing a broadcasting RuntimeError (and, once
-    n was fixed but nz still defaulted to a cube, a large spurious CUDA
-    OOM from allocating a needlessly cubic ice volume). This test builds
-    V and the RandomIcemaker with genuinely different, non-cube (nz, nxy)
-    to guard against a similar mismatch being reintroduced.
-    """
-    nz, nxy = 6, 16
-    V = torch.zeros(1, nz, nxy, nxy)
-    icemaker = RandomIcemaker(dx=1.0, n=nxy, nz=nz, progressbars=False)
-
-    result = blend_ice_into_volume(V, icemaker, voxel_size=1.0)
-    assert result.shape == (1, nz, nxy, nxy)
-    assert torch.isfinite(result).all()
-
-
 def test_bundled_ice_data_resolves_inside_the_package():
     """The bundled cache and MD reference data must be found through the
     import system, not by walking up from __file__ to a repository root.
@@ -574,6 +548,13 @@ def test_blend_ice_slabwise_matches_whole_volume_expression(nz, n, inplace):
     Non-dividing `nz` is covered because the slab loop's last chunk is
     short, and because the first and last slabs are the ones whose halo is
     truncated by the volume itself.
+
+    The non-cubic (nz != n) cases also pin that a RandomIcemaker's fixed
+    (n, dx, nz) must match V exactly (it has no tiling support): the
+    micrograph pipeline once built its RandomIcemaker with the particle
+    resolution instead of `micrograph_size` and a cubic default nz instead
+    of the ice-thickness nz, giving a broadcasting RuntimeError and, once n
+    was fixed, a spurious CUDA OOM from a needlessly cubic ice volume.
     """
     from specter.ice import RandomIcemaker
     from specter.ice import blend_ice_into_volume

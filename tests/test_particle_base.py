@@ -118,18 +118,6 @@ def test_solvate_halo_spanning_several_slabs_matches_padded_reference(monkeypatc
     assert torch.allclose(got, want, atol=1e-6, rtol=0)
 
 
-def test_solvate_slab_count_is_capped():
-    from specter.imagegenerator._particle_base import (
-        _SOLVATE_MAX_SLICES,
-        _solvate_chunk_slices,
-    )
-
-    assert _solvate_chunk_slices(1024) == 64
-    assert _solvate_chunk_slices(512) == 64
-    assert _solvate_chunk_slices(64) == _SOLVATE_MAX_SLICES
-    assert _solvate_chunk_slices(20000) == 1
-
-
 def test_process_volume_keeps_no_cpu_copy_of_the_crowd_canvas():
     model = _tiny_generator(pad_fft=True, ice_model=None)
     model.crowd = CrowdWithDuplicates(

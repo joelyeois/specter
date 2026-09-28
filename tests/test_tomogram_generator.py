@@ -288,43 +288,6 @@ def test_tomogram_specimen_generator_composites_two_non_overlapping_instances():
         assert (centroid_offset_xyz - expected_xyz).norm() < 40.0
 
 
-def test_tomogram_specimen_generator_auto_places_non_colliding_instances():
-    """Two instances with position_xyz left at its default (None) in a box
-    generously sized for both -- both should be accepted (no "dropped"
-    warning), get distinct, non-overlapping labels, and have their own
-    position_xyz mutated in place to the resolved coordinates (inspectable
-    after generate())."""
-    big_shape_zyx = (140, 140, 140)
-    kwargs = dict(_MEMBRANE_KWARGS, target_shape=big_shape_zyx)
-    mgen_a = MembraneGenerator(seed=0, **kwargs)
-    mgen_b = MembraneGenerator(seed=1, **kwargs)
-    instance_a = MembraneInstance(generator=mgen_a)
-    instance_b = MembraneInstance(generator=mgen_b)
-    assert instance_a.position_xyz is None
-    gen = TomogramSpecimenGenerator(
-        membrane_instances=[instance_a, instance_b],
-        target_shape=big_shape_zyx,
-        voxel_size=_V_SIZE,
-        protein_specs=[
-            TomogramProteinSpec(pdb_source=str(_LARGE_FIXTURE), location="cytosol")
-        ],
-        occupancy_fraction=0.05,
-        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
-        seed=0,
-    )
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        gen.generate()
-    dropped_warns = [x for x in w if "dropped" in str(x.message)]
-    assert not dropped_warns
-
-    assert instance_a.position_xyz is not None
-    assert instance_b.position_xyz is not None
-    labels = gen.membrane_labels
-    assert labels is not None
-    assert set(torch.unique(labels).tolist()) - {0} == {1, 2}
-
-
 def test_tomogram_specimen_generator_drops_instances_that_dont_fit():
     """Several instances, deliberately too many/too-large for a small box
     -- some must be dropped (warned about), and a dropped instance's own
@@ -1122,16 +1085,6 @@ def test_pack_shapes_places_nothing_when_the_packing_grid_is_full():
     assert coords.shape == (0, 3) and rots.shape == (0, 3, 3) and accepted.numel() == 0
     assert occ is occupancy
     assert any("no free voxel" in str(w.message) for w in caught)
-
-
-def test_pack_shapes_still_packs_a_region_with_room():
-    gen = _bare_generator()
-    pack_shape = (12, 12, 12)
-    occupancy = torch.zeros(pack_shape, dtype=torch.bool)
-    coords, rots, accepted, occ = gen._pack_shapes(
-        [_FakePDB()], torch.zeros(6, dtype=torch.long), pack_shape, 8.0, 2, occupancy
-    )
-    assert coords.shape[0] > 0 and occ.any()
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")

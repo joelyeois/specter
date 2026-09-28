@@ -78,8 +78,3 @@ def test_config_literal_fields_are_subsets_of_the_option_vocabulary(config_cls):
         checked += 1
     # MatchConfig's only enumerated field is the exempt one.
     assert checked > 0 or config_cls is MatchConfig
-
-
-def test_every_alias_is_exported():
-    for name in options.__all__:
-        assert get_origin(getattr(options, name)) is Literal

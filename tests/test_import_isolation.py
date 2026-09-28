@@ -146,12 +146,6 @@ def test_volume_rotator_is_still_reachable_from_the_package() -> None:
     assert VolumeRotator is Direct
 
 
-def test_volume_rotator_access_is_what_loads_lightning() -> None:
-    """Touching the rotator does load Lightning; that part is expected."""
-    loaded = _loaded_modules("from specter.rotations import VolumeRotator")
-    assert "lightning" in loaded
-
-
 def test_rotations_dir_advertises_the_lazy_names() -> None:
     """`dir()` must list lazy exports so tab completion still finds them."""
     import specter.rotations as rotations

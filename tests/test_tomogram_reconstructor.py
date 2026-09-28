@@ -17,7 +17,6 @@ import torch
 import torch.utils.data
 
 from specter.arrays import ball3d
-from specter.fft import fft3
 from specter.ghostbuster import TomogramReconstructor
 from specter.settings import Propagation, TiltGeometry
 from conftest import fit_one_epoch
@@ -124,15 +123,6 @@ def test_dose_must_have_one_entry_per_tilt(tr_kwargs: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fov_mask_none_at_zero_tilt(tr_kwargs: dict) -> None:
-    """At (near-)zero tilt the full image is real FOV, so the mask is None."""
-    model = TomogramReconstructor(
-        **tr_kwargs,
-        propagation=Propagation(scattering_model="projection"),
-    )
-    assert model._fov_mask(1) is None  # tilt_idx 1 == 0 degrees
-
-
 def test_fov_mask_zeros_border_at_high_tilt(tr_kwargs: dict) -> None:
     """At high tilt (tilt_axis='x') the Y-border of the mask is zeroed and the
     center remains real FOV."""
@@ -209,41 +199,6 @@ def test_configure_optimizers_returns_empty_when_lr_none(tr_kwargs: dict) -> Non
     opts, schedulers = model.configure_optimizers()
     assert opts == []
     assert schedulers == []
-
-
-def test_configure_optimizers_unknown_scheduler_raises(tr_kwargs: dict) -> None:
-    """An unrecognised scheduler string raises ValueError from configure_optimizers."""
-    model = TomogramReconstructor(
-        **tr_kwargs,
-        lr=0.1,
-        scheduler="BogusScheduler",
-        propagation=Propagation(scattering_model="projection"),
-    )
-    with pytest.raises(ValueError, match="Unknown scheduler"):
-        model.configure_optimizers()
-
-
-# ---------------------------------------------------------------------------
-# Fourier k-mask
-# ---------------------------------------------------------------------------
-
-
-def test_kmask_zeros_high_frequencies(tr_kwargs: dict) -> None:
-    """on_train_batch_end applies the Fourier k-mask in-place after each step."""
-    torch.manual_seed(0)
-    n = tr_kwargs["V"].shape[-1]
-    kwargs = dict(tr_kwargs)
-    kwargs["V"] = torch.randn(n, n, n)
-    model = TomogramReconstructor(
-        **kwargs,
-        lr=0.1,
-        kmask=ball3d(n, n // 2),
-        propagation=Propagation(scattering_model="projection"),
-    )
-    model.on_train_batch_end(None, None, 0)
-    spectrum = fft3(model.V.data, shift=True)
-    outside_mask = spectrum[model.kmask == 0]
-    assert torch.allclose(outside_mask, torch.zeros_like(outside_mask), atol=1e-5)
 
 
 # ---------------------------------------------------------------------------

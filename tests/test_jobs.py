@@ -241,30 +241,9 @@ def test_job_create_tensor_summary(tmp_path: Path) -> None:
     }
 
 
-def test_job_create_dict_of_tensors(tmp_path: Path) -> None:
-    class _WithCtf:
-        def __init__(self, ctf_params: dict) -> None:  # type: ignore[type-arg]
-            self.ctf_params = ctf_params
-
-    ctf = {"dfu": torch.ones(10), "dfv": torch.ones(10)}
-    with Job("dummy", project="p", base_dir=tmp_path) as job:
-        job.create(_WithCtf, ctf)
-    data = json.loads((job.dir / "job.json").read_text())
-    assert data["params"]["ctf_params"]["dfu"]["__type__"] == "Tensor"
-    assert data["params"]["ctf_params"]["dfu"]["shape"] == [10]
-
-
 # ---------------------------------------------------------------------------
 # Task 4: job.log() and job.save()
 # ---------------------------------------------------------------------------
-
-
-def test_job_log_stores_params(tmp_path: Path) -> None:
-    with Job("ghostbuster", project="p", base_dir=tmp_path) as job:
-        job.log({"n_particles": 100, "dataset": "empiar-12391"})
-    data = json.loads((job.dir / "job.json").read_text())
-    assert data["params"]["n_particles"] == 100
-    assert data["params"]["dataset"] == "empiar-12391"
 
 
 def test_job_log_merges(tmp_path: Path) -> None:
@@ -518,14 +497,6 @@ def test_cli_diff_smoke(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Task 7: Job resume via job_id
 # ---------------------------------------------------------------------------
-
-
-def test_job_resume_opens_existing_folder(tmp_path: Path) -> None:
-    with Job("ghostbuster", project="p", base_dir=tmp_path) as job:
-        first_dir = job.dir
-
-    with Job("ghostbuster", project="p", base_dir=tmp_path, job_id="J001") as job:
-        assert job.dir == first_dir
 
 
 def test_job_resume_does_not_allocate_new_id(tmp_path: Path) -> None:

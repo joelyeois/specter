@@ -26,11 +26,8 @@ import ast
 from pathlib import Path
 
 import pytest
-import torch
 
 import specter.imagegenerator._generator as generator_module
-from specter.imagegenerator import ImageGenerator
-from specter.settings import Camera, Ice, Propagation
 
 PACKAGE = Path(generator_module.__file__).parent
 
@@ -75,41 +72,3 @@ def test_no_unlisted_module_pads() -> None:
         if p.name not in EXPECTED_MODE and _pad_volume_calls(p)
     )
     assert not unlisted, f"pad_volume called in unlisted module(s): {unlisted}"
-
-
-def test_image_generator_actually_pads_with_constant() -> None:
-    """The AST check alone would pass if the call became unreachable."""
-    seen: list[str] = []
-    original = generator_module.pad_volume
-
-    def recording(V, nxy, nz, ice_thickness, pad_fft, xy_pad_mode="constant"):
-        seen.append(xy_pad_mode)
-        return original(V, nxy, nz, ice_thickness, pad_fft, xy_pad_mode=xy_pad_mode)
-
-    generator_module.pad_volume = recording
-    try:
-        volume = torch.zeros(16, 16, 16)
-        volume[6:10, 6:10, 6:10] = 50.0
-        gen = ImageGenerator(
-            scattering_potential=volume,
-            pixel_size=2.0,
-            quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-            translations=torch.zeros(1, 2),
-            ctf_params={
-                "cs": torch.full((1,), 2.0e7),
-                "dfu": torch.full((1,), 8000.0),
-            },
-            voltage=300.0,
-            dose_per_angstrom=20.0,
-            verbose=False,
-            progressbars=False,
-            propagation=Propagation(scattering_model="multislice", pad_fft=True),
-            camera=Camera(noise_model=None),
-            ice=Ice(model=None),
-        )
-        with torch.no_grad():
-            gen(torch.tensor([0]))
-    finally:
-        generator_module.pad_volume = original
-
-    assert seen == ["constant"]

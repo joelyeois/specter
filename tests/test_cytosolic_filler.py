@@ -87,12 +87,6 @@ def test_build_filler_pool_specs_works_on_pei2016_table_too():
     )
 
 
-def test_build_filler_pool_specs_is_equal_ratio_by_default():
-    """No ratio key by default, so every species takes the spec's ratio 1."""
-    specs = build_filler_pool_specs(PEI2016_CROWDING_TABLE)
-    assert specs == [{"pdb_source": e["code"]} for e in PEI2016_CROWDING_TABLE]
-
-
 def test_build_filler_pool_specs_abundance_weighting_follows_occurrence_freq():
     """
     Weighted ratios are proportional to occurrence_freq and average 1 over

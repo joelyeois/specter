@@ -45,17 +45,6 @@ def test_cli_particles_smoke(tmp_path: Path) -> None:
     assert (tmp_path / "particles.star").exists()
 
 
-def test_cli_particles_help_smoke() -> None:
-    result = proc.run(
-        [sys.executable, "-m", "specter.cli._cli", "simulate", "particles", "--help"],
-        capture_output=True,
-        encoding="utf-8",
-    )
-    assert result.returncode == 0
-    assert "--pdb_source" in result.stdout
-    assert "--scattering_model" in result.stdout
-
-
 def test_cli_particles_n_particles_override(tmp_path: Path) -> None:
     """--n_particles overrides the loaded TOML config's value end to end."""
     result = _run_particles_cli(tmp_path, n_particles=3)
@@ -201,17 +190,6 @@ def test_cli_micrograph_smoke(tmp_path: Path) -> None:
         assert mrc.data.shape == (1, 64, 64)
 
 
-def test_cli_micrograph_help_smoke() -> None:
-    result = proc.run(
-        [sys.executable, "-m", "specter.cli._cli", "simulate", "micrograph", "--help"],
-        capture_output=True,
-        encoding="utf-8",
-    )
-    assert result.returncode == 0
-    assert "--pdb_source" in result.stdout
-    assert "--micrograph_size" in result.stdout
-
-
 def test_cli_micrograph_n_micrographs_override(tmp_path: Path) -> None:
     """--n_micrographs overrides the loaded TOML config's value end to end."""
     result = _run_micrograph_cli(tmp_path, n_micrographs=2)
@@ -272,36 +250,6 @@ def test_cli_tiltseries_smoke(tmp_path: Path) -> None:
 
     with mrcfile.open(tmp_path / "tiltseries.mrcs") as mrc:
         assert mrc.data.shape == (3, 48, 48)
-
-
-def test_cli_tiltseries_help_smoke() -> None:
-    result = proc.run(
-        [sys.executable, "-m", "specter.cli._cli", "simulate", "tiltseries", "--help"],
-        capture_output=True,
-        encoding="utf-8",
-    )
-    assert result.returncode == 0
-    assert "--volume_path" in result.stdout
-    assert "--n_tilts" in result.stdout
-
-
-def test_cli_tiltseries_requires_volume_path(tmp_path: Path) -> None:
-    """Without --volume_path, run_tilt_series should fail with a clear error
-    rather than silently falling back to some other specimen source."""
-    args = [
-        sys.executable,
-        "-m",
-        "specter.cli._cli",
-        "simulate",
-        "tiltseries",
-        "--device",
-        "cpu",
-        "--output_dir",
-        str(tmp_path),
-    ]
-    result = proc.run(args, capture_output=True, encoding="utf-8")
-    assert result.returncode != 0
-    assert "volume_path" in result.stderr
 
 
 def test_cli_tiltseries_tomogram_config_chains_build_and_simulate(

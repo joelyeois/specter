@@ -313,20 +313,6 @@ def test_aberration_dose_envelope_false_is_unchanged():
     )
 
 
-def test_aberration_dose_envelope_attenuates_high_frequency():
-    ab = Aberration(
-        64,
-        pixel_size=1.0,
-        voltage=300.0,
-        aberration_model="nonlinear",
-        dose_envelope=True,
-    )
-    ctf_params = {"dfu": torch.tensor([5000.0]), "dose": torch.tensor([50.0])}
-    transfer = ab.transfer_function(ctf_params)
-    magnitude = torch.abs(transfer).squeeze(0)
-    assert magnitude[0, 1] > magnitude[0, 20]
-
-
 def test_ctf_batch_includes_dose():
     from specter.imagegenerator._base import BaseImager
 

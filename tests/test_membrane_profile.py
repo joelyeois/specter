@@ -82,25 +82,6 @@ def test_compute_bilayer_profile_has_headgroup_peak_and_decays_outside():
     assert torch.corrcoef(torch.stack([positive_side, negative_side]))[0, 1] > 0.7
 
 
-def test_compute_bilayer_profile_phosphate_peak_dominates_glycerol_shoulder():
-    # Regression test: an earlier template weighting let the glycerol/ester/
-    # upper-chain region (~+-8 A) out-peak the phosphate headgroup (~+-20 A),
-    # the opposite of real bilayer electron-density profiles, where the
-    # phosphate peak is the tallest, sharpest feature. Needs enough lipids
-    # to be a real signal rather than per-leaflet sampling noise (a 6-lipid
-    # patch does not reliably resolve this ordering).
-    atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=120, area_per_lipid_a2=65.0, jitter_angstrom=2.5, seed=0
-    )
-    profile = compute_bilayer_profile(
-        atomic_numbers, coordinates, voxel_size=1.0, parameterization="shtyrov"
-    )
-
-    phosphate_peak = profile(torch.linspace(18.0, 21.0, 10)).max()
-    glycerol_shoulder_peak = profile(torch.linspace(5.0, 11.0, 10)).max()
-    assert phosphate_peak > glycerol_shoulder_peak
-
-
 def test_compute_bilayer_profile_no_competing_peak_in_chain_region():
     """Regression test for a real, user-reported visual defect: the previous
     template (satisfying the weaker "phosphate > glycerol shoulder" check

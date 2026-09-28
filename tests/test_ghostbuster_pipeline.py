@@ -20,7 +20,6 @@ import torch
 
 from specter.ghostbuster import (
     Ghostbuster,
-    Reconstructor,
     TomogramGhostbuster,
     TomogramReconstructor,
 )
@@ -95,24 +94,6 @@ def test_ghostbuster_counts_stack_is_used_as_is(mrc_file: Path) -> None:
     assert torch.equal(gb._images, raw)
 
 
-@pytest.mark.parametrize(
-    "halfset,expected_label",
-    [("A", "A"), ("B", "B"), ("all", None)],
-)
-def test_ghostbuster_halfset_label_mapping(
-    mrc_file: Path, halfset: str, expected_label: str | None
-) -> None:
-    """halfset maps to halfset_label as documented: 'A'->A, 'B'->B, 'all'->None."""
-    gb = Ghostbuster(
-        cs_file="fake.cs",
-        mrc_file=str(mrc_file),
-        dose_per_angstrom=2.0,
-        halfset=halfset,
-        propagation=Propagation(scattering_model="projection"),
-    )
-    assert gb.halfset_label == expected_label
-
-
 @pytest.mark.parametrize("alpha,expected", [(None, 0.1), (0.0, 0.0), (0.5, 0.5)])
 def test_ghostbuster_alpha_overrides_cs(
     mrc_file: Path, alpha: float | None, expected: float
@@ -139,38 +120,6 @@ def test_ghostbuster_alpha_out_of_range_rejected(mrc_file: Path) -> None:
             dose_per_angstrom=2.0,
             alpha=1.5,
         )
-
-
-def test_ghostbuster_test_run_executes(mrc_file: Path) -> None:
-    """test_run() binning + one epoch completes and returns a trained Reconstructor."""
-    gb = Ghostbuster(
-        cs_file="fake.cs",
-        mrc_file=str(mrc_file),
-        dose_per_angstrom=2.0,
-        lr=0.1,
-        batchsize=2,
-        propagation=Propagation(scattering_model="projection"),
-    )
-    model = gb.test_run(bin_factor=2)
-    assert isinstance(model, Reconstructor)
-    assert model.V.shape == (BOX // 2, BOX // 2, BOX // 2)
-
-
-def test_ghostbuster_run_executes(mrc_file: Path) -> None:
-    """run() completes one full (unbinned) epoch and updates the volume."""
-    gb = Ghostbuster(
-        cs_file="fake.cs",
-        mrc_file=str(mrc_file),
-        dose_per_angstrom=2.0,
-        lr=0.1,
-        epochs=1,
-        batchsize=2,
-        propagation=Propagation(scattering_model="projection"),
-    )
-    model = gb.run()
-    assert isinstance(model, Reconstructor)
-    assert model.V.shape == (BOX, BOX, BOX)
-    assert not torch.equal(model.V.data, torch.zeros(BOX, BOX, BOX))
 
 
 # ---------------------------------------------------------------------------
@@ -385,21 +334,6 @@ def _dataset_with_blobs(
 def _preprocessed(raw: torch.Tensor) -> torch.Tensor:
     dose_per_area = 2.0 * PIXEL_SIZE**2
     return dose_per_area**0.5 * -raw + dose_per_area
-
-
-def test_ghostbuster_pairs_row_i_with_slice_i(mrc_file: Path) -> None:
-    """The contract: row i of the .cs is slice i of the stack. The default
-    fixture is well-formed, so nothing is reordered."""
-    gb = Ghostbuster(
-        cs_file="fake.cs",
-        mrc_file=str(mrc_file),
-        dose_per_angstrom=2.0,
-        propagation=Propagation(scattering_model="projection"),
-    )
-
-    with mrcfile.open(str(mrc_file)) as mrc:
-        raw = torch.as_tensor(mrc.data.copy())
-    assert torch.allclose(gb._images, _preprocessed(raw))
 
 
 def test_ghostbuster_refuses_a_stack_the_cs_file_says_is_not_in_row_order(

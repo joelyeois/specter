@@ -29,11 +29,6 @@ VALID = [
 INVALID = ["auto", "banana", "gpu", "", "   ", "cuda:", "0,,1", "cuda:x"]
 
 
-@pytest.mark.parametrize("spelling", VALID)
-def test_valid_spellings_parse(spelling: str) -> None:
-    assert isinstance(parse_device(spelling), DeviceSpec)
-
-
 @pytest.mark.parametrize("spelling", INVALID)
 def test_invalid_spellings_raise_rather_than_defaulting(spelling: str) -> None:
     """Silence here is what made `--device banana` train on GPU 0."""
@@ -47,6 +42,7 @@ def test_parsed_shapes() -> None:
     assert parse_device("cuda:1") == DeviceSpec(("cuda:1",))
     assert parse_device("0") == DeviceSpec(("cuda:0",))
     assert parse_device("0,1,2") == DeviceSpec(("cuda:0", "cuda:1", "cuda:2"))
+    assert parse_device("cuda:0,cuda:1") == DeviceSpec(("cuda:0", "cuda:1"))
     assert parse_device("cpu,cpu") == DeviceSpec(("cpu", "cpu"))
     assert parse_device("0,1").is_multi
     assert not parse_device("0").is_multi

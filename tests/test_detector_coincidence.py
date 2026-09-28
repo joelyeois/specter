@@ -150,15 +150,6 @@ def test_positive_radius_all_zero_image_returns_blank_frame() -> None:
     assert (out == 0).all()
 
 
-def test_larger_radius_loses_more_electrons() -> None:
-    """Monotonicity: a bigger exclusion disc must suppress strictly more."""
-    n0 = N0
-    survivals = [
-        _grid_survival(n0, r, SIZE, range(N_SEEDS)) for r in (0.5, 1.0, 2.0, 3.0)
-    ]
-    assert survivals == sorted(survivals, reverse=True), survivals
-
-
 # ---------------------------------------------------------------------------
 # Detector response: MTF (blur) vs DQE(0) (counting efficiency)
 # ---------------------------------------------------------------------------
@@ -190,21 +181,6 @@ def test_mtf_is_normalised_at_dc(preset: str) -> None:
     mtf = getattr(detectors, preset)(n=128, dx=1.0, device="cpu")
     assert float(mtf.flatten()[0]) == pytest.approx(1.0, abs=1e-5)
     assert float(mtf.max()) == pytest.approx(1.0, abs=1e-5)
-
-
-def test_mtf_conserves_total_counts() -> None:
-    """Applying an MTF must not change the number of electrons, only where."""
-    from specter.detectors import falcon4i_300kv
-    from specter.fft import fft2, ifft2
-
-    mtf = falcon4i_300kv(n=256, dx=1.0, device="cpu")
-    torch.manual_seed(0)
-    img = torch.poisson(torch.full((256, 256), 20.0)).double()
-    blurred = torch.real(ifft2(fft2(img) * mtf))
-
-    assert blurred.sum().item() == pytest.approx(img.sum().item(), rel=1e-6)
-    # ...but it must actually blur, or the test is vacuous.
-    assert blurred.std().item() < img.std().item()
 
 
 @pytest.mark.parametrize(

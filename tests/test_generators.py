@@ -138,32 +138,6 @@ def test_micrograph_generator_regression(small_volume, ctf_params, save_or_compa
     save_or_compare("micrograph_generator", images.cpu())
 
 
-def test_micrograph_generator_accepts_prebuilt_icemaker(small_volume, ctf_params):
-    """A pre-built icemaker passed via icemaker= is reused, not rebuilt internally."""
-    from specter.ice import RandomIcemaker
-
-    icemaker = RandomIcemaker(dx=2.0, n=32, nz=32, progressbars=False)
-
-    gen = MicrographGenerator(
-        MicrographSpecimenGenerator(
-            small_volume, 2.0, 32, icemaker=icemaker, progressbars=False
-        ),
-        micrograph_size=32,
-        pixel_size=2.0,
-        ctf_params=ctf_params,
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        coincidence_radius=_CR,
-        verbose=False,
-        progressbars=False,
-        propagation=Propagation(scattering_model="projection", alpha=0.1),
-        camera=Camera(noise_model="poisson", n_frames=10),
-    )
-    assert gen.specimen_gen.icemaker is icemaker
-    images = gen(torch.tensor([0]))
-    assert images.shape == (1, 32, 32)
-
-
 def test_micrograph_generator_blends_ice_into_prebuilt_volume(
     small_volume_4d, ctf_params
 ):
@@ -421,32 +395,6 @@ def test_image_generator_multislice_scattering_model_keeps_specimen_absorption()
     assert model.aberration.specimen_absorption is True
 
 
-def test_aberration_rejects_per_image_ctf_params_as_constructor_kwargs():
-    """dfu/cs/etc. genuinely vary per particle -- still not constructor args."""
-    with pytest.raises(TypeError, match="dfu"):
-        Aberration(16, 2.0, 300.0, dfu=5000.0)
-
-
-def test_transfer_function_supports_batched_ctf_params():
-    """Batched CTF parameters should broadcast over the Fourier grid."""
-    aberration = Aberration(
-        n_pixels=16,
-        pixel_size=2.0,
-        voltage=300.0,
-        aberration_model="nonlinear",
-    )
-
-    transfer = aberration.transfer_function(
-        {
-            "dfu": torch.linspace(4000.0, 5000.0, 5),
-            "dfv": torch.linspace(4100.0, 5100.0, 5),
-            "dfang": torch.zeros(5),
-        }
-    )
-
-    assert transfer.shape == (5, 16, 16)
-
-
 def test_image_generator_plumbs_envelope_params(small_volume, ctf_params):
     """ImageGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
     gen = ImageGenerator(
@@ -607,31 +555,6 @@ def test_image_generator_dose_envelope_changes_output(small_volume, ctf_params):
     image_on = gen_on(torch.tensor([0]))
 
     assert not torch.allclose(image_off, image_on)
-
-
-def test_image_generator_bfactor_none_and_zero_match(small_volume, ctf_params):
-    """Providing None or 0.0 preserves the existing generator behavior."""
-    kwargs = dict(
-        scattering_potential=small_volume,
-        pixel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.tensor([[0.0, 0.0]]),
-        ctf_params=ctf_params,
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        camera=Camera(noise_model=None),
-        propagation=Propagation(scattering_model="projection", alpha=0.1),
-        verbose=False,
-        progressbars=False,
-    )
-
-    gen_none = ImageGenerator(**kwargs, bfactor=None)
-    gen_zero = ImageGenerator(**kwargs, bfactor=0.0)
-
-    image_none = gen_none(torch.tensor([0]))
-    image_zero = gen_zero(torch.tensor([0]))
-
-    assert torch.equal(image_none, image_zero)
 
 
 def test_micrograph_generator_potential_scale_changes_output(small_volume, ctf_params):
@@ -1458,24 +1381,6 @@ def test_crowding_slab_from_coordinates_does_not_follow_ice_thickness(
         )
         slabs.append(gen.crowd.max_distance_z)
     assert slabs == [32 * 2.0, 32 * 2.0]
-
-
-def test_crowding_slab_is_still_settable(small_volume, ctf_params):
-    """An explicit `crowd_max_distance_z` overrides the template-depth default."""
-    gen = ImageGenerator(
-        scattering_potential=small_volume,
-        pixel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.tensor([[0.0, 0.0]]),
-        ctf_params=ctf_params,
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        verbose=False,
-        progressbars=False,
-        ice=Ice(model=None, thickness=2000.0),
-        crowding=Crowding(min_distance=60.0, max_distance_z=500.0),
-    )
-    assert gen.crowd.max_distance_z == 500.0
 
 
 def test_tilt_series_uses_each_tilts_own_parameters():

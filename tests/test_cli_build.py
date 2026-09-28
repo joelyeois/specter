@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess as proc
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,9 +18,9 @@ from specter.cli._cli import cli
 # the per-species potential kernels -- which a process shares internally and
 # a subprocess throws away. Running the CLI in-process lets the whole module
 # amortise one warmup instead of paying it per test: 6m16s -> 1m11s serially,
-# and 2626 s -> 1467 s of CPU. The two --help tests below stay in a real
-# subprocess, so `python -m specter.cli._cli` is still pinned as an entry
-# point; they are cheap because they never build anything.
+# and 2626 s -> 1467 s of CPU. The `python -m specter.cli._cli` entry point is
+# pinned in a real subprocess by tests/test_cli_config_defaults.py and
+# tests/test_cli_reconstruct.py, not here.
 
 
 @dataclass
@@ -87,17 +85,6 @@ def test_cli_build_tomogram_smoke(tmp_path: Path) -> None:
     assert len(lines) > 0
     assert '"type": "orientedPoint"' in lines[0]
     assert '"xyz_rotation_matrix"' in lines[0]
-
-
-def test_cli_build_tomogram_help_smoke() -> None:
-    result = proc.run(
-        [sys.executable, "-m", "specter.cli._cli", "build", "tomogram", "--help"],
-        capture_output=True,
-        encoding="utf-8",
-    )
-    assert result.returncode == 0
-    assert "--filler_occupancy_fraction" in result.stdout
-    assert "--n_tomograms" in result.stdout
 
 
 def test_cli_build_tomogram_output_dir_becomes_job_root_when_tracked(
@@ -495,15 +482,3 @@ def test_cli_build_ice_shards_across_devices(tmp_path: Path) -> None:
     result = _run_ice_cli(tmp_path, "--n_configs", "4", "--device", "cpu,cpu")
     assert result.returncode == 0, result.stderr
     assert len(list(tmp_path.glob("*.pt"))) == 4
-
-
-def test_cli_build_ice_help_smoke() -> None:
-    result = proc.run(
-        [sys.executable, "-m", "specter.cli._cli", "build", "ice", "--help"],
-        capture_output=True,
-        encoding="utf-8",
-    )
-    assert result.returncode == 0
-    assert "--n_configs" in result.stdout
-    assert "--seed_start" in result.stdout
-    assert "--device" in result.stdout

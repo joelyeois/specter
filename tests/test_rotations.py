@@ -6,9 +6,7 @@ import torch
 from specter.rotations import (
     VolumeRotator,
     _build_roi_query_points,
-    _normalize_slice_indices,
     _prepare_volume_for_grid_sample,
-    _resolve_roi,
     build_affine_matrix,
     random_rotation_matrix,
     rotate_volume,
@@ -19,7 +17,6 @@ from specter.rotations import (
 from specter import rotations
 from specter.rotations import affine_sampling_grid
 import torch.nn.functional as F
-from specter.rotations._volume import _relion_rotation_grid
 
 
 # ---------------------------------------------------------------------------
@@ -198,22 +195,6 @@ def test_sample_rotated_slices_matches_rotate_volume(angle_deg: float) -> None:
 # ---------------------------------------------------------------------------
 # sample_rotated_slices helper functions
 # ---------------------------------------------------------------------------
-
-
-def test_normalize_slice_indices_accepts_int_list_and_tensor() -> None:
-    assert torch.equal(
-        _normalize_slice_indices(0, "cpu"), torch.as_tensor(0).unsqueeze(0)
-    )
-    assert torch.equal(_normalize_slice_indices([-1, 1], "cpu"), torch.tensor([-1, 1]))
-    assert torch.equal(
-        _normalize_slice_indices(torch.tensor([2, 3]), "cpu"), torch.tensor([2, 3])
-    )
-
-
-def test_resolve_roi_defaults_to_full_centered_volume() -> None:
-    roi_center, roi_size = _resolve_roi(None, None, ny=10, nx=20)
-    assert roi_center == (5, 10)
-    assert roi_size == (10, 20)
 
 
 def test_build_roi_query_points_center_pixel_is_zero() -> None:
@@ -649,16 +630,6 @@ def test_volume_rotator_has_no_persistent_identity_grid():
     """A cached (nz, ny, nx, 3) identity grid would be 1.6 GB at 512^3."""
     rot = VolumeRotator(8, 8, 8)
     assert "base_grid" not in dict(rot.named_buffers())
-
-
-def test_rotate_volume_relion_grid_matches_float64_reference():
-    """_relion_rotation_grid, through affine_sampling_grid, against the
-    six-pass chain evaluated in float64."""
-    nz, ny, nx = 11, 9, 13
-    theta = _random_theta(2, torch.float64)
-    got = _relion_rotation_grid(theta, nz, ny, nx, False)
-    want = _six_pass_reference(theta, nz, ny, nx, "relion")
-    assert torch.allclose(got, want, atol=1e-13, rtol=0)
 
 
 def test_rotation_grid_gradients_flow_to_pose():

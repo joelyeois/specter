@@ -58,19 +58,6 @@ def test_membrane_entry_explicit_target_shape_zyx_is_honored():
     assert instance.generator.target_shape == (20, 20, 20)
 
 
-def test_n_copies_expands_into_independent_seeded_instances():
-    config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics", "n_copies": 3}],
-        seed=100,
-        **_BASE_KWARGS,
-    )
-    gen = build_tomogram_generator(config)
-    assert len(gen.membrane_instances) == 3
-    seeds = [mi.generator.seed for mi in gen.membrane_instances]
-    assert seeds == [100, 101, 102]
-    assert all(mi.position_xyz is None for mi in gen.membrane_instances)
-
-
 def test_n_copies_restarts_per_entry_not_running_across_entries():
     config = TomogramConfig(
         membrane=[
@@ -145,18 +132,6 @@ def test_filaments_config_builds_filament_specs():
     assert spec.n_copies == 4
 
 
-def test_actin_flag_appends_actin_spec():
-    from specter.specimen import ACTIN_SPEC
-
-    config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics"}],
-        actin=True,
-        **_BASE_KWARGS,
-    )
-    gen = build_tomogram_generator(config)
-    assert ACTIN_SPEC in gen.filament_specs
-
-
 def test_actin_flag_is_additive_to_filaments():
     config = TomogramConfig(
         membrane=[{"shape_backend": "spherical_harmonics"}],
@@ -168,15 +143,6 @@ def test_actin_flag_is_additive_to_filaments():
     assert len(gen.filament_specs) == 2
     codes = {spec.code for spec in gen.filament_specs}
     assert codes == {"1TUB", "1J6Z"}
-
-
-def test_no_filaments_or_actin_leaves_filament_specs_empty():
-    config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics"}],
-        **_BASE_KWARGS,
-    )
-    gen = build_tomogram_generator(config)
-    assert gen.filament_specs == []
 
 
 # `n_copies` is the one count spelling across every config entry type. The

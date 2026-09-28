@@ -272,22 +272,13 @@ def _empty_volume(nz: int, nxy: int) -> torch.Tensor:
     return torch.zeros(1, nz, nxy, nxy)
 
 
-def test_all_zero_volume_is_filled_with_ice():
+def test_blend_without_profile_fills_the_box():
     """An empty specimen is vitreous ice, not vacuum.
 
-    It used to come back empty. The blend gated on ``V < 0.05 * V.max()``,
-    so a volume of zeros put the threshold at zero, nothing compared below
-    it, and no ice was added anywhere -- an artifact of the rule being
-    relative to the volume's own contents. Tests carried a marker voxel
-    solely to work around it. The occupancy estimator is absolute, so empty
-    space now takes ice at full weight."""
-    torch.manual_seed(0)
-    V = torch.zeros(1, 24, 32, 32)
-    out = blend_ice_into_volume(V, _tiny_bank(), 4.0)
-    assert float(out.abs().max()) > 0.0
-
-
-def test_blend_without_profile_fills_the_box():
+    An all-zero volume used to come back empty: the blend gated on
+    ``V < 0.05 * V.max()``, so zeros put the threshold at zero and no ice
+    was added anywhere. The occupancy estimator is absolute, so empty space
+    takes ice at full weight in every slice."""
     torch.manual_seed(0)
     bank = _tiny_bank()
     nz, nxy, px = 24, 32, 4.0

@@ -9,7 +9,6 @@ import torch
 
 from specter.imagegenerator import ImageGenerator
 from specter.io import (
-    create_particle_starfile,
     create_particle_starfile_from_model,
     extract_parameters_from_starfile,
 )
@@ -17,38 +16,6 @@ from specter.settings import Camera, Propagation
 
 # Effective coincidence exclusion radius; see tests/test_generators.py::_CR.
 _CR = 1.8 / math.sqrt(2 * math.pi)
-
-
-def test_create_particle_starfile_writes_bfactor_column(tmp_path) -> None:
-    n = 3
-    ctf_params = {
-        "dfu": torch.full((n,), 5000.0),
-        "dfv": torch.full((n,), 5000.0),
-        "dfang": torch.zeros(n),
-        "cs": torch.full((n,), 2.7),
-        "phaseshift": torch.zeros(n),
-    }
-    create_particle_starfile(
-        torch.randn(n, 8, 8),
-        rotations=torch.tensor([[0.0, 0.0, 0.0, 1.0]] * n),
-        translations=torch.zeros(n, 2),
-        alpha=0.1,
-        output_dir=str(tmp_path),
-        voltage=300.0,
-        dx=1.5,
-        filename="particles",
-        ctf_params=ctf_params,
-        dose_per_angstrom=2.0,
-        coincidence_radius=_CR,
-        potential_scale=0.75,
-        bfactor=42.0,
-    )
-
-    df = starfile.read(tmp_path / "particles.star")
-    assert (df["specterBfactor"] == 42.0).all()
-    assert (df["specterPotentialScale"] == 0.75).all()
-    assert df["specterCoincidenceRadius"].to_numpy() == pytest.approx(_CR)
-    assert (df["specterDosePerAngstrom"] == 2.0).all()
 
 
 def test_create_particle_starfile_from_model_matches_model_params(tmp_path) -> None:

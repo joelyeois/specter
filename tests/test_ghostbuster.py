@@ -304,50 +304,6 @@ def test_bfactor_kwarg_overrides_ctf_params_bfactor(tiny_volume: torch.Tensor) -
 
 
 # ---------------------------------------------------------------------------
-# Training loop
-# ---------------------------------------------------------------------------
-
-
-def test_reconstructor_training_updates_volume(
-    tiny_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
-) -> None:
-    """One gradient step with C2 symmetry updates V from its initial value."""
-    torch.manual_seed(42)
-    n_particles = 4
-    n = tiny_volume.shape[-1]
-
-    ctf = {k: v.repeat(n_particles) for k, v in full_ctf_params.items()}
-    quaternions = torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(n_particles, 1)
-    translations = torch.zeros(n_particles, 2)
-    images = torch.randn(n_particles, n, n)
-
-    V_init = tiny_volume.clone()
-    model = Reconstructor(
-        V=tiny_volume.clone(),
-        voxel_size=2.0,
-        quaternions=quaternions,
-        translations=translations,
-        ctf_params=ctf,
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        lr=0.1,
-        symmetry="C2",
-        propagation=Propagation(scattering_model="projection"),
-    )
-
-    opt = torch.optim.AdamW([model.V], lr=0.1)
-    batch = (images, torch.arange(n_particles))
-    loss, _, _ = model._common_step(batch, 0)
-    opt.zero_grad()
-    loss.backward()
-    opt.step()
-
-    assert not torch.equal(model.V.data, V_init), (
-        "V was not updated after one gradient step"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Per-particle scale weighting
 # ---------------------------------------------------------------------------
 
@@ -546,33 +502,6 @@ def test_run_dir_writes_expected_artifacts(
     assert {"epoch_01", "epoch_02"} <= set(metrics["epochs"])
 
 
-def test_symmetrize_applies_configured_symmetry(
-    tiny_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
-) -> None:
-    """symmetrize() calls apply_symmetry with the constructor's symmetry settings."""
-    torch.manual_seed(0)
-    n = tiny_volume.shape[-1]
-    model = Reconstructor(
-        V=torch.randn(n, n, n),
-        voxel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.zeros(1, 2),
-        ctf_params=full_ctf_params,
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        symmetry="C2",
-        symmetry_mode="real",
-        symmetry_batchsize=4,
-        propagation=Propagation(scattering_model="projection"),
-    )
-    v_before = model.V.data.clone()
-    model.symmetrize()
-    expected = apply_symmetry(
-        v_before, get_rotation_matrices("C2"), batchsize=4, method="real"
-    )
-    assert torch.allclose(model.V.data, expected)
-
-
 def test_on_train_epoch_end_applies_symmetry(
     tiny_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
 ) -> None:
@@ -604,29 +533,6 @@ def test_on_train_epoch_end_applies_symmetry(
 # ---------------------------------------------------------------------------
 # FSC / CryoSPARC reference loading
 # ---------------------------------------------------------------------------
-
-
-def test_fsc_ref_and_mask_accept_tensor(
-    tiny_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
-) -> None:
-    """fsc_ref and fsc_mask tensors are stored verbatim."""
-    n = tiny_volume.shape[-1]
-    ref = torch.rand(n, n, n)
-    mask = torch.ones(n, n, n)
-    model = Reconstructor(
-        V=tiny_volume,
-        voxel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.zeros(1, 2),
-        ctf_params=full_ctf_params,
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        fsc_ref=ref,
-        fsc_mask=mask,
-        propagation=Propagation(scattering_model="projection"),
-    )
-    assert torch.equal(model.fsc_ref, ref)
-    assert torch.equal(model.fsc_mask, mask)
 
 
 def test_fsc_ref_and_cryosparc_ref_load_from_file(

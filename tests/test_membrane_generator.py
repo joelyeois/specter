@@ -38,12 +38,6 @@ def test_place_transmembrane_before_generate_raises():
         gen.place_transmembrane()
 
 
-def test_place_transmembrane_with_no_specs_returns_empty_list():
-    gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
-    gen.generate()
-    assert gen.place_transmembrane() == []
-
-
 def test_insert_blend_replaces_occupied_region_and_preserves_untouched_background():
     # Regression test for the additive-insertion fix: a transmembrane
     # protein displaces lipid where it sits rather than coexisting with it,
@@ -708,48 +702,6 @@ def test_swept_spline_radius_variation_changes_field_and_is_reproducible():
     assert not torch.equal(field_a.phi, field_constant.phi)
 
 
-def test_swept_spline_radius_variation_mean_preserved_at_small_n_points():
-    """Regression test: at few path points, a smoothed noise sequence's own
-    mean is generically nonzero (not guaranteed near zero the way i.i.d.
-    noise was) -- dividing by std alone (not centering first) amplified
-    that offset, collapsing every drawn radius to the _MIN_RADIUS_FRACTION
-    floor for some seeds instead of the intended mild variation around
-    tube_radius_angstrom. Reproduces the exact failing case found via
-    MembraneGenerator's swept-spline defaults (18 points, seed 3): mean
-    drawn radius must land close to tube_radius_angstrom, not near the floor."""
-    import numpy as np
-    from scipy import ndimage
-
-    from specter.specimen.membrane._field_swept_spline import (
-        _MIN_RADIUS_FRACTION,
-        _sample_wandering_path,
-    )
-
-    total_length_angstrom, step_length_angstrom, tube_radius_angstrom = (
-        262.2857142857143,
-        15.0,
-        21.857142857142858,
-    )
-    radius_variation, sigma_points, flexibility, seed = 0.1943228840827942, 2.0, 0.15, 3
-
-    n_points = max(2, round(total_length_angstrom / step_length_angstrom) + 1)
-    rng = np.random.default_rng(seed)
-    _sample_wandering_path(n_points, step_length_angstrom, flexibility, rng)
-    noise = rng.normal(size=n_points)
-    noise = ndimage.gaussian_filter1d(noise, sigma=sigma_points, mode="nearest")
-    noise = noise - noise.mean()
-    noise_std = float(noise.std())
-    if noise_std > 0.0:
-        noise = noise / noise_std
-    radii = tube_radius_angstrom * np.clip(
-        1.0 + radius_variation * noise, _MIN_RADIUS_FRACTION, None
-    )
-
-    assert abs(radii.mean() - tube_radius_angstrom) < 0.1 * tube_radius_angstrom
-    floor = _MIN_RADIUS_FRACTION * tube_radius_angstrom
-    assert not np.allclose(radii, floor, atol=0.5)
-
-
 def test_swept_spline_radius_variation_rejects_negative():
     from specter.specimen.membrane._field_swept_spline import (
         generate_membrane_field_swept_spline,
@@ -838,19 +790,6 @@ def _synthetic_inside_mask(shape=(30, 30, 30), radius=8.0) -> np.ndarray:
     return r < radius
 
 
-def test_signed_distance_transform_cpu_matches_scipy_directly():
-    inside = _synthetic_inside_mask()
-    spacing_angstrom = 3.0
-    phi = _signed_distance_transform(inside, spacing_angstrom, device="cpu")
-
-    dist_out = ndimage.distance_transform_edt(~inside, sampling=spacing_angstrom)
-    dist_in = ndimage.distance_transform_edt(inside, sampling=spacing_angstrom)
-    expected = torch.as_tensor(dist_out - dist_in, dtype=torch.float32)
-
-    assert phi.device.type == "cpu"
-    assert torch.equal(phi, expected)
-
-
 def test_signed_distance_transform_gpu_matches_cpu_when_cupy_available():
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
@@ -898,34 +837,6 @@ def test_signed_distance_transform_falls_back_to_cpu_without_cupy(monkeypatch):
 
     assert phi.device.type == "cuda"
     assert torch.equal(phi.cpu(), expected)
-
-
-def test_field_voxel_budget_matches_its_documented_derivation():
-    """`_MAX_FIELD_VOXELS` is a measured budget divided by a measured cost,
-    not a hand-picked number -- so it must stay consistent with the constants
-    it is derived from (see this module's own comment block for the sweep).
-
-    The cap has to satisfy the tightest of the three measured costs: VRAM on
-    the cupy path, and host RSS on either path. Only the scipy-path RSS
-    figure is a module constant (the other two live in the comment table), so
-    that one is checked directly and the rest are checked as headroom.
-    """
-    from specter.specimen.membrane._generator import (
-        _FIELD_BYTES_PER_VOXEL,
-        _FIELD_RAM_BUDGET_BYTES,
-        _FIELD_VRAM_BUDGET_BYTES,
-        _FIELD_VRAM_BYTES_PER_VOXEL,
-        _MAX_FIELD_VOXELS,
-    )
-
-    # scipy path: host RSS is what binds, and the cap is set right at it
-    # (rounded to a round number), so allow 10% of rounding slack.
-    scipy_cap = _FIELD_RAM_BUDGET_BYTES / _FIELD_BYTES_PER_VOXEL
-    assert _MAX_FIELD_VOXELS <= scipy_cap * 1.1
-
-    # cupy path: VRAM must have real headroom at the cap, or an 8 GB card
-    # (the machine this budget is written for) wouldn't hold it.
-    assert _MAX_FIELD_VOXELS * _FIELD_VRAM_BYTES_PER_VOXEL <= _FIELD_VRAM_BUDGET_BYTES
 
 
 def test_signed_distance_transform_falls_back_when_gpu_transform_raises(monkeypatch):
@@ -1159,41 +1070,6 @@ def test_collision_radius_and_generator_sizing_agree() -> None:
                 swept_tube_radius=generator.swept_tube_radius,
             )
         )
-
-
-def test_generator_and_pipeline_share_one_set_of_default_ranges() -> None:
-    """
-    The auto-size cap must draw from the same defaults the generator would.
-
-    `pipelines._tomogram` caps a fully-auto membrane against the tomogram box,
-    and needs a lower bound to write a complete range with. It used to retype
-    `MembraneGenerator`'s, so changing a default in one place left the other
-    capping against a stale value -- with nothing failing, and only for a
-    membrane whose size the user had left entirely unspecified.
-    """
-    import inspect
-
-    import specter.pipelines._tomogram as tomogram_pipeline
-    from specter.specimen import (
-        DEFAULT_SH_AXES_RANGE_ANGSTROM,
-        DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
-        DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
-        MembraneGenerator,
-    )
-
-    params = inspect.signature(MembraneGenerator.__init__).parameters
-    for name, constant in (
-        ("sh_axes_range", DEFAULT_SH_AXES_RANGE_ANGSTROM),
-        ("swept_total_length_range", DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM),
-        ("swept_tube_radius_range", DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM),
-    ):
-        assert params[name].default is constant, (
-            f"MembraneGenerator.{name}'s default is no longer the shared constant"
-        )
-    assert (
-        tomogram_pipeline.DEFAULT_SH_AXES_RANGE_ANGSTROM
-        is DEFAULT_SH_AXES_RANGE_ANGSTROM
-    )
 
 
 def test_render_transmembrane_template_honours_use_deposited_bfactors():

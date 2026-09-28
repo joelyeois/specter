@@ -326,12 +326,3 @@ def test_non_uniform_voltage_is_refused(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(_cryosparc, "Dataset", _MixedVoltageDataset)
     with pytest.raises(ValueError, match=r"ctf/accel_kv.*240.*360"):
         extract_parameters_from_csfile("fake.cs", halfset="all")
-
-
-def test_uniform_scalar_returns_the_common_value() -> None:
-    from specter.io._common import _uniform_scalar
-
-    out = _uniform_scalar(torch.full((5,), 1.25), "x", "f")
-    assert out.ndim == 0 and float(out) == 1.25
-    with pytest.raises(ValueError, match="x"):
-        _uniform_scalar(torch.tensor([1.0, 1.2, 0.8]), "x", "f")

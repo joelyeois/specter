@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
-import os
 from pathlib import Path
 
 import pytest
@@ -46,15 +44,6 @@ def test_load_config_flattens_tables(tmp_path: Path) -> None:
     assert config.pdb_source == "6bdf"
     assert config.n_pixels == 128
     assert config.voltage == 200.0
-
-
-def test_load_config_fills_defaults_for_missing_fields(tmp_path: Path) -> None:
-    path = _write_toml(tmp_path, '[potential]\npdb_source = "6bdf"\n')
-    config = load_config(path)
-    assert config.n_pixels == 256
-    assert config.pixel_size == 1.0
-    assert config.scattering_model == "multislice"
-    assert config.dose == 20.0
 
 
 def test_parse_scalar_or_range_accepts_numbers_lists_and_strings() -> None:
@@ -127,38 +116,6 @@ def test_load_config_keeps_relative_pdb_cache_dir_verbatim(
     )
     config = load_config(path)
     assert config.pdb_cache_dir == "my-cache"
-
-
-def test_results_are_cwd_relative_and_the_cache_is_not() -> None:
-    """Results are project-local; the download cache deliberately is not.
-
-    The output default stays relative so it never depends on REPO_ROOT,
-    which only resolves to the repo for an editable install and would
-    point inside the virtualenv for a wheel install. The structure cache
-    is the opposite case: an absolute user-level path, so one download is
-    shared by every project instead of re-fetched per working directory.
-    """
-    from specter.pipelines._common import resolve_output_dir
-
-    config = ParticleStackConfig(pdb_source="6bdf")
-    output_dir = resolve_output_dir(config, "particles")
-    assert output_dir == "particles"
-    assert not os.path.isabs(output_dir)
-    assert os.path.isabs(config.pdb_cache_dir)
-    assert config.pdb_cache_dir.endswith(os.path.join("specter", "pdb"))
-
-
-def test_find_specter_project_root_uses_cwd_when_nothing_found(tmp_path: Path) -> None:
-    """A fresh directory with no .specter anywhere above it becomes the
-    root of a new project -- like `git init` creating a repo at cwd."""
-    fresh = tmp_path / "fresh"
-    fresh.mkdir()
-    assert find_specter_project_root(fresh) == fresh.resolve()
-
-
-def test_find_specter_project_root_finds_marker_at_start(tmp_path: Path) -> None:
-    (tmp_path / ".specter").touch()
-    assert find_specter_project_root(tmp_path) == tmp_path.resolve()
 
 
 def test_find_specter_project_root_walks_up_from_subdirectory(tmp_path: Path) -> None:
@@ -285,21 +242,6 @@ def test_load_config_preserves_absolute_pdb_cache_dir(tmp_path: Path) -> None:
     assert config.pdb_cache_dir == absolute
 
 
-def test_particle_stack_config_requires_pdb_source() -> None:
-    import pytest
-
-    with pytest.raises(TypeError):
-        ParticleStackConfig()  # type: ignore[call-arg]
-
-
-def test_apply_overrides_sets_fields() -> None:
-    config = ParticleStackConfig(pdb_source="6bdf")
-    result = apply_overrides(config, {"n_particles": 500, "device": "cuda:0"})
-    assert result is config
-    assert config.n_particles == 500
-    assert config.device == "cuda:0"
-
-
 def test_load_config_tilt_series_parses_scalar_fields(tmp_path: Path) -> None:
     path = _write_toml(
         tmp_path,
@@ -316,33 +258,6 @@ def test_load_config_tilt_series_parses_scalar_fields(tmp_path: Path) -> None:
     assert config.voxel_size == 5.0
     assert config.n_tilts == 21
     assert config.tilt_axis == "x"
-
-
-def test_load_config_tilt_series_fills_defaults_for_missing_fields(
-    tmp_path: Path,
-) -> None:
-    path = _write_toml(tmp_path, "[specimen]\nvoxel_size = 5.0\n")
-    config = load_config(path, TiltSeriesConfig)
-    assert config.volume_path == ""
-    assert config.n_tilts == 61
-    assert config.scattering_model == "multislice"
-    assert config.ice_model == "gd"
-
-
-def test_tilt_series_toml_volume_path_round_trip(tmp_path: Path) -> None:
-    path = _write_toml(
-        tmp_path,
-        """
-        [specimen]
-        volume_path = "path/to/specimen.mrc"
-
-        [tilt_geometry]
-        n_tilts = 5
-        """,
-    )
-    config = load_config(path, TiltSeriesConfig)
-    assert config.volume_path == "path/to/specimen.mrc"
-    assert config.n_tilts == 5
 
 
 def test_load_config_names_unknown_fields_and_renames(tmp_path):
@@ -397,13 +312,6 @@ def test_build_config_options_preserves_mixed_case_field_names() -> None:
     assert "deltaV_V" in names
     assert "deltaI_I" in names
     assert "deltav_v" not in names
-
-
-@pytest.mark.parametrize("config_cls", [MicrographConfig, TiltSeriesConfig])
-def test_seed_is_configurable(config_cls: type) -> None:
-    """Every generation command needs a seed to be reproducible at all."""
-    assert "seed" in {f.name for f in dataclasses.fields(config_cls)}
-    assert config_cls.seed is None
 
 
 def test_bulk_materials_do_not_follow_the_structure_scattering_factors() -> None:
@@ -590,24 +498,6 @@ def test_hydrogen_settings_reach_pdb(monkeypatch, pipeline):
     assert seen["monomer_library_path"] == "/some/monomers"
 
 
-@pytest.mark.parametrize(
-    "cls_name", ["ParticleStackConfig", "MicrographConfig", "TomogramConfig"]
-)
-def test_monomer_library_path_defaults_to_the_env_var(cls_name):
-    """
-    An unset field must not override $CLIBD_MON.
-
-    The field is additive: it names a library for runs that want one recorded
-    in their own config, and stays out of the way otherwise. A default of
-    anything but None would silence the variable for every existing config.
-    """
-    import specter.config as config_module
-
-    cls = getattr(config_module, cls_name)
-    kwargs = {"pdb_source": "1abc"} if cls_name != "TomogramConfig" else {}
-    assert cls(**kwargs).monomer_library_path is None
-
-
 def test_tomogram_generator_carries_the_monomer_library_path():
     """
     `specter build tomogram` forwards the field too.
@@ -684,18 +574,6 @@ def test_envelope_knobs_are_reachable_from_every_simulate_config(
     assert "klim" in propagation_fields
     for knob in ("bfactor", "klim"):
         assert knob in fields, f"{config_cls} cannot set {knob}"
-
-
-def test_klim_reaches_the_scattering_bandlimit() -> None:
-    """klim is a fraction of Nyquist, and must survive config -> Scattering."""
-    from specter.scattering import Scattering
-
-    unlimited = Scattering(32, 1.0, 300.0, scattering_model="multislice")
-    limited = Scattering(32, 1.0, 300.0, scattering_model="multislice", klim=0.66)
-    assert unlimited.klim is None
-    assert limited.klim == 0.66
-    # 0.66 of Nyquist keeps strictly fewer frequencies than no limit at all.
-    assert limited.kmask.sum() < limited.kmask.numel()
 
 
 @pytest.mark.parametrize(

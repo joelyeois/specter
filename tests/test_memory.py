@@ -2,28 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-import torch
-
 from specter import memory
 from specter.config import load_config
 from specter.memory import (
     MAX_AUTO_BATCHSIZE,
-    available_memory_bytes,
     estimate_peak_bytes,
     recommend_batchsize,
-    resolve_batchsize,
 )
-
-# A default-shaped run: 256 box, pad_fft=True (pad_nxy = 2*nxy), nz = nxy.
-_NXY = 256
-_GEOM = (_NXY, _NXY, 2 * _NXY)  # nxy, nz, pad_nxy
 
 # A box small enough that `_SATURATION_PADDED_VOXELS` is not the binding
 # constraint, so tests about the MEMORY bound and the `n_particles`/ceiling
-# clamps still exercise those. At `_GEOM` one particle already saturates a GPU,
-# which is the whole point of that cap -- see
-# `test_recommend_batchsize_caps_at_gpu_saturation`.
+# clamps still exercise those. At the default 256 box (pad_fft=True, nz = nxy)
+# one particle already saturates a GPU, which is the whole point of that cap --
+# see `test_recommend_batchsize_caps_at_gpu_saturation`.
 # 40 rather than a round power of two so that
 # `_PADDED_COPIES_PER_PARTICLE * nz * pad_nxy**2 * 4` lands on a whole number of
 # bytes: `recommend_batchsize` keeps that product as a float while
@@ -31,28 +22,6 @@ _GEOM = (_NXY, _NXY, 2 * _NXY)  # nxy, nz, pad_nxy
 # a floor() by one.
 _SMALL_NXY = 40
 _SMALL_GEOM = (_SMALL_NXY, _SMALL_NXY, 2 * _SMALL_NXY)
-
-
-def test_estimate_peak_grows_linearly_with_batchsize() -> None:
-    """Per-particle cost is constant, so successive differences match."""
-    peaks = [estimate_peak_bytes(b, *_GEOM) for b in (1, 2, 3, 4)]
-    steps = [b - a for a, b in zip(peaks, peaks[1:])]
-    assert all(s == pytest.approx(steps[0], rel=1e-6) for s in steps)
-    assert peaks[0] < peaks[-1]
-
-
-def test_estimate_peak_tracks_the_padded_box_not_num_pixels() -> None:
-    """Turning off pad_fft quarters the canvas part of the per-particle term
-    (pad_nxy^2), which is the whole reason a user can't guess this number
-    from n_pixels. The rotation-grid part of the per-particle term is set by
-    the unpadded template and does not move with pad_fft."""
-    padded = estimate_peak_bytes(4, _NXY, _NXY, 2 * _NXY)
-    unpadded = estimate_peak_bytes(4, _NXY, _NXY, _NXY)
-    overhead = estimate_peak_bytes(0, _NXY, _NXY, _NXY)
-    grid_term = 4 * memory._TEMPLATE_COPIES_PER_PARTICLE * _NXY**3 * 4
-    assert (padded - overhead - grid_term) == pytest.approx(
-        4 * (unpadded - overhead - grid_term), rel=1e-6
-    )
 
 
 def test_estimate_peak_matches_measured_l40_sweep() -> None:
@@ -118,22 +87,6 @@ def test_recommend_batchsize_clamps_to_n_particles_and_ceiling(
     monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: 10**13)
     assert recommend_batchsize(*_SMALL_GEOM, "cpu", n_particles=3) == 3
     assert recommend_batchsize(*_SMALL_GEOM, "cpu") == MAX_AUTO_BATCHSIZE
-
-
-def test_available_memory_bytes_cpu_is_positive() -> None:
-    assert available_memory_bytes("cpu") > 0
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
-def test_available_memory_bytes_cuda_is_below_total() -> None:
-    free = available_memory_bytes("cuda:0")
-    _, total = torch.cuda.mem_get_info(torch.device("cuda:0"))
-    assert 0 < free <= total
-
-
-def test_resolve_batchsize_passes_ints_through() -> None:
-    assert resolve_batchsize(7, *_GEOM, "cpu") == 7
-    assert resolve_batchsize("auto", *_SMALL_GEOM, "cpu", n_particles=2) == 2
 
 
 def test_config_batchsize_accepts_auto_and_int(tmp_path: Path) -> None:

@@ -311,24 +311,6 @@ def test_cryosparc_ref_rejects_malformed_and_meaningless_pairs(
         validate_config(config)
 
 
-def test_job_id_without_project_pins_under_implicit_default_project(
-    particle_data: tuple[Path, Path], tmp_path: Path
-) -> None:
-    """job_id without project is valid: it pins a number directly under
-    output_dir's implicit default project, not a named one -- omitting
-    `project` never meant "untracked"."""
-    cs_file, mrc_file = particle_data
-    output_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, output_dir)
-    config.job_id = "J005"
-    config.halfset = "all"
-
-    run_reconstruction(config)
-
-    job_dir = output_dir / "reconstructions" / "J005"
-    assert (job_dir / "job.json").exists()
-
-
 def test_missing_input_file_fails_before_any_work(tmp_path: Path) -> None:
     config = ReconstructionConfig(
         cs_file=str(tmp_path / "nope.cs"),

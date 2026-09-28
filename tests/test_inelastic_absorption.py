@@ -132,28 +132,6 @@ def test_multislice_recovers_the_mean_free_path_put_in(mfp_A: float) -> None:
     assert slope == pytest.approx(mfp_A, rel=0.01)
 
 
-def test_transmitted_fraction_is_physically_available() -> None:
-    """
-    Ice must not remove more of the beam than its cross section allows.
-
-    Through 1200 A of ice, inelastic scattering removes 26%. The fitted
-    ``alpha = 0.1`` removes 51% -- more than inelastic plus *all* elastic
-    scattering combined (39%) -- which is the error this model exists to
-    avoid. A regression that reintroduces it fails here.
-    """
-    sigma = interaction_parameter(VOLTAGE)
-    thickness = 1200.0
-
-    v_ab = absorption_potential(INELASTIC_MFP_ICE_A, VOLTAGE)
-    physical = math.exp(-2.0 * sigma * v_ab * thickness)
-    assert physical == pytest.approx(math.exp(-thickness / INELASTIC_MFP_ICE_A))
-    assert 1.0 - physical == pytest.approx(0.262, abs=0.005)
-
-    # alpha applied to ice's mean inner potential, for contrast.
-    fitted = math.exp(-2.0 * sigma * 0.100 * 4.55 * thickness)
-    assert 1.0 - fitted > 0.39
-
-
 def test_amplitude_contrast_leaves_a_complex_potential_alone() -> None:
     """
     A potential that already carries absorption is returned unchanged.

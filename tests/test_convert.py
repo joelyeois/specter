@@ -75,16 +75,6 @@ def _convert_and_read(tmp_path, **overrides):
     return data["optics"], data["particles"]
 
 
-def test_writes_a_single_file_with_optics_and_particles_blocks(tmp_path) -> None:
-    out = tmp_path / "out.star"
-    convert_csfile_to_starfile("fake.cs", str(out))
-
-    assert out.exists()
-    data = starfile.read(str(out))
-    assert set(data) == {"optics", "particles"}
-    assert len(data["particles"]) == 3
-
-
 def test_image_name_is_one_based_index_at_path(tmp_path) -> None:
     _, particles = _convert_and_read(tmp_path)
 

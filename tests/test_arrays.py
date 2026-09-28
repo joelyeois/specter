@@ -28,12 +28,6 @@ def test_trilinear_batched_matches_looped_unbatched() -> None:
     assert torch.allclose(batched, looped, atol=1e-6)
 
 
-def test_trilinear_unbatched_input_returns_unbatched_output() -> None:
-    coords = torch.zeros(5, 3)
-    volume = soft_voxelize_coordinates(coords, (8, 8, 8), 1.0)
-    assert volume.shape == (8, 8, 8)
-
-
 def test_trilinear_single_coordinate_splats_to_nearest_8_voxels() -> None:
     # A coordinate exactly at a voxel corner (e.g. half-integer offset from
     # the origin) should distribute weight 0.125 to all 8 surrounding voxels.

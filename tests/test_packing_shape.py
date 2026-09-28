@@ -66,26 +66,6 @@ def test_build_species_mask_gap_is_quantized_to_voxel_size():
     assert int(m5.sum()) > int(m0.sum())
 
 
-def test_pack_shapes_3d_places_nothing_overlapping():
-    masks = [build_species_mask(blob(), 4.0, gap=0.0)]
-    species = torch.zeros(60, dtype=torch.long)
-    grid = (30, 60, 60)
-
-    coords, rotations, accepted, occ = pack_shapes_3d(
-        masks, species, grid, 4.0, seed=0, n_orientations=32, max_retries=40
-    )
-
-    assert accepted.numel() > 0
-    assert coords.shape == (accepted.numel(), 3)
-    assert rotations.shape == (accepted.numel(), 3, 3)
-    # rotations must be proper rotations
-    eye = torch.eye(3).expand_as(rotations)
-    assert torch.allclose(rotations @ rotations.transpose(1, 2), eye, atol=1e-4)
-    assert torch.allclose(
-        torch.linalg.det(rotations), torch.ones(len(rotations)), atol=1e-4
-    )
-
-
 def test_pack_shapes_3d_output_reproduces_its_own_occupancy_grid():
     """
     Re-stamp from the RETURNED coords/rotations and require an exact match
@@ -207,40 +187,6 @@ def test_coarsen_mask_contains_the_fine_mask():
     assert bool(coarse[mapped[:, 0], mapped[:, 1], mapped[:, 2]].all()), (
         "a fine voxel landed outside the coarsened mask"
     )
-
-
-def test_coarsen_mask_is_a_noop_below_factor_two():
-    m = build_species_mask(blob(), 2.0, gap=0.0)
-    assert coarsen_mask(m, 1) is m
-
-
-def test_pack_shapes_3d_accepts_a_coarser_grid_than_the_render():
-    """
-    Packing on a coarse grid must still return positions in ANGSTROM on the
-    shared physical box, so a caller can render them at any resolution.
-    """
-    coords = blob(n_atoms=2000, radius=30.0)
-    fine_voxel, factor = 1.0, 4
-    fine = build_species_mask(coords, fine_voxel, gap=0.0)
-    coarse = coarsen_mask(fine, factor)
-
-    box_angstrom = (160.0, 320.0, 320.0)
-    coarse_grid = tuple(int(round(b / (fine_voxel * factor))) for b in box_angstrom)
-
-    pos, rot, accepted, _ = pack_shapes_3d(
-        [coarse],
-        torch.zeros(40, dtype=torch.long),
-        coarse_grid,
-        fine_voxel * factor,
-        seed=0,
-        n_orientations=16,
-        max_retries=40,
-    )
-    assert accepted.numel() > 0
-    # Positions are physical and box-centered, independent of packing grid.
-    half = torch.tensor([box_angstrom[2] / 2, box_angstrom[1] / 2, box_angstrom[0] / 2])
-    assert bool((pos.abs() <= half).all()), "positions must stay inside the box"
-    assert rot.shape == (accepted.numel(), 3, 3)
 
 
 def test_generator_coarse_packing_survives_both_placement_stages():

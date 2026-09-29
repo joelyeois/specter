@@ -89,6 +89,7 @@ membrane_min_transmembrane_spacing = 40.0  # center-to-center, A
 
 # Filaments. Either hand-write [[filaments]] entries (FilamentSpec kwargs), as
 # below, or set `actin = true` for the built-in ACTIN_SPEC preset.
+# actin = false          # also place the bundled F-actin preset, additive to [[filaments]]
 [[filaments]]
 code = "1J6Z"          # F-actin monomer
 step = 27.3            # axial rise per monomer, A

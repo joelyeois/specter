@@ -41,7 +41,7 @@ absorption_model = "alpha"         # alpha | inelastic_mfp -- inelastic_mfp deri
 [models]
 scattering_model = "multislice"    # multislice | firstborn | projection | ctf
 noise_model = "poisson"            # poisson | none
-detector_model = "none"            # none | perfect | k3_300kv | k3_200kv
+detector_model = "none"            # none | perfect | k3_300kv | k3_200kv | k2_300kv | falcon4i_300kv | falcon4i_200kv | falcon3ec_300kv
 
 [postprocessing]
 normalize_tilt_series = false
@@ -76,6 +76,7 @@ deltaV_V = 0.06e-6                 # unitless (ΔV/V)
 deltaI_I = 0.01e-6                 # unitless (ΔI/I)
 dose_envelope = false
 # dose_envelope_target = "specimen"  # damage each tilt's specimen, not the ice
+# bfactor = 50.0               # Å², uncomment to enable a B-factor envelope
 coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence loss
 
 # --- Ice ---
@@ -87,6 +88,8 @@ bulk_scattering_factors = "kirkland"  # kirkland | lobato | shtyrov; the ice and
                                    # other non-biomolecular material
 
 # --- Numerics ---
+# klim = 0.66                   # fraction of Nyquist, Kirkland's anti-aliasing bandlimit;
+                                 # unset keeps the full Nyquist range
 pad_fft = false
 
 # --- Reproducibility ---

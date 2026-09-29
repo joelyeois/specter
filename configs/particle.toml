@@ -24,6 +24,13 @@ dose = 20.0                    # e⁻/Å²; single value, or [low, high] to samp
 cs = 2.0                       # mm
 alpha = 0.1                    # unitless, amplitude contrast ratio
 
+[absorption]
+absorption_model = "alpha"         # alpha | inelastic_mfp -- inelastic_mfp derives the
+                                   # imaginary potential per material and sets alpha to 0
+# inelastic_mfp_solvent = 3950.0   # Å; unset = measured ice value at the run's voltage
+# inelastic_mfp_specimen = 2460.0  # Å; unset = the ice's value (no absorption contrast)
+# objective_aperture = 12.0        # mrad, inelastic_mfp only (70 µm on a Krios)
+
 [sampling]
 defocus = [5000.0, 15000.0]    # Å; single value, or [low, high] to sample per particle
 shift = 2.0                    # Å
@@ -32,7 +39,7 @@ n_particles = 20
 [models]
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf
 noise_model = "poisson"          # poisson | none
-detector_model = "none"          # none | perfect | k3_300kv | k3_200kv
+detector_model = "none"          # none | perfect | k3_300kv | k3_200kv | k2_300kv | falcon4i_300kv | falcon4i_200kv | falcon3ec_300kv
 
 [postprocessing]
 normalize_particles = true
@@ -93,12 +100,19 @@ energy_spread = 0.7            # eV (FWHM)
 deltaV_V = 0.06e-6             # unitless (ΔV/V)
 deltaI_I = 0.01e-6             # unitless (ΔI/I)
 dose_envelope = false
+# dose_envelope_target = "specimen"  # damage the specimen, not its ice (default transfer_function)
 # bfactor = 50.0               # Å², uncomment to enable a B-factor envelope
 coincidence_radius = 0.0       # pixels; single value, or [low, high] to sample per particle
+# dose_weights_path = "path/to/refm_empirical_dw.npy"  # per-frame exposure-filter weights;
+                                 # frames then summed in Fourier space under them
+# dose_weights_max_frequency = 0.5  # 1/Å of the weights' last bin; unset derives it
+# detector_pixel_size = 0.83    # Å, the movies' physical pixel when the particles were
+                                 # resampled; the detector MTF is evaluated on it
 
 # --- Scattering and numerics ---
 ews_curvature_sign = "positive"  # negative | positive, matches CryoSPARC's convention
-# klim = 0.5                     # 1/Å, reciprocal-space cutoff; unset uses the full Nyquist range
+# klim = 0.66                   # fraction of Nyquist, Kirkland's anti-aliasing bandlimit;
+                                 # unset keeps the full Nyquist range
 rotate_mode = "real"             # real | fourier
 potential_scale = 1.0            # unitless; single value, or [low, high] (< 1 approximates thicker ice)
 pad_fft = true
@@ -111,6 +125,7 @@ bulk_scattering_factors = "kirkland"  # the ice, and any other non-biomolecular
                                  # Shtyrov is fitted for biomolecules
 ice_relax_steps = 0              # local MLBOP seam-relaxation steps, only used when
                                  # ice_model="gd" tiles multiple cached blocks
+# ice_motion_variance = 0.38     # Å² per e⁻/Å², beam-induced water motion; unset = frozen ice
 
 # --- Crowding ---
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter

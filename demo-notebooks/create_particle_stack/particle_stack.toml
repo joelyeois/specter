@@ -47,4 +47,4 @@ bfactor = 0.0        # Å²
 coincidence_radius = 0  # pixels
 ice_model = "gd"
 # ice_motion_variance = 0.38     # Å² per e⁻/Å², beam-induced water motion; unset = frozen ice
-# ice_cache_dir = "../../ice-data/ice_cache"  # defaults to the bundled cache
+# ice_cache_dir = "ice"          # a `specter build ice` library; defaults to the cache bundled in the package

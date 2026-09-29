@@ -58,7 +58,7 @@ ice_model = "gd"              # tiled from a pre-baked cache: scales to large mi
 ice_profile = "flat"     # flat | wedge | meniscus
 # ice_thickness_range = [250.0, 900.0]   # Å, wedge only; overrides ice_thickness
 # ice_profile_angle = 0.0                # degrees, ramp direction
-# ice_cache_dir = "../../ice-data/ice_cache"  # defaults to the bundled cache
+# ice_cache_dir = "ice"          # a `specter build ice` library; defaults to the cache bundled in the package
 # ice_motion_variance = 0.38     # Å² per e⁻/Å², beam-induced water motion; unset = frozen ice
 crowd_chunk_size = 1                   # crowding duplicates rotated per batch; 1 is both the
                                        # cheapest and the fastest setting, see the user guide

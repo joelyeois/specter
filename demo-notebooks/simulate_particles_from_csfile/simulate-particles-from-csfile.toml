@@ -71,7 +71,7 @@ coincidence_radius = 2.0         # pixels
 # --- Ice and crowding ---
 ice_model = "gd"                 # gd | random | none
 # ice_motion_variance = 0.38     # Å² per e⁻/Å², beam-induced water motion; unset = frozen ice
-# ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
+# ice_cache_dir = "ice"          # a `specter build ice` library; defaults to the cache bundled in the package
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å
 

@@ -897,7 +897,9 @@ class TiltSeriesGenerator(MicrographGenerator):
 
             tilt_series.append(image.detach().cpu())
             exitwaves.append(exitwave.detach().cpu())
-            clean_images.append(torch.abs(detector_waves.detach().cpu()) ** 2)
+            # |psi|^2 on the device: the host then receives a real image
+            # rather than a complex one, and the CPU does no elementwise work.
+            clean_images.append((detector_waves.detach().abs() ** 2).cpu())
 
         return (
             torch.stack(tilt_series, dim=1),

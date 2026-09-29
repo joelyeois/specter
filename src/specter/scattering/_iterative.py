@@ -788,22 +788,25 @@ class IterativeScattering(L.LightningModule):
         B = V.shape[0]
         device = self.device
 
-        exitwave = torch.ones(
+        phase_sum = torch.zeros(
             (B, self.nxy, self.nxy), device=device, dtype=torch.complex64
         )
 
+        # The exit wave is the exponential of a sum over slices (see
+        # `parallel_rytov`), so the product of per-slice exponentials is
+        # one exponential of the summed exponent, and that sum is linear:
+        # it is accumulated in Fourier space and inverted once. The
+        # absorption factor and i*sigma*dz are one complex scalar, which
+        # depends only on whether V is complex.
+        c = self._phase_scale(V)
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "Rytov (Iterative)"
         ):
-            # Propagate transmission of slice i to exit plane; the distance
-            # is nz_new - i. The absorption factor and i*sigma*dz are one
-            # complex scalar on the (B, Y, X) result, not a complex copy of
-            # the slice.
+            # Propagate slice i to the exit plane; the distance is nz_new - i.
             F_i = self._get_propagator(float(nz_new - i))
-            c = self._phase_scale(slice_sample)
-            exitwave = exitwave * torch.exp(c * ifft2(fft2(slice_sample) * F_i))
+            phase_sum += fft2(slice_sample) * F_i
 
-        return exitwave
+        return torch.exp(c * ifft2(phase_sum))
 
     def parallel_rytov(
         self,

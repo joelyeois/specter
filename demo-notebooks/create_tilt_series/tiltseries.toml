@@ -48,5 +48,5 @@ coincidence_radius = 0
 # dose_envelope_target = "specimen"  # damage each tilt's specimen, not the ice
 ice_model = "gd"          # bundled IceBank cache; try "random" for a faster/cheaper placeholder
 ice_relax_steps = 0
-# ice_motion_variance = 0.38       # Å² per e⁻/Å²; needs the same dose on every tilt
+# ice_motion_variance = 0.38       # Å² per e⁻/Å²; filtered at each tilt's own dose
 pad_fft = true  # fixes multislice edge-wraparound artifacts at this wide tilt range

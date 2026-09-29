@@ -83,7 +83,7 @@ coincidence_radius = 0.0           # pixels; 0 = plain Poisson, no coincidence l
 ice_model = "gd"                   # gd | random | none
 # ice_cache_dir = "ice"            # defaults to the cache bundled in the package
 ice_relax_steps = 0                # local MLBOP seam-relaxation steps, ice_model="gd" only
-# ice_motion_variance = 0.38       # Å² per e⁻/Å²; needs the same dose on every tilt
+# ice_motion_variance = 0.38       # Å² per e⁻/Å²; filtered at each tilt's own dose
 bulk_scattering_factors = "kirkland"  # kirkland | lobato | shtyrov; the ice and any
                                    # other non-biomolecular material
 

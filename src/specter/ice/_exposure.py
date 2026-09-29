@@ -62,6 +62,7 @@ scaling them with sigma0^2 away from the measured kick is untested.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from typing import Literal
 
 import torch
@@ -608,6 +609,44 @@ def apply_solvent_exposure(
     Its projected power has the specified temporal average. Applying this
     before multislice is an approximation.
     """
+    envelope = solvent_exposure_envelope(
+        dose,
+        displacement_variance,
+        n_frames,
+        weights,
+        weights_max_frequency,
+        model,
+    )
+    for volume in ice:
+        apply_radial_envelope_(volume, pixel_size, envelope)
+
+
+def solvent_exposure_envelope(
+    dose: float,
+    displacement_variance: float,
+    n_frames: int,
+    weights: torch.Tensor | None,
+    weights_max_frequency: float | None,
+    model: CoherenceModel = "relaxed",
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    """
+    The radial amplitude envelope :func:`apply_solvent_exposure` applies.
+
+    The square root of :func:`solvent_exposure_power`, as a function of the
+    3D spatial frequency. A caller that keeps the ice as its spectrum
+    (:class:`~specter.fft.RadialSpectrum`) filters it with this envelope
+    once per exposure instead of transforming the ice each time.
+
+    Parameters
+    ----------
+    dose, displacement_variance, n_frames, weights, weights_max_frequency, model
+        As for :func:`solvent_exposure_power`.
+
+    Returns
+    -------
+    callable
+        Maps spatial frequency in 1/Angstrom to the amplitude envelope.
+    """
 
     def envelope(k: torch.Tensor) -> torch.Tensor:
         return solvent_exposure_power(
@@ -620,5 +659,4 @@ def apply_solvent_exposure(
             model,
         ).sqrt()
 
-    for volume in ice:
-        apply_radial_envelope_(volume, pixel_size, envelope)
+    return envelope

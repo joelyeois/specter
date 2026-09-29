@@ -199,7 +199,7 @@ class TiltSeriesConfig:
         check="non_negative",
     )  # local MLBOP seam-relaxation steps for ice_model="gd"
     ice_motion_variance: float | None = ice_motion_variance_setting(
-        "Needs the same dose on every tilt."
+        "Each tilt's ice is filtered at that tilt's own dose."
     )
     # Everything specter renders that is NOT a biomolecule: the ice.
     # Kept separate from `scattering_factors` on purpose -- Shtyrov fits bonded

@@ -17,7 +17,9 @@ from ..progress import status, track
 
 from .. import rotations
 from .. import tilt as tilt_geometry
+from ..fft import RadialSpectrum
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
+from ..ice._exposure import solvent_exposure_envelope
 from ..potential import aperture_lowpass_isotropic
 from ..settings import Camera, Envelopes, Ice, Optics, Propagation, TiltGeometry
 from ._base import (
@@ -29,6 +31,92 @@ from ._base import (
 )
 from ._micrograph import MicrographGenerator
 from ..scattering import IterativeScattering
+
+
+class _TiltSolvent:
+    """
+    The ice of a tilt series, rendered for one tilt's exposure at a time.
+
+    The solvent-exposure filter acts on the unweighted ice canvas, before it
+    is weighted by the free fraction of each voxel and padded for the tilt
+    range. The canvas is therefore kept as its 3D spectrum and the free
+    fraction beside it, so the ice for a dose costs one inverse transform,
+    one product and the padding.
+
+    Parameters
+    ----------
+    spectrum : RadialSpectrum
+        Spectrum of the unweighted ice canvas, ``(Z, Y, X)``.
+    free : torch.Tensor
+        Free fraction, ``1 - occupancy``, of the dry specimen,
+        ``(1, Z, Y, X)``, on the spectrum's device.
+    ice : Ice
+        Supplies ``motion_variance``.
+    n_frames : int
+        Frames per tilt.
+    weights, weights_max_frequency
+        As returned by :func:`~specter.imagegenerator._base.read_dose_weights`.
+    fit : callable
+        Pads, tapers and aperture-filters a ``(1, Z, Y, X)`` volume as the
+        specimen was, returning the result.
+    """
+
+    def __init__(
+        self,
+        spectrum: RadialSpectrum,
+        free: torch.Tensor,
+        ice: Ice,
+        n_frames: int,
+        weights: torch.Tensor | None,
+        weights_max_frequency: float | None,
+        fit: Callable[[torch.Tensor], torch.Tensor],
+    ) -> None:
+        assert ice.motion_variance is not None
+        self.spectrum = spectrum
+        self.free = free
+        self.motion_variance = ice.motion_variance
+        self.n_frames = n_frames
+        self.weights = weights
+        self.weights_max_frequency = weights_max_frequency
+        self.fit = fit
+
+    @property
+    def device(self) -> torch.device:
+        """Where the spectrum and the free fraction live."""
+        return self.spectrum.device
+
+    def to(self, device: torch.device | str) -> _TiltSolvent:
+        """Move the spectrum and the free fraction to `device`, in place."""
+        free = self.free.to(device)
+        self.spectrum.to(device)
+        self.free = free
+        return self
+
+    def render(self, dose: float) -> torch.Tensor:
+        """
+        The weighted, padded ice for an exposure of `dose` e-/A^2.
+
+        Equal to :func:`~specter.ice.apply_solvent_exposure` applied to the
+        unweighted canvas at that dose, then weighted and padded.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(1, Z', Y', X')`` on :attr:`device`.
+        """
+        envelope = solvent_exposure_envelope(
+            dose,
+            self.motion_variance,
+            self.n_frames,
+            self.weights,
+            self.weights_max_frequency,
+        )
+        ice = torch.empty(
+            self.spectrum.shape, device=self.device, dtype=self.spectrum.dtype
+        )
+        self.spectrum.filter_into(ice, envelope)
+        ice.mul_(self.free[0])
+        return self.fit(ice[None])
 
 
 class TiltSeriesGenerator(MicrographGenerator):
@@ -218,10 +306,17 @@ class TiltSeriesGenerator(MicrographGenerator):
     costs one inverse transform; resident memory is four volumes (the
     volume, the spectrum, its inverse-transform scratch and the ice), all
     placed on the device together or streamed from the host together.
-    ``Ice(motion_variance=...)`` filters the ice once, at the dose of one
-    tilt, before it is blended: the coherence between two frames depends
-    only on the dose between them, so every tilt keeps the same fraction of
-    the ice structure. That requires the same dose on every tilt.
+    ``Ice(motion_variance=...)`` filters each tilt's ice at that tilt's own
+    dose and frame count: the coherence between two frames depends only on
+    the dose between them, so a tilt keeps the fraction of the ice structure
+    its own exposure sets, whatever came before it. When every tilt has the
+    same dose, one filtered ice serves the series and is blended once. When
+    the doses differ, the unweighted ice canvas is kept as its 3D spectrum
+    with the free fraction of the dry specimen, and each change of dose
+    renders the ice with one inverse transform, weighted, padded and added
+    to the specimen (or to its damaged form). That costs the spectrum, the
+    free fraction and a padded ice volume in resident memory, placed with
+    the volume.
     """
 
     _dose_weighted = False  # a tilt is a plain sum, not an exposure-filtered one
@@ -331,13 +426,29 @@ class TiltSeriesGenerator(MicrographGenerator):
                 "filter decorrelates it. Set "
                 "Envelopes(dose_envelope_target='specimen')."
             )
-        ice_filter = self._tilt_solvent_filter(
-            ice, camera, pixel_size, dose_per_angstrom
+        per_tilt_solvent = volume_icemaker is not None and self._dose_varies(
+            ice, dose_per_angstrom
         )
+        captured: list[RadialSpectrum] = []
+        ice_filter: Callable[[torch.Tensor], None] | None
+        if per_tilt_solvent:
+
+            def capture(canvas: torch.Tensor) -> None:
+                # Keep the unweighted ice as its spectrum, and let the blend
+                # weight a canvas of ones instead: what it adds is then the
+                # free fraction of every voxel.
+                captured.append(RadialSpectrum(canvas[0], pixel_size))
+                canvas.fill_(1.0)
+
+            ice_filter = capture
+        else:
+            ice_filter = self._tilt_solvent_filter(
+                ice, camera, pixel_size, dose_per_angstrom
+            )
         # Kept for the damage series: the dose envelope on the specimen acts
         # on the dry specimen, never on the ice blended into it.
         dry = volume if damages_specimen else None
-        volume = self._blend_ice(
+        blended = self._blend_ice(
             volume,
             ice,
             volume_icemaker,
@@ -346,6 +457,13 @@ class TiltSeriesGenerator(MicrographGenerator):
             progressbars,
             ice_filter=ice_filter,
         )
+        free: torch.Tensor | None = None
+        if per_tilt_solvent:
+            # The specimen is padded without its ice, which each tilt adds.
+            free = blended.sub_(volume)
+            del blended
+        else:
+            volume = blended
 
         if isinstance(micrograph_size, int):
             desired_nxy = micrograph_size
@@ -409,6 +527,40 @@ class TiltSeriesGenerator(MicrographGenerator):
                     dry = aperture_lowpass_isotropic(
                         dry, pixel_size, objective_aperture, voltage
                     )
+
+        solvent_series: _TiltSolvent | None = None
+        if per_tilt_solvent:
+            assert free is not None
+
+            def fit(v: torch.Tensor) -> torch.Tensor:
+                v = self._fit_volume_to_tilt(
+                    v,
+                    desired_nxy,
+                    angles,
+                    quaternions,
+                    edge_margin,
+                    taper_width,
+                    z_taper_width,
+                    pad_volume,
+                    log=False,
+                )
+                if objective_aperture is not None:
+                    v = aperture_lowpass_isotropic(
+                        v, pixel_size, objective_aperture, voltage
+                    )
+                return v
+
+            weights, max_frequency = read_dose_weights(camera)
+            solvent_series = _TiltSolvent(
+                captured[0],
+                free,
+                ice,
+                camera.n_frames or 1,
+                weights,
+                max_frequency,
+                fit,
+            )
+            del free, captured
 
         super().__init__(
             specimen=volume,
@@ -479,8 +631,25 @@ class TiltSeriesGenerator(MicrographGenerator):
             if self.volume is dry or self.volume.data_ptr() == dry.data_ptr():
                 self.volume = self.volume.clone()
             with torch.no_grad():
-                self._init_dose_series(dry, self.volume if volume_icemaker else dry)
+                self._init_dose_series(
+                    dry,
+                    self.volume
+                    if volume_icemaker is not None and not per_tilt_solvent
+                    else dry,
+                )
             del dry
+        # With a per-tilt solvent, self.volume holds the specimen and the
+        # ice of the last dose rendered; without damage the padded dry
+        # specimen is kept beside it to add each tilt's ice to.
+        self._solvent_series = solvent_series
+        self._solvent_dose: float | None = None
+        self._tilt_dry: torch.Tensor | None = None
+        if solvent_series is not None and self._specimen_spectrum is None:
+            self._tilt_dry = self.volume
+            self.volume = torch.empty_like(self._tilt_dry)
+            # So that the volume holds ice from construction on: the first
+            # tilt's.
+            self._render_tilt_solvent(float(self.dose_per_angstrom.flatten()[0]))
 
         self.slice_batchsize = slice_batchsize
         # pad_fft=True (multislice only) gives the per-slice FFT-based Fresnel
@@ -569,6 +738,14 @@ class TiltSeriesGenerator(MicrographGenerator):
     # ------------------------------------------------------------------ #
 
     @staticmethod
+    def _dose_varies(ice: Ice, dose_per_angstrom: float | torch.Tensor) -> bool:
+        """Whether the solvent filter differs between tilts: motion, and unequal doses."""
+        if ice.motion_variance is None:
+            return False
+        doses = torch.as_tensor(dose_per_angstrom, dtype=torch.float32).flatten()
+        return not bool(torch.all(doses == doses[0]))
+
+    @staticmethod
     def _tilt_solvent_filter(
         ice: Ice,
         camera: Camera,
@@ -576,23 +753,18 @@ class TiltSeriesGenerator(MicrographGenerator):
         dose_per_angstrom: float | torch.Tensor,
     ) -> Callable[[torch.Tensor], None] | None:
         """
-        The solvent-exposure filter for the tilts' ice, or None.
+        The solvent-exposure filter for a series whose tilts share one dose, or None.
 
         Each tilt is its own short exposure, a sum of its own frames, and the
         ice's coherence between two frames depends only on the dose between
-        them, not on what came before. Every tilt therefore keeps the same
-        fraction of its ice structure, the one set by the dose of one tilt,
-        and a single filtered ice serves the series. That requires every tilt
-        to receive the same dose.
+        them, not on what came before. With one dose on every tilt, every
+        tilt keeps the same fraction of its ice structure and a single
+        filtered ice serves the series. Unequal doses are rendered per tilt
+        instead (:class:`_TiltSolvent`).
         """
         if ice.motion_variance is None:
             return None
         doses = torch.as_tensor(dose_per_angstrom, dtype=torch.float32).flatten()
-        if not torch.allclose(doses, doses[0].expand_as(doses)):
-            raise ValueError(
-                "Ice(motion_variance=...) on a tilt series needs the same dose on "
-                "every tilt: one filtered ice volume serves the whole series"
-            )
         weights, max_frequency = read_dose_weights(camera)
         return solvent_exposure_filter(
             ice, camera, pixel_size, float(doses[0]), weights, max_frequency
@@ -690,11 +862,13 @@ class TiltSeriesGenerator(MicrographGenerator):
         taper_width: int,
         z_taper_width: int,
         pad_volume: bool,
+        log: bool = True,
     ) -> torch.Tensor:
         """
         Size the volume for the tilt range: record the XY the range needs
         (`recommended_nxy_for_max_tilt`, `max_allowed_*`), reflect-pad the
-        volume to it when asked, and apply the edge tapers.
+        volume to it when asked, and apply the edge tapers. ``log=False``
+        repeats the padding silently, for a tilt's ice.
         """
         max_tilt_angle_deg = tilt_geometry.infer_max_tilt_from_inputs(
             angles=angles, quaternions=quaternions
@@ -741,8 +915,9 @@ class TiltSeriesGenerator(MicrographGenerator):
                 )
                 if taper_width > 0:
                     msg += f", target_nxy (with taper)>={target_nxy}"
-                logger.info(msg + ".")
-            else:
+                if log:
+                    logger.info(msg + ".")
+            elif log:
                 logger.info(
                     "Input volume XY may be too small for requested tilt "
                     "coverage; proceeding anyway (pad_volume=False).\n"
@@ -757,11 +932,11 @@ class TiltSeriesGenerator(MicrographGenerator):
             volume = tilt_geometry.apply_volume_cosine_taper(
                 volume, taper_xy=int(taper_width), taper_z=int(z_taper_width)
             )
-            if taper_width > 0:
+            if taper_width > 0 and log:
                 logger.info(
                     f"Applied cosine-taper over {taper_width} px at the XY edges."
                 )
-            if z_taper_width > 0:
+            if z_taper_width > 0 and log:
                 logger.info(
                     f"Applied cosine-taper over {z_taper_width} px "
                     f"at the Z edges (top/bottom)."
@@ -796,6 +971,59 @@ class TiltSeriesGenerator(MicrographGenerator):
             return torch.zeros(batch, dtype=torch.long, device=device)
         return idx if isinstance(idx, torch.Tensor) else torch.tensor([idx])
 
+    def _render_tilt_solvent(self, dose: float) -> None:
+        """
+        Put the ice for an exposure of `dose` into ``self.volume``.
+
+        A no-op when the ice of that dose is already there. Under specimen
+        damage the ice becomes ``self._solvent``, which
+        :meth:`_render_exposure` adds to the damaged specimen; otherwise it is
+        added to the padded dry specimen directly.
+        """
+        if self._solvent_dose == dose:
+            return
+        series = self._solvent_series
+        assert series is not None
+        with torch.no_grad():
+            solvent = series.render(dose).to(self.volume.device)
+            if self._tilt_dry is None:
+                self._solvent = solvent
+                self._rendered_exposure = None
+            else:
+                torch.add(self._tilt_dry, solvent, out=self.volume)
+            del solvent
+        self._solvent_dose = dose
+
+    def _paired_names(self) -> list[str]:
+        """The volume, its paired fields, and the dry specimen of a per-tilt solvent."""
+        names = super()._paired_names()
+        if getattr(self, "_tilt_dry", None) is not None:
+            names.append("_tilt_dry")
+        return names
+
+    def _ensure_volume_placed(self) -> None:
+        """
+        As :meth:`MicrographGenerator._ensure_volume_placed`, with a per-tilt
+        solvent's spectrum and free fraction placed with the volume, or on the
+        host when the device cannot also hold them.
+        """
+        super()._ensure_volume_placed()
+        series = getattr(self, "_solvent_series", None)
+        if series is None or series.device == self.volume.device:
+            return
+        try:
+            series.to(self.volume.device)
+        except torch.cuda.OutOfMemoryError:
+            series.to("cpu")
+            torch.cuda.empty_cache()
+
+    def _paired_to_host(self) -> None:
+        """As the parent's, moving a per-tilt solvent to the host as well."""
+        super()._paired_to_host()
+        series = getattr(self, "_solvent_series", None)
+        if series is not None:
+            series.to("cpu")
+
     def generate_tilt_series(
         self, idx: int | torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -826,7 +1054,8 @@ class TiltSeriesGenerator(MicrographGenerator):
 
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1).to(self.volume.device)
         damaged = self._specimen_spectrum is not None
-        if not damaged:
+        per_tilt = damaged or self._solvent_series is not None
+        if not per_tilt:
             volume_scaled = self.volume * scale
 
         for i in track(
@@ -834,13 +1063,19 @@ class TiltSeriesGenerator(MicrographGenerator):
             description="Generating tilt series.",
             disable=not self.progressbars,
         ):
-            if damaged:
-                # This tilt's damage state: its own dose, after the
-                # pre-exposure of the tilts before it.
-                dose_i = self.dose_per_angstrom[
-                    self._tilt_index(i, idx, 1, self.dose_per_angstrom)
-                ]
-                self._render_exposure(float(dose_i), float(self.pre_exposure[i]))
+            if per_tilt:
+                # This tilt's exposure: its own dose, after the pre-exposure
+                # of the tilts before it. The ice depends on the dose only,
+                # the specimen's damage on both.
+                dose_i = float(
+                    self.dose_per_angstrom[
+                        self._tilt_index(i, idx, 1, self.dose_per_angstrom)
+                    ]
+                )
+                if self._solvent_series is not None:
+                    self._render_tilt_solvent(dose_i)
+                if damaged:
+                    self._render_exposure(dose_i, float(self.pre_exposure[i]))
                 volume_scaled = self.volume * scale.to(self.volume.device)
             Q = self.quaternions[i].unsqueeze(0).expand(B, -1)
             T = self.translations[i].unsqueeze(0).expand(B, -1)

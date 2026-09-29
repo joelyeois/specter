@@ -92,8 +92,10 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
   transform per tilt (0.03 s on a GPU at 200 × 576 × 576 voxels). See
   [Aberrations](../concepts/aberrations.md).
 - **Solvent motion**: `ice_motion_variance` filters the ice to what survives
-  one tilt's exposure. One filtered ice volume serves every tilt, so every
-  tilt must receive the same dose. See [Ice structure](../concepts/ice.md).
+  each tilt's own exposure. With one dose on every tilt, one filtered ice
+  volume serves the series; with per-tilt doses (Python API), the ice is
+  kept as its 3D spectrum and filtered per tilt, at one inverse transform
+  each. See [Ice structure](../concepts/ice.md).
 - **Ice**: `ice_model`: `"gd"` (default, `IceBank`'s cached
   `GradientSKIcemaker` configs, realistic and near-free at this
   cache size), `"random"` (cheap, low-fidelity `RandomIcemaker`), or `"none"`

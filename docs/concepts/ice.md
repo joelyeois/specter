@@ -205,9 +205,14 @@ specimen, since the cavity a molecule cuts into the ice moves with the
 molecule and does not decorrelate. A micrograph is one exposure, filtered at
 its own dose and frame count. Each tilt of a tilt series is a short exposure
 of its own frames, and the coherence between two frames depends only on the
-dose between them, so every tilt retains the same fraction of the ice
-structure and one filtered ice volume serves the series. This requires the
-same dose on every tilt. It needs the dose envelope,
+dose between them, so each tilt retains the fraction of the ice structure
+set by its own dose, independent of the tilts before it. When every tilt
+receives the same dose, one filtered ice volume serves the series. When the
+doses differ, as in a dose-symmetric scheme or with doses read from an
+acquisition log, the unweighted ice is kept as its 3D spectrum, and each
+tilt's ice is filtered at that tilt's dose, weighted by the free fraction of
+the specimen and padded for the tilt range. The filter is radial in 3D
+frequency, so a tilt costs one inverse transform. It needs the dose envelope,
 if one is applied, to act on the specimen
 (``Envelopes(dose_envelope_target="specimen")``, see
 [Aberrations](aberrations.md)): on the transfer function the envelope would
@@ -244,9 +249,10 @@ fade the solvent that the exposure filter already decorrelates.
   The filter also acts before multislice, which is exact only for the
   projected, linear image.
 - **A tilt series shares one ice realisation across its tilts.** Each
-  tilt's image has the second-order ice statistics of its own exposure, but
-  the ice of consecutive tilts is identical, whereas the real ice has
-  rearranged between them.
+  tilt's ice is filtered at its own dose, so its image has the second-order
+  ice statistics of its own exposure, but every tilt filters the same
+  underlying configuration, whereas the real ice has rearranged between
+  tilts.
 - **Long-wavelength ice power differs between library and relaxed ice.**
   After many kick-and-relax steps the ice carries 0.5 to 0.9 of the
   library's density fluctuation at 10 to 90 Å. Both are outputs of the same

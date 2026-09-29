@@ -256,11 +256,99 @@ def test_tilt_solvent_motion_filters_the_ice_once():
     assert float(moving.volume.std()) < float(plain.volume.std())
 
 
-def test_tilt_solvent_motion_needs_one_dose_per_tilt():
-    with pytest.raises(ValueError, match="same dose on every tilt"):
-        tilt_series(
-            torch.zeros(1, 16, 48, 48),
-            Ice(model="random", motion_variance=0.38),
-            Envelopes(),
-            dose=torch.tensor([5.0, 6.0, 5.0]),
+ANGLES = [-40.0, 0.0, 40.0]
+
+
+def ice_for_dose(model, volume, dose):
+    """The padded ice-filled volume a series of one dose would image."""
+    from specter.ice import RandomIcemaker, blend_ice_into_volume
+
+    specter.seed(3)
+    with limited_cpu_threads(1):
+        blended = blend_ice_into_volume(
+            volume.clone(),
+            RandomIcemaker(dx=DX, n=48, nz=16),
+            DX,
+            ice_filter=lambda c: apply_solvent_exposure(
+                c, DX, dose, 0.38, 1, None, None
+            ),
         )
+    return model._fit_volume_to_tilt(blended, 32, ANGLES, None, 8, 2, 0, True)
+
+
+def spy_on_tilts(model, check):
+    """Run the series, calling ``check(i)`` once each tilt's volume is in place."""
+    seen = []
+
+    def hook(module, args):
+        check(len(seen))
+        seen.append(len(seen))
+
+    handle = model.iterative_scattering.register_forward_pre_hook(hook)
+    with torch.no_grad():
+        model.generate_tilt_series(torch.tensor([0]))
+    handle.remove()
+    return seen
+
+
+def test_tilt_solvent_motion_follows_each_tilts_dose():
+    """
+    With unequal doses each tilt's ice is apply_solvent_exposure at that
+    tilt's own dose, blended around the specimen and padded, as a series of
+    that one dose would have it.
+    """
+    volume = tilt_volume()
+    doses = [5.0, 8.0, 2.0]
+    model = tilt_series(
+        volume,
+        Ice(model="random", motion_variance=0.38),
+        Envelopes(),
+        dose=torch.tensor(doses),
+    )
+    expected = [ice_for_dose(model, volume, d) for d in doses]
+
+    def check(i):
+        torch.testing.assert_close(model.volume, expected[i], rtol=1e-5, atol=1e-5)
+
+    assert spy_on_tilts(model, check) == [0, 1, 2]
+    assert float(expected[1].std()) < float(expected[2].std())
+
+
+def test_tilt_solvent_motion_at_one_dose_matches_the_single_filter():
+    """A tilt rendered at dose d equals the ice of a series with d on every tilt."""
+    volume = tilt_volume()
+    motion = Ice(model="random", motion_variance=0.38)
+    uniform = tilt_series(volume, motion, Envelopes())
+    varying = tilt_series(
+        volume, motion, Envelopes(), dose=torch.tensor([5.0, 8.0, 5.0])
+    )
+    varying._ensure_volume_placed()
+    varying._render_tilt_solvent(5.0)
+    torch.testing.assert_close(varying.volume, uniform.volume, rtol=1e-6, atol=1e-6)
+
+
+def test_tilt_solvent_motion_per_tilt_with_specimen_damage():
+    """Each tilt is its damaged dry specimen plus the ice of its own dose."""
+    volume = tilt_volume()
+    doses = [5.0, 8.0, 2.0]
+    model = tilt_series(
+        volume,
+        Ice(model="random", motion_variance=0.38),
+        dose=torch.tensor(doses),
+    )
+    dry = tilt_series(volume, Ice(), Envelopes()).volume
+    ice = [ice_for_dose(model, volume, d) - dry for d in doses]
+    pre = [0.0, 5.0, 13.0]
+
+    def check(i):
+        damaged = apply_dose_damage(
+            dry.clone(),
+            DX,
+            doses[i],
+            pre_exposure=pre[i],
+            weighted=False,
+            voltage=300.0,
+        )
+        torch.testing.assert_close(model.volume, damaged + ice[i], rtol=1e-5, atol=1e-5)
+
+    assert spy_on_tilts(model, check) == [0, 1, 2]

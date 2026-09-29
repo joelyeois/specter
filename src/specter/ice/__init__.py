@@ -12,6 +12,7 @@ from ._exposure import (
     apply_solvent_exposure,
     solvent_coherence,
     solvent_decorrelation_rate,
+    solvent_exposure_envelope,
     solvent_exposure_power,
 )
 from ._gradient import GradientSKIcemaker
@@ -30,6 +31,7 @@ __all__ = [
     "apply_solvent_exposure",
     "solvent_coherence",
     "solvent_decorrelation_rate",
+    "solvent_exposure_envelope",
     "solvent_exposure_power",
     "GradientSKIcemaker",
     "ExtXYZDump",

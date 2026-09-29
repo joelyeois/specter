@@ -932,15 +932,16 @@ class IterativeScattering(L.LightningModule):
         )
 
         # The scalar depends only on whether V is complex, so it is one
-        # value for every slice.
+        # value for every slice. The sum is linear, so it is accumulated in
+        # Fourier space and inverted once rather than once per slice.
         c = self._phase_scale(V)
         for i, nz_new, slice_sample in self._iter_slices(
             V, theta_matrix, slice_batchsize, "First Born (Iterative)"
         ):
             F_i = self._get_propagator(float(nz_new - i))
-            total_scattered += ifft2(fft2(slice_sample) * F_i)
+            total_scattered += fft2(slice_sample) * F_i
 
-        exitwave = 1 + c * total_scattered
+        exitwave = 1 + c * ifft2(total_scattered)
         return exitwave
 
     def kinematic(

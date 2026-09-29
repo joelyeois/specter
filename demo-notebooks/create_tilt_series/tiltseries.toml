@@ -22,6 +22,13 @@ max_tilt_angle = 45.0
 n_tilts = 5              # quick smoke test; use ~41-61 for a real tilt scheme
 tilt_axis = "y"
 
+[absorption]
+absorption_model = "alpha"         # alpha | inelastic_mfp -- inelastic_mfp derives the
+                                   # imaginary potential per material and sets alpha to 0
+# inelastic_mfp_solvent = 3950.0   # Å; unset = measured ice value at the run's voltage
+# inelastic_mfp_specimen = 2460.0  # Å; unset = the ice's value (no absorption contrast)
+# objective_aperture = 12.0        # mrad, inelastic_mfp only (70 µm on a Krios)
+
 [models]
 scattering_model = "multislice"
 noise_model = "poisson"
@@ -38,6 +45,8 @@ filename = "tilt_series"
 # this run makes, everything here has a default that is usually right.
 [advanced]
 coincidence_radius = 0
+# dose_envelope_target = "specimen"  # damage each tilt's specimen, not the ice
 ice_model = "gd"          # bundled IceBank cache; try "random" for a faster/cheaper placeholder
 ice_relax_steps = 0
+# ice_motion_variance = 0.38       # Å² per e⁻/Å²; needs the same dose on every tilt
 pad_fft = true  # fixes multislice edge-wraparound artifacts at this wide tilt range

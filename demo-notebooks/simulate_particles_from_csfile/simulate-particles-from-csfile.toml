@@ -22,6 +22,14 @@ ice_thickness = 0.0              # Å, 0 = minimum (particle box size)
 [microscope]
 dose = 53.0                    # e⁻/Å², from EMDB Experiment tab
 
+[absorption]
+absorption_model = "alpha"         # alpha | inelastic_mfp -- inelastic_mfp derives the
+                                   # imaginary potential per material and sets alpha to 0
+                                   # (the .cs file's own alpha is discarded)
+# inelastic_mfp_solvent = 3950.0   # Å; unset = measured ice value at the run's voltage
+# inelastic_mfp_specimen = 2460.0  # Å; unset = the ice's value (no absorption contrast)
+# objective_aperture = 12.0        # mrad, inelastic_mfp only (70 µm on a Krios)
+
 [sampling]
 n_particles = 10                 # number of particles to load from the .cs file
 
@@ -56,11 +64,13 @@ energy_spread = 0.7            # eV (FWHM)
 deltaV_V = 0.06e-6              # unitless (ΔV/V)
 deltaI_I = 0.01e-6               # unitless (ΔI/I)
 dose_envelope = false
+# dose_envelope_target = "specimen"  # damage the specimen, not its ice (default transfer_function)
 bfactor = 200.0                 # Å²
 coincidence_radius = 2.0         # pixels
 
 # --- Ice and crowding ---
 ice_model = "gd"                 # gd | random | none
+# ice_motion_variance = 0.38     # Å² per e⁻/Å², beam-induced water motion; unset = frozen ice
 # ice_cache_dir = "ice-data/ice_cache"  # defaults to the bundled cache
 # crowd_min_distance = 100.0      # Å, uncomment to crowd particles; defaults to pdb.max_diameter
 # crowd_max_distance_z = 50.0     # Å

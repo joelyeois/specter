@@ -123,30 +123,27 @@ def test_dose_must_have_one_entry_per_tilt(tr_kwargs: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fov_mask_zeros_border_at_high_tilt(tr_kwargs: dict) -> None:
-    """At high tilt (tilt_axis='x') the Y-border of the mask is zeroed and the
-    center remains real FOV."""
+@pytest.mark.parametrize("tilt_axis", ["x", "y"], ids=["tilt_axis_x", "tilt_axis_y"])
+def test_fov_mask_cache_matches_the_per_step_computation(
+    tr_kwargs: dict, tilt_axis: str
+) -> None:
+    """The cached per-tilt border widths give the mask the per-step
+    evaluation from the tilt pose gave, for every tilt. At high tilt the
+    border perpendicular to the tilt axis (Y for tilt_axis='x', X for 'y') is
+    zeroed and the center remains real FOV."""
     model = TomogramReconstructor(
         **tr_kwargs,
         propagation=Propagation(scattering_model="projection"),
-        tilt=TiltGeometry(tilt_axis="x"),
+        tilt=TiltGeometry(tilt_axis=tilt_axis),
     )
     mask = model._fov_mask(0)  # -20 degree tilt
     assert mask is not None
     assert mask.shape == (8, 8)
-    assert torch.all(mask[0, :] == 0.0)
-    assert torch.all(mask[-1, :] == 0.0)
+    across = mask if tilt_axis == "x" else mask.T
+    assert torch.all(across[0, :] == 0.0)
+    assert torch.all(across[-1, :] == 0.0)
     assert mask[4, 4] == 1.0
 
-
-def test_fov_mask_cache_matches_the_per_step_computation(tr_kwargs: dict) -> None:
-    """The cached per-tilt border widths give the mask the per-step
-    evaluation from the tilt pose gave, for every tilt."""
-    model = TomogramReconstructor(
-        **tr_kwargs,
-        propagation=Propagation(scattering_model="projection"),
-        tilt=TiltGeometry(tilt_axis="y"),
-    )
     for idx, Q in enumerate(model.quaternions):
         theta = roma.unitquat_to_rotvec(Q.unsqueeze(0))[0].norm()
         real_fov = int(
@@ -160,8 +157,12 @@ def test_fov_mask_cache_matches_the_per_step_computation(tr_kwargs: dict) -> Non
             continue
         pad = (model.nxy - real_fov) // 2
         expected = torch.ones(model.nxy, model.nxy)
-        expected[:, :pad] = 0.0
-        expected[:, model.nxy - pad :] = 0.0
+        if tilt_axis == "x":
+            expected[:pad, :] = 0.0
+            expected[model.nxy - pad :, :] = 0.0
+        else:
+            expected[:, :pad] = 0.0
+            expected[:, model.nxy - pad :] = 0.0
         assert mask is not None
         assert torch.equal(mask, expected)
     assert model._fov_pads() is model._fov_pads()

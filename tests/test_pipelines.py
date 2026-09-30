@@ -63,46 +63,6 @@ def _write_minimal_csfile(path: Path, n: int) -> None:
     ).save(str(path))
 
 
-def test_run_particle_stack_from_csfile(tmp_path: Path) -> None:
-    """cs_path drives pixel_size/voltage/alpha/poses/CTF from a CryoSPARC
-    passthrough .cs file instead of synthetic sampling -- see
-    src/specter/pipelines/_particles.py. For a real-data demonstration of
-    this same code path against EMPIAR-11377, see
-    docs/user-guide/particle-stack.md and
-    docs-figures/particle_stack_empiar_11377.py.
-    """
-    cs_path = tmp_path / "minimal.cs"
-    _write_minimal_csfile(cs_path, n=5)
-
-    config = ParticleStackConfig(
-        pdb_source="6bdf",
-        n_pixels=64,
-        cs_path=str(cs_path),
-        n_particles=5,
-        scattering_model="projection",
-        ice_model="none",
-        detector_model="none",
-        device="cpu",
-        batchsize=5,
-        output_dir=str(tmp_path),
-        filename="cs_particles",
-    )
-    run_particle_stack(config)
-
-    with mrcfile.open(tmp_path / "cs_particles.mrcs") as mrc:
-        assert mrc.data.shape == (5, 64, 64)
-
-    df = starfile.read(tmp_path / "cs_particles.star")
-    assert len(df) == 5
-    # These come from the .cs file, not ParticleStackConfig's (unused) defaults.
-    assert df["rlnVoltage"].iloc[0] == _VOLTAGE_KV
-    assert df["rlnSphericalAberration"].iloc[0] == _CS_MM
-    assert abs(df["rlnImagePixelSize"].iloc[0] - _PIXEL_SIZE_A) < 1e-4
-    assert df["rlnAmplitudeContrast"].iloc[0] == _ALPHA
-    assert df["rlnDefocusU"].iloc[0] == _DFU_A
-    assert df["rlnDefocusV"].iloc[0] == _DFV_A
-
-
 def _write_minimal_starfile(path: Path, n: int) -> None:
     """A single-block RELION .star with every column _load_starfile_parameters reads."""
     starfile.write(
@@ -128,19 +88,32 @@ def _write_minimal_starfile(path: Path, n: int) -> None:
     )
 
 
-def test_run_particle_stack_from_starfile(tmp_path: Path) -> None:
-    """star_path is the RELION counterpart of cs_path -- same code path in
-    src/specter/pipelines/_particles.py, fed by
-    `extract_parameters_from_starfile` instead, which returns the same
-    10-tuple.
+@pytest.mark.parametrize(
+    ("write_input", "config_field", "filename"),
+    [
+        (_write_minimal_csfile, "cs_path", "minimal.cs"),
+        (_write_minimal_starfile, "star_path", "minimal.star"),
+    ],
+    ids=["csfile", "starfile"],
+)
+def test_run_particle_stack_from_dataset_file(
+    tmp_path: Path, write_input, config_field: str, filename: str
+) -> None:
+    """cs_path drives pixel_size/voltage/alpha/poses/CTF from a CryoSPARC
+    passthrough .cs file instead of synthetic sampling -- see
+    src/specter/pipelines/_particles.py. star_path is its RELION
+    counterpart -- same code path, fed by `extract_parameters_from_starfile`
+    instead, which returns the same 10-tuple. For a real-data demonstration
+    of this same code path against EMPIAR-11377, see
+    docs/user-guide/particle-stack.md and
+    docs-figures/particle_stack_empiar_11377.py.
     """
-    star_path = tmp_path / "minimal.star"
-    _write_minimal_starfile(star_path, n=5)
+    input_path = tmp_path / filename
+    write_input(input_path, n=5)
 
     config = ParticleStackConfig(
         pdb_source="6bdf",
         n_pixels=64,
-        star_path=str(star_path),
         n_particles=5,
         scattering_model="projection",
         ice_model="none",
@@ -148,16 +121,17 @@ def test_run_particle_stack_from_starfile(tmp_path: Path) -> None:
         device="cpu",
         batchsize=5,
         output_dir=str(tmp_path),
-        filename="star_particles",
+        filename="particles_out",
+        **{config_field: str(input_path)},
     )
     run_particle_stack(config)
 
-    with mrcfile.open(tmp_path / "star_particles.mrcs") as mrc:
+    with mrcfile.open(tmp_path / "particles_out.mrcs") as mrc:
         assert mrc.data.shape == (5, 64, 64)
 
-    df = starfile.read(tmp_path / "star_particles.star")
+    df = starfile.read(tmp_path / "particles_out.star")
     assert len(df) == 5
-    # These come from the input .star file, not ParticleStackConfig's defaults.
+    # These come from the input file, not ParticleStackConfig's (unused) defaults.
     assert df["rlnVoltage"].iloc[0] == _VOLTAGE_KV
     assert df["rlnSphericalAberration"].iloc[0] == _CS_MM
     assert abs(df["rlnImagePixelSize"].iloc[0] - _PIXEL_SIZE_A) < 1e-4
@@ -265,10 +239,21 @@ def test_run_particle_stack_rejects_seed_with_auto_batchsize(tmp_path: Path) -> 
         run_particle_stack(config)
 
 
-def test_run_particle_stack_tracked_by_project(tmp_path: Path) -> None:
-    """--project routes output through specter.jobs instead of output_dir/
-    filename -- opt-in, unlike reconstruction's always-on tracking."""
-    config = ParticleStackConfig(
+def _minimal_tomogram_config(**overrides) -> TomogramConfig:
+    defaults = dict(
+        target_shape=[24, 48, 48],
+        voxel_size=12.0,
+        targets=[{"pdb_source": "6bdf", "n_copies": 1}],
+        device="cpu",
+        write_picks=False,
+        write_segmentation=False,
+    )
+    defaults.update(overrides)
+    return TomogramConfig(**defaults)
+
+
+def _tracked_particle_config(tmp_path: Path) -> ParticleStackConfig:
+    return ParticleStackConfig(
         pdb_source="6bdf",
         n_pixels=32,
         n_particles=2,
@@ -280,19 +265,10 @@ def test_run_particle_stack_tracked_by_project(tmp_path: Path) -> None:
         project="apoferritin",
         output_dir=str(tmp_path),
     )
-    run_particle_stack(config)
-
-    job_dir = tmp_path / "apoferritin" / "particles" / "J001"
-    assert (job_dir / "particles.mrcs").exists()
-    assert (job_dir / "particles.star").exists()
-
-    job = json.loads((job_dir / "job.json").read_text())
-    assert job["status"] == "complete"
-    assert job["params"]["n_particles"] == 2
 
 
-def test_run_micrograph_tracked_by_project(tmp_path: Path) -> None:
-    config = MicrographConfig(
+def _tracked_micrograph_config(tmp_path: Path) -> MicrographConfig:
+    return MicrographConfig(
         pdb_source="6bdf",
         n_pixels=32,
         micrograph_size=64,
@@ -305,22 +281,12 @@ def test_run_micrograph_tracked_by_project(tmp_path: Path) -> None:
         project="apoferritin",
         output_dir=str(tmp_path),
     )
-    run_micrograph(config)
-
-    job_dir = tmp_path / "apoferritin" / "micrographs" / "J001"
-    with mrcfile.open(job_dir / "micrographs.mrcs") as mrc:
-        assert mrc.data.shape == (1, 64, 64)
-    job = json.loads((job_dir / "job.json").read_text())
-    assert job["status"] == "complete"
 
 
-def test_run_tilt_series_tracked_by_project(tmp_path: Path) -> None:
-    import torch
-
+def _tracked_tilt_series_config(tmp_path: Path) -> TiltSeriesConfig:
     volume_path = tmp_path / "volume.pt"
     torch.save(torch.rand(32, 48, 48) * 0.01, volume_path)
-
-    config = TiltSeriesConfig(
+    return TiltSeriesConfig(
         volume_path=str(volume_path),
         voxel_size=4.0,
         micrograph_size=48,
@@ -335,36 +301,64 @@ def test_run_tilt_series_tracked_by_project(tmp_path: Path) -> None:
         project="apoferritin",
         output_dir=str(tmp_path),
     )
-    run_tilt_series(config)
 
-    job_dir = tmp_path / "apoferritin" / "tiltseries" / "J001"
-    with mrcfile.open(job_dir / "tilt_series.mrcs") as mrc:
-        assert mrc.data.shape == (3, 48, 48)
+
+def _tracked_tomogram_config(tmp_path: Path) -> TomogramConfig:
+    return _minimal_tomogram_config(project="apoferritin", output_dir=str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("make_config", "run", "job_type", "artifacts", "params"),
+    [
+        (
+            _tracked_particle_config,
+            run_particle_stack,
+            "particles",
+            {"particles.mrcs": None, "particles.star": None},
+            {"n_particles": 2},
+        ),
+        (
+            _tracked_micrograph_config,
+            run_micrograph,
+            "micrographs",
+            {"micrographs.mrcs": (1, 64, 64)},
+            {},
+        ),
+        (
+            _tracked_tilt_series_config,
+            run_tilt_series,
+            "tiltseries",
+            {"tilt_series.mrcs": (3, 48, 48)},
+            {},
+        ),
+        (
+            _tracked_tomogram_config,
+            run_build_tomogram,
+            "tomograms",
+            {"tomogram.mrc": None},
+            {},
+        ),
+    ],
+    ids=["particles", "micrograph", "tilt_series", "tomogram"],
+)
+def test_run_pipeline_tracked_by_project(
+    tmp_path: Path, make_config, run, job_type: str, artifacts: dict, params: dict
+) -> None:
+    """--project routes output through specter.jobs instead of output_dir/
+    filename -- opt-in, unlike reconstruction's always-on tracking."""
+    run(make_config(tmp_path))
+
+    job_dir = tmp_path / "apoferritin" / job_type / "J001"
+    for name, shape in artifacts.items():
+        assert (job_dir / name).exists()
+        if shape is not None:
+            with mrcfile.open(job_dir / name) as mrc:
+                assert mrc.data.shape == shape
+
     job = json.loads((job_dir / "job.json").read_text())
     assert job["status"] == "complete"
-
-
-def _minimal_tomogram_config(**overrides) -> TomogramConfig:
-    defaults = dict(
-        target_shape=[24, 48, 48],
-        voxel_size=12.0,
-        targets=[{"pdb_source": "6bdf", "n_copies": 1}],
-        device="cpu",
-        write_picks=False,
-        write_segmentation=False,
-    )
-    defaults.update(overrides)
-    return TomogramConfig(**defaults)
-
-
-def test_run_build_tomogram_tracked_by_project(tmp_path: Path) -> None:
-    config = _minimal_tomogram_config(project="apoferritin", output_dir=str(tmp_path))
-    run_build_tomogram(config)
-
-    job_dir = tmp_path / "apoferritin" / "tomograms" / "J001"
-    assert (job_dir / "tomogram.mrc").exists()
-    job = json.loads((job_dir / "job.json").read_text())
-    assert job["status"] == "complete"
+    for key, value in params.items():
+        assert job["params"][key] == value
 
 
 def test_tomogram_output_path_tracked_requires_pinned_job_id() -> None:

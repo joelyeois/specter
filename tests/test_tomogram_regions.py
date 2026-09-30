@@ -71,8 +71,13 @@ def test_cc3d_labelling_matches_scipy_partition():
     assert bool(masks["cytosol"][0, 0, 0])
 
 
-def test_classify_membrane_regions_hollow_sphere_center_is_lumen_corner_is_cytosol():
-    density = _hollow_sphere_density(n=40, shell_radius=12.0)
+@pytest.mark.parametrize("scale", [1.0, 100.0], ids=["unit_peak", "peak_x100"])
+def test_classify_membrane_regions_hollow_sphere_center_is_lumen_corner_is_cytosol(
+    scale: float,
+) -> None:
+    """The default threshold is relative to the density's peak, so scaling
+    the peak up must leave the classification unchanged."""
+    density = _hollow_sphere_density(n=40, shell_radius=12.0) * scale
     masks = classify_membrane_regions(density)
     assert bool(masks["lumen"][20, 20, 20])
     assert bool(masks["cytosol"][0, 0, 0])
@@ -106,15 +111,6 @@ def test_classify_membrane_regions_two_disjoint_vesicles_both_become_lumen():
     assert bool(
         masks["cytosol"][30, 30, 30]
     )  # between the two vesicles, not enclosed by either
-
-
-def test_classify_membrane_regions_default_threshold_scales_with_peak():
-    density = (
-        _hollow_sphere_density() * 100.0
-    )  # scale peak up, threshold should track it
-    masks = classify_membrane_regions(density)
-    assert bool(masks["lumen"][20, 20, 20])
-    assert bool(masks["cytosol"][0, 0, 0])
 
 
 def test_many_boundary_components_classify_correctly():

@@ -63,21 +63,27 @@ def test_parse_scalar_or_range_rejects_more_than_two_values() -> None:
         parse_scalar_or_range("1,2,3")
 
 
+@pytest.mark.parametrize(
+    ("dose", "defocus"),
+    [("40", "[8000.0, 12000.0]"), ('"40"', '"8000,12000"')],
+    ids=["numeric", "legacy_string"],
+)
 def test_load_config_scalar_or_range_fields_accept_numeric_toml(
-    tmp_path: Path,
+    tmp_path: Path, dose: str, defocus: str
 ) -> None:
-    """Sampling fields read as plain TOML numbers/arrays, no quoting needed."""
+    """Sampling fields read as plain TOML numbers/arrays, no quoting needed,
+    and configs written before the numeric spelling keep working unchanged."""
     path = _write_toml(
         tmp_path,
-        """
+        f"""
         [potential]
         pdb_source = "6bdf"
 
         [microscope]
-        dose = 40
+        dose = {dose}
 
         [sampling]
-        defocus = [8000.0, 12000.0]
+        defocus = {defocus}
         """,
     )
     config = load_config(path)
@@ -85,37 +91,17 @@ def test_load_config_scalar_or_range_fields_accept_numeric_toml(
     assert parse_scalar_or_range(config.defocus) == (8000.0, 12000.0)
 
 
-def test_load_config_scalar_or_range_fields_still_accept_legacy_strings(
-    tmp_path: Path,
-) -> None:
-    """Configs written before the numeric spelling keep working unchanged."""
-    path = _write_toml(
-        tmp_path,
-        """
-        [potential]
-        pdb_source = "6bdf"
-
-        [microscope]
-        dose = "40"
-
-        [sampling]
-        defocus = "8000,12000"
-        """,
-    )
-    config = load_config(path)
-    assert parse_scalar_or_range(config.dose) == (40.0, 40.0)
-    assert parse_scalar_or_range(config.defocus) == (8000.0, 12000.0)
-
-
-def test_load_config_keeps_relative_pdb_cache_dir_verbatim(
-    tmp_path: Path,
+@pytest.mark.parametrize("absolute", [False, True], ids=["relative", "absolute"])
+def test_load_config_keeps_pdb_cache_dir_verbatim(
+    tmp_path: Path, absolute: bool
 ) -> None:
     """A path the user wrote is theirs -- resolved against cwd, not rewritten."""
+    written = str(tmp_path / "cache") if absolute else "my-cache"
     path = _write_toml(
-        tmp_path, '[potential]\npdb_source = "6bdf"\npdb_cache_dir = "my-cache"\n'
+        tmp_path, f'[potential]\npdb_source = "6bdf"\npdb_cache_dir = "{written}"\n'
     )
     config = load_config(path)
-    assert config.pdb_cache_dir == "my-cache"
+    assert config.pdb_cache_dir == written
 
 
 def test_find_specter_project_root_walks_up_from_subdirectory(tmp_path: Path) -> None:
@@ -203,43 +189,39 @@ def test_find_specter_project_root_never_creates_a_marker(tmp_path: Path) -> Non
     assert not (tmp_path / PROJECT_MARKER).exists()
 
 
-def test_pdb_cache_follows_xdg_cache_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    ("xdg", "specter", "expected"),
+    [
+        ("scratch-cache", None, "scratch-cache/specter/pdb"),
+        ("xdg", "explicit", "explicit"),
+        (None, "elsewhere", "elsewhere"),
+    ],
+    ids=["xdg_cache_home", "specter_beats_xdg", "specter_env_var"],
+)
+def test_pdb_cache_env_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    xdg: str | None,
+    specter: str | None,
+    expected: str,
 ) -> None:
-    """Honouring XDG is what lets an HPC user move the cache onto scratch
-    for every XDG-aware tool at once, instead of per-tool."""
+    """$SPECTER_PDB_CACHE beats $XDG_CACHE_HOME, which beats the default.
+
+    Honouring XDG is what lets an HPC user move the cache onto scratch
+    for every XDG-aware tool at once, instead of per-tool.
+    """
     from specter.config import default_pdb_cache_dir
 
-    monkeypatch.delenv(PDB_CACHE_ENV_VAR, raising=False)
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "scratch-cache"))
-    assert default_pdb_cache_dir() == str(
-        tmp_path / "scratch-cache" / "specter" / "pdb"
+    if xdg is not None:
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / xdg))
+    if specter is None:
+        monkeypatch.delenv(PDB_CACHE_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(PDB_CACHE_ENV_VAR, str(tmp_path / specter))
+    assert default_pdb_cache_dir() == str(tmp_path / expected)
+    assert ParticleStackConfig(pdb_source="6bdf").pdb_cache_dir == str(
+        tmp_path / expected
     )
-
-
-def test_specter_pdb_cache_beats_xdg(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
-    monkeypatch.setenv(PDB_CACHE_ENV_VAR, str(tmp_path / "explicit"))
-    from specter.config import default_pdb_cache_dir
-
-    assert default_pdb_cache_dir() == str(tmp_path / "explicit")
-
-
-def test_pdb_cache_env_var_overrides_default(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv(PDB_CACHE_ENV_VAR, str(tmp_path / "elsewhere"))
-    config = ParticleStackConfig(pdb_source="6bdf")
-    assert config.pdb_cache_dir == str(tmp_path / "elsewhere")
-
-
-def test_load_config_preserves_absolute_pdb_cache_dir(tmp_path: Path) -> None:
-    absolute = str(tmp_path / "cache")
-    path = _write_toml(
-        tmp_path, f'[potential]\npdb_source = "6bdf"\npdb_cache_dir = "{absolute}"\n'
-    )
-    config = load_config(path)
-    assert config.pdb_cache_dir == absolute
 
 
 def test_load_config_tilt_series_parses_scalar_fields(tmp_path: Path) -> None:

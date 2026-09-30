@@ -81,40 +81,51 @@ def test_membrane_config_entry_dict_never_mutated():
     assert entry == {"shape_backend": "spherical_harmonics", "n_copies": 2}
 
 
-def test_render_workers_and_devices_reach_membrane_tomogram_generator():
-    # A comma-separated `device` pools multiple GPUs for concurrent
-    # per-species rendering (see specter.devices.DeviceSpec.primary_and_pool)
-    # -- torch.device("cuda:N") is a valid descriptor
-    # regardless of whether GPU N is actually present, so this doesn't
-    # need real multi-GPU hardware to test the wiring.
-    config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics", "n_copies": 2}],
-        render_workers=4,
-        device="0,1",
-        **_BASE_KWARGS,
-    )
+@pytest.mark.parametrize(
+    "membrane_entry, config_kwargs, expected_workers, expected_devices, expected_device",
+    [
+        (
+            {"shape_backend": "spherical_harmonics", "n_copies": 2},
+            {"render_workers": 4, "device": "0,1"},
+            4,
+            [torch.device("cuda:0"), torch.device("cuda:1")],
+            "cuda:0",
+        ),
+        (
+            {"shape_backend": "spherical_harmonics"},
+            {"device": "cpu"},
+            1,
+            [torch.device("cpu")],
+            "cpu",
+        ),
+    ],
+    ids=["explicit_pool", "default_serial"],
+)
+def test_render_workers_and_devices_reach_membrane_tomogram_generator(
+    membrane_entry: dict,
+    config_kwargs: dict,
+    expected_workers: int,
+    expected_devices: list[torch.device],
+    expected_device: str,
+) -> None:
+    """A comma-separated `device` pools multiple GPUs for concurrent
+    per-species rendering (see specter.devices.DeviceSpec.primary_and_pool)
+    -- torch.device("cuda:N") is a valid descriptor regardless of whether
+    GPU N is actually present, so this doesn't need real multi-GPU hardware
+    to test the wiring. Left unset, render_workers is serial; that case pins
+    device="cpu" so it is about render_workers, not about which device the
+    config defaults to (which is "cuda", resolved against the host at run
+    time)."""
+    config = TomogramConfig(membrane=[membrane_entry], **config_kwargs, **_BASE_KWARGS)
     gen = build_tomogram_generator(config)
-    assert gen.render_workers == 4
-    assert gen.render_devices == [torch.device("cuda:0"), torch.device("cuda:1")]
-    assert gen.device == "cuda:0"
+    assert gen.render_workers == expected_workers
+    assert gen.render_devices == expected_devices
+    assert gen.device == expected_device
     # Every MembraneGenerator instance still gets its own default (1) --
     # transmembrane_specs is empty in _BASE_KWARGS, so there's nothing for
     # a per-instance render pass to parallelize anyway (see
     # build_tomogram_generator's own pre-render comment).
     assert all(mi.generator.render_workers == 1 for mi in gen.membrane_instances)
-
-
-def test_render_workers_default_is_serial():
-    # device pinned so this is about render_workers, not about which device the
-    # config defaults to (which is "cuda", resolved against the host at run time).
-    config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics"}],
-        device="cpu",
-        **_BASE_KWARGS,
-    )
-    gen = build_tomogram_generator(config)
-    assert gen.render_workers == 1
-    assert gen.render_devices == [torch.device("cpu")]
 
 
 def test_filaments_config_builds_filament_specs():

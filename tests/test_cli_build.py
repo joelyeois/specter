@@ -72,6 +72,9 @@ def _run_build_cli(config_path: Path, *extra_args: str) -> _CliResult:
 
 
 def test_cli_build_tomogram_smoke(tmp_path: Path) -> None:
+    """A sphere-packing build writes the volume and picks, and (sphere-packing,
+    non-membrane mode) also gets a _protein_labels.mrc under the generalized
+    write_segmentation, but no membrane or region labels."""
     config_path = tmp_path / "tomogram.toml"
     _write_test_config(config_path, tmp_path)
 
@@ -86,21 +89,32 @@ def test_cli_build_tomogram_smoke(tmp_path: Path) -> None:
     assert '"type": "orientedPoint"' in lines[0]
     assert '"xyz_rotation_matrix"' in lines[0]
 
+    assert (tmp_path / "test_tomogram_protein_labels.mrc").exists()
+    assert not (tmp_path / "test_tomogram_membrane_labels.mrc").exists()
+    assert not (tmp_path / "test_tomogram_regions.mrc").exists()
 
+
+@pytest.mark.parametrize("cli_output_dir", [False, True], ids=["toml", "cli"])
 def test_cli_build_tomogram_output_dir_becomes_job_root_when_tracked(
-    tmp_path: Path,
+    tmp_path: Path, cli_output_dir: bool
 ) -> None:
     """The same --output_dir is the leaf untracked and the job-tree root tracked.
 
     This is what lets a user point specter at one folder and have --project
     organise output *within* it, rather than needing a second path flag to
-    say where the numbered tree goes.
+    say where the numbered tree goes. --output_dir on the command line still
+    beats the TOML's, tracked or not.
     """
     config_path = tmp_path / "tomogram.toml"
-    chosen = tmp_path / "chosen"
-    _write_test_config(config_path, chosen)
+    from_toml = tmp_path / "from_toml"
+    _write_test_config(config_path, from_toml)
+    extra = ["--project", "proj"]
+    chosen = from_toml
+    if cli_output_dir:
+        chosen = tmp_path / "from_cli"
+        extra += ["--output_dir", str(chosen)]
 
-    result = _run_build_cli(config_path, "--project", "proj")
+    result = _run_build_cli(config_path, *extra)
     assert result.returncode == 0, result.stderr
 
     job_dir = chosen / "proj" / "tomograms" / "J001"
@@ -108,24 +122,8 @@ def test_cli_build_tomogram_output_dir_becomes_job_root_when_tracked(
     assert (job_dir / "job.json").exists()
     # Not also written flat into the folder the way an untracked run would.
     assert not (chosen / "test_tomogram.mrc").exists()
-
-
-def test_cli_build_tomogram_cli_output_dir_overrides_config_when_tracked(
-    tmp_path: Path,
-) -> None:
-    """--output_dir on the command line still beats the TOML's, tracked or not."""
-    config_path = tmp_path / "tomogram.toml"
-    from_toml = tmp_path / "from_toml"
-    _write_test_config(config_path, from_toml)
-    from_cli = tmp_path / "from_cli"
-
-    result = _run_build_cli(
-        config_path, "--project", "proj", "--output_dir", str(from_cli)
-    )
-    assert result.returncode == 0, result.stderr
-
-    assert (from_cli / "proj" / "tomograms" / "J001" / "test_tomogram.mrc").exists()
-    assert not from_toml.exists()
+    if cli_output_dir:
+        assert not from_toml.exists()
 
 
 def test_cli_build_tomogram_n_tomograms(tmp_path: Path) -> None:
@@ -340,19 +338,6 @@ def test_cli_build_tomogram_write_segmentation_override(tmp_path: Path) -> None:
     assert not (tmp_path / "test_membrane_tomogram_protein_labels.mrc").exists()
     assert not (tmp_path / "test_membrane_tomogram_membrane_labels.mrc").exists()
     assert not (tmp_path / "test_membrane_tomogram_regions.mrc").exists()
-
-
-def test_cli_build_tomogram_sphere_packing_write_segmentation(tmp_path: Path) -> None:
-    """Sphere-packing (non-membrane) mode also gets a _protein_labels.mrc
-    under the generalized write_segmentation."""
-    config_path = tmp_path / "tomogram.toml"
-    _write_test_config(config_path, tmp_path)
-
-    result = _run_build_cli(config_path)
-    assert result.returncode == 0, result.stderr
-    assert (tmp_path / "test_tomogram_protein_labels.mrc").exists()
-    assert not (tmp_path / "test_tomogram_membrane_labels.mrc").exists()
-    assert not (tmp_path / "test_tomogram_regions.mrc").exists()
 
 
 def test_cli_build_tomogram_zero_instances_fit_smoke(tmp_path: Path) -> None:

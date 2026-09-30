@@ -95,32 +95,37 @@ def test_tracked_output_dir_defaults_to_project_root(
         assert output_dir == str(tmp_path / "p" / "particles" / "J001")
 
 
+@pytest.mark.parametrize(
+    ("project", "job_id"),
+    [("apoferritin", "J003"), (None, "J007")],
+    ids=["project", "no_project"],
+)
 def test_not_is_main_computes_same_path_without_touching_filesystem(
-    tmp_path: Path,
+    tmp_path: Path, project: str | None, job_id: str
 ) -> None:
     """A non-main DDP rank must agree on the exact path is_main resolves,
     without creating anything itself -- job_id is required here in real
     pipelines (see validate_config) precisely so this is a pure string
     join, safe to compute redundantly and independently."""
-    config = _Config(project="apoferritin", job_id="J003", output_dir=str(tmp_path))
+    config = _Config(project=project, job_id=job_id, output_dir=str(tmp_path))
+    job_type_dir = (
+        tmp_path / project / "particles" if project else tmp_path / "particles"
+    )
+
+    with _tracked_output_dir(config, "particles", is_main=False) as early_worker_dir:
+        assert early_worker_dir == str(job_type_dir / job_id)
+    # is_main=False never touches the filesystem at all.
+    assert not job_type_dir.exists()
+
     with _tracked_output_dir(config, "particles", is_main=True) as main_dir:
         pass
     with _tracked_output_dir(config, "particles", is_main=False) as worker_dir:
         assert worker_dir == main_dir
+    assert early_worker_dir == main_dir
 
     # The worker's entry didn't create anything new on its own -- only
     # is_main's Job() call above did.
-    assert set(os.listdir(tmp_path / "apoferritin" / "particles")) == {"J003"}
-
-
-def test_not_is_main_without_project_computes_job_type_dir_directly(
-    tmp_path: Path,
-) -> None:
-    config = _Config(job_id="J007", output_dir=str(tmp_path))
-    with _tracked_output_dir(config, "particles", is_main=False) as output_dir:
-        assert output_dir == str(tmp_path / "particles" / "J007")
-    # is_main=False never touches the filesystem at all.
-    assert not (tmp_path / "particles").exists()
+    assert set(os.listdir(job_type_dir)) == {job_id}
 
 
 def test_tracked_records_failure_status(tmp_path: Path) -> None:
@@ -133,20 +138,19 @@ def test_tracked_records_failure_status(tmp_path: Path) -> None:
     assert job["error"] == "boom"
 
 
+@pytest.mark.parametrize(
+    ("project", "job_type"),
+    [("apoferritin", "tomograms"), (None, "particles")],
+    ids=["project", "no_project"],
+)
 def test_reserve_next_job_id_matches_what_job_itself_would_assign(
-    tmp_path: Path,
+    tmp_path: Path, project: str | None, job_type: str
 ) -> None:
-    assert _reserve_next_job_id("apoferritin", str(tmp_path)) == "J001"
+    assert _reserve_next_job_id(project, str(tmp_path)) == "J001"
 
-    with Job("tomograms", project="apoferritin", base_dir=tmp_path):
+    with Job(job_type, project=project, base_dir=tmp_path):
         pass
-    assert _reserve_next_job_id("apoferritin", str(tmp_path)) == "J002"
-
-
-def test_reserve_next_job_id_no_project(tmp_path: Path) -> None:
-    with Job("particles", project=None, base_dir=tmp_path):
-        pass
-    assert _reserve_next_job_id(None, str(tmp_path)) == "J002"
+    assert _reserve_next_job_id(project, str(tmp_path)) == "J002"
 
 
 @pytest.mark.parametrize("cuda_present", [True, False])

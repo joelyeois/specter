@@ -151,20 +151,24 @@ def test_amplitude_contrast_leaves_a_complex_potential_alone() -> None:
     )
 
 
-def test_propagation_rejects_alpha_alongside_the_mfp_model() -> None:
-    """The two routes to the imaginary potential would double-count."""
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"alpha": 0.1}, "double-count"),
+        ({"scattering_model": "ctf"}, "not available with"),
+    ],
+    ids=["alpha", "scattering_model_ctf"],
+)
+def test_propagation_rejects_incompatible_settings_with_the_mfp_model(
+    kwargs: dict, match: str
+) -> None:
+    """A nonzero ``alpha`` alongside the mfp model would double-count, since
+    the two are routes to the same imaginary potential; ``"ctf"`` has a real
+    exit wave and absorbs at the lens instead."""
     from specter.settings import Propagation
 
-    with pytest.raises(ValueError, match="double-count"):
-        Propagation(absorption_model="inelastic_mfp", alpha=0.1)
-
-
-def test_propagation_rejects_the_mfp_model_with_scattering_model_ctf() -> None:
-    """``"ctf"`` has a real exit wave and absorbs at the lens instead."""
-    from specter.settings import Propagation
-
-    with pytest.raises(ValueError, match="not available with"):
-        Propagation(absorption_model="inelastic_mfp", scattering_model="ctf")
+    with pytest.raises(ValueError, match=match):
+        Propagation(absorption_model="inelastic_mfp", **kwargs)
 
 
 def test_pipeline_drops_a_dataset_alpha_under_the_mfp_model() -> None:

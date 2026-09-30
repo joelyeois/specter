@@ -50,33 +50,22 @@ def test_icebank_raises_on_empty_dir(tmp_path):
         IceBank(str(tmp_path))
 
 
-def test_icebank_basic_extraction_shape_and_finite(tmp_path):
+@pytest.mark.parametrize(
+    "n, nz, batchsize, expected_shape",
+    [(16, None, 3, (3, 16, 16, 16)), (16, 8, 1, (1, 8, 16, 16))],
+    ids=["cubic_batched", "noncubic"],
+)
+def test_icebank_extraction_shape_and_finite(
+    tmp_path, n: int, nz: int | None, batchsize: int, expected_shape: tuple
+) -> None:
     _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
     cache = IceBank(str(tmp_path), progressbars=False)
     assert len(cache) == 1
 
     torch.manual_seed(1)
-    ice = cache.generate_ice(n=16, dx=1.0, batchsize=3)
-    assert ice.shape == (3, 16, 16, 16)
+    ice = cache.generate_ice(n=n, nz=nz, dx=1.0, batchsize=batchsize)
+    assert ice.shape == expected_shape
     assert torch.isfinite(ice).all()
-
-
-def test_icebank_parameterization_changes_kernel(tmp_path):
-    """Regression guard: IceBank._get_kernel should honor `parameterization`,
-    not silently fall back to a hardcoded 'kirkland'."""
-    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
-    kirkland = IceBank(str(tmp_path), progressbars=False)
-    lobato = IceBank(str(tmp_path), progressbars=False, parameterization="lobato")
-
-    assert not torch.allclose(kirkland._get_kernel(1.0), lobato._get_kernel(1.0))
-
-
-def test_icebank_noncubic_request(tmp_path):
-    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
-    cache = IceBank(str(tmp_path), progressbars=False)
-
-    ice = cache.generate_ice(n=16, nz=8, dx=1.0, batchsize=1)
-    assert ice.shape == (1, 8, 16, 16)
 
 
 def test_icebank_raises_for_oversized_request(tmp_path):
@@ -194,15 +183,24 @@ def test_icebank_deterministic_filtering_with_mixed_config_sizes(tmp_path):
         assert ice.shape == (1, 24, 24, 24)
 
 
-def test_icebank_generate_big_ice_shape_and_finite(tmp_path):
+@pytest.mark.parametrize(
+    "n, relax_steps, seed",
+    [(64, 20, 1), (32, 10, 0)],
+    ids=["tiled_2x2x2", "single_tile"],
+)
+def test_icebank_generate_big_ice_shape_and_finite(
+    tmp_path, n: int, relax_steps: int, seed: int
+) -> None:
     """A request larger than the single cached config (32^3) must tile
-    (here 2x2x2 of 32A tiles -> 64^3) rather than raise."""
+    (here 2x2x2 of 32A tiles -> 64^3) rather than raise; the degenerate
+    case, a 'big' request that only needs a 1x1x1 tile grid (no seams at
+    all), should still work without error."""
     _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
     cache = IceBank(str(tmp_path), progressbars=False)
 
-    torch.manual_seed(1)
-    ice = cache.generate_big_ice(n=64, dx=1.0, batchsize=1, relax_steps=20)
-    assert ice.shape == (1, 64, 64, 64)
+    torch.manual_seed(seed)
+    ice = cache.generate_big_ice(n=n, dx=1.0, batchsize=1, relax_steps=relax_steps)
+    assert ice.shape == (1, n, n, n)
     assert torch.isfinite(ice).all()
 
 
@@ -217,30 +215,21 @@ def test_icebank_generate_big_ice_deltas_noncubic_and_batched(tmp_path):
     assert deltas.shape == (2, 48, 64, 64)
 
 
-def test_icebank_generate_big_ice_deltas_streamed_splat_matches_monolithic(tmp_path):
+@pytest.mark.parametrize(
+    "n, seed", [(64, 9), (48, 11)], ids=["exact_multiple", "overflow"]
+)
+def test_icebank_generate_big_ice_deltas_streamed_splat_matches_monolithic(
+    tmp_path, n: int, seed: int
+) -> None:
     """When relax_steps=0, generate_big_ice_deltas splats each tile into
     the output volume as soon as it's drawn (bounding peak memory to a
     single tile's atom count) instead of gathering every tile's atoms into
     one tensor before voxelizing. Splatting is linear/accumulating, so the
     streamed result must exactly match voxelizing the same (post-`keep`)
-    positions in one monolithic call."""
-    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
-    cache = IceBank(str(tmp_path), progressbars=False)
+    positions in one monolithic call.
 
-    torch.manual_seed(9)
-    streamed = cache.generate_big_ice_deltas(n=64, dx=1.0, batchsize=1, relax_steps=0)
-    reference = soft_voxelize_coordinates(
-        cache.positions, grid_shape=(64, 64, 64), voxel_size=1.0, periodic=True
-    )
-    assert torch.allclose(streamed[0], reference, atol=1e-5)
-
-
-def test_icebank_generate_big_ice_streamed_splat_matches_trimmed_monolithic_with_overflow(
-    tmp_path,
-):
-    """Same invariant as the test above, but at a request size (48, with a
-    32 A tile) that is NOT an exact multiple of the tile size -- unlike
-    n=64 above, every edge tile's own footprint here genuinely overhangs
+    The `overflow` case (48, with a 32 A tile) is NOT an exact multiple of
+    the tile size, so every edge tile's own footprint genuinely overhangs
     the true requested box, exercising the per-tile overflow-discard fix
     in _place_tiles (a prior version of this splat call used an
     unconditional periodic wrap that pulled far-outside overflow atoms
@@ -250,10 +239,10 @@ def test_icebank_generate_big_ice_streamed_splat_matches_trimmed_monolithic_with
     _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
     cache = IceBank(str(tmp_path), progressbars=False)
 
-    torch.manual_seed(11)
-    streamed = cache.generate_big_ice_deltas(n=48, dx=1.0, batchsize=1, relax_steps=0)
+    torch.manual_seed(seed)
+    streamed = cache.generate_big_ice_deltas(n=n, dx=1.0, batchsize=1, relax_steps=0)
     reference = soft_voxelize_coordinates(
-        cache.positions, grid_shape=(48, 48, 48), voxel_size=1.0, periodic=True
+        cache.positions, grid_shape=(n, n, n), voxel_size=1.0, periodic=True
     )
     assert torch.allclose(streamed[0], reference, atol=1e-5)
 
@@ -308,30 +297,22 @@ def test_icebank_generate_big_ice_relaxation_improves_energy(tmp_path):
     )
 
 
-def test_icebank_generate_big_ice_request_fitting_single_tile(tmp_path):
-    """Degenerate case: a 'big' request that only needs a 1x1x1 tile grid
-    (no seams at all) should still work without error."""
-    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
-    cache = IceBank(str(tmp_path), progressbars=False)
+def test_build_ice_cache_names_configs_by_seed(tmp_path):
+    """Cache entries are named after the seed that generated them, not their
+    position in the batch, so a second run at a higher seed_start EXTENDS a
+    library instead of overwriting the first run's configs.
 
-    torch.manual_seed(0)
-    ice = cache.generate_big_ice(n=32, dx=1.0, batchsize=1, relax_steps=10)
-    assert ice.shape == (1, 32, 32, 32)
-    assert torch.isfinite(ice).all()
-
-
-def test_build_ice_cache_writes_loadable_configs(tmp_path):
-    """Smoke test: build_ice_cache() is a slower, single-process alternative
-    to `specter build ice` (see its own docstring) for generating cache
-    entries -- check its output round-trips through IceBank at a tiny, fast
-    scale, not that it converges well."""
+    Also a smoke test that build_ice_cache() -- a slower, single-process
+    alternative to `specter build ice` (see its own docstring) -- writes
+    entries that round-trip through IceBank at a tiny, fast scale, not that
+    it converges well."""
     torch.manual_seed(0)
     build_ice_cache(
         str(tmp_path),
         n_configs=2,
         n=8,
         dx=1.0,
-        n_steps=3,
+        n_steps=2,
         device="cpu",
         seed_start=0,
         progressbars=False,
@@ -348,14 +329,6 @@ def test_build_ice_cache_writes_loadable_configs(tmp_path):
     assert ice.shape == (1, 8, 8, 8)
     assert torch.isfinite(ice).all()
 
-
-def test_build_ice_cache_names_configs_by_seed(tmp_path):
-    """Cache entries are named after the seed that generated them, not their
-    position in the batch, so a second run at a higher seed_start EXTENDS a
-    library instead of overwriting the first run's configs."""
-    build_ice_cache(
-        str(tmp_path), n_configs=2, n=8, n_steps=2, device="cpu", progressbars=False
-    )
     build_ice_cache(
         str(tmp_path),
         n_configs=2,

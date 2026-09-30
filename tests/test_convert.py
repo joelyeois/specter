@@ -75,49 +75,49 @@ def _convert_and_read(tmp_path, **overrides):
     return data["optics"], data["particles"]
 
 
-def test_image_name_is_one_based_index_at_path(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("column", "expected"),
+    [
+        # blob/idx is 0-based; RELION's idx@stack is 1-based.
+        (
+            "rlnImageName",
+            [
+                "000001@J1/particles.mrcs",
+                "000002@J1/particles.mrcs",
+                "000003@J1/particles.mrcs",
+            ],
+        ),
+        # alignments3D/split is 0/1; rlnRandomSubset is 1/2.
+        ("rlnRandomSubset", [1, 2, 1]),
+        ("rlnDefocusAngle", pytest.approx(45.0, abs=1e-4)),
+        ("rlnPhaseShift", pytest.approx(90.0, abs=1e-4)),
+        # Defocus passes through in Angstrom.
+        ("rlnDefocusU", pytest.approx(10000.0)),
+        ("rlnDefocusV", pytest.approx(9800.0)),
+        # 2 px * 1.5 A/px = 3.0 A, no negation.
+        ("rlnOriginXAngst", pytest.approx(3.0)),
+        ("rlnOriginYAngst", pytest.approx(-3.0)),
+        ("rlnCtfScalefactor", pytest.approx(0.75)),
+    ],
+    ids=[
+        "image_name_one_based_index_at_path",
+        "random_subset_one_based",
+        "defocus_angle_degrees",
+        "phase_shift_degrees",
+        "defocus_u_angstrom",
+        "defocus_v_angstrom",
+        "origin_x_angstrom_no_sign_flip",
+        "origin_y_angstrom_no_sign_flip",
+        "ctf_scalefactor_from_alignments_alpha",
+    ],
+)
+def test_particle_column_conversion(tmp_path, column, expected) -> None:
     _, particles = _convert_and_read(tmp_path)
 
-    # blob/idx is 0-based; RELION's idx@stack is 1-based.
-    assert list(particles["rlnImageName"]) == [
-        "000001@J1/particles.mrcs",
-        "000002@J1/particles.mrcs",
-        "000003@J1/particles.mrcs",
-    ]
-
-
-def test_random_subset_is_one_based(tmp_path) -> None:
-    _, particles = _convert_and_read(tmp_path)
-
-    # alignments3D/split is 0/1; rlnRandomSubset is 1/2.
-    assert list(particles["rlnRandomSubset"]) == [1, 2, 1]
-
-
-def test_defocus_angle_converted_to_degrees(tmp_path) -> None:
-    _, particles = _convert_and_read(tmp_path)
-
-    assert particles["rlnDefocusAngle"].to_numpy() == pytest.approx(45.0, abs=1e-4)
-
-
-def test_phase_shift_converted_to_degrees(tmp_path) -> None:
-    _, particles = _convert_and_read(tmp_path)
-
-    assert particles["rlnPhaseShift"].to_numpy() == pytest.approx(90.0, abs=1e-4)
-
-
-def test_defocus_passes_through_in_angstrom(tmp_path) -> None:
-    _, particles = _convert_and_read(tmp_path)
-
-    assert particles["rlnDefocusU"].to_numpy() == pytest.approx(10000.0)
-    assert particles["rlnDefocusV"].to_numpy() == pytest.approx(9800.0)
-
-
-def test_origins_convert_pixels_to_angstrom_without_sign_flip(tmp_path) -> None:
-    _, particles = _convert_and_read(tmp_path)
-
-    # 2 px * 1.5 A/px = 3.0 A, no negation.
-    assert particles["rlnOriginXAngst"].to_numpy() == pytest.approx(3.0)
-    assert particles["rlnOriginYAngst"].to_numpy() == pytest.approx(-3.0)
+    if isinstance(expected, list):
+        assert list(particles[column]) == expected
+    else:
+        assert particles[column].to_numpy() == expected
 
 
 def test_origins_fold_in_beam_shift(tmp_path) -> None:
@@ -142,12 +142,6 @@ def test_beam_tilt_converted_to_milliradians(tmp_path) -> None:
         expected_mrad, rel=1e-5
     )
     assert particles["rlnBeamTiltY"].to_numpy() == pytest.approx(0.0, abs=1e-9)
-
-
-def test_ctf_scalefactor_from_alignments_alpha(tmp_path) -> None:
-    _, particles = _convert_and_read(tmp_path)
-
-    assert particles["rlnCtfScalefactor"].to_numpy() == pytest.approx(0.75)
 
 
 def test_optics_block_holds_one_row_for_uniform_particles(tmp_path) -> None:
@@ -235,7 +229,14 @@ def test_rotations_round_trip_through_the_star_reader(tmp_path) -> None:
     assert torch.equal(split, torch.tensor([1, 2, 1]))
 
 
-def test_cli_converts_a_csfile(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("extra_args", "image_name"),
+    [([], "000001@J1/particles.mrcs"), (["--image-basename"], "000001@particles.mrcs")],
+    ids=["default", "image_basename"],
+)
+def test_cli_converts_a_csfile(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, extra_args, image_name
+) -> None:
     from click.testing import CliRunner
 
     from specter.cli._cli import cli
@@ -245,10 +246,14 @@ def test_cli_converts_a_csfile(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
     src = tmp_path / "fake.cs"
     src.touch()
 
-    result = CliRunner().invoke(cli, ["convert", "cs2star", str(src), str(out)])
+    result = CliRunner().invoke(
+        cli, ["convert", "cs2star", str(src), str(out), *extra_args]
+    )
 
     assert result.exit_code == 0, result.output
-    assert set(starfile.read(str(out))) == {"optics", "particles"}
+    data = starfile.read(str(out))
+    assert set(data) == {"optics", "particles"}
+    assert data["particles"]["rlnImageName"].iloc[0] == image_name
 
 
 def test_cli_refuses_to_clobber_an_existing_file(
@@ -455,25 +460,6 @@ def test_image_basename_composes_with_image_prefix(tmp_path) -> None:
     # that no longer sits where CryoSPARC left it.
     particles = starfile.read(str(out))["particles"]
     assert particles["rlnImageName"].iloc[0] == "000001@/import/stacks/particles.mrcs"
-
-
-def test_cli_accepts_image_basename(tmp_path, monkeypatch) -> None:
-    from click.testing import CliRunner
-
-    from specter.cli._cli import cli
-
-    monkeypatch.setattr(_convert, "Dataset", fake_dataset())
-    src = tmp_path / "in.cs"
-    src.touch()
-    out = tmp_path / "cli.star"
-
-    result = CliRunner().invoke(
-        cli, ["convert", "cs2star", str(src), str(out), "--image-basename"]
-    )
-
-    assert result.exit_code == 0, result.output
-    particles = starfile.read(str(out))["particles"]
-    assert particles["rlnImageName"].iloc[0] == "000001@particles.mrcs"
 
 
 def test_passthrough_is_discovered_beside_the_particles_file(

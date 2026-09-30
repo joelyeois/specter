@@ -138,16 +138,10 @@ def test_micrograph_generator_regression(small_volume, ctf_params, save_or_compa
     save_or_compare("micrograph_generator", images.cpu())
 
 
-def test_micrograph_generator_blends_ice_into_prebuilt_volume(
-    small_volume_4d, ctf_params
-):
-    """MicrographGenerator(volume=..., ice_model=...) blends ice into volume at construction,
-    matching its size/voxel size, only where volume had little existing potential."""
-    torch.manual_seed(0)
-    original_volume = small_volume_4d.clone()
-
+def _ice_blend_micrograph(small_volume_4d, ctf_params):
+    volume = small_volume_4d.clone()
     gen = MicrographGenerator(
-        small_volume_4d.clone(),
+        volume.clone(),
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
@@ -157,14 +151,62 @@ def test_micrograph_generator_blends_ice_into_prebuilt_volume(
         progressbars=False,
         ice=Ice(model="random"),
     )
+    return gen, volume
+
+
+def _ice_blend_tilt_series(small_volume_4d, ctf_params):
+    volume = torch.zeros(1, 16, 48, 48)
+    volume[0, 5:11, 20:28, 20:28] = 50.0
+    gen = TiltSeriesGenerator(
+        volume=volume.clone(),
+        micrograph_size=32,
+        pixel_size=2.0,
+        ctf_params=ctf_params,
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        angles=torch.tensor([0.0]),
+        verbose=False,
+        progressbars=False,
+        tilt=TiltGeometry(tilt_axis="y"),
+        ice=Ice(model="random"),
+    )
+    return gen, volume
+
+
+@pytest.mark.parametrize(
+    ("make_generator", "particle"),
+    [
+        (
+            _ice_blend_micrograph,
+            (slice(12, 20), slice(12, 20), slice(12, 20)),
+        ),
+        (
+            _ice_blend_tilt_series,
+            (slice(5, 11), slice(20, 28), slice(20, 28)),
+        ),
+    ],
+    ids=["micrograph", "tilt_series"],
+)
+def test_generator_blends_ice_into_prebuilt_volume(
+    make_generator, particle, small_volume_4d, ctf_params
+):
+    """A generator given a pre-built volume and an ice model blends ice into it at
+    construction, matching its size/voxel size, only where the volume had little
+    existing potential.
+
+    For TiltSeriesGenerator this happens before the class's own tilt-coverage
+    padding is applied; no padding is triggered at this geometry (available_nxy
+    already meets target_nxy), so gen.volume's shape matches the raw input
+    exactly.
+    """
+    torch.manual_seed(0)
+    gen, original_volume = make_generator(small_volume_4d, ctf_params)
 
     # Same shape as the input volume -- ice fills the existing volume, doesn't grow it.
     assert gen.volume.shape == original_volume.shape
     # Particle region (originally high potential, above the ice mask threshold) is
     # untouched.
-    assert torch.equal(
-        gen.volume[0, 12:20, 12:20, 12:20], original_volume[0, 12:20, 12:20, 12:20]
-    )
+    assert torch.equal(gen.volume[(0, *particle)], original_volume[(0, *particle)])
     # Elsewhere (originally near-zero potential), ice has been added.
     assert not torch.equal(gen.volume, original_volume)
     assert gen.volume[0, 0, 0, 0] > 0
@@ -213,41 +255,6 @@ def test_tilt_series_generator_regression(ctf_params, save_or_compare):
     torch.manual_seed(0)
     tilt_series, _, _ = gen.generate_tilt_series(torch.tensor([0]))
     save_or_compare("tilt_series_generator", tilt_series.cpu())
-
-
-def test_tilt_series_generator_blends_ice_into_volume(ctf_params):
-    """TiltSeriesGenerator(volume=..., ice_model=...) blends ice into volume, matching its
-    size/voxel size, before the class's own tilt-coverage padding is applied."""
-    torch.manual_seed(0)
-    volume = torch.zeros(1, 16, 48, 48)
-    volume[0, 5:11, 20:28, 20:28] = 50.0
-    original_volume = volume.clone()
-
-    gen = TiltSeriesGenerator(
-        volume=volume.clone(),
-        micrograph_size=32,
-        pixel_size=2.0,
-        ctf_params=ctf_params,
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        angles=torch.tensor([0.0]),
-        verbose=False,
-        progressbars=False,
-        tilt=TiltGeometry(tilt_axis="y"),
-        ice=Ice(model="random"),
-    )
-
-    # No tilt-coverage padding triggered at this geometry (available_nxy already
-    # meets target_nxy), so gen.volume's shape matches the raw input exactly.
-    assert gen.volume.shape == original_volume.shape
-    # Particle region (originally high potential, above the ice mask threshold) is
-    # untouched.
-    assert torch.equal(
-        gen.volume[0, 5:11, 20:28, 20:28], original_volume[0, 5:11, 20:28, 20:28]
-    )
-    # Elsewhere (originally near-zero potential), ice has been added.
-    assert not torch.equal(gen.volume, original_volume)
-    assert gen.volume[0, 0, 0, 0] > 0
 
 
 def test_bfactor_damps_transfer_function():
@@ -395,9 +402,18 @@ def test_image_generator_multislice_scattering_model_keeps_specimen_absorption()
     assert model.aberration.specimen_absorption is True
 
 
-def test_image_generator_plumbs_envelope_params(small_volume, ctf_params):
-    """ImageGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
-    gen = ImageGenerator(
+_ENVELOPES = dict(
+    convergence_angle=0.02,
+    cc=2.7e7,
+    energy_spread=0.8,
+    deltaV_V=0.05e-6,
+    deltaI_I=0.02e-6,
+    dose_envelope=True,
+)
+
+
+def _envelope_image_generator(small_volume, small_coords, ctf_params, **kw):
+    return ImageGenerator(
         scattering_potential=small_volume,
         pixel_size=2.0,
         quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
@@ -407,31 +423,13 @@ def test_image_generator_plumbs_envelope_params(small_volume, ctf_params):
         dose_per_angstrom=2.0,
         verbose=False,
         progressbars=False,
-        propagation=Propagation(scattering_model="projection"),
-        envelopes=Envelopes(
-            convergence_angle=0.02,
-            cc=2.7e7,
-            energy_spread=0.8,
-            deltaV_V=0.05e-6,
-            deltaI_I=0.02e-6,
-            dose_envelope=True,
-        ),
-        camera=Camera(noise_model=None),
+        **kw,
     )
-    assert gen.aberration.convergence_angle == 0.02
-    assert gen.aberration.cc == 2.7e7
-    assert gen.aberration.energy_spread == 0.8
-    assert gen.aberration.deltaV_V == 0.05e-6
-    assert gen.aberration.deltaI_I == 0.02e-6
-    assert gen.aberration.dose_envelope is True
 
 
-def test_image_generator_from_coordinates_plumbs_envelope_params(
-    small_coords, ctf_params
-):
-    """ImageGeneratorFromCoordinates forwards Cs/Cc/dose envelope params to Aberration."""
+def _envelope_from_coordinates_generator(small_volume, small_coords, ctf_params, **kw):
     coords, atomic_numbers = small_coords
-    gen = ImageGeneratorFromCoordinates(
+    return ImageGeneratorFromCoordinates(
         coordinates=coords,
         atomic_numbers=atomic_numbers,
         nxy=16,
@@ -442,28 +440,12 @@ def test_image_generator_from_coordinates_plumbs_envelope_params(
         voltage=300.0,
         dose_per_angstrom=2.0,
         verbose=False,
-        propagation=Propagation(scattering_model="projection"),
-        envelopes=Envelopes(
-            convergence_angle=0.02,
-            cc=2.7e7,
-            energy_spread=0.8,
-            deltaV_V=0.05e-6,
-            deltaI_I=0.02e-6,
-            dose_envelope=True,
-        ),
-        camera=Camera(noise_model=None),
+        **kw,
     )
-    assert gen.aberration.convergence_angle == 0.02
-    assert gen.aberration.cc == 2.7e7
-    assert gen.aberration.energy_spread == 0.8
-    assert gen.aberration.deltaV_V == 0.05e-6
-    assert gen.aberration.deltaI_I == 0.02e-6
-    assert gen.aberration.dose_envelope is True
 
 
-def test_micrograph_generator_plumbs_envelope_params(small_volume, ctf_params):
-    """MicrographGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
-    gen = MicrographGenerator(
+def _envelope_micrograph_generator(small_volume, small_coords, ctf_params, **kw):
+    return MicrographGenerator(
         MicrographSpecimenGenerator(small_volume, 2.0, 32, progressbars=False),
         micrograph_size=32,
         pixel_size=2.0,
@@ -472,50 +454,47 @@ def test_micrograph_generator_plumbs_envelope_params(small_volume, ctf_params):
         dose_per_angstrom=2.0,
         verbose=False,
         progressbars=False,
-        propagation=Propagation(scattering_model="projection"),
-        envelopes=Envelopes(
-            convergence_angle=0.02,
-            cc=2.7e7,
-            energy_spread=0.8,
-            deltaV_V=0.05e-6,
-            deltaI_I=0.02e-6,
-            dose_envelope=True,
-        ),
-        camera=Camera(noise_model=None),
+        **kw,
     )
-    assert gen.aberration.convergence_angle == 0.02
-    assert gen.aberration.cc == 2.7e7
-    assert gen.aberration.energy_spread == 0.8
-    assert gen.aberration.deltaV_V == 0.05e-6
-    assert gen.aberration.deltaI_I == 0.02e-6
-    assert gen.aberration.dose_envelope is True
 
 
-def test_tilt_series_generator_plumbs_envelope_params(ctf_params):
-    """TiltSeriesGenerator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
+def _envelope_tilt_series_generator(small_volume, small_coords, ctf_params, **kw):
     volume = torch.zeros(1, 16, 48, 48)
     volume[0, 5:11, 20:28, 20:28] = 50.0
-    angles = torch.tensor([-10.0, 0.0, 10.0])
-
-    gen = TiltSeriesGenerator(
+    return TiltSeriesGenerator(
         volume=volume,
         micrograph_size=32,
         pixel_size=2.0,
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        angles=angles,
+        angles=torch.tensor([-10.0, 0.0, 10.0]),
         verbose=False,
         progressbars=False,
+        **kw,
+    )
+
+
+@pytest.mark.parametrize(
+    "make_generator",
+    [
+        _envelope_image_generator,
+        _envelope_from_coordinates_generator,
+        _envelope_micrograph_generator,
+        _envelope_tilt_series_generator,
+    ],
+    ids=["image", "from_coordinates", "micrograph", "tilt_series"],
+)
+def test_generator_plumbs_envelope_params(
+    make_generator, small_volume, small_coords, ctf_params
+):
+    """Every generator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
+    gen = make_generator(
+        small_volume,
+        small_coords,
+        ctf_params,
         propagation=Propagation(scattering_model="projection"),
-        envelopes=Envelopes(
-            convergence_angle=0.02,
-            cc=2.7e7,
-            energy_spread=0.8,
-            deltaV_V=0.05e-6,
-            deltaI_I=0.02e-6,
-            dose_envelope=True,
-        ),
+        envelopes=Envelopes(**_ENVELOPES),
         camera=Camera(noise_model=None),
     )
     assert gen.aberration.convergence_angle == 0.02
@@ -1247,53 +1226,32 @@ def test_image_generator_state_dict_round_trips(small_volume, ctf_params):
     assert torch.allclose(expected, actual)
 
 
-def test_both_generators_forward_ice_parameterization(
-    small_coords, small_volume, ctf_params
+@pytest.mark.parametrize(
+    ("ice", "expected"),
+    [
+        (Ice(model="random", parameterization="lobato"), "lobato"),
+        (Ice(model="random"), "kirkland"),
+    ],
+    ids=["explicit_lobato", "shared_default"],
+)
+def test_sibling_generators_resolve_the_same_ice_parameterization(
+    ice, expected, small_coords, small_volume, ctf_params
 ):
-    """Ice is modelled the way the caller asked, in either generator.
+    """Ice is modelled the way the caller asked, in either generator, and the
+    two image generators must not drift apart unnoticed.
 
     ImageGeneratorFromCoordinates used to take no ice_parameterization at
     all, so its ice silently fell back to resolve_icemaker's own default
     while its ImageGenerator sibling honoured the setting -- the two
-    regression fixtures below were being generated with different ice.
-    """
-    coords, atomic_numbers = small_coords
-    common = dict(
-        nxy=16,
-        pixel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.tensor([[0.0, 0.0]]),
-        ctf_params=ctf_params,
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        ice=Ice(model="random", parameterization="lobato"),
-        verbose=False,
-    )
-    from_coords = ImageGeneratorFromCoordinates(
-        coordinates=coords, atomic_numbers=atomic_numbers, **common
-    )
-    from_volume = ImageGenerator(
-        scattering_potential=small_volume,
-        **{k: v for k, v in common.items() if k != "nxy"},
-    )
-    assert from_coords.icemaker.parameterization == "lobato"
-    assert from_volume.icemaker.parameterization == "lobato"
-
-
-def test_sibling_generators_agree_on_their_shared_ice_defaults(
-    small_coords, small_volume, ctf_params
-):
-    """The two image generators must not drift apart unnoticed.
-
-    Each regression fixture below pins a generator against its OWN past and
-    never against its sibling, so the pair can diverge with the suite green
-    -- which is exactly what happened: ImageGenerator honoured
-    ice_parameterization while ImageGeneratorFromCoordinates ignored it, and
-    the two fixtures were being generated with different ice for months.
+    regression fixtures were being generated with different ice for months.
+    Each regression fixture pins a generator against its OWN past and never
+    against its sibling, so the pair can diverge with the suite green.
 
     Comparing the resolved icemakers rather than the images keeps this cheap
     and specific: it fails on the settings that drifted, not on a pixel
-    difference that could come from anywhere.
+    difference that could come from anywhere. When neither is told, both must
+    land on the same default, and that default is the bulk-material one
+    (kirkland), not PotentialBuilder's.
     """
     coords, atomic_numbers = small_coords
     common = dict(
@@ -1304,7 +1262,7 @@ def test_sibling_generators_agree_on_their_shared_ice_defaults(
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
-        ice=Ice(model="random"),
+        ice=ice,
         verbose=False,
     )
     from_coords = ImageGeneratorFromCoordinates(
@@ -1315,12 +1273,11 @@ def test_sibling_generators_agree_on_their_shared_ice_defaults(
         **{k: v for k, v in common.items() if k != "nxy"},
     )
 
-    # Neither was told, so both must land on the same default.
     assert (
         from_coords.icemaker.parameterization == from_volume.icemaker.parameterization
     )
-    # ... and that default is the bulk-material one, not PotentialBuilder's.
-    assert from_coords.icemaker.parameterization == "kirkland"
+    assert from_coords.icemaker.parameterization == expected
+    assert from_volume.icemaker.parameterization == expected
 
 
 @pytest.mark.parametrize("ice_thickness", [0.0, 200.0, 2000.0])

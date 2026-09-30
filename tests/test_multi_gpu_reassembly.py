@@ -76,43 +76,39 @@ def _ctf(n: int) -> dict[str, torch.Tensor]:
     }
 
 
-def test_starfile_rejects_metadata_longer_than_the_image_stack(tmp_path) -> None:
-    """Half the images with all of the metadata: the shape the DDP bug took."""
-    with pytest.raises(ValueError, match="per-particle metadata does not match"):
-        create_particle_starfile(
-            torch.randn(4, 8, 8),
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        dict(
             rotations=torch.tensor([[0.0, 0.0, 0.0, 1.0]] * 8),
             translations=torch.zeros(8, 2),
             ctf_params=_ctf(8),
             dx=1.5,
             voltage=300.0,
             alpha=0.1,
-            filename="particles",
-            output_dir=str(tmp_path),
-        )
+        ),
+        dict(ctf_params=_ctf(8)),
+        dict(ctf_params={"dfu": torch.full((8,), 5000.0)}),
+    ],
+    ids=["full_metadata", "ctf_params_only", "dfu_only"],
+)
+def test_starfile_rejects_metadata_longer_than_the_image_stack(
+    tmp_path, metadata: dict
+) -> None:
+    """Half the images with all of the metadata: the shape the DDP bug took.
 
-
-def test_starfile_writes_nothing_when_it_rejects_the_metadata(tmp_path) -> None:
-    """A rejected call must not leave a stack on disk with no STAR beside it."""
-    with pytest.raises(ValueError):
+    The error names the offending column, and a rejected call must not leave
+    a stack on disk with no STAR beside it."""
+    with pytest.raises(ValueError, match="per-particle metadata does not match") as exc:
         create_particle_starfile(
             torch.randn(4, 8, 8),
-            ctf_params=_ctf(8),
             filename="particles",
             output_dir=str(tmp_path),
+            **metadata,
         )
+    assert "ctf_params['dfu'] has 8" in str(exc.value)
     assert not (tmp_path / "particles.mrcs").exists()
     assert not (tmp_path / "particles.star").exists()
-
-
-def test_starfile_names_the_offending_column(tmp_path) -> None:
-    with pytest.raises(ValueError, match=r"ctf_params\['dfu'\] has 8"):
-        create_particle_starfile(
-            torch.randn(4, 8, 8),
-            ctf_params={"dfu": torch.full((8,), 5000.0)},
-            filename="particles",
-            output_dir=str(tmp_path),
-        )
 
 
 def test_starfile_still_accepts_scalars_for_the_constant_columns(tmp_path) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import pytest
 import torch
 
 from specter.aberrations._functions import (
@@ -127,31 +128,31 @@ def test_phaseshift_linear_model_returns_negative_input_unchanged():
     assert torch.allclose(explicit_none, -phaseshift_val)
 
 
-def test_phaseshift_linear_model_with_alpha_adds_amp_contrast_offset():
+@pytest.mark.parametrize(
+    "phase, alpha, expected",
+    [(0.5, 0.1, -0.5 + math.acos(0.1)), (0.0, 0.0, math.pi / 2)],
+    ids=["alpha_0.1", "alpha_zero_quarter_turn"],
+)
+def test_phaseshift_linear_model_with_alpha_adds_amp_contrast_offset(
+    phase, alpha, expected
+):
     """CryoSPARC convention: chi_c0 = phase_shift - acos(amp_contrast), so
     chi_phaseshift = -phase_shift + acos(amp_contrast) -- matches the
-    (2*pi/3)*wavelength^2 trefoil derivation's -1 global sign convention."""
-    phaseshift_val = torch.tensor([0.5])
-    alpha = torch.tensor(0.1)
-    k = torch.zeros((1, 4, 4))
-    result = phaseshift(
-        phaseshift_val, k, n_pixels=4, aberration_model="linear", alpha=alpha
-    )
-    expected = -phaseshift_val + math.acos(0.1)
-    assert torch.allclose(result, expected)
+    (2*pi/3)*wavelength^2 trefoil derivation's -1 global sign convention.
 
-
-def test_phaseshift_linear_model_alpha_zero_still_adds_quarter_turn():
-    """acos(0) = pi/2 exactly -- amplitude contrast defaulting to zero is
+    acos(0) = pi/2 exactly -- amplitude contrast defaulting to zero is
     still a real, nonzero phase-quadrature offset in CryoSPARC's
     convention, not a no-op."""
-    phaseshift_val = torch.tensor([0.0])
-    alpha = torch.tensor(0.0)
+    phaseshift_val = torch.tensor([phase])
     k = torch.zeros((1, 4, 4))
     result = phaseshift(
-        phaseshift_val, k, n_pixels=4, aberration_model="linear", alpha=alpha
+        phaseshift_val,
+        k,
+        n_pixels=4,
+        aberration_model="linear",
+        alpha=torch.tensor(alpha),
     )
-    assert torch.allclose(result, torch.tensor([math.pi / 2]))
+    assert torch.allclose(result, torch.tensor([expected]))
 
 
 def test_phaseshift_nonlinear_model_ignores_alpha():

@@ -38,21 +38,30 @@ def _run_particles_cli(output_dir: Path, n_particles: int = 2) -> proc.Completed
     return proc.run(args, capture_output=True, encoding="utf-8")
 
 
-def test_cli_particles_smoke(tmp_path: Path) -> None:
-    result = _run_particles_cli(tmp_path)
+@pytest.mark.parametrize(
+    ("n_particles", "permissive"),
+    [(2, False), (3, False), (1, True)],
+    ids=["default", "override", "single"],
+)
+def test_cli_particles_smoke(
+    tmp_path: Path, n_particles: int, permissive: bool
+) -> None:
+    """--n_particles overrides the loaded TOML config's value end to end.
+
+    n_particles=1 must work -- the most natural first thing a user tries.
+    random_quaternion squeezes the batch axis at n == 1, so the pipeline used
+    to hand roma a length-1 vector instead of a quaternion and crash with an
+    IndexError before writing anything.
+    """
+    import mrcfile
+
+    result = _run_particles_cli(tmp_path, n_particles=n_particles)
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "particles.mrcs").exists()
     assert (tmp_path / "particles.star").exists()
 
-
-def test_cli_particles_n_particles_override(tmp_path: Path) -> None:
-    """--n_particles overrides the loaded TOML config's value end to end."""
-    result = _run_particles_cli(tmp_path, n_particles=3)
-    assert result.returncode == 0, result.stderr
-    import mrcfile
-
-    with mrcfile.open(tmp_path / "particles.mrcs") as mrc:
-        assert mrc.data.shape[0] == 3
+    with mrcfile.open(str(tmp_path / "particles.mrcs"), permissive=permissive) as mrc:
+        assert mrc.data.shape[0] == n_particles
 
 
 def test_cli_particles_advanced_flags_reach_the_star_file(tmp_path: Path) -> None:
@@ -178,8 +187,10 @@ def _run_micrograph_cli(
     return proc.run(args, capture_output=True, encoding="utf-8")
 
 
-def test_cli_micrograph_smoke(tmp_path: Path) -> None:
-    result = _run_micrograph_cli(tmp_path)
+@pytest.mark.parametrize("n_micrographs", [1, 2], ids=["default", "override"])
+def test_cli_micrograph_smoke(tmp_path: Path, n_micrographs: int) -> None:
+    """--n_micrographs overrides the loaded TOML config's value end to end."""
+    result = _run_micrograph_cli(tmp_path, n_micrographs=n_micrographs)
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "micrographs.mrcs").exists()
     assert (tmp_path / "micrographs.star").exists()
@@ -187,17 +198,7 @@ def test_cli_micrograph_smoke(tmp_path: Path) -> None:
     import mrcfile
 
     with mrcfile.open(tmp_path / "micrographs.mrcs") as mrc:
-        assert mrc.data.shape == (1, 64, 64)
-
-
-def test_cli_micrograph_n_micrographs_override(tmp_path: Path) -> None:
-    """--n_micrographs overrides the loaded TOML config's value end to end."""
-    result = _run_micrograph_cli(tmp_path, n_micrographs=2)
-    assert result.returncode == 0, result.stderr
-    import mrcfile
-
-    with mrcfile.open(tmp_path / "micrographs.mrcs") as mrc:
-        assert mrc.data.shape[0] == 2
+        assert mrc.data.shape == (n_micrographs, 64, 64)
 
 
 def test_cli_tiltseries_smoke(tmp_path: Path) -> None:
@@ -365,23 +366,6 @@ voxel_size = 12.0
     assert result.returncode != 0
     assert "tomogram_config" in result.stderr
     assert "volume_path" in result.stderr
-
-
-def test_cli_particles_single_particle(tmp_path: Path) -> None:
-    """
-    n_particles=1 must work -- the most natural first thing a user tries.
-
-    random_quaternion squeezes the batch axis at n == 1, so the pipeline used
-    to hand roma a length-1 vector instead of a quaternion and crash with an
-    IndexError before writing anything.
-    """
-    result = _run_particles_cli(tmp_path, n_particles=1)
-    assert result.returncode == 0, result.stderr
-
-    import mrcfile
-
-    with mrcfile.open(str(tmp_path / "particles.mrcs"), permissive=True) as mrc:
-        assert mrc.data.shape[0] == 1
 
 
 # PotentialBuilder defaults to the Shtyrov parameterization, which is per

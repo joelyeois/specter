@@ -358,11 +358,23 @@ def test_run_reconstruction_writes_a_numbered_job_directory(
 def test_run_reconstruction_halfsets_share_one_job(
     particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    """The A/B workflow: two runs into one pinned job, side by side.
+    """The A/B workflow: two runs into one pinned job, side by side, and
+    both halfsets' results survive in job.json.
 
     This is what the jobs branch exists for -- `halfset` is excluded
     from the job parameter log, so the second run resumes into the same
     directory instead of failing the identical-settings check.
+
+    This is the manual alternative to `halfset="gold"` (CLAUDE.md: "this is
+    how a manual halfset='A' then halfset='B' pair shares one [job]"). Both
+    calls run in-process (no subprocess -- that's only `halfset="gold"`), so
+    the monkeypatched `particle_data` fixture is fine here, unlike the
+    gold-standard tests. Before `_merge_halfset_results`, `job.log`'s plain
+    `dict.update` meant halfset B's `job.log({"results": ...})` replaced the
+    whole `results` value, discarding halfset A's metrics entirely even
+    though `volume_A.mrc` was still sitting on disk right next to it. The
+    merge does not depend on `project`; setting one here also pins that
+    `run_reconstruction` forwards it into the job path.
     """
     cs_file, mrc_file = particle_data
     output_dir = tmp_path / "out"
@@ -370,11 +382,11 @@ def test_run_reconstruction_halfsets_share_one_job(
     for halfset in ("A", "B"):
         config = _config(cs_file, mrc_file, output_dir)
         config.project = "test-project"
-        config.job_id = "J001"
+        config.job_id = "J005"
         config.halfset = halfset  # type: ignore[assignment]
         run_reconstruction(config)
 
-    job_dir = output_dir / "test-project" / "reconstructions" / "J001"
+    job_dir = output_dir / "test-project" / "reconstructions" / "J005"
     assert (job_dir / "volume_A.mrc").exists()
     assert (job_dir / "volume_B.mrc").exists()
     # job.json already has the full config; a tracked run no longer writes
@@ -391,82 +403,25 @@ def test_run_reconstruction_halfsets_share_one_job(
     assert job["params"]["test_run"] is True
     assert job["params"]["device"] == "cpu"
 
-
-def test_run_reconstruction_gold_standard_default(
-    real_particle_data: tuple[Path, Path], tmp_path: Path
-) -> None:
-    """Leaving halfset unset defaults to gold-standard: both halves, then FSC.
-
-    Needs `real_particle_data`, not the monkeypatched `particle_data` --
-    gold-standard mode spawns a real subprocess per halfset, which doesn't
-    inherit a pytest monkeypatch. Leaving `project` unset too doesn't mean
-    untracked -- there's no such mode -- just no project-name segment.
-    """
-    cs_file, mrc_file = real_particle_data
-    output_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, output_dir)
-    assert config.halfset == "gold"  # exactly what's under test: no override
-
-    run_reconstruction(config)
-
-    job_dir = output_dir / "reconstructions" / "J001"
-    assert (job_dir / "volume_A.mrc").exists()
-    assert (job_dir / "volume_B.mrc").exists()
-    assert (job_dir / "fsc_gold_standard.png").exists()
-
-    job = json.loads((job_dir / "job.json").read_text())
-    assert job["project"] is None
-    assert "resolution_gold_standard" in job["params"]
-
-
-def _job_params(job_dir: Path) -> dict[str, Any]:
-    return json.loads((job_dir / "job.json").read_text())["params"]
-
-
-def test_manual_two_pass_halfsets_both_survive_in_job_json(
-    particle_data: tuple[Path, Path], tmp_path: Path
-) -> None:
-    """halfset "A" then halfset "B" into the same job_id, as two separate
-    `run_reconstruction` calls, must not have the second call's `job.log`
-    overwrite the first's results.
-
-    This is the manual alternative to `halfset="gold"` (CLAUDE.md: "this is
-    how a manual halfset='A' then halfset='B' pair shares one [job]"). Both
-    calls run in-process (no subprocess -- that's only `halfset="gold"`), so
-    the monkeypatched `particle_data` fixture is fine here, unlike the
-    gold-standard tests. Before `_merge_halfset_results`, `job.log`'s plain
-    `dict.update` meant halfset B's `job.log({"results": ...})` replaced the
-    whole `results` value, discarding halfset A's metrics entirely even
-    though `volume_A.mrc` was still sitting on disk right next to it.
-    """
-    cs_file, mrc_file = particle_data
-    output_dir = tmp_path / "out"
-
-    config_a = _config(cs_file, mrc_file, output_dir)
-    config_a.halfset = "A"
-    config_a.job_id = "J005"
-    run_reconstruction(config_a)
-
-    config_b = _config(cs_file, mrc_file, output_dir)
-    config_b.halfset = "B"
-    config_b.job_id = "J005"
-    run_reconstruction(config_b)
-
-    job_dir = output_dir / "reconstructions" / "J005"
-    assert (job_dir / "volume_A.mrc").exists()
-    assert (job_dir / "volume_B.mrc").exists()
-
-    results = _job_params(job_dir)["results"]
+    results = job["params"]["results"]
     assert set(results) == {"A", "B", "epochs"}
     assert results["A"]["metrics"], "halfset A's own results were discarded"
     assert results["B"]["metrics"]
 
 
-def test_gold_standard_writes_no_json_but_job_json(
+def test_run_reconstruction_gold_standard_default(
     real_particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    """Every resolution lands in job.json -- no per-halfset or per-epoch file.
+    """Leaving halfset unset defaults to gold-standard: both halves, then FSC,
+    with every resolution in job.json and nothing failing for want of a mask
+    or reference.
 
+    Needs `real_particle_data`, not the monkeypatched `particle_data` --
+    gold-standard mode spawns a real subprocess per halfset, which doesn't
+    inherit a pytest monkeypatch. Leaving `project` unset too doesn't mean
+    untracked -- there's no such mode -- just no project-name segment.
+
+    Every resolution lands in job.json -- no per-halfset or per-epoch file.
     The two halfsets reconstruct in separate worker processes, so neither
     holds the other's volume and neither can compute a half-map FSC alone.
     Whichever finishes an epoch second reads its sibling's volume off the
@@ -475,18 +430,33 @@ def test_gold_standard_writes_no_json_but_job_json(
     orchestrator through a `multiprocessing.Queue`, once, when it exits, and
     the orchestrator folds both into the one `job.json` its `Job` already
     owns. ``job.json`` is the only JSON this run produces.
+
+    A run with neither reference maps nor a mask still succeeds. The
+    half-map FSC needs no ground truth at all -- it correlates halfset A
+    against halfset B -- so it is still recorded. Map-to-model needs a
+    reference and is simply absent. Nothing raises: `fsc_ref=None` and no
+    mask is an ordinary run, not a misconfiguration.
     """
     cs_file, mrc_file = real_particle_data
     output_dir = tmp_path / "out"
     config = _config(cs_file, mrc_file, output_dir)
+    assert config.halfset == "gold"  # exactly what's under test: no override
+    assert config.fsc_ref is None and config.fsc_mask is None
 
     run_reconstruction(config)
 
     job_dir = output_dir / "reconstructions" / "J001"
+    assert (job_dir / "volume_A.mrc").exists()
+    assert (job_dir / "volume_B.mrc").exists()
+    assert (job_dir / "fsc_gold_standard.png").exists()
     assert [p.name for p in job_dir.glob("*.json")] == ["job.json"]
     assert not list((job_dir / "epochs").glob("*.json"))
 
-    results = _job_params(job_dir)["results"]
+    job = json.loads((job_dir / "job.json").read_text())
+    assert job["project"] is None
+    assert "resolution_gold_standard" in job["params"]
+
+    results = job["params"]["results"]
     assert results["A"]["metrics"]
     assert results["B"]["metrics"]
 
@@ -498,6 +468,21 @@ def test_gold_standard_writes_no_json_but_job_json(
         figure = job_dir / "epochs" / f"fsc_halfmap_{entry['epoch']:03d}.png"
         # The claim file is created empty, so existence alone proves nothing.
         assert figure.stat().st_size > 0
+
+    half = [e for e in epochs if "resolution_gold_standard" in e]
+    assert half, "half-map FSC needs no reference and should still be recorded"
+    for entry in half:
+        assert entry["resolution_gold_standard"]
+        # No mask supplied, so no masked number -- recorded as null, not absent.
+        assert entry["resolution_gold_standard_masked"] is None
+
+    assert not [e for e in epochs if "resolution_map_to_model" in e], (
+        "no reference => no map-to-model"
+    )
+
+
+def _job_params(job_dir: Path) -> dict[str, Any]:
+    return json.loads((job_dir / "job.json").read_text())["params"]
 
 
 def _fsc_fixtures(tmp_path: Path) -> tuple[Path, Path]:
@@ -549,39 +534,6 @@ def test_all_four_resolutions_recorded_when_refs_given(
     for entry in m2m:
         assert entry["resolution_map_to_model"]
         assert entry["resolution_map_to_model_masked"]
-
-
-def test_no_mask_and_no_reference_degrades_instead_of_failing(
-    real_particle_data: tuple[Path, Path], tmp_path: Path
-) -> None:
-    """A run with neither reference maps nor a mask still succeeds.
-
-    The half-map FSC needs no ground truth at all -- it correlates halfset A
-    against halfset B -- so it is still recorded. Map-to-model needs a
-    reference and is simply absent. Nothing raises: `fsc_ref=None` and no
-    mask is an ordinary run, not a misconfiguration.
-    """
-    cs_file, mrc_file = real_particle_data
-    output_dir = tmp_path / "out"
-    config = _config(cs_file, mrc_file, output_dir)
-    assert config.fsc_ref is None and config.fsc_mask is None
-
-    run_reconstruction(config)
-
-    job_dir = output_dir / "reconstructions" / "J001"
-    assert (job_dir / "volume_A.mrc").exists()
-
-    entries = _job_params(job_dir)["results"]["epochs"]
-    half = [e for e in entries if "resolution_gold_standard" in e]
-    assert half, "half-map FSC needs no reference and should still be recorded"
-    for entry in half:
-        assert entry["resolution_gold_standard"]
-        # No mask supplied, so no masked number -- recorded as null, not absent.
-        assert entry["resolution_gold_standard_masked"] is None
-
-    assert not [e for e in entries if "resolution_map_to_model" in e], (
-        "no reference => no map-to-model"
-    )
 
 
 def test_reference_without_mask_records_only_unmasked(

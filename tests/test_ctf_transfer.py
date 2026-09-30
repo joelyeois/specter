@@ -60,50 +60,39 @@ def _new_transfer(
 # ---------------------------------------------------------------------------
 
 
-def test_defocus_astigmatism_cs_matches_old_aberration():
-    dfu, dfv, dfang = 20000.0, 18000.0, 35.0  # Angstrom, Angstrom, degrees
-    cs_angstrom = 2.7e7  # Angstrom
-
-    old = _old_transfer(
-        {
-            "dfu": torch.tensor(dfu),
-            "dfv": torch.tensor(dfv),
-            "dfang": torch.tensor(dfang),
-            "cs": torch.tensor(cs_angstrom),
-        }
-    )
-
-    params = CTFParameters(
-        defocus=(dfu + dfv) / 2 / 1e4,
-        astigmatism=(dfu - dfv) / 2 / 1e4,
-        astigmatism_angle=dfang,
-        spherical_aberration=cs_angstrom / 1e7,
-        voltage=VOLTAGE,
-    )
-    new = _new_transfer(params)
-
-    assert torch.allclose(old, new, atol=1e-4)
-
-
-def test_isotropic_defocus_matches_old_aberration():
-    """No astigmatism -- sanity check independent of the astigmatism-angle mapping."""
-    df_angstrom = 15000.0
-    old = _old_transfer({"dfu": torch.tensor(df_angstrom), "cs": torch.tensor(2.7e7)})
-    params = CTFParameters(
-        defocus=df_angstrom / 1e4, spherical_aberration=2.7e7 / 1e7, voltage=VOLTAGE
-    )
-    new = _new_transfer(params)
-    assert torch.allclose(old, new, atol=1e-4)
-
-
-def test_cs_only_matches_old_aberration():
-    """Cs in isolation, no defocus at all."""
-    cs_angstrom = 3.1e7
-    old = _old_transfer({"dfu": torch.tensor(0.0), "cs": torch.tensor(cs_angstrom)})
-    params = CTFParameters(
-        defocus=0.0, spherical_aberration=cs_angstrom / 1e7, voltage=VOLTAGE
-    )
-    new = _new_transfer(params)
+@pytest.mark.parametrize(
+    "old_params,new_kwargs",
+    [
+        (
+            {"dfu": 20000.0, "dfv": 18000.0, "dfang": 35.0, "cs": 2.7e7},
+            dict(
+                defocus=(20000.0 + 18000.0) / 2 / 1e4,
+                astigmatism=(20000.0 - 18000.0) / 2 / 1e4,
+                astigmatism_angle=35.0,
+                spherical_aberration=2.7e7 / 1e7,
+                voltage=VOLTAGE,
+            ),
+        ),
+        (
+            {"dfu": 15000.0, "cs": 2.7e7},
+            dict(
+                defocus=15000.0 / 1e4, spherical_aberration=2.7e7 / 1e7, voltage=VOLTAGE
+            ),
+        ),
+        (
+            {"dfu": 0.0, "cs": 3.1e7},
+            dict(defocus=0.0, spherical_aberration=3.1e7 / 1e7, voltage=VOLTAGE),
+        ),
+    ],
+    ids=["defocus_astigmatism_cs", "isotropic_defocus", "cs_only"],
+)
+def test_defocus_and_cs_match_old_aberration(old_params, new_kwargs):
+    """Defocus, astigmatism and Cs parity (legacy Angstrom units against
+    CTFParameters' micrometres/mm). The isotropic case has no astigmatism, a
+    sanity check independent of the astigmatism-angle mapping; the Cs-only
+    case checks Cs in isolation, with no defocus at all."""
+    old = _old_transfer({k: torch.tensor(v) for k, v in old_params.items()})
+    new = _new_transfer(CTFParameters(**new_kwargs))
     assert torch.allclose(old, new, atol=1e-4)
 
 
@@ -595,9 +584,15 @@ def test_forward_end_to_end_matches_old_aberration_ctf_model():
 # ---------------------------------------------------------------------------
 
 
-def test_cs_envelope_matches_old_aberration():
-    """Spatial-coherence (beam convergence) envelope -- needs the
-    defocus/Cs micrometers/mm -> Angstrom conversion at the call site."""
+@pytest.mark.parametrize(
+    "envelope_kwargs",
+    [{"convergence_angle": 1.0}, {"cc": 1.4e7}],
+    ids=["cs_envelope", "cc_envelope"],
+)
+def test_coherence_envelope_matches_old_aberration(envelope_kwargs):
+    """Spatial-coherence (beam convergence) envelope, which needs the
+    defocus/Cs micrometers/mm -> Angstrom conversion at the call site, and the
+    temporal-coherence (chromatic aberration) envelope."""
     dfu, cs_angstrom = 15000.0, 2.7e7
     old = _old_transfer(
         {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_angstrom)},
@@ -607,7 +602,7 @@ def test_cs_envelope_matches_old_aberration():
         PIXEL_SIZE,
         VOLTAGE,
         aberration_model="nonlinear",
-        convergence_angle=1.0,
+        **envelope_kwargs,
     )
     old_t = old_full.transfer_function(
         {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_angstrom)}
@@ -617,34 +612,13 @@ def test_cs_envelope_matches_old_aberration():
         defocus=dfu / 1e4, spherical_aberration=cs_angstrom / 1e7, voltage=VOLTAGE
     )
     new_tf = TransferFunction(
-        N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear", convergence_angle=1.0
+        N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear", **envelope_kwargs
     )
     new_t = new_tf.transfer_function(params).squeeze()
 
     assert torch.allclose(old_t, new_t, atol=1e-4)
     # And it must actually do something (differ from the no-envelope case).
     assert not torch.allclose(old_t, old, atol=1e-3)
-
-
-def test_cc_envelope_matches_old_aberration():
-    """Temporal-coherence (chromatic aberration) envelope."""
-    dfu, cs_angstrom = 15000.0, 2.7e7
-    old = Aberration(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", cc=1.4e7
-    )
-    old_t = old.transfer_function(
-        {"dfu": torch.tensor(dfu), "cs": torch.tensor(cs_angstrom)}
-    ).squeeze()
-
-    params = CTFParameters(
-        defocus=dfu / 1e4, spherical_aberration=cs_angstrom / 1e7, voltage=VOLTAGE
-    )
-    new_tf = TransferFunction(
-        N_PIXELS, PIXEL_SIZE, aberration_model="nonlinear", cc=1.4e7
-    )
-    new_t = new_tf.transfer_function(params).squeeze()
-
-    assert torch.allclose(old_t, new_t, atol=1e-4)
 
 
 def test_dose_envelope_matches_old_aberration():
@@ -1022,22 +996,24 @@ def test_lpp_near_zero_peak_phase_is_near_noop():
     assert torch.allclose(out_lpp, out_plain, atol=1e-3)
 
 
-def test_lpp_mutually_exclusive_with_nonzero_phase_shift():
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        CTFParameters(defocus=1.0, phase_shift=10.0, lpp_params=_LPP_KWARGS)
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        (dict(phase_shift=10.0, lpp_params=_LPP_KWARGS), "mutually exclusive"),
+        (dict(lpp_params={"NA": 0.1}), "missing required keys"),
+        (
+            dict(lpp_params={**_LPP_KWARGS, "bogus_key": 1.0}),
+            "unrecognized keys",
+        ),
+    ],
+    ids=["nonzero_phase_shift", "missing_required_key", "unrecognized_key"],
+)
+def test_lpp_params_validation_raises(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        CTFParameters(defocus=1.0, **kwargs)
     # A zero/default phase_shift alongside lpp_params is fine.
     CTFParameters(defocus=1.0, phase_shift=0.0, lpp_params=_LPP_KWARGS)
     CTFParameters(defocus=1.0, lpp_params=_LPP_KWARGS)
-
-
-def test_lpp_missing_required_key_raises():
-    with pytest.raises(ValueError, match="missing required keys"):
-        CTFParameters(defocus=1.0, lpp_params={"NA": 0.1})
-
-
-def test_lpp_unrecognized_key_raises():
-    with pytest.raises(ValueError, match="unrecognized keys"):
-        CTFParameters(defocus=1.0, lpp_params={**_LPP_KWARGS, "bogus_key": 1.0})
 
 
 def test_lpp_combined_with_per_particle_defocus_and_trefoil():

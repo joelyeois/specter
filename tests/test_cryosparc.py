@@ -15,7 +15,24 @@ def _patch_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cryosparc, "Dataset", _FakeDataset)
 
 
-def test_extract_parameters_all_particles() -> None:
+@pytest.mark.parametrize(
+    ("halfset", "n_particles", "expected_indices", "expected_labels"),
+    [
+        ("all", None, [0, 1, 2, 3, 4, 5], [0, 1, 0, 1, 0, 1]),
+        ("B", None, [1, 3, 5], None),
+        # n_particles truncates after the class filter, not before it.
+        ("B", 2, [1, 3], None),
+        ("all", 4, [0, 1, 2, 3], [0, 1, 0, 1]),
+    ],
+    ids=["all", "by_class", "n_particles_after_class_filter", "n_particles_all"],
+)
+def test_extract_parameters_selects_particles(
+    halfset: str,
+    n_particles: int | None,
+    expected_indices: list[int],
+    expected_labels: list[int] | None,
+) -> None:
+    kwargs = {} if n_particles is None else {"n_particles": n_particles}
     (
         voltage_kv,
         pixel_size,
@@ -27,44 +44,17 @@ def test_extract_parameters_all_particles() -> None:
         anisomag,
         indices,
         halfset_labels,
-    ) = extract_parameters_from_csfile("fake.cs", halfset="all")
+    ) = extract_parameters_from_csfile("fake.cs", halfset=halfset, **kwargs)
 
-    assert rotations.shape == (6, 4)
-    assert translations_angstrom.shape == (6, 2)
-    assert ctf_params["cs"].shape == (6,)
-    assert torch.equal(indices, torch.arange(6))
-    assert torch.equal(halfset_labels, torch.tensor([0, 1, 0, 1, 0, 1]))
-
-
-def test_extract_parameters_by_class() -> None:
-    (_, _, _, rotations, _, ctf_params, _, _, indices, halfset_labels) = (
-        extract_parameters_from_csfile("fake.cs", halfset="B")
-    )
-
-    assert rotations.shape == (3, 4)
-    assert ctf_params["cs"].shape == (3,)
-    assert torch.equal(indices, torch.tensor([1, 3, 5]))
-    assert halfset_labels is None
-
-
-def test_extract_parameters_n_particles_truncates_after_class_filter() -> None:
-    (_, _, _, rotations, _, ctf_params, _, _, indices, _) = (
-        extract_parameters_from_csfile("fake.cs", halfset="B", n_particles=2)
-    )
-
-    assert rotations.shape == (2, 4)
-    assert ctf_params["cs"].shape == (2,)
-    assert torch.equal(indices, torch.tensor([1, 3]))
-
-
-def test_extract_parameters_n_particles_all() -> None:
-    (_, _, _, rotations, _, _, _, _, indices, halfset_labels) = (
-        extract_parameters_from_csfile("fake.cs", halfset="all", n_particles=4)
-    )
-
-    assert rotations.shape == (4, 4)
-    assert torch.equal(indices, torch.arange(4))
-    assert torch.equal(halfset_labels, torch.tensor([0, 1, 0, 1]))
+    n = len(expected_indices)
+    assert rotations.shape == (n, 4)
+    assert translations_angstrom.shape == (n, 2)
+    assert ctf_params["cs"].shape == (n,)
+    assert torch.equal(indices, torch.tensor(expected_indices))
+    if expected_labels is None:
+        assert halfset_labels is None
+    else:
+        assert torch.equal(halfset_labels, torch.tensor(expected_labels))
 
 
 class _TrefoilTetrafoilDataset(_FakeDataset):

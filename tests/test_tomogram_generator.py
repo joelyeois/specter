@@ -845,53 +845,50 @@ def test_tomogram_specimen_generator_bead_specs_excluded_from_protein_packing():
             assert dist > bead.radius
 
 
-def test_tomogram_specimen_generator_export_picks_includes_beads(tmp_path):
+@pytest.mark.parametrize(
+    "bead_specs, n_beads, mixed_sizes",
+    [
+        ([TomogramBeadSpec(radius=20.0, count=2)], 2, False),
+        (
+            [
+                TomogramBeadSpec(radius=[14.0, 26.0], count=6),
+                TomogramBeadSpec(radius=30.0, count=2),
+            ],
+            8,
+            True,
+        ),
+    ],
+    ids=["single_radius", "mixed_radii"],
+)
+def test_all_beads_go_in_one_pick_file(tmp_path, bead_specs, n_beads, mixed_sizes):
+    """Every fiducial lands in a single `gold-bead` file of point picks
+    (no rotation matrix), whatever its radius or population. Grouping by
+    radius (the earlier behaviour) wrote one file per bead under a
+    [low, high] radius, since every instance then has a unique size."""
     gen = TomogramSpecimenGenerator(
         membrane_instances=[],
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
         protein_specs=[],
-        bead_specs=[TomogramBeadSpec(radius=20.0, count=2)],
+        bead_specs=bead_specs,
         seed=0,
     )
     gen.generate()
-
     written = gen.export_picks(tmp_path)
-    bead_key = next(k for k in written if k.endswith("-bead"))
-    lines = written[bead_key].read_text().strip().splitlines()
-    assert len(lines) == 2
-    rows = [json.loads(line) for line in lines]
-    assert all(row["type"] == "point" for row in rows)
-    assert all("xyz_rotation_matrix" not in row for row in rows)
-
-
-def test_all_beads_go_in_one_pick_file(tmp_path):
-    """Every fiducial lands in a single `gold-bead` file, whatever its
-    radius or population. Grouping by radius (the earlier behaviour) wrote
-    one file per bead under a [low, high] radius, since every instance
-    then has a unique size."""
-    gen = TomogramSpecimenGenerator(
-        membrane_instances=[],
-        target_shape=_TARGET_SHAPE_ZYX,
-        voxel_size=_V_SIZE,
-        protein_specs=[],
-        bead_specs=[
-            TomogramBeadSpec(radius=[14.0, 26.0], count=6),
-            TomogramBeadSpec(radius=30.0, count=2),
-        ],
-        seed=0,
-    )
-    gen.generate()
-    written = gen.export_picks(str(tmp_path))
 
     bead_keys = sorted(k for k in written if k.endswith("-bead"))
     assert bead_keys == ["gold-bead"], bead_keys
 
-    # Both populations' beads are in that one file.
-    with open(written["gold-bead"]) as f:
-        rows = [line for line in f if line.strip()]
-    assert len(rows) == len(gen.bead_instances)
-    assert len({b.radius for b in gen.bead_instances}) > 1, "test needs mixed sizes"
+    # Every population's beads are in that one file.
+    lines = written["gold-bead"].read_text().strip().splitlines()
+    assert len(lines) == n_beads
+    assert len(lines) == len(gen.bead_instances)
+    rows = [json.loads(line) for line in lines]
+    assert all(row["type"] == "point" for row in rows)
+    assert all("xyz_rotation_matrix" not in row for row in rows)
+    assert (len({b.radius for b in gen.bead_instances}) > 1) == mixed_sizes, (
+        "test needs mixed sizes" if mixed_sizes else "expected a single size"
+    )
 
 
 @pytest.mark.parametrize(

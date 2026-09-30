@@ -160,8 +160,25 @@ def test_anisomag_changes_output(gb_kwargs: dict, anisomag: torch.Tensor) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_tilt_changes_output(tiny_volume: torch.Tensor) -> None:
-    """Non-zero beam tilt changes the transfer function output."""
+@pytest.mark.parametrize(
+    "extra_ctf_params",
+    [
+        {"tiltx": [0.01], "tilty": [0.01]},
+        {"trefoil1": [300.0], "trefoil2": [-200.0]},
+        {
+            "tetrafoil1": [100.0],
+            "tetrafoil2": [-80.0],
+            "tetrafoil3": [60.0],
+            "tetrafoil4": [-40.0],
+        },
+    ],
+    ids=["beam_tilt", "trefoil", "tetrafoil"],
+)
+def test_higher_order_aberration_changes_output(
+    tiny_volume: torch.Tensor, extra_ctf_params: dict[str, list[float]]
+) -> None:
+    """Non-zero beam tilt, trefoil or tetrafoil changes the transfer function
+    output."""
     base = dict(
         V=tiny_volume,
         voxel_size=2.0,
@@ -171,65 +188,13 @@ def test_tilt_changes_output(tiny_volume: torch.Tensor) -> None:
         dose_per_angstrom=2.0,
         propagation=Propagation(alpha=0.0, scattering_model="projection"),
     )
-    no_tilt = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
-    with_tilt = {
-        "dfu": torch.tensor([5000.0]),
-        "cs": torch.tensor([2.7]),
-        "tiltx": torch.tensor([0.01]),
-        "tilty": torch.tensor([0.01]),
+    without = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
+    with_term = {
+        **without,
+        **{k: torch.tensor(v) for k, v in extra_ctf_params.items()},
     }
-    img_no = Reconstructor(**base, ctf_params=no_tilt).forward(torch.tensor([0]))
-    img_yes = Reconstructor(**base, ctf_params=with_tilt).forward(torch.tensor([0]))
-    assert not torch.equal(img_no, img_yes)
-
-
-def test_trefoil_changes_output(tiny_volume: torch.Tensor) -> None:
-    """Non-zero trefoil changes the transfer function output."""
-    base = dict(
-        V=tiny_volume,
-        voxel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.tensor([[0.0, 0.0]]),
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        propagation=Propagation(alpha=0.0, scattering_model="projection"),
-    )
-    no_trefoil = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
-    with_trefoil = {
-        "dfu": torch.tensor([5000.0]),
-        "cs": torch.tensor([2.7]),
-        "trefoil1": torch.tensor([300.0]),
-        "trefoil2": torch.tensor([-200.0]),
-    }
-    img_no = Reconstructor(**base, ctf_params=no_trefoil).forward(torch.tensor([0]))
-    img_yes = Reconstructor(**base, ctf_params=with_trefoil).forward(torch.tensor([0]))
-    assert not torch.equal(img_no, img_yes)
-
-
-def test_tetrafoil_changes_output(tiny_volume: torch.Tensor) -> None:
-    """Non-zero tetrafoil changes the transfer function output."""
-    base = dict(
-        V=tiny_volume,
-        voxel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.tensor([[0.0, 0.0]]),
-        voltage=300.0,
-        dose_per_angstrom=2.0,
-        propagation=Propagation(alpha=0.0, scattering_model="projection"),
-    )
-    no_tetrafoil = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
-    with_tetrafoil = {
-        "dfu": torch.tensor([5000.0]),
-        "cs": torch.tensor([2.7]),
-        "tetrafoil1": torch.tensor([100.0]),
-        "tetrafoil2": torch.tensor([-80.0]),
-        "tetrafoil3": torch.tensor([60.0]),
-        "tetrafoil4": torch.tensor([-40.0]),
-    }
-    img_no = Reconstructor(**base, ctf_params=no_tetrafoil).forward(torch.tensor([0]))
-    img_yes = Reconstructor(**base, ctf_params=with_tetrafoil).forward(
-        torch.tensor([0])
-    )
+    img_no = Reconstructor(**base, ctf_params=without).forward(torch.tensor([0]))
+    img_yes = Reconstructor(**base, ctf_params=with_term).forward(torch.tensor([0]))
     assert not torch.equal(img_no, img_yes)
     assert torch.isfinite(img_yes).all()
 

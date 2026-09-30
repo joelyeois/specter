@@ -336,49 +336,46 @@ def test_default_config_builds_no_profile():
     assert build_ice_profile(_cfg(ice_profile="flat")) is None
 
 
-def test_tilt_alone_builds_a_profile():
-    prof = build_ice_profile(_cfg(ice_tilt=0.2))
+@pytest.mark.parametrize(
+    "config_kwargs, expected",
+    [
+        ({"ice_tilt": 0.2}, {"mode": "flat", "tilt": 0.2}),
+        (
+            {
+                "ice_profile": "wedge",
+                "ice_thickness_range": [250.0, 900.0],
+                "ice_profile_angle": 45.0,
+            },
+            {"mode": "wedge", "thickness_range": (250.0, 900.0), "angle": 45.0},
+        ),
+        # A CLI flag can only carry a string, so 'min,max' must parse.
+        (
+            {"ice_profile": "wedge", "ice_thickness_range": "250,900"},
+            {"thickness_range": (250.0, 900.0)},
+        ),
+        (
+            {
+                "ice_profile": "meniscus",
+                "ice_thickness": 300.0,
+                "ice_rim_thickness": 1600.0,
+                "ice_hole_radius": 2500.0,
+                "ice_hole_offset": "4500,0",
+            },
+            {
+                "mode": "meniscus",
+                "mean_thickness": 300.0,
+                "rim_thickness": 1600.0,
+                "hole_offset": (4500.0, 0.0),
+            },
+        ),
+    ],
+    ids=["tilt_alone", "wedge", "cli_string_spelling", "meniscus_offset_hole"],
+)
+def test_config_builds_a_profile(config_kwargs: dict, expected: dict) -> None:
+    prof = build_ice_profile(_cfg(**config_kwargs))
     assert prof is not None
-    assert prof.mode == "flat"
-    assert prof.tilt == 0.2
-
-
-def test_config_builds_a_wedge():
-    prof = build_ice_profile(
-        _cfg(
-            ice_profile="wedge",
-            ice_thickness_range=[250.0, 900.0],
-            ice_profile_angle=45.0,
-        )
-    )
-    assert prof is not None
-    assert prof.mode == "wedge"
-    assert prof.thickness_range == (250.0, 900.0)
-    assert prof.angle == 45.0
-
-
-def test_config_accepts_the_cli_string_spelling():
-    """A CLI flag can only carry a string, so 'min,max' must parse."""
-    prof = build_ice_profile(_cfg(ice_profile="wedge", ice_thickness_range="250,900"))
-    assert prof is not None
-    assert prof.thickness_range == (250.0, 900.0)
-
-
-def test_config_builds_a_meniscus_with_an_offset_hole():
-    prof = build_ice_profile(
-        _cfg(
-            ice_profile="meniscus",
-            ice_thickness=300.0,
-            ice_rim_thickness=1600.0,
-            ice_hole_radius=2500.0,
-            ice_hole_offset="4500,0",
-        )
-    )
-    assert prof is not None
-    assert prof.mode == "meniscus"
-    assert prof.mean_thickness == 300.0
-    assert prof.rim_thickness == 1600.0
-    assert prof.hole_offset == (4500.0, 0.0)
+    for attr, value in expected.items():
+        assert getattr(prof, attr) == value, attr
 
 
 def test_reversed_thickness_range_is_rejected_by_validation():

@@ -528,10 +528,22 @@ def test_potential_builder_analytic_matches_gemmi_multi_atom(tmp_path):
     )
 
 
-def test_potential_builder_analytic_gradient_matches_finite_difference():
+@pytest.mark.parametrize(
+    ("parameterization", "atomic_numbers", "atom_species", "eps"),
+    [
+        ("shtyrov", [8, 6], ["O(HH)", None], 1e-3),
+        ("kirkland", [16, 6], None, 1e-2),
+        ("lobato", [16, 6], None, 1e-2),
+    ],
+    ids=["shtyrov", "kirkland", "lobato"],
+)
+def test_potential_builder_analytic_gradient_matches_finite_difference(
+    parameterization, atomic_numbers, atom_species, eps
+):
     """
     forward(method="analytic") must be differentiable w.r.t. coordinates,
-    and the gradient must match a central finite-difference estimate.
+    and the gradient must be finite and match a central finite-difference
+    estimate.
 
     Uses a random-weighted sum as the loss, not a bare .sum(): the plain
     volume sum is (by design, since build_potential_volume_analytic_scatter
@@ -539,17 +551,25 @@ def test_potential_builder_analytic_gradient_matches_finite_difference():
     potential, which is intentionally near-invariant to atom position — its
     gradient is correctly near-zero, which isn't a useful differentiability
     check. A weighted sum breaks that symmetry and actually depends on
-    position.
+    position. (Kirkland/Lobato's shell-average is only an approximation, not
+    exact, so a bare sum isn't perfectly position-invariant there either --
+    but a weighted sum gives a robust, clearly nonzero gradient regardless.)
+
+    For Kirkland/Lobato this is also the regression test for a NaN-gradient
+    bug: yukawa_shell_average/plain_exp_shell_average's far/near torch.where
+    branches were each evaluated everywhere (not just where selected), and
+    the unselected branch could overflow to inf for out-of-domain inputs,
+    corrupting the gradient via 0*inf=nan even though the forward value was
+    finite and correct.
     """
-    atomic_numbers = torch.tensor([8, 6], dtype=torch.long)
-    atom_species = ["O(HH)", None]
+    atomic_numbers = torch.tensor(atomic_numbers, dtype=torch.long)
     coords = torch.tensor([[0.3, -0.2, 0.1], [3.1, 0.0, 0.0]])
 
     pb = PotentialBuilder(
         32,
         1.0,
         atomic_numbers,
-        parameterization="shtyrov",
+        parameterization=parameterization,
         atom_species=atom_species,
         progressbars=False,
     )
@@ -562,9 +582,9 @@ def test_potential_builder_analytic_gradient_matches_finite_difference():
 
     c = coords.clone().requires_grad_(True)
     total_potential(c).backward()
+    assert torch.isfinite(c.grad).all(), f"non-finite gradient: {c.grad}"
     analytic_grad = c.grad[0, 0].item()
 
-    eps = 1e-3
     plus = coords.clone()
     plus[0, 0] += eps
     minus = coords.clone()
@@ -574,21 +594,31 @@ def test_potential_builder_analytic_gradient_matches_finite_difference():
     assert analytic_grad == pytest.approx(fd_grad, rel=1e-2)
 
 
-def test_potential_builder_analytic_handles_out_of_bounds_atom():
+@pytest.mark.parametrize(
+    ("parameterization", "atom_species"),
+    [
+        ("shtyrov", ["O(HH)", "O(HH)"]),
+        ("kirkland", None),
+        ("lobato", None),
+    ],
+    ids=["shtyrov", "kirkland", "lobato"],
+)
+def test_potential_builder_analytic_handles_out_of_bounds_atom(
+    parameterization, atom_species
+):
     """
     An atom placed (partially or fully) outside the grid should be clipped,
     not crash — matching soft_voxelize_coordinates' existing behavior for
-    the '2d'/'3d' methods.
+    the '2d'/'3d' methods, for every parameterization's analytic path.
     """
     atomic_numbers = torch.tensor([8, 8], dtype=torch.long)
-    atom_species = ["O(HH)", "O(HH)"]
     coords = torch.tensor([[0.0, 0.0, 0.0], [1000.0, 1000.0, 1000.0]])
 
     pb = PotentialBuilder(
         16,
         1.0,
         atomic_numbers,
-        parameterization="shtyrov",
+        parameterization=parameterization,
         atom_species=atom_species,
         progressbars=False,
     )
@@ -597,7 +627,18 @@ def test_potential_builder_analytic_handles_out_of_bounds_atom():
     assert volume.sum() > 0
 
 
-def test_potential_builder_analytic_robust_to_subvoxel_position():
+@pytest.mark.parametrize(
+    ("parameterization", "atom_species", "total_spread_tol", "exact_total"),
+    [
+        ("shtyrov", ["O(HH)"], 2e-3, True),
+        ("kirkland", None, 0.2, False),
+        ("lobato", None, 0.2, False),
+    ],
+    ids=["shtyrov", "kirkland", "lobato"],
+)
+def test_potential_builder_analytic_robust_to_subvoxel_position(
+    parameterization, atom_species, total_spread_tol, exact_total
+):
     """
     Regression test for the point-sampling aliasing bug: before
     build_potential_volume_analytic_scatter switched to exact erf-based
@@ -605,41 +646,58 @@ def test_potential_builder_analytic_robust_to_subvoxel_position():
     peak value by ~26x (1012 -> 38.6) purely from where it landed relative
     to the grid, with no physical meaning. With proper voxel-averaging:
       - the total integrated potential (sum * dx^3) must stay constant
-        regardless of sub-voxel position (matches the analytic total
-        c1 * sum(a_i), since voxel-averaging exactly conserves the
-        integral under translation);
+        regardless of sub-voxel position (for Shtyrov/Peng's pure-Gaussian
+        erf treatment it matches the analytic total c1 * sum(a_i) to 1e-3,
+        since voxel-averaging exactly conserves the integral under
+        translation);
       - the peak value should vary only mildly with position, not swing
         by an order of magnitude.
+
+    Kirkland/Lobato's Yukawa terms use a sphere-of-equal-volume
+    shell-average -- a bounded *approximation*, not an exact integral, so
+    the total is only approximately invariant (~2-20% per the derivation's
+    Monte Carlo validation, confirmed empirically at ~11%), hence the
+    per-parameterization spread tolerance. The key regression guard is that
+    neither the total nor the peak blows up or swings by orders of magnitude
+    the way naive point-sampling does.
     """
     atomic_numbers = torch.tensor([8], dtype=torch.long)
-    atom_species = ["O(HH)"]
     n, dx = 16, 1.0
 
     pb = PotentialBuilder(
         n,
         dx,
         atomic_numbers,
-        parameterization="shtyrov",
+        parameterization=parameterization,
         atom_species=atom_species,
         progressbars=False,
     )
 
-    a0 = 0.529177  # CODATA
-    e = 14.399645  # CODATA
-    c1 = 2 * torch.pi * e * a0
-    a_coefs, _ = pb._get_analytic_atom_coefficients()
-    expected_total = (c1 * a_coefs[0].sum()).item()
-
-    peaks = []
+    totals, peaks = [], []
     for offset in [0.0, 0.1, 0.25, 0.5]:
         coords = torch.tensor([[offset, 0.0, 0.0]])
         volume = pb.forward(coords, method="analytic")
-        total = (volume.sum() * dx**3).item()
-        assert total == pytest.approx(expected_total, rel=1e-3), (
-            f"total at offset={offset} is {total}, expected {expected_total}"
-        )
+        assert torch.isfinite(volume).all()
+        totals.append((volume.sum() * dx**3).item())
         peaks.append(volume.max().item())
 
+    if exact_total:
+        a0 = 0.529177  # CODATA
+        e = 14.399645  # CODATA
+        c1 = 2 * torch.pi * e * a0
+        a_coefs, _ = pb._get_analytic_atom_coefficients()
+        expected_total = (c1 * a_coefs[0].sum()).item()
+        for offset, total in zip([0.0, 0.1, 0.25, 0.5], totals):
+            assert total == pytest.approx(expected_total, rel=1e-3), (
+                f"total at offset={offset} is {total}, expected {expected_total}"
+            )
+
+    total_spread = (max(totals) - min(totals)) / (sum(totals) / len(totals))
+    assert total_spread < total_spread_tol, (
+        f"total integral varies by {total_spread * 100:.1f}% across sub-voxel "
+        f"positions ({totals}) -- should stay within the "
+        f"{total_spread_tol * 100:.1f}% bound for {parameterization}"
+    )
     assert max(peaks) / min(peaks) < 3.0, (
         f"peak varies by {max(peaks) / min(peaks):.1f}x across sub-voxel "
         f"positions ({peaks}) -- should be a mild, smooth variation, not "
@@ -687,111 +745,6 @@ def test_potential_builder_analytic_matches_3d_splat(parameterization):
         torch.stack([volume_analytic.flatten(), volume_3d.flatten()])
     )[0, 1]
     assert corr.item() > 0.9, f"correlation too low: {corr.item()}"
-
-
-@pytest.mark.parametrize("parameterization", ["kirkland", "lobato"])
-def test_potential_builder_analytic_gradient_matches_finite_difference_kl(
-    parameterization,
-):
-    """
-    forward(method="analytic") for Kirkland/Lobato must be differentiable
-    w.r.t. coordinates, matching a central finite-difference estimate.
-
-    Regression test for the NaN-gradient bug found and fixed this session:
-    yukawa_shell_average/plain_exp_shell_average's far/near torch.where
-    branches were each evaluated everywhere (not just where selected), and
-    the unselected branch could overflow to inf for out-of-domain inputs,
-    corrupting the gradient via 0*inf=nan even though the forward value was
-    finite and correct. Uses a random-weighted sum as the loss, not a bare
-    .sum(), following the same reasoning as the Shtyrov analytic gradient
-    test (Kirkland/Lobato's shell-average is only an approximation, not
-    exact, so a bare sum isn't perfectly position-invariant here either --
-    but a weighted sum gives a robust, clearly nonzero gradient regardless).
-    """
-    atomic_numbers = torch.tensor([16, 6], dtype=torch.long)
-    coords = torch.tensor([[0.3, -0.2, 0.1], [3.1, 0.0, 0.0]])
-
-    pb = PotentialBuilder(
-        32, 1.0, atomic_numbers, parameterization=parameterization, progressbars=False
-    )
-
-    torch.manual_seed(0)
-    weight = torch.randn(32, 32, 32)
-
-    def total_potential(c):
-        return (pb.forward(c, method="analytic") * weight).sum()
-
-    c = coords.clone().requires_grad_(True)
-    total_potential(c).backward()
-    assert torch.isfinite(c.grad).all(), f"non-finite gradient: {c.grad}"
-    analytic_grad = c.grad[0, 0].item()
-
-    eps = 1e-2
-    plus = coords.clone()
-    plus[0, 0] += eps
-    minus = coords.clone()
-    minus[0, 0] -= eps
-    fd_grad = (total_potential(plus).item() - total_potential(minus).item()) / (2 * eps)
-
-    assert analytic_grad == pytest.approx(fd_grad, rel=1e-2)
-
-
-@pytest.mark.parametrize("parameterization", ["kirkland", "lobato"])
-def test_potential_builder_analytic_handles_out_of_bounds_atom_kl(parameterization):
-    """
-    An atom placed (partially or fully) outside the grid should be clipped,
-    not crash, for Kirkland/Lobato's analytic path too.
-    """
-    atomic_numbers = torch.tensor([8, 8], dtype=torch.long)
-    coords = torch.tensor([[0.0, 0.0, 0.0], [1000.0, 1000.0, 1000.0]])
-
-    pb = PotentialBuilder(
-        16, 1.0, atomic_numbers, parameterization=parameterization, progressbars=False
-    )
-    volume = pb.forward(coords, method="analytic")
-    assert torch.isfinite(volume).all()
-    assert volume.sum() > 0
-
-
-@pytest.mark.parametrize("parameterization", ["kirkland", "lobato"])
-def test_potential_builder_analytic_robust_to_subvoxel_position_kl(parameterization):
-    """
-    Sub-voxel robustness for Kirkland/Lobato's analytic path. Unlike
-    Shtyrov/Peng's pure-Gaussian erf treatment (exact voxel average, total
-    integral exactly invariant under translation), Kirkland/Lobato's Yukawa
-    terms use a sphere-of-equal-volume shell-average -- a bounded
-    *approximation*, not an exact integral, so the total is only
-    approximately invariant (~2-20% per the derivation's Monte Carlo
-    validation, confirmed empirically here at ~11%). The key regression
-    guard is that neither the total nor the peak blows up or swings by
-    orders of magnitude the way naive point-sampling does.
-    """
-    atomic_numbers = torch.tensor([8], dtype=torch.long)
-    n, dx = 16, 1.0
-
-    pb = PotentialBuilder(
-        n, dx, atomic_numbers, parameterization=parameterization, progressbars=False
-    )
-
-    totals, peaks = [], []
-    for offset in [0.0, 0.1, 0.25, 0.5]:
-        coords = torch.tensor([[offset, 0.0, 0.0]])
-        volume = pb.forward(coords, method="analytic")
-        assert torch.isfinite(volume).all()
-        totals.append((volume.sum() * dx**3).item())
-        peaks.append(volume.max().item())
-
-    total_spread = (max(totals) - min(totals)) / (sum(totals) / len(totals))
-    assert total_spread < 0.2, (
-        f"total integral varies by {total_spread * 100:.1f}% across sub-voxel "
-        f"positions ({totals}) -- should stay within the shell-average "
-        "approximation's known ~20% worst-case bound"
-    )
-    assert max(peaks) / min(peaks) < 3.0, (
-        f"peak varies by {max(peaks) / min(peaks):.1f}x across sub-voxel "
-        f"positions ({peaks}) -- should be a mild, smooth variation, not "
-        "an aliasing-driven blow-up"
-    )
 
 
 def test_kirkland_lobato_analytic_no_overflow_for_heavy_elements():

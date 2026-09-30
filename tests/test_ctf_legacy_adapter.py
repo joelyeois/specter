@@ -73,20 +73,49 @@ def test_full_ctf_params_dict_matches_old_aberration():
     assert torch.allclose(old_out, new_out, atol=1e-4)
 
 
-def test_minimal_ctf_params_dict_matches_old_aberration():
+@pytest.mark.parametrize(
+    "seed,constructor_kwargs,extra_ctf_params",
+    [
+        (1, {}, {}),
+        (4, {"bfactor": 150.0}, {}),
+        (5, {"dose_envelope": True}, {"dose": torch.tensor([40.0, 45.0])}),
+        (6, {"convergence_angle": 1.0, "cc": 1.4e7}, {}),
+    ],
+    ids=["minimal", "bfactor", "dose_envelope", "convergence_angle_and_cc"],
+)
+def test_minimal_ctf_params_dict_with_envelopes_matches_old_aberration(
+    seed, constructor_kwargs, extra_ctf_params
+):
     """Just dfu + cs -- matches how run_tilt_series's minimal path
     constructs ctf_params (no astigmatism/beam-tilt/trefoil/phase-plate
-    terms at all)."""
-    exitwave = _exitwave(2, seed=1)
+    terms at all) -- alone and with each envelope switched on.
+
+    bfactor is a LegacyAberrationAdapter *construction-time* argument
+    (matching TransferFunction), not read per-call from the dict -- in
+    practice ctf_params["bfactor"] is always the same constant value
+    across every particle anyway (BaseImager expands a scalar bfactor to
+    all n particles identically), so this is a no-op difference."""
+    exitwave = _exitwave(2, seed=seed)
     ctf_params = {
         "dfu": torch.tensor([15000.0, 16000.0]),
         "cs": torch.tensor([2.7e7, 2.7e7]),
+        **extra_ctf_params,
     }
 
-    old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear")
+    old = Aberration(
+        N_PIXELS,
+        PIXEL_SIZE,
+        VOLTAGE,
+        aberration_model="nonlinear",
+        **constructor_kwargs,
+    )
     old_out = old(exitwave, ctf_params)
     adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear"
+        N_PIXELS,
+        PIXEL_SIZE,
+        VOLTAGE,
+        aberration_model="nonlinear",
+        **constructor_kwargs,
     )
     new_out = adapter(exitwave, ctf_params)
 
@@ -125,79 +154,6 @@ def test_ctf_model_matches_old_aberration():
 
     assert not old_out.is_complex()
     assert not new_out.is_complex()
-    assert torch.allclose(old_out, new_out, atol=1e-4)
-
-
-def test_bfactor_matches_old_aberration():
-    """bfactor is a LegacyAberrationAdapter *construction-time* argument
-    (matching TransferFunction), not read per-call from the dict -- in
-    practice ctf_params["bfactor"] is always the same constant value
-    across every particle anyway (BaseImager expands a scalar bfactor to
-    all n particles identically), so this is a no-op difference."""
-    exitwave = _exitwave(2, seed=4)
-    ctf_params = {
-        "dfu": torch.tensor([15000.0, 16000.0]),
-        "cs": torch.tensor([2.7e7, 2.7e7]),
-    }
-
-    old = Aberration(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", bfactor=150.0
-    )
-    old_out = old(exitwave, ctf_params)
-    adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", bfactor=150.0
-    )
-    new_out = adapter(exitwave, ctf_params)
-
-    assert torch.allclose(old_out, new_out, atol=1e-4)
-
-
-def test_dose_envelope_matches_old_aberration():
-    exitwave = _exitwave(2, seed=5)
-    ctf_params = {
-        "dfu": torch.tensor([15000.0, 16000.0]),
-        "cs": torch.tensor([2.7e7, 2.7e7]),
-        "dose": torch.tensor([40.0, 45.0]),
-    }
-
-    old = Aberration(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", dose_envelope=True
-    )
-    old_out = old(exitwave, ctf_params)
-    adapter = LegacyAberrationAdapter(
-        N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear", dose_envelope=True
-    )
-    new_out = adapter(exitwave, ctf_params)
-
-    assert torch.allclose(old_out, new_out, atol=1e-4)
-
-
-def test_convergence_angle_and_cc_envelopes_match_old_aberration():
-    exitwave = _exitwave(2, seed=6)
-    ctf_params = {
-        "dfu": torch.tensor([15000.0, 16000.0]),
-        "cs": torch.tensor([2.7e7, 2.7e7]),
-    }
-
-    old = Aberration(
-        N_PIXELS,
-        PIXEL_SIZE,
-        VOLTAGE,
-        aberration_model="nonlinear",
-        convergence_angle=1.0,
-        cc=1.4e7,
-    )
-    old_out = old(exitwave, ctf_params)
-    adapter = LegacyAberrationAdapter(
-        N_PIXELS,
-        PIXEL_SIZE,
-        VOLTAGE,
-        aberration_model="nonlinear",
-        convergence_angle=1.0,
-        cc=1.4e7,
-    )
-    new_out = adapter(exitwave, ctf_params)
-
     assert torch.allclose(old_out, new_out, atol=1e-4)
 
 

@@ -171,22 +171,12 @@ def test_fetch_pdb_file_reuses_a_differently_cased_cache_entry(tmp_path, monkeyp
     assert len(list(tmp_path.iterdir())) == 1
 
 
-def test_fetch_pdb_file_does_not_call_the_network_when_quiet(tmp_path, monkeypatch):
+@pytest.mark.parametrize("verbose", [False, True], ids=["quiet", "verbose"])
+def test_fetch_pdb_file_cache_hit_makes_no_request(tmp_path, monkeypatch, verbose):
     # Regression test: get_available_assemblies returns None and only ever
     # prints, but ran on every fetch -- before the cache check, and with its
     # result discarded when verbose=False. That HTTPS round trip was the
     # entire cost of a "cache hit" for an already-downloaded structure.
-    (tmp_path / "1ABC-assembly1.cif").write_text("data_1ABC\n#\n")
-
-    def fake_get(url, *args, **kwargs):
-        raise AssertionError(f"no request should be made, got {url}")
-
-    monkeypatch.setattr(pdb_module.requests, "get", fake_get)
-    path = PDB.fetch_pdb_file("1ABC", pdb_cache_dir=str(tmp_path), verbose=False)
-    assert Path(path).name == "1ABC-assembly1.cif"
-
-
-def test_fetch_pdb_file_verbose_cache_hit_makes_no_request(tmp_path, monkeypatch):
     # The assembly listing is only a log line, so a cache hit must not pay
     # its HTTPS round trip even with verbose=True and info logging on.
     import logging
@@ -197,8 +187,9 @@ def test_fetch_pdb_file_verbose_cache_hit_makes_no_request(tmp_path, monkeypatch
         raise AssertionError(f"no request should be made, got {url}")
 
     monkeypatch.setattr(pdb_module.requests, "get", fake_get)
-    monkeypatch.setattr(pdb_module.logger, "level", logging.INFO)
-    path = PDB.fetch_pdb_file("1ABC", pdb_cache_dir=str(tmp_path), verbose=True)
+    if verbose:
+        monkeypatch.setattr(pdb_module.logger, "level", logging.INFO)
+    path = PDB.fetch_pdb_file("1ABC", pdb_cache_dir=str(tmp_path), verbose=verbose)
     assert Path(path).name == "1ABC-assembly1.cif"
 
 

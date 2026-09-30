@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from specter import memory
 from specter.config import load_config
 from specter.memory import (
@@ -74,11 +76,23 @@ def test_recommend_batchsize_scales_with_free_memory(monkeypatch) -> None:
     assert recommend_batchsize(*_SMALL_GEOM, "cpu") == 8
 
 
-def test_recommend_batchsize_never_below_one(monkeypatch) -> None:
-    """A box too big for the device still returns 1 -- the run then fails
-    honestly on a real allocation rather than on an estimate."""
-    monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: 1024)
-    assert recommend_batchsize(1024, 1024, 2048, "cpu") == 1
+@pytest.mark.parametrize(
+    ("budget", "device", "geometry"),
+    [
+        (1024, "cpu", (1024, 1024, 2048)),
+        (10**13, "cuda", (2048, 2048, 4096)),
+    ],
+    ids=["memory_bound", "saturation_cap"],
+)
+def test_recommend_batchsize_never_below_one(
+    monkeypatch, budget: int, device: str, geometry: tuple[int, int, int]
+) -> None:
+    """A box too big for the device still returns 1, not 0 -- the run then
+    fails honestly on a real allocation rather than on an estimate. The same
+    holds when the GPU saturation cap is what binds: a box larger than the
+    whole saturation budget still yields 1."""
+    monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: budget)
+    assert recommend_batchsize(*geometry, device) == 1
 
 
 def test_recommend_batchsize_clamps_to_n_particles_and_ceiling(
@@ -124,12 +138,6 @@ def test_recommend_batchsize_caps_at_gpu_saturation(monkeypatch) -> None:
     # Measured optima on an L40: 2 at box 256, 8 at box 64.
     assert big_box == 2, "a 67M-voxel-per-particle box must not batch up"
     assert small_box == MAX_AUTO_BATCHSIZE, "a small box should batch to the ceiling"
-
-
-def test_saturation_cap_never_returns_zero(monkeypatch) -> None:
-    """A box larger than the whole budget still yields 1, not 0."""
-    monkeypatch.setattr(memory, "available_memory_bytes", lambda _d: 10**13)
-    assert recommend_batchsize(2048, 2048, 4096, "cuda") == 1
 
 
 def test_cuda_budget_leaves_room_for_allocator_reservation() -> None:

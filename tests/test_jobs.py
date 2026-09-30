@@ -45,15 +45,19 @@ def test_job_dir_places_project_before_job_type(tmp_path: Path) -> None:
         assert job.dir == tmp_path / "apoferritin" / "reconstructions" / "J001"
 
 
-def test_job_id_shared_across_job_types_in_one_project(tmp_path: Path) -> None:
+@pytest.mark.parametrize("project", ["p", None], ids=["project", "no_project"])
+def test_job_id_shared_across_job_types_in_one_project(
+    tmp_path: Path, project: str | None
+) -> None:
     """Numbering is one continuous sequence per project, not restarted per
     job_type -- so two different pipelines sharing a project don't both
-    independently claim J001."""
-    with Job("particles", project="p", base_dir=tmp_path) as job1:
+    independently claim J001. The same shared-numbering guarantee holds with
+    project=None too."""
+    with Job("particles", project=project, base_dir=tmp_path) as job1:
         pass
-    with Job("reconstructions", project="p", base_dir=tmp_path) as job2:
+    with Job("reconstructions", project=project, base_dir=tmp_path) as job2:
         pass
-    with Job("particles", project="p", base_dir=tmp_path) as job3:
+    with Job("particles", project=project, base_dir=tmp_path) as job3:
         pass
     assert job1.dir.name == "J001"
     assert job2.dir.name == "J002"
@@ -70,16 +74,6 @@ def test_job_project_none_drops_project_segment(tmp_path: Path) -> None:
         assert job.dir == tmp_path / "reconstructions" / "J001"
     data = json.loads((job.dir / "job.json").read_text())
     assert data["project"] is None
-
-
-def test_job_id_shared_across_types_with_no_project(tmp_path: Path) -> None:
-    """The same shared-numbering guarantee holds with project=None too."""
-    with Job("particles", project=None, base_dir=tmp_path) as job1:
-        pass
-    with Job("reconstructions", project=None, base_dir=tmp_path) as job2:
-        pass
-    assert job1.dir.name == "J001"
-    assert job2.dir.name == "J002"
 
 
 def test_resolve_base_dir_from_env(
@@ -187,32 +181,23 @@ class _NoRunDir:
         self.x = x
 
 
-def test_job_create_captures_explicit_args(tmp_path: Path) -> None:
+def test_job_create_captures_args_and_injects_run_dir(tmp_path: Path) -> None:
+    """Explicit arguments and unpassed defaults are both logged; run_dir is
+    injected into the instance but kept out of the logged params."""
     with Job("dummy", project="p", base_dir=tmp_path) as job:
-        job.create(_DummyClass, "hello", value=3.14)
+        explicit = job.create(_DummyClass, "hello", value=3.14)
     data = json.loads((job.dir / "job.json").read_text())
     assert data["params"]["name"] == "hello"
     assert data["params"]["value"] == 3.14
+    assert explicit.run_dir == job.dir
+    assert "run_dir" not in data["params"]
 
-
-def test_job_create_captures_defaults(tmp_path: Path) -> None:
     with Job("dummy", project="p", base_dir=tmp_path) as job:
-        job.create(_DummyClass, "hello")
+        obj = job.create(_DummyClass, "hello")
     data = json.loads((job.dir / "job.json").read_text())
     assert data["params"]["flag"] is False
     assert data["params"]["value"] == 1.0
-
-
-def test_job_create_injects_run_dir(tmp_path: Path) -> None:
-    with Job("dummy", project="p", base_dir=tmp_path) as job:
-        obj = job.create(_DummyClass, "hello")
     assert obj.run_dir == job.dir
-
-
-def test_job_create_run_dir_not_in_params(tmp_path: Path) -> None:
-    with Job("dummy", project="p", base_dir=tmp_path) as job:
-        job.create(_DummyClass, "hello")
-    data = json.loads((job.dir / "job.json").read_text())
     assert "run_dir" not in data["params"]
 
 
@@ -296,7 +281,7 @@ def test_job_save_figure(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_job(tmp_path: Path, project: str, job_type: str, params: dict) -> None:  # type: ignore[type-arg]
+def _make_job(tmp_path: Path, project: str | None, job_type: str, params: dict) -> None:  # type: ignore[type-arg]
     with Job(job_type, project=project, base_dir=tmp_path) as job:
         job.log(params)
 
@@ -364,21 +349,25 @@ def test_database_diff_missing_key(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_short_params_default_shows_first_four_scalars() -> None:
-    params = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
-    assert _short_params(params) == "a=1  b=2  c=3  d=4"
-
-
-def test_short_params_keys_overrides_default_order() -> None:
-    """A result logged after training (e.g. e=5, added last) is still
-    shown when explicitly asked for, even though it'd be cut by the
-    default first-4 behaviour."""
-    params = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
-    assert _short_params(params, keys=["e", "a"]) == "e=5  a=1"
-
-
-def test_short_params_keys_missing_key_shows_dash() -> None:
-    assert _short_params({"a": 1}, keys=["a", "missing"]) == "a=1  missing=-"
+@pytest.mark.parametrize(
+    ("params", "keys", "expected"),
+    [
+        ({"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}, None, "a=1  b=2  c=3  d=4"),
+        # A result logged after training (e.g. e=5, added last) is still
+        # shown when explicitly asked for, even though it'd be cut by the
+        # default first-4 behaviour.
+        ({"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}, ["e", "a"], "e=5  a=1"),
+        ({"a": 1}, ["a", "missing"], "a=1  missing=-"),
+    ],
+    ids=["default_first_four", "keys_override_order", "missing_key_dash"],
+)
+def test_short_params(
+    params: dict[str, int], keys: list[str] | None, expected: str
+) -> None:
+    if keys is None:
+        assert _short_params(params) == expected
+    else:
+        assert _short_params(params, keys=keys) == expected
 
 
 def test_cli_list_smoke(tmp_path: Path) -> None:
@@ -429,8 +418,11 @@ def test_cli_list_show_smoke(tmp_path: Path) -> None:
     assert "J001" in result.stdout
 
 
-def test_cli_show_smoke(tmp_path: Path) -> None:
-    _make_job(tmp_path, "my-project", "ghostbuster", {"lr": 0.1})
+@pytest.mark.parametrize("project", ["my-project", None], ids=["project", "no_project"])
+def test_cli_show_smoke(tmp_path: Path, project: str | None) -> None:
+    """--project is omittable, for a job created without one."""
+    _make_job(tmp_path, project, "ghostbuster", {"lr": 0.1})
+    project_args = ["--project", project] if project is not None else []
     result = proc.run(
         [
             sys.executable,
@@ -438,8 +430,7 @@ def test_cli_show_smoke(tmp_path: Path) -> None:
             "specter.jobs._cli",
             "show",
             "J001",
-            "--project",
-            "my-project",
+            *project_args,
             "--base-dir",
             str(tmp_path),
         ],
@@ -448,27 +439,6 @@ def test_cli_show_smoke(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "J001" in result.stdout
-
-
-def test_cli_show_smoke_no_project(tmp_path: Path) -> None:
-    """--project is omittable, for a job created without one."""
-    with Job("ghostbuster", project=None, base_dir=tmp_path) as job:
-        job.log({"lr": 0.1})
-    result = proc.run(
-        [
-            sys.executable,
-            "-m",
-            "specter.jobs._cli",
-            "show",
-            job.dir.name,
-            "--base-dir",
-            str(tmp_path),
-        ],
-        capture_output=True,
-        encoding="utf-8",
-    )
-    assert result.returncode == 0
-    assert job.dir.name in result.stdout
 
 
 def test_cli_diff_smoke(tmp_path: Path) -> None:

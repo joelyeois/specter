@@ -12,37 +12,6 @@ from specter.scattering import (
 from specter.fft import fft2, ifft2
 
 
-def test_iterative_scattering_batch_size(dummy_volume):
-    scat_iter = IterativeScattering(
-        nxy=64,
-        pixel_size=1.0,
-        voltage=300.0,
-        scattering_model="multislice",
-        progressbars=False,
-    )
-
-    R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
-    theta_matrix = build_affine_matrix(R)
-
-    psi1 = scat_iter.forward(dummy_volume, theta_matrix, slice_batchsize=1)
-    psi4 = scat_iter.forward(dummy_volume, theta_matrix, slice_batchsize=4)
-
-    assert torch.allclose(psi1, psi4, atol=1e-5)
-
-    scat_iter_rytov = IterativeScattering(
-        nxy=64,
-        pixel_size=1.0,
-        voltage=300.0,
-        scattering_model="rytov",
-        progressbars=False,
-    )
-
-    psi1_rytov = scat_iter_rytov.rytov(dummy_volume, theta_matrix, slice_batchsize=1)
-    psi4_rytov = scat_iter_rytov.rytov(dummy_volume, theta_matrix, slice_batchsize=4)
-
-    assert torch.allclose(psi1_rytov, psi4_rytov, atol=1e-5)
-
-
 def test_multislice_checkpointing_matches_uncheckpointed(dummy_volume):
     """Gradient checkpointing must not change the multislice exit wave."""
     scat_iter = IterativeScattering(
@@ -94,9 +63,23 @@ def test_parallel_rytov_checkpointing_backprops(dummy_volume):
     assert V.grad.abs().sum() > 0
 
 
-@pytest.mark.parametrize("scattering_model", ["firstborn", "kinematic", "ctf"])
-def test_iterative_models_consistent_across_batch_size(dummy_volume, scattering_model):
-    """firstborn/kinematic/ctf must be invariant to the slice_batchsize chunking."""
+@pytest.mark.parametrize(
+    "scattering_model, method_name",
+    [
+        ("multislice", "forward"),
+        ("rytov", "rytov"),
+        ("firstborn", "firstborn"),
+        ("kinematic", "kinematic"),
+        ("ctf", "ctf"),
+    ],
+    ids=["multislice", "rytov", "firstborn", "kinematic", "ctf"],
+)
+def test_iterative_models_consistent_across_batch_size(
+    dummy_volume, scattering_model, method_name
+):
+    """Every iterative model must be invariant to the slice_batchsize chunking
+    (multislice through the ``forward`` dispatch, the others through their own
+    method)."""
     scat_iter = IterativeScattering(
         nxy=64,
         pixel_size=1.0,
@@ -107,7 +90,7 @@ def test_iterative_models_consistent_across_batch_size(dummy_volume, scattering_
     R = roma.rotvec_to_rotmat(torch.tensor([[0.0, 0.1, 0.0]])).to(dummy_volume.device)
     theta_matrix = build_affine_matrix(R)
 
-    method = getattr(scat_iter, scattering_model)
+    method = getattr(scat_iter, method_name)
     psi1 = method(dummy_volume, theta_matrix, slice_batchsize=1)
     psi4 = method(dummy_volume, theta_matrix, slice_batchsize=4)
 
@@ -565,41 +548,26 @@ def test_single_scatter_models_accept_a_complex_volume():
     assert torch.allclose(from_real, from_complex, rtol=1e-10, atol=1e-12)
 
 
-def test_propagator_is_cached_and_flipped_once():
-    model = Scattering(
-        8,
-        1.0,
-        300.0,
-        scattering_model="rytov",
-        nz=5,
-        ews_curvature_sign="negative",
-        progressbars=False,
-    )
-    V = torch.rand(1, 5, 8, 8)
-    F1 = model._propagator(V)
-    F2 = model._propagator(V)
-    # A zero-copy view of the one stored stack, already in traversal order.
-    assert F1.data_ptr() == F2.data_ptr() == model._F_traversal.data_ptr()
-    expected = (model.F_real + 1j * model.F_imag).flip(0)
-    assert torch.equal(F1, expected)
-    # Another dtype is converted once and cached.
-    Vd = V.double()
-    assert model._propagator(Vd) is model._propagator(Vd)
-    assert torch.equal(model._propagator(Vd), expected.to(torch.complex128))
-
-
-@pytest.mark.parametrize("sign", ["negative", "positive"])
-def test_propagator_stack_is_the_per_slice_stack(sign):
+@pytest.mark.parametrize(
+    "scattering_model, n, nz, px, sign",
+    [
+        ("rytov", 8, 5, 1.0, "negative"),
+        ("firstborn", 16, 9, 1.3, "negative"),
+        ("firstborn", 16, 9, 1.3, "positive"),
+    ],
+    ids=["rytov-negative", "firstborn-negative", "firstborn-positive"],
+)
+def test_propagator_is_the_cached_per_slice_stack(scattering_model, n, nz, px, sign):
     """The broadcast build is bitwise the per-slice `fresnel_propagator` stack,
-    held once, and is neither checkpoint state nor lost by `.double()`."""
+    held once (cached, and flipped once for the negative Ewald sign), and is
+    neither checkpoint state nor lost by `.double()`."""
     from specter.scattering._kernels import frequency_grid, fresnel_propagator
 
-    n, nz, px = 16, 9, 1.3
     model = Scattering(
         n,
         px,
         300.0,
-        scattering_model="firstborn",
+        scattering_model=scattering_model,
         nz=nz,
         ews_curvature_sign=sign,
         progressbars=False,
@@ -614,6 +582,18 @@ def test_propagator_stack_is_the_per_slice_stack(sign):
     assert torch.equal(torch.view_as_complex(model._F_traversal), traversal)
     assert [name for name, _ in model.named_buffers()].count("_F_traversal") == 1
     assert "_F_traversal" not in model.state_dict()
+
+    V = torch.rand(1, nz, n, n)
+    F1 = model._propagator(V)
+    F2 = model._propagator(V)
+    # A zero-copy view of the one stored stack, already in traversal order.
+    assert F1.data_ptr() == F2.data_ptr() == model._F_traversal.data_ptr()
+    assert torch.equal(F1, traversal)
+    # Another dtype is converted once and cached.
+    Vd = V.double()
+    assert model._propagator(Vd) is model._propagator(Vd)
+    assert torch.equal(model._propagator(Vd), traversal.to(torch.complex128))
+
     model.double()
     assert torch.equal(
         model._propagator(torch.zeros(1, nz, n, n, dtype=torch.float64)),

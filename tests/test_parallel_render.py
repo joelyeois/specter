@@ -37,45 +37,54 @@ from specter.specimen._parallel_render import (
 from conftest import monomer_library
 
 
-def test_resolve_render_devices_defaults_to_single_device():
-    assert resolve_render_devices("cpu", None) == [torch.device("cpu")]
-    assert resolve_render_devices("cpu", []) == [torch.device("cpu")]
+def _visible_render_devices() -> list[torch.device]:
+    """What `render_devices="auto"` must resolve to on this host."""
+    if torch.cuda.is_available():
+        return [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
+    return [torch.device("cpu")]
 
 
-def test_resolve_render_devices_honors_explicit_pool():
-    devices = resolve_render_devices("cpu", ["cpu", "cpu"])
-    assert devices == [torch.device("cpu"), torch.device("cpu")]
+@pytest.mark.parametrize(
+    "pool, expected",
+    [
+        (None, [torch.device("cpu")]),
+        ([], [torch.device("cpu")]),
+        (["cpu", "cpu"], [torch.device("cpu"), torch.device("cpu")]),
+        ("auto", _visible_render_devices()),
+    ],
+    ids=[
+        "none_defaults_to_single",
+        "empty_defaults_to_single",
+        "explicit_pool",
+        "auto",
+    ],
+)
+def test_resolve_render_devices(pool, expected: list[torch.device]) -> None:
+    assert resolve_render_devices("cpu", pool) == expected
 
 
-def test_build_templates_concurrently_serial_matches_keys():
+@pytest.mark.parametrize(
+    "keys, max_workers", [([0, 1, 2], 1), ([0, 1, 2, 3], 4)], ids=["serial", "parallel"]
+)
+def test_build_templates_concurrently_produces_every_key(
+    keys: list[int], max_workers: int
+) -> None:
     calls = []
 
     def build_one(key: int, device: torch.device) -> torch.Tensor:
         calls.append(key)
-        return torch.tensor([key])
-
-    result = build_templates_concurrently(
-        keys=[0, 1, 2],
-        build_one=build_one,
-        devices=[torch.device("cpu")],
-        max_workers=1,
-    )
-    assert calls == [0, 1, 2]  # max_workers=1 runs strictly in order
-    assert {k: v.item() for k, v in result.items()} == {0: 0, 1: 1, 2: 2}
-
-
-def test_build_templates_concurrently_parallel_produces_same_result():
-    def build_one(key: int, device: torch.device) -> torch.Tensor:
         time.sleep(0.01)
         return torch.tensor([key])
 
     result = build_templates_concurrently(
-        keys=[0, 1, 2, 3],
+        keys=keys,
         build_one=build_one,
         devices=[torch.device("cpu")],
-        max_workers=4,
+        max_workers=max_workers,
     )
-    assert {k: v.item() for k, v in result.items()} == {0: 0, 1: 1, 2: 2, 3: 3}
+    if max_workers == 1:
+        assert calls == keys  # max_workers=1 runs strictly in order
+    assert {k: v.item() for k, v in result.items()} == {k: k for k in keys}
 
 
 def test_build_templates_concurrently_actually_overlaps():
@@ -241,16 +250,6 @@ def test_resolve_render_workers_resolves_auto():
         resolve_render_workers("auto", n_species=1000) == RECOMMENDED_MAX_RENDER_WORKERS
     )
     assert resolve_render_workers("auto", n_species=3) == 3
-
-
-def test_resolve_render_devices_resolves_auto():
-    devices = resolve_render_devices("cpu", "auto")
-    if torch.cuda.is_available():
-        assert devices == [
-            torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())
-        ]
-    else:
-        assert devices == [torch.device("cpu")]
 
 
 # readd_hydrogens has to survive the process boundary: the PDB cache is built

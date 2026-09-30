@@ -21,11 +21,40 @@ _SMALL_KWARGS = dict(
 )
 
 
-def test_generate_produces_correct_shape_with_membrane_density():
-    gen = MembraneGenerator(seed=0, **_SMALL_KWARGS)
+_SH_KWARGS = dict(
+    target_shape=(80, 80, 80),
+    voxel_size=4.0,
+    shape_backend="spherical_harmonics",
+    sh_axes=(60.0, 60.0, 60.0),
+    sh_max_degree=8,
+    n_lipids_per_leaflet=6,
+)
+
+
+_SWEPT_SPLINE_KWARGS = dict(
+    target_shape=(90, 90, 90),
+    voxel_size=4.0,
+    shape_backend="swept_spline",
+    swept_total_length=300.0,
+    swept_step_length_angstrom=15.0,
+    swept_tube_radius=25.0,
+    n_lipids_per_leaflet=6,
+)
+
+
+_BACKEND_KWARGS = [_SMALL_KWARGS, _SH_KWARGS, _SWEPT_SPLINE_KWARGS]
+_BACKEND_IDS = ["small_default", "spherical_harmonics", "swept_spline"]
+
+
+@pytest.mark.parametrize("kwargs", _BACKEND_KWARGS, ids=_BACKEND_IDS)
+def test_generate_produces_correct_shape_with_membrane_density(kwargs: dict) -> None:
+    """Every shape_backend must be a drop-in for the others through the rest
+    of the pipeline -- same output contract, same calibrated BilayerProfile
+    underneath, only the shape geometry differs."""
+    gen = MembraneGenerator(seed=0, **kwargs)
     volume = gen.generate()
 
-    assert volume.shape == _SMALL_KWARGS["target_shape"]
+    assert volume.shape == kwargs["target_shape"]
     assert torch.isfinite(volume).all()
     assert volume.max() > 0
     assert gen.field is not None
@@ -309,46 +338,28 @@ def test_shape_backend_rejects_unknown_value():
         )
 
 
-_SH_KWARGS = dict(
-    target_shape=(80, 80, 80),
-    voxel_size=4.0,
-    shape_backend="spherical_harmonics",
-    sh_axes=(60.0, 60.0, 60.0),
-    sh_max_degree=8,
-    n_lipids_per_leaflet=6,
-)
+_SHAPE_BACKEND_KWARGS = [_SH_KWARGS, _SWEPT_SPLINE_KWARGS]
+_SHAPE_BACKEND_IDS = ["spherical_harmonics", "swept_spline"]
 
 
-def test_spherical_harmonics_backend_produces_correct_shape_with_membrane_density():
-    """shape_backend="spherical_harmonics" must be a drop-in for the other
-    backends through the rest of the pipeline -- same output contract, same
-    calibrated BilayerProfile underneath, only the shape geometry differs."""
-    gen = MembraneGenerator(seed=0, **_SH_KWARGS)
-    volume = gen.generate()
-
-    assert volume.shape == _SH_KWARGS["target_shape"]
-    assert torch.isfinite(volume).all()
-    assert volume.max() > 0
-    assert gen.field is not None
-    assert gen.profile is not None
-
-
-def test_spherical_harmonics_backend_is_seed_reproducible():
-    gen_a = MembraneGenerator(seed=3, **_SH_KWARGS)
-    gen_b = MembraneGenerator(seed=3, **_SH_KWARGS)
+@pytest.mark.parametrize("kwargs", _SHAPE_BACKEND_KWARGS, ids=_SHAPE_BACKEND_IDS)
+def test_shape_backend_is_seed_reproducible(kwargs: dict) -> None:
+    gen_a = MembraneGenerator(seed=3, **kwargs)
+    gen_b = MembraneGenerator(seed=3, **kwargs)
     volume_a = gen_a.generate()
     volume_b = gen_b.generate()
     assert torch.equal(volume_a, volume_b)
 
 
-def test_spherical_harmonics_backend_supports_transmembrane_placement():
+@pytest.mark.parametrize("kwargs", _SHAPE_BACKEND_KWARGS, ids=_SHAPE_BACKEND_IDS)
+def test_shape_backend_supports_transmembrane_placement(kwargs: dict) -> None:
     pdb_path = Path(__file__).parent / "test_data" / "1mbo.cif"
     if not pdb_path.exists():
         pytest.skip("bundled PDB fixture missing")
     gen = MembraneGenerator(
         transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=3)],
         seed=0,
-        **_SH_KWARGS,
+        **kwargs,
     )
     gen.generate()
     placements = gen.place_transmembrane(min_spacing_angstrom=15.0)
@@ -373,53 +384,6 @@ def test_spherical_harmonics_backend_warns_when_axes_too_small_for_reliable_reso
     )
     with pytest.warns(UserWarning, match="voxels/radius"):
         gen.generate()
-
-
-_SWEPT_SPLINE_KWARGS = dict(
-    target_shape=(90, 90, 90),
-    voxel_size=4.0,
-    shape_backend="swept_spline",
-    swept_total_length=300.0,
-    swept_step_length_angstrom=15.0,
-    swept_tube_radius=25.0,
-    n_lipids_per_leaflet=6,
-)
-
-
-def test_swept_spline_backend_produces_correct_shape_with_membrane_density():
-    """shape_backend="swept_spline" must be a drop-in for the other backends
-    through the rest of the pipeline -- same output contract, same
-    calibrated BilayerProfile underneath, only the shape geometry differs."""
-    gen = MembraneGenerator(seed=0, **_SWEPT_SPLINE_KWARGS)
-    volume = gen.generate()
-
-    assert volume.shape == _SWEPT_SPLINE_KWARGS["target_shape"]
-    assert torch.isfinite(volume).all()
-    assert volume.max() > 0
-    assert gen.field is not None
-    assert gen.profile is not None
-
-
-def test_swept_spline_backend_is_seed_reproducible():
-    gen_a = MembraneGenerator(seed=3, **_SWEPT_SPLINE_KWARGS)
-    gen_b = MembraneGenerator(seed=3, **_SWEPT_SPLINE_KWARGS)
-    volume_a = gen_a.generate()
-    volume_b = gen_b.generate()
-    assert torch.equal(volume_a, volume_b)
-
-
-def test_swept_spline_backend_supports_transmembrane_placement():
-    pdb_path = Path(__file__).parent / "test_data" / "1mbo.cif"
-    if not pdb_path.exists():
-        pytest.skip("bundled PDB fixture missing")
-    gen = MembraneGenerator(
-        transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=3)],
-        seed=0,
-        **_SWEPT_SPLINE_KWARGS,
-    )
-    gen.generate()
-    placements = gen.place_transmembrane(min_spacing_angstrom=15.0)
-    assert len(placements) > 0
 
 
 def test_spherical_harmonics_zero_amplitude_isotropic_matches_sphere_sdf():

@@ -124,9 +124,10 @@ from EM images of a real bead prep.
 ## Placement and polydispersity
 
 The packer places beads with the
-[sphere RSA backend](packing.md#rsa-sphere-packing), right after
-filaments. A bead is a sphere, so treating it as one approximates
-nothing, unlike proteins, which default to shape-based collision.
+[sphere RSA backend](packing.md#sphere-packing-for-beads-and-membranes),
+right after filaments. A bead is a sphere, so treating it as one
+approximates nothing. Proteins are packed by shape-based collision, the
+only protein backend.
 Beads avoid the membrane shell, the carbon film, and already-placed
 filaments and beads; the protein-fill stage that follows then avoids them.
 

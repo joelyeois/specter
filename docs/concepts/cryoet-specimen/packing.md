@@ -65,8 +65,9 @@ Within each region, the packer places species in two passes:
    truth, and it lands in picks by default.
 2. **Filler**: `ratio` on a spec. The packer fills in around the
    already-placed targets, drawing species in proportion to their ratios,
-   until it reaches the occupancy budget or the packing jams. Filler stays
-   out of picks by default.
+   until it reaches the occupancy budget or the packing jams. Filler is
+   also exported to picks by default, into a separate `-filler`-suffixed
+   file when the same species is also a target in that region.
 
 Targets going first is what makes an exact count meaningful. Ask for 25
 ribosomes after filling the box to jamming with filler and you will not
@@ -253,9 +254,10 @@ The shell distance field, the field from already-placed spheres, and their eleme
 
 If you want both obstacle avoidance and region restriction, you union the
 masks before taking the distance transform, which is the elementwise
-minimum of the two fields (the third panel above). That is how the
-protein-fill stage folds in the membrane shell, the carbon film, placed
-filaments, placed beads, and already-placed targets, all as one field.
+minimum of the two fields (the third panel above). That is how bead
+placement folds in the membrane shell and placed filaments as one field.
+Protein fill does not use this field at all: it collides against the
+boolean occupancy grid described above.
 
 Note the first panel: the valid region includes the vesicle's *interior*.
 The distance field alone cannot tell inside from outside. That is exactly

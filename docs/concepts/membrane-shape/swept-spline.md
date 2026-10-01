@@ -131,33 +131,46 @@ adjacent convex bulge is pulled inward; both reduce local curvature.
 
 ## Parameters at a glance
 
+These are the names a `[[membrane]]` TOML table and `MembraneGenerator`
+accept. The four size and shape parameters each have a `_range`
+counterpart: when the scalar is unset, every membrane instance draws its own
+value uniformly from the range.
+
 | Parameter | Meaning | Default |
 |---|---|---|
-| `flexibility` | Direction-correlation \(f\) of the random walk | 0.15 |
-| `total_length_angstrom` | Path contour length, Å | 500.0 |
-| `step_length_angstrom` | Spacing between sphere centers, Å | 15.0 |
-| `tube_radius_angstrom` | Tube radius, Å | 25.0 |
-| `radius_variation` | RMS fractional radius variation \(a\) | 0.0 |
-| `radius_variation_sigma_points` | Path-order smoothing for the radius noise, points | 2.0 |
-| `blend_sharpness_angstrom` | Smooth-min blend radius \(k\), Å | `0.5 * tube_radius_angstrom` |
-| `curvature_iterations` | Number of Laplacian relaxation steps | 15 |
+| `swept_flexibility` | Direction-correlation \(f\) of the random walk, in \((0, 1]\) | drawn from `swept_flexibility_range` = `(0.08, 0.25)` |
+| `swept_total_length` | Path contour length, Å | drawn from `swept_total_length_range` = `(1500, 2500)` |
+| `swept_tube_radius` | Tube radius, Å | drawn from `swept_tube_radius_range` = `(150, 400)` |
+| `swept_radius_variation` | RMS fractional radius variation \(a\) | drawn from `swept_radius_variation_range` = `(0.1, 0.3)` |
+| `swept_step_length_angstrom` | Spacing between sphere centers, Å | `0.5 * swept_tube_radius` |
+| `swept_radius_variation_sigma_points` | Path-order smoothing for the radius noise, points | 2.0 |
+| `swept_blend_sharpness_angstrom` | Smooth-min blend radius \(k\), Å | `0.5 * swept_tube_radius` |
+| `swept_path_smoothing_sigma_points` | Path-order smoothing of the path itself, points | 1.5 |
+| `swept_curvature_iterations` | Number of Laplacian relaxation steps | 15 |
+| `swept_curvature_step_fraction` | Step size of each relaxation step | 0.15 |
+
+`specter build tomogram` clamps the upper bounds of
+`swept_total_length_range` and `swept_tube_radius_range` so that an
+automatically sized organelle fits the box. The figures on this page call
+the underlying field function directly, whose keyword arguments drop the
+`swept_` prefix (`flexibility`, `tube_radius_angstrom`, ...).
 
 ![Flexibility swept from a nearly straight rod to a tightly wandering, near-self-touching walk.](../../assets/images/membrane-swept-flexibility-sweep.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Flexibility swept from a nearly straight rod to a tightly wandering, near-self-touching walk.
 ///
 
-`flexibility=0.15`: 0.05 is nearly a straight rod, 0.35 produces a sharp,
-near-self-touching bend (a good stress case, not a good default); 0.15
-gives a soft, organic, non-straight tube with no beading at the other
-defaults.
+In the flexibility sweep, 0.05 is nearly a straight rod and 0.35 produces a
+sharp, near-self-touching bend (a good stress case, not a good default).
+0.15 gives a soft, organic, non-straight tube with no beading, which is why
+the default `swept_flexibility_range` of `(0.08, 0.25)` brackets it.
 
 ## Limitations
 
 - **No branching.** The path is a single line; it cannot represent
   Y-junctions or networked tubule topology.
-- **Beading if mis-tuned.** `step_length_angstrom` must stay well under
-  `2 * tube_radius_angstrom`; the generator warns when it does not.
+- **Beading if mis-tuned.** `swept_step_length_angstrom` must stay well
+  under `2 * swept_tube_radius`; the generator warns when it does not.
 - **`cap_curvature` is an approximate proxy**, not exact mean curvature
   flow. An extreme enough bend can still leave a thin margin between
   leaflets even after relaxation.

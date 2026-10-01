@@ -171,6 +171,9 @@ A gold-standard run writes, into its job directory:
 - `volume_A.mrc` / `volume_B.mrc`: the two half-map reconstructions.
 - `epochs/<NNN>_A.mrc` / `epochs/<NNN>_B.mrc`: per-epoch snapshots of each
   half.
+- `epochs/volume_<NNN>_A.png` / `epochs/volume_<NNN>_B.png`: a preview
+  figure of each half's volume at every epoch, for checking progress without
+  opening the `.mrc` files.
 - `fsc_gold_standard.png`: the final half-map FSC, written once both
   halves finish.
 - `epochs/fsc_halfmap_<NNN>.png`: the half-map FSC recomputed after
@@ -229,7 +232,12 @@ list/show/diff CLI. `--project` and `--job_id` behave as documented there.
 comma-separated list (`0,1`), which trains across them via Lightning DDP,
 all-reducing gradients every step. For a gold-standard run, a
 comma-separated list instead splits the two halves across devices (see
-above) rather than sharding one half's batches across them. `--precision`
+above) rather than sharding one half's batches across them. A
+multi-GPU device string with `--halfset A`, `B` or `all` requires an
+explicit `--job_id`: DDP re-runs the pipeline once per rank, and
+auto-numbering needs a single process to choose the job directory. A
+`gold` run does not need one, since its orchestrator opens the job once
+before spawning the halves. `--precision`
 controls Lightning's training precision (`16-mixed` by default, forced to
 `32` on CPU); `--num_workers` sets dataloader worker processes.
 

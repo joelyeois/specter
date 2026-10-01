@@ -12,7 +12,7 @@ how `MembraneGenerator` builds that shape.
 
 !!! info "Source"
     Walks through `specter.specimen.membrane._field_spherical_harmonics`.
-    Figures are produced by `docs-figures/membrane_shape.py`, which calls
+    Figures are produced by `docs-figures/membrane_shape_spherical_harmonics.py`, which calls
     the same private helpers as the real code path.
 
 ## Star-convex surfaces
@@ -142,10 +142,14 @@ voxels, 81x at 3M, ~180x at 10M. Measured by
 
 ## Parameters
 
+These are the names a `[[membrane]]` TOML table and `MembraneGenerator`
+accept.
+
 | Parameter | Meaning | Default |
 |---|---|---|
 | `sh_max_degree` | Highest harmonic degree \(L\) | 8 |
-| `sh_axes` | Physical semi-axes \((a_x, a_y, a_z)\), Å | `(300, 300, 300)` |
+| `sh_axes` | Physical semi-axes \((a_x, a_y, a_z)\), Å | unset (drawn from `sh_axes_range`) |
+| `sh_axes_range` | `(low, high)` range each semi-axis is drawn from, uniformly and independently, when `sh_axes` is unset, Å | `(150, 450)` |
 | `sh_amplitude` | RMS fractional radius perturbation \(a\) | 0.15 |
 | `sh_spectrum_power` | Exponent \(p\) in \(\mathrm{Var}(c_{lm}) \propto [l(l+1)]^{-p}\) | 2.0 |
 
@@ -163,7 +167,12 @@ concavity artifacts.
 Isotropic, elongated, and flattened base ellipsoids, same random perturbation.
 ///
 
-`sh_axes` sets the base ellipsoid the perturbation rides on.
+`sh_axes` sets the base ellipsoid the perturbation rides on. Left unset,
+each instance draws its three semi-axes independently from `sh_axes_range`,
+which gives every organelle a mild anisotropy. The default range spans
+vesicle and small-organelle radii; `specter build tomogram` additionally
+clamps its upper bound so that an automatically sized organelle fits the
+box.
 
 ## Limitations
 

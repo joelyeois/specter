@@ -110,10 +110,13 @@ Region map, per-instance membrane labels, and per-instance protein/filament/bead
 - `regions`: `0` cytosol, `1` shell, `2` lumen.
 - `membrane_labels`: which membrane instance a shell voxel belongs to.
   The first write wins where two instances overlap.
-- `instance_labels`: one id per placed filament monomer, bead, target and
-  filler instance.
+- `instance_labels`: one id per filament, microtubule, bead, target,
+  filler and transmembrane protein instance. A filament or microtubule is
+  labelled as one object, not as its individual monomers or dimers.
 - Picks: copick-style `.ndjson` per species, positions and orientations.
-  The generator exports targets by default, but not filler particles.
+  The generator exports targets and filler by default. A species placed both
+  as a target and as filler in the same region keeps its filler instances in
+  a separate `-filler`-suffixed file.
 
 Membranes deliberately have no picks entry: a surface has no single
 natural "position" the way a protein does, so `membrane_labels` and
@@ -121,10 +124,6 @@ natural "position" the way a protein does, so `membrane_labels` and
 
 ## Limitations
 
-- **Transmembrane proteins get no per-instance voxel labels.** Their
-  density is present in the volume, and the generator records their
-  placements, but they do not appear in `instance_labels`. This is a
-  documented gap, not an oversight.
 - **Collision is voxel-quantized.** Protein placement tests each
   molecule's real rotated footprint against an occupancy grid, so the
   grid resolves a molecule's position only to the packing voxel size.
@@ -147,7 +146,7 @@ both generic bulk-material simulations with no placement logic of their
 own: the [gold beads](beads.md) (`gen_beads.m`) and the
 [carbon film](carbon-film.md) (`gen_carbon.m`/`carbonshape`). SPECTER
 adapts the [transmembrane placement](bilayer.md) construction from
-Polnet, as it does the bilayer's two-Gaussian profile.
+Polnet.
 
 ## References
 

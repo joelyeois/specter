@@ -40,7 +40,7 @@ field.
 - **Protein species**: `[[targets]]` (exact `n_copies` each, always
   exported to picks) and `[[filler]]`/`filler_from_pei2016`/
   `filler_from_cryoetsim` (packed around targets up to
-  `filler_occupancy_fraction`, excluded from picks by default). See
+  `filler_occupancy_fraction`, also exported to picks by default). See
   [Placement order & regions](#placement-order-regions) below.
 - **Membranes**: `[[membrane]]` entries: `shape_backend`
   (`spherical_harmonics` or `swept_spline`), size ranges
@@ -55,7 +55,9 @@ field.
   with a tubulin dimer gives a single protofilament, not a full tube.
 - **Gold fiducial beads**: `[[beads]]` entries (`radius`, `n_copies`), one per
   population; `radius` takes a single number or a `[low, high]` pair drawn per
-  bead. Beads avoid the membrane shell and already-placed
+  bead. The top-level `bead_roughness` (default `0.12`) sets how irregular each
+  bead's boundary is, as an RMS fraction of its radius; it also takes a single
+  number or a `[low, high]` pair drawn per bead, and `0.0` gives clean spheres. Beads avoid the membrane shell and already-placed
   filaments/microtubules, but aren't
   region-gated to cytosol/lumen. All beads go into one `gold-bead` pick
   file regardless of size.
@@ -82,8 +84,11 @@ per region:
    placed second, packed around the already-placed targets until it
    reaches `filler_occupancy_fraction` (a fraction of real footprint
    volume, per region) or the packing jams, whichever comes first, so you rarely need
-   to hand-tune it. Excluded from picks by default (`write_picks` still
-   controls this; see the CLI help for the exact rule).
+   to hand-tune it. Filler is exported to picks by default, alongside the
+   targets. A species declared both as a target and as filler, in the same
+   location, writes its filler instances to a separate `-filler`-suffixed
+   pick file, so the target file holds only the exact-count instances.
+   `write_picks = false` turns off pick export entirely.
 
 `location = "cytosol"` (default) or `"lumen"` on a `targets`/`filler` entry
 only matters when a `[[membrane]]` is present. Without one, the whole box
@@ -112,6 +117,32 @@ on its own, since the automatic cap measures the widest axis whenever
 outcome for a lamella. Set `seed` when a run has to reproduce a specimen
 whose lumen you have already checked.
 
+## Scattering factors & hydrogens
+
+Two fields choose the atomic scattering factors, split by material:
+
+- **`scattering_factors`** (default `shtyrov`) applies to biomolecules:
+  targets, filler, filaments, microtubules and transmembrane proteins.
+  Shtyrov factors are fitted per bonded species, so they need each
+  structure's bond topology. A `[[membrane]]` table that names its own
+  `parameterization` overrides this field for that population.
+- **`bulk_scattering_factors`** (default `kirkland`) applies to the carbon
+  film and the gold fiducial beads. Shtyrov factors are fitted for
+  biomolecules over a limited spatial-frequency range, and bulk materials
+  lie outside that domain.
+
+Under `shtyrov`, many bonded species name a hydrogen neighbour, so atom
+typing depends on hydrogens being present. A hydrogen-free deposition types
+completely only when a Monomer Library is available, through
+`monomer_library_path` or the `$CLIBD_MON` environment variable; without one,
+roughly 44% of a hydrogen-free protein falls back to per-element Peng
+factors. `readd_hydrogens` controls what the library does: `"auto"`
+(default) keeps hydrogens a file already carries and adds them only to a
+structure that has none, `true` always re-adds them from ideal geometry, and
+`false` adds no hydrogen density while still using the library for typing.
+See [Installation](../installation.md#monomer-library-for-shtyrov-scattering-factors)
+for obtaining the library.
+
 ## Compute & scaling flags
 
 Rendering dozens of species and packing hundreds of filler instances can
@@ -120,8 +151,8 @@ be slow or run out of memory past a small smoke-test box, so
 `accumulator_device = "auto"`, and `render_chunk_size = 64`. Keep those
 `"auto"` defaults for most runs rather than hand-tuning them:
 
-- **`device`**: `cpu | cuda | cuda:0 | 0,1,2 | auto`. A comma-separated
-  list of GPU indices (or `"auto"`, every visible GPU) pools those GPUs for
+- **`device`**: `cpu | cuda | cuda:0 | 0,1,2`. A comma-separated
+  list of GPU indices pools those GPUs for
   concurrent per-species rendering instead of a single device; the first
   entry becomes the primary device for everything else (packing itself
   always runs on CPU regardless).
@@ -261,7 +292,8 @@ larger than many systems' per-user home-directory quota).
 Alongside `{filename}.mrc`, by default you get:
 
 - **Picks** (`write_picks`): one copick-style
-  `{species}-{annotation_version}_orientedpoint.ndjson` file per species.
+  `{species}-{annotation_version}_orientedpoint.ndjson` file per species,
+  filler included (see [Placement order & regions](#placement-order-regions)).
 - **Segmentation** (`write_segmentation`):
   `{filename}_protein_labels.mrc` (always), plus
   `{filename}_membrane_labels.mrc` and `{filename}_regions.mrc`
@@ -281,6 +313,18 @@ both, so a per-class target can be built by union and a single-label atlas
 by whatever priority you prefer. Neither reduction is written for you: the
 volumes are kept separate because an exclusive atlas cannot be turned back
 into overlapping masks, while the reverse is trivial.
+
+## Job tracking
+
+By default a run writes into `output_dir` as a flat directory. Setting
+`--project` or `--job_id` routes the output through `specter.jobs` instead:
+the run lands in `output_dir/[project/]tomograms/J00N/`, numbered, with a
+`job.json` recording the full parameter set and git commit. When this
+config is chained into `specter simulate tiltseries` via
+`--tomogram_config`, leaving both fields unset here while tracking the tilt
+series run passes that run's project down to the tomogram. See
+[Manage jobs](jobs.md) for the directory layout and the `specter jobs`
+commands.
 
 ## Multiple tomograms
 

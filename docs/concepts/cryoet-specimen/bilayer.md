@@ -191,8 +191,12 @@ resolve the *sign* of that axis. With no topology information
 (cytoplasmic vs. extracellular) to break the symmetry, which end becomes
 \(+z\) is an arbitrary but deterministic PCA-sign choice.
 
-The generator chooses species per site by weighted random draw on
-`frequency`. The requested site count isn't guaranteed: if the surface is
+`frequency` sets both how many sites are requested and how they are
+shared out: the generator samples `sum(frequency)` sites over all species,
+then chooses a species per site by weighted random draw on `frequency`. In a
+TOML config the same field is spelled `n_copies` on a
+`[[membrane_transmembrane_specs]]` entry, and counts per membrane instance.
+The requested site count isn't guaranteed: if the surface is
 too small for that many well-spaced sites, or the working grid is too
 coarse for reliable surface projection, the generator warns and places
 what it found.
@@ -204,8 +208,8 @@ what it found.
 | `bilayer_thickness` | Phosphate-to-phosphate leaflet spacing \(t\), Å | 38.0 |
 | `bilayer_layer_sigma_angstrom` | Additional Gaussian broadening along \(z\), Å | 0.0 |
 | `min_transmembrane_spacing` | Minimum centre-to-centre site spacing, Å | 40.0 |
-| `transmembrane_occupancy_fraction` | Surface occupancy target for site sampling | 0.05 |
-| `frequency` (per spec) | Relative weight among transmembrane species | 1 |
+| `transmembrane_occupancy_fraction` | Protein-over-lipid blending threshold, as a fraction of \(\psi_{\max}\) (see below) | 0.05 |
+| `frequency` (per spec; TOML `n_copies`) | Site count contributed by the species, and its weight in the per-site draw | 1 |
 | `tm_span_mask` (per spec) | Atom mask selecting the membrane-spanning region | None (full z-extent) |
 
 \(t\) defaults to 38.0 Å, inside the published 36–39 Å range for fluid
@@ -213,6 +217,17 @@ phosphatidylcholine. It was 30.0 until 2026-08-30, the midpoint of
 polnet's `MB_THICK_RG` (25–35 Å) — a range sitting entirely below the
 experimental one. The reference template's own spacing is 40 Å, so the
 default rescales it by 0.95.
+
+`transmembrane_occupancy_fraction` does not set how many proteins are
+placed. It sets where an inserted protein replaces the lipid instead of
+adding to it, since a real transmembrane protein displaces lipid where it
+sits. With \(f\) the fraction and \(\psi_{\max}\) the bilayer profile's
+peak, the membrane density is replaced by the protein's wherever the
+protein template's density exceeds \(1.5\,f\,\psi_{\max}\), left untouched
+where it is below \(0.5\,f\,\psi_{\max}\), and blended by a smoothstep in
+between. The midpoint of that band, \(f\,\psi_{\max}\), is the boundary
+that assigns a voxel to the protein's instance label rather than to the
+membrane label.
 
 `bilayer_layer_sigma_angstrom` is *additional* broadening, and defaults to none.
 It set the leaflet peak width of the analytic profile; the measured
@@ -235,9 +250,6 @@ width left to set here — only blur to add.
   real membranes are not.
 - **No lipid composition.** One profile per membrane instance, with no
   notion of rafts, cholesterol, or local thickness variation.
-- **Transmembrane instances get no voxel labels.** Their density is in the
-  volume, and the generator records their placements, but they do not
-  appear in `instance_labels`.
 - **Depth alignment defaults to the full z-extent** when you don't give a
   `tm_span_mask`, which is wrong for a protein with a large soluble domain
   on one side only.

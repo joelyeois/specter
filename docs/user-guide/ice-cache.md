@@ -223,7 +223,7 @@ Three properties of the command exist to make a multi-hour run practical:
 
 - **Configurations shard across devices.** `--device 0,1,2,3` runs one worker
   process per GPU, each taking a disjoint slice, so four GPUs finish a library
-  roughly four times faster. `--device auto` uses every visible GPU. Size the
+  roughly four times faster. Size the
   pool against the measured reserved peak with room for variation: one
   configuration per GPU at a time, on **each** device in the pool.
 - **Runs resume.** A configuration whose file already exists is skipped, so

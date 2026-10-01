@@ -1,0 +1,23 @@
+{
+  "checkout": "/tmp/specter-micrograph-slice-views",
+  "device": "cuda:3",
+  "gpu": "NVIDIA L40",
+  "torch": "2.5.1+cu121",
+  "stages": {
+    "assembly_seconds": 125.05951389297843,
+    "placement_seconds": 7.294433772563934,
+    "propagation_seconds": 5.740391530096531,
+    "detector_seconds": 0.022138584405183792
+  },
+  "volume_shape": [
+    1,
+    500,
+    4096,
+    4096
+  ],
+  "volume_device": "cuda:3",
+  "peak_allocated_bytes": 35411955712,
+  "peak_reserved_bytes": 35483811840,
+  "cli_seconds_excluding_volume_capture": 141.63287661597133,
+  "capture_seconds": 0
+}

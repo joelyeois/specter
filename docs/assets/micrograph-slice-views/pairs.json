@@ -1,0 +1,152 @@
+{
+  "gpu": "NVIDIA L40",
+  "device": "cuda:3",
+  "shape": [
+    1,
+    500,
+    4096,
+    4096
+  ],
+  "trials": [
+    {
+      "placement": "resident",
+      "pair": 0,
+      "variant": "before",
+      "seconds": 5.745812799781561,
+      "peak_allocated_bytes": 34896615936,
+      "start_allocated_bytes": 33755758592
+    },
+    {
+      "placement": "resident",
+      "pair": 0,
+      "variant": "after",
+      "seconds": 5.674773253500462,
+      "peak_allocated_bytes": 34829507072,
+      "start_allocated_bytes": 33755758592
+    },
+    {
+      "placement": "resident",
+      "pair": 1,
+      "variant": "after",
+      "seconds": 5.675811171531677,
+      "peak_allocated_bytes": 34829507072,
+      "start_allocated_bytes": 33755758592
+    },
+    {
+      "placement": "resident",
+      "pair": 1,
+      "variant": "before",
+      "seconds": 5.751928307116032,
+      "peak_allocated_bytes": 34896615936,
+      "start_allocated_bytes": 33755758592
+    },
+    {
+      "placement": "resident",
+      "pair": 2,
+      "variant": "before",
+      "seconds": 5.913176659494638,
+      "peak_allocated_bytes": 34896615936,
+      "start_allocated_bytes": 33755758592
+    },
+    {
+      "placement": "resident",
+      "pair": 2,
+      "variant": "after",
+      "seconds": 5.518802531063557,
+      "peak_allocated_bytes": 34829507072,
+      "start_allocated_bytes": 33755758592
+    },
+    {
+      "placement": "streamed",
+      "pair": 0,
+      "variant": "before",
+      "seconds": 13.338869143277407,
+      "peak_allocated_bytes": 1342177280,
+      "start_allocated_bytes": 201326592
+    },
+    {
+      "placement": "streamed",
+      "pair": 0,
+      "variant": "after",
+      "seconds": 7.4798765406012535,
+      "peak_allocated_bytes": 1342177280,
+      "start_allocated_bytes": 201326592
+    },
+    {
+      "placement": "streamed",
+      "pair": 1,
+      "variant": "after",
+      "seconds": 7.445040550082922,
+      "peak_allocated_bytes": 1342177280,
+      "start_allocated_bytes": 201326592
+    },
+    {
+      "placement": "streamed",
+      "pair": 1,
+      "variant": "before",
+      "seconds": 13.500265419483185,
+      "peak_allocated_bytes": 1342177280,
+      "start_allocated_bytes": 201326592
+    },
+    {
+      "placement": "streamed",
+      "pair": 2,
+      "variant": "before",
+      "seconds": 13.343641936779022,
+      "peak_allocated_bytes": 1342177280,
+      "start_allocated_bytes": 201326592
+    },
+    {
+      "placement": "streamed",
+      "pair": 2,
+      "variant": "after",
+      "seconds": 7.572158042341471,
+      "peak_allocated_bytes": 1342177280,
+      "start_allocated_bytes": 201326592
+    }
+  ],
+  "precision": [
+    {
+      "placement": "resident",
+      "pair": 0,
+      "bitwise_equal": true,
+      "max_abs_error": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "placement": "resident",
+      "pair": 1,
+      "bitwise_equal": true,
+      "max_abs_error": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "placement": "resident",
+      "pair": 2,
+      "bitwise_equal": true,
+      "max_abs_error": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "placement": "streamed",
+      "pair": 0,
+      "bitwise_equal": true,
+      "max_abs_error": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "placement": "streamed",
+      "pair": 1,
+      "bitwise_equal": true,
+      "max_abs_error": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "placement": "streamed",
+      "pair": 2,
+      "bitwise_equal": true,
+      "max_abs_error": 0.0,
+      "relative_l2": 0.0
+    }
+  ]
+}

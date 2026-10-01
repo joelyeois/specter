@@ -1,0 +1,7 @@
+{
+  "clean_bitwise_equal": true,
+  "noisy_bitwise_equal": true,
+  "clean_max_abs_error": 0.0,
+  "noisy_max_abs_error": 0.0,
+  "power_bitwise_equal": true
+}

@@ -280,7 +280,7 @@ class IterativeScattering(L.LightningModule):
     def _fetch_volume_slices(
         self,
         V: torch.Tensor,
-        slice_positions: torch.Tensor,
+        slice_positions: torch.Tensor | slice,
         is_identity: bool,
         rotator: VolumeRotator | None,
         theta_matrix: torch.Tensor,
@@ -299,8 +299,9 @@ class IterativeScattering(L.LightningModule):
 
         Parameters
         ----------
-        slice_positions : torch.Tensor
-            1D tensor of slice indices (in processing order), shape (K,).
+        slice_positions : torch.Tensor or slice
+            Slice indices in processing order. A Python slice avoids an
+            advanced-indexing copy for consecutive, unrotated planes.
         roi_size : int, optional
             Size of the square ROI to fetch. Defaults to ``self.nxy``; callers
             that need a larger canvas (e.g. ``multislice`` with ``pad_fft=True``)
@@ -314,7 +315,11 @@ class IterativeScattering(L.LightningModule):
         size = self.nxy if roi_size is None else roi_size
         if is_identity:
             B = V.shape[0]
-            K = slice_positions.shape[0]
+            K = (
+                len(range(*slice_positions.indices(V.shape[1])))
+                if isinstance(slice_positions, slice)
+                else slice_positions.shape[0]
+            )
             Y, X = V.shape[-2], V.shape[-1]
             y_end, x_end = y_start + size, x_start + size
             # Requested window may exceed V's actual extent (e.g. a padded canvas
@@ -332,6 +337,7 @@ class IterativeScattering(L.LightningModule):
                 ].to(device)
             return out
         assert rotator is not None
+        assert isinstance(slice_positions, torch.Tensor)
         slice_indices = slice_positions.float() - (nz_new - 1) / 2
         # device= lets sample_rotated_slices interpolate directly on `device`
         # via a small windowed transfer when V lives elsewhere -- e.g. when
@@ -360,8 +366,8 @@ class IterativeScattering(L.LightningModule):
         Yield ``(i, nz_new, slice_sample)`` for each Z-slice of a (possibly
         rotated) volume, in EWS processing order.
 
-        For the identity transform, each slice is fetched individually
-        (cheap direct indexing). Otherwise slices are fetched in
+        For the identity transform, each slice is fetched as a view, with
+        a device transfer only when needed. Otherwise slices are fetched in
         ``slice_batchsize``-sized batches via `_fetch_volume_slices` and
         cached, trading memory for fewer `sample_rotated_slices` calls.
 
@@ -395,9 +401,10 @@ class IterativeScattering(L.LightningModule):
         slices_block: torch.Tensor | None = None
         for i in pbar:
             if is_identity:
+                z = nz_new - 1 - i if self.ews_curvature_sign == "negative" else i
                 slice_sample = self._fetch_volume_slices(
                     V,
-                    indices[i : i + 1],
+                    slice(z, z + 1),
                     is_identity,
                     rotator,
                     theta_matrix,

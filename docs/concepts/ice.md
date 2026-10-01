@@ -108,6 +108,53 @@ on local structure than the ML-BOP penalty, and S(k) matching alone can
 still hide badly overlapping atoms behind a good Fourier-amplitude match
 when this is the only penalty active.
 
+## Rendering
+
+The optimised positions are one site per water molecule, and each site is
+rendered as a whole molecule by convolving the positions with a single
+potential kernel (`ice._kernels.build_water_kernel`). The kernel is the
+oxygen potential plus the potentials of two hydrogens, each smeared uniformly
+over a spherical shell at the O-H bond length of 0.9572 Å.
+
+Hydrogen cannot be omitted from an electron scattering model. By the
+Mott-Bethe relation the electron scattering factor of an atom goes as
+\((Z - f_x(k))/k^2\), so a diffuse one-electron atom contributes strongly at
+low spatial frequency: the two hydrogens carry 35% of the molecule's
+integrated potential under Kirkland factors. Rendered at 0.93 g/cm³, an
+oxygen-only kernel gives ice a mean inner potential of 2.95 V under Kirkland
+factors (2.04 V under the Shtyrov `O(HH)` factor), whereas the full kernel
+gives 4.50-4.53 V under Kirkland factors at 0.5-1.5 Å voxels. Liquid water
+measures 4.48 ± 0.19 V by electron holography (Yesibolati et al., 2020),
+about 4.21 V once scaled to the density of ice. An isolated-atom
+superposition cannot represent bonding and is expected to sit somewhat above
+such a measurement.
+
+The shell, rather than placing both hydrogens on the oxygen, follows from the
+molecules' random orientations: a hydrogen's contribution decoheres with
+spatial frequency as \(\operatorname{sinc}(2\pi k d)\) for bond length
+\(d\). Both placements give the same mean inner potential, but collapsing the
+hydrogens onto the oxygen fixes that factor at 1 and overstates the ice's
+power at high frequency (about 1.9× from 5 Å to Nyquist at 1 Å per voxel).
+The shell is applied as one Fourier-space multiply.
+
+The kernel uses the `bulk_scattering_factors` setting (`Ice(parameterization=...)`
+in Python), which defaults to `"kirkland"`. It is separate from
+`scattering_factors`, which governs biomolecules: the Shtyrov factors are
+fitted to bonded species of biomolecules over 0.011-0.62 Å⁻¹, and a mean
+inner potential is a \(k = 0\) quantity outside that range. The full
+Shtyrov kernel gives 3.6 V.
+
+Two grid conventions keep the rendered canvas uniform up to its faces. The
+kernel is odd-sized and centred on a voxel, so each molecule's potential is
+centred on its own position rather than half a voxel away (see
+[Atomic potentials](atomic-potentials.md#supersampling-then-pooling)). The
+convolution with the positions is periodic
+(`potential.potential_from_deltas(boundary="periodic")`): an ice canvas is a
+piece of bulk, so a molecule near one face contributes across the opposite
+face rather than being truncated. A linear convolution would leave each face
+plane at a fraction of the bulk potential, which the CTF would turn into a
+rim at the box boundary.
+
 ## Solvent displacement
 
 Ice is added to a specimen in proportion to the space the specimen leaves
@@ -171,12 +218,15 @@ the summed image has the right second-order statistics without the frames
 being simulated. \(\mathcal S(0) = 1\): the mean potential, which sets the
 absorption and the volume the specimen displaces, is kept.
 
-The correlation comes from one of two models (`ice.solvent_coherence`).
-McMullan et al. (2015) assume every molecule takes an independent Gaussian
+The correlation comes from one of two models, selected by the `model`
+argument of `ice.solvent_coherence` and `ice.apply_solvent_exposure`:
+`"gaussian"` or `"relaxed"`. The generators always use `"relaxed"`, the
+default; `"gaussian"` is reachable only through those functions. The
+`"gaussian"` model follows McMullan et al. (2015), who assume every molecule takes an independent Gaussian
 step of variance \(\sigma_0^2\) per axis per e⁻/Å², so that
 \(\rho_k(\tau) = e^{-2\pi^2\sigma_0^2 k^2 \tau}\); they measured
-\(\sigma_0^2 = 0.38\) Å² per e⁻/Å² from the 3.7 Å ring at 300 kV. The default
-model, `"relaxed"`, is measured instead. Periodic 256 Å boxes of library ice
+\(\sigma_0^2 = 0.38\) Å² per e⁻/Å² from the 3.7 Å ring at 300 kV. The
+`"relaxed"` model is measured instead. Periodic 256 Å boxes of library ice
 were evolved by such Gaussian kicks, each followed by the library's own
 \(S(k)\) and ML-BOP relaxation so that every state is water, and the
 coherence was measured without a grid, from the structure factor of all
@@ -269,6 +319,10 @@ fade the solvent that the exposure filter already decorrelates.
   Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019). Machine learning
   coarse grained models for water. *Nature Communications*, 10, 379.
   [doi:10.1038/s41467-018-08222-6](https://doi.org/10.1038/s41467-018-08222-6)
+- Yesibolati, M. N., Laganà, S., Sun, H., Beleggia, M., Kathmann, S. M.,
+  Kasama, T., & Mølhave, K. (2020). Mean inner potential of liquid water.
+  *Physical Review Letters*, 124, 065502.
+  [doi:10.1103/PhysRevLett.124.065502](https://doi.org/10.1103/PhysRevLett.124.065502)
 - Tersoff, J. (1988). New empirical approach for the structure and energy
   of covalent systems. *Physical Review B*, 37(12), 6991–7000.
   [doi:10.1103/PhysRevB.37.6991](https://doi.org/10.1103/PhysRevB.37.6991)

@@ -164,9 +164,15 @@ misinterpret the exit wave it is given; only code building `Aberration`,
 
 You can layer four independent multiplicative amplitude envelopes onto
 the transfer function, each damping high-resolution signal for a
-different physical reason (`aberrations/_envelopes.py`, ported from
-[teamtomo](https://github.com/teamtomo)'s
-[`torch_fourier_filter.envelopes`](https://github.com/teamtomo/torch-fourier-filter)):
+different physical reason (`aberrations/_envelopes.py`). The B-factor and
+coherence envelopes are ported from [teamtomo](https://github.com/teamtomo)'s
+[`torch_fourier_filter.envelopes`](https://github.com/teamtomo/torch-fourier-filter).
+The dose envelope departs from that source: upstream evaluates the
+Grant & Grigorieff decay at the final exposure only, whereas SPECTER
+averages it over the exposure interval each image spans, as described
+below.
+
+
 
 | Envelope | Physical cause | Parameter |
 |---|---|---|

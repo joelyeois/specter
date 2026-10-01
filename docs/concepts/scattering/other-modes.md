@@ -103,9 +103,11 @@ single transmission function with no propagation step at all,
 
 This is also what `scattering_model="ctf"` returns as a real-valued
 projected potential (`2\sigma\Delta z \sum_z V_z`, without the complex
-exponential), for use with `aberration_model="linear"`'s separate
-CTF-based intensity model (see [Detector](../detector.md) and
-[Aberrations](../aberrations.md)).
+exponential), which feeds the linear (weak-phase-object) CTF image model
+(see [Detector](../detector.md) and [Aberrations](../aberrations.md)).
+That aberration model is not a separate setting: every imager derives it
+from `scattering_model` (`aberrations.aberration_model_for_scattering`),
+selecting `"linear"` for `"ctf"` and `"nonlinear"` for every other model.
 
 ## Accuracy vs. thickness
 

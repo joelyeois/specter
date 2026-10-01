@@ -67,9 +67,11 @@ from each other, across a whole micrograph; see
 [Pipeline overview](pipeline-overview.md#how-the-generator-classes-use-it).
 
 `Crowding.min_distance` (the Poisson-disk minimum separation) controls
-sampling density; `max_distance_z` and an implicit XY bound derived from
-the volume size cap it. In a TOML config the same fields carry a `crowd_`
-prefix (`crowd_min_distance`, `crowd_max_distance_z`). `n_points=inf` by default, so
+sampling density; `max_distance_z` and `max_distance_xy` bound the region
+it fills, in Å. Left unset, `max_distance_xy` is the template's edge length
+plus `min_distance` (\(n\,\Delta x + d_\text{min}\)). In a TOML config the
+same fields carry a `crowd_` prefix (`crowd_min_distance`,
+`crowd_max_distance_z`, `crowd_max_distance_xy`). `n_points=inf` by default, so
 sampling continues until the box is full rather than stopping at a fixed
 count.
 
@@ -86,6 +88,18 @@ than a controlled single-particle experiment. `chunk_size` limits how many dupli
 `CrowdWithDuplicates` rotates per batch, trading GPU memory for speed;
 the default of 1 is the memory-safe choice, and `None` rotates every
 duplicate at once.
+
+Before rotating, `CrowdWithDuplicates` crops the template to the smallest
+centred cube that no rotation about its centre can move density out of
+(`crowding.rotation_safe_crop`). A template's box is sized for the image
+rather than for the molecule, so most of it is empty, and rotation preserves
+distance from the centre. The crop's half-width is the radius of the
+furthest occupied voxel plus \(\sqrt{3}\) voxels, because trilinear
+resampling can carry density from radius \(R\) to one voxel diagonal
+further out. Each axis keeps its parity, so the crop's centre stays where the
+template's was. The crop changes the image only through the resampling
+grid's normalisation, at the \(10^{-5}\) relative level, and draws no
+random numbers, so a seeded specimen is unchanged.
 
 ### Water–air interface adsorption
 

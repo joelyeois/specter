@@ -74,11 +74,13 @@ modes](other-modes.md#accuracy-vs-thickness) for the measured error curves.
 
 **Ewald sphere curvature sign.** Before propagation, `ews_curvature_sign`
 (`"negative"` by default, `"positive"` to match [CryoSPARC](https://cryosparc.com/)) determines
-whether the volume's Z-slices traverse front-to-back or
-back-to-front (`torch.flip(V, dims=(1,))`). Multislice, Rytov, and first
-Born each propagate a slice's contribution a different net distance to
-the exit plane, so reversing the traversal order changes which face of
-the specimen accumulates the least propagation and which the most.
+the order in which the beam traverses the volume's Z-slices. Under
+`"positive"` the beam enters at slice 0 and exits after the last slice;
+under `"negative"` it enters at the last slice and exits after slice 0.
+Multislice, Rytov, and first Born each propagate a slice's contribution a
+different net distance to the exit plane, so reversing the traversal order
+changes which face of the specimen accumulates the least propagation and
+which the most.
 
 **Amplitude contrast.** `alpha` (0 by default) sets the fraction of the
 potential treated as absorptive, via `potential.apply_amplitude_contrast`:
@@ -100,20 +102,6 @@ avoids ever materializing a second full-size rotated copy of the volume.
 Both classes implement the same five models with the same formulas; only
 the source of each Z-slice differs.
 
-## References
-
-- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
-  formation. In *Current Approaches to Cryo-Electron Microscopy*,
-  *Progress in Molecular Biology and Translational Science*. Elsevier.
-  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
-- Yonekura, K., Braunfeld, M. B., Maki-Yonekura, S., & Agard, D. A. (2006).
-  Electron energy filtering significantly improves amplitude contrast of
-  frozen-hydrated protein at 300 kV. *Journal of Structural Biology*, 156,
-  524–536. [doi:10.1016/j.jsb.2006.07.016](https://doi.org/10.1016/j.jsb.2006.07.016)
-- Langmore, J. P., & Smith, M. F. (1992). Quantitative energy-filtered electron
-  microscopy of biological molecules in ice. *Ultramicroscopy*, 46, 349–373.
-
-
 ## Mean-free-path absorption support
 
 For particle generators, `Propagation(absorption_model="inelastic_mfp")`
@@ -122,6 +110,21 @@ when constructing `Propagation` directly. Without `inelastic_mfp_specimen`,
 the solvent-present case uses uniform absorption; specifying a specimen MFP
 builds a material-dependent field before solvent blending. With no solvent
 and no specimen MFP, no absorption is assigned.
+
+The `specter simulate particles`, `simulate micrograph` and
+`simulate tiltseries` configs expose the same settings as flat TOML fields,
+each with a matching `--<field>` flag:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `absorption_model` | `"alpha"` | `"alpha"` scales the real potential by the amplitude-contrast ratio; `"inelastic_mfp"` derives the imaginary potential per material from a mean free path and ignores `alpha`, including a `.cs`/`.star` file's |
+| `inelastic_mfp_solvent` | unset | Ice mean free path in Å; unset takes the voltage-dependent value described below |
+| `inelastic_mfp_specimen` | unset | Specimen mean free path in Å; unset gives the specimen the ice value, so it carries no absorption contrast (2460 Å is the derived protein value at 300 kV) |
+| `objective_aperture` | unset | Objective aperture semi-angle in mrad (see [Objective aperture](#objective-aperture)); unset applies no aperture |
+| `dose_envelope_target` | `"transfer_function"` | Where the dose envelope acts: `"transfer_function"` filters the whole image, solvent included; `"specimen"` damages the specimen potential before ice is added |
+
+`inelastic_mfp_solvent`, `inelastic_mfp_specimen` and `objective_aperture`
+take effect only under `absorption_model="inelastic_mfp"`.
 
 The solvent mean free path defaults to the value for amorphous ice at the
 generator's accelerating voltage, from `potential.ice_inelastic_mfp`. Two
@@ -188,7 +191,8 @@ insufficient for the occupancy estimator. It still supports `alpha`. This
 restriction does not remove the low-level propagators' support for supplied
 complex potentials.
 
-A possible extension is described in [the Himes-style design sketch](himes-inelastic-design.md).
+A spectral, exposure-resolved absorption model is available separately through
+the [frozen-plasmon Python API](frozen-plasmon.md).
 
 ### Objective aperture
 
@@ -238,3 +242,16 @@ The [frozen-plasmon Python API](frozen-plasmon.md) adds separate spectral
 absorption sources, explicit solvent trajectories, paired slice propagation
 and incoherent exposure integration. It requires explicit source calibration;
 the included Drude spectrum is a development approximation.
+
+## References
+
+- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
+  formation. In *Current Approaches to Cryo-Electron Microscopy*,
+  *Progress in Molecular Biology and Translational Science*. Elsevier.
+  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+- Yonekura, K., Braunfeld, M. B., Maki-Yonekura, S., & Agard, D. A. (2006).
+  Electron energy filtering significantly improves amplitude contrast of
+  frozen-hydrated protein at 300 kV. *Journal of Structural Biology*, 156,
+  524–536. [doi:10.1016/j.jsb.2006.07.016](https://doi.org/10.1016/j.jsb.2006.07.016)
+- Langmore, J. P., & Smith, M. F. (1992). Quantitative energy-filtered electron
+  microscopy of biological molecules in ice. *Ultramicroscopy*, 46, 349–373.

@@ -41,12 +41,17 @@ computes every slice's contribution as one batched FFT pair rather than
 bound memory. A fully parallel forward pass is both faster and, via
 checkpointing, cheaper to hold gradients for than replaying a sequential
 recursion hundreds to a thousand slices deep, which is what would make
-Rytov attractive inside an iterative, tilt-aware reconstruction loop. No
-pipeline wires it in yet, however: `parallel_rytov` is correctness- and
-gradient-tested (`tests/test_scattering.py`) but not called from any
-pipeline, config, or reconstructor class, and `TomogramReconstructor`
-(the one class that uses `IterativeScattering` at all) still defaults to
-`scattering_model="multislice"`.
+Rytov attractive inside an iterative, tilt-aware reconstruction loop.
+`parallel_rytov` is not one of the `scattering_model` options: it is absent
+from `specter.options.ScatteringModel`, from every config and from the CLI.
+It is reached either by calling the method directly or by constructing
+`IterativeScattering(..., scattering_model="rytov_parallel")`, an
+undocumented string that `IterativeScattering.forward` dispatches on and
+that falls outside the type annotation. `Scattering` does not accept it.
+The method is correctness- and gradient-tested
+(`tests/test_scattering.py`), but no pipeline, config or reconstructor
+calls it, and `TomogramReconstructor` (the one class that uses
+`IterativeScattering`) defaults to `scattering_model="multislice"`.
 
 ## Accuracy vs. thickness
 

@@ -31,7 +31,7 @@ which elementary functions they sum:
 | Parameterization | Fourier-space term | Real-space term |
 |---|---|---|
 | Kirkland | Lorentzian \(a/(k^2+b)\) **and** Gaussian \(c\,e^{-dk^2}\) | screened Coulomb (Yukawa) **and** Gaussian |
-| Lobato | rational \(a(2+bk^2)/(1+bk^2)^2\) | modified Bessel \(K_0\), \(K_1\) |
+| Lobato | rational \(a(2+bk^2)/(1+bk^2)^2\) | screened Coulomb (Yukawa) **and** exponential |
 | Shtyrov / Peng | Gaussian \(a\,e^{-bk^2/4}\) only | Gaussian only |
 
 ## Kirkland: Lorentzian + Gaussian sum
@@ -95,16 +95,20 @@ angle) more tightly than Kirkland's Lorentzian+Gaussian sum:
 f_e(k) = \sum_{i=1}^{5} a_i\, \frac{2 + b_i k^2}{(1 + b_i k^2)^2}
 \]
 
-(`lobato_atomic_potential_3d_fourier`, Lobato Eq. 56.) This rational form's
-real-space inverse transform has no elementary closed form. It comes out
-in terms of the modified Bessel functions \(K_0\) and \(K_1\)
-(`lobato_atomic_potential_3d`, Lobato Eq. 15):
+(`lobato_atomic_potential_3d_fourier`, Lobato Eq. 56.) Each rational term
+inverts to an elementary real-space function, a screened Coulomb term
+\(e^{-2\pi r/\sqrt{b_i}}/r\) plus a bare exponential
+(`lobato_atomic_potential_3d`):
 
 \[
 V(r) = \frac{\pi^2}{\kappa} \sum_{i=1}^{5} \frac{a_i}{b_i^{3/2}}
        \left(\frac{\sqrt{b_i}}{\pi r} + 1\right) e^{-2\pi r/\sqrt{b_i}},
 \qquad \kappa = \frac{1}{2\pi a_0 e}
 \]
+
+The modified Bessel functions \(K_0\) and \(K_1\) enter only the
+projected, two-dimensional potential (`lobato_atomic_potential_2d`), where
+the integral of these terms along the beam direction produces them.
 
 `ice/_kernels.py` and `PotentialBuilder` treat Kirkland and Lobato as
 interchangeable, equally-validated element-indexed parameterizations;
@@ -249,6 +253,8 @@ voxel grid two ways:
   the main volume's voxel size. It splats atom positions onto the main
   grid with `soft_voxelize_coordinates` (trilinear, differentiable) and
   FFT-convolves them with the pooled kernel, once per unique element.
+  The grid parities of this path are fixed; see
+  [below](#supersampling-then-pooling).
 - **Analytic scatter-add** (`method="analytic"`, `PotentialBuilder`'s
   default regardless of parameterization): rather than supersampling and
   pooling, `PotentialBuilder` integrates each atom's Gaussian terms
@@ -265,7 +271,32 @@ voxel grid two ways:
   the only option under `periodic=True`, which the analytic path does not
   implement.
 
-Both give the exact voxel *average* of the potential rather than a point
+### Supersampling then pooling
+
+`compute_supersampling_parameters` constrains the parity of both grids.
+
+- **The fine grid is even.** Under the symmetric sampling convention an
+  even grid has no sample at \(r = 0\), where the Kirkland and Lobato
+  potentials diverge as \(1/r\). Every pooled voxel is then a finite
+  average of fine samples, the nearest lying \(\sqrt{3}/2\) fine steps
+  from the origin.
+- **The pooled kernel is odd.** An odd kernel has a centre voxel, and when
+  the fine grid is even that voxel is centred exactly on \(r = 0\). An
+  even kernel has no centre voxel; its origin lies between two voxels, and
+  every potential built by convolving with it is displaced half a voxel
+  from the coordinates it was built from.
+- **The supersampling factor is even.** An even fine grid that pools to an
+  odd kernel needs an even factor, so an odd factor (from rounding
+  `dx / dx_atom`) is doubled. Below 0.1 Å per voxel the factor is 2.
+
+Without these rules the pooled size would follow from the fine-grid
+rounding and come out even for 20 of the 36 pixel sizes between 0.5 and
+4.0 Å (for example \(8^3\) at 0.731 Å and \(4^3\) at 1.5 Å). The same
+kernels render ice, where the half-voxel offset combined with a linear
+convolution would leave the canvas faces at reduced potential; see
+[Ice structure](ice.md#rendering).
+
+Both methods give the exact voxel *average* of the potential rather than a point
 sample at the nearest grid point. The underlying potential peaks sharply
 at the atom center, so a point sample would bounce around with sub-voxel
 atom position.

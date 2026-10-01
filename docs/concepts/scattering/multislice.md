@@ -96,8 +96,8 @@ SPECTER leaves the choice to you.
 
 `ews_curvature_sign="negative"` (the default, matching the convention
 used elsewhere in this documentation) reverses the Z-slice traversal
-order (`torch.flip(V, dims=(1,))`) before the recursion starts, so the
-recursion transmits through the face nearer the detector last.
+order: the beam enters at the volume's last Z-slice and leaves through
+slice 0, which is therefore the face adjacent to the exit plane.
 `"positive"` matches [CryoSPARC](https://cryosparc.com/)'s own convention instead. Because each
 slice propagates a different net distance to the exit plane, the
 traversal order changes the result. A projection-only model has no such

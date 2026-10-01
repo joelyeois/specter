@@ -41,7 +41,11 @@ MTF vs. spatial frequency for every bundled detector model.
 ///
 
 The K3 curves come from [Gatan](https://www.gatan.com/)'s
-published MTF datasheets. The Falcon 4i (a
+published MTF datasheets. The K2 Summit curve (`k2_300kv`, counting mode at
+300 kV) is Gatan's published MTF table on the same frequency grid as the K3
+tables, evaluated at the K2's 5 µm physical pixel; supply super-resolution
+data binned back to physical pixels. It falls to 0.86 at half Nyquist and
+0.61 at Nyquist. The Falcon 4i (a
 [Thermo Fisher Scientific](https://www.thermofisher.com/) detector) curves
 are derived instead from three published DQE points (0,
 0.5, and 1x Nyquist) under the white-noise approximation
@@ -67,7 +71,7 @@ place the detector's Nyquist fall-off at the image's Nyquist. `detector_pixel_si
 (Angstrom) names the pixel the movies were recorded at; the curve is then
 evaluated on that pixel and read off at the image's frequencies. For a stack
 recorded at 0.514 Å and cropped to 0.703 Å, the image's Nyquist is 0.73 of the
-detector's, where the Falcon 3EC MTF is 0.84 rather than the 0.62 it has at the
+detector's, where the Falcon 3EC MTF is 0.84 rather than the 0.59 it has at the
 detector's Nyquist. `specter match particles` reads the recording pixel from the
 particle metadata (`location/micrograph_psize_A` in a CryoSPARC `.cs` file,
 `rlnMicrographOriginalPixelSize` in a RELION `.star` file) and sets it when it
@@ -123,14 +127,16 @@ Left: detected/incident electron ratio vs. incident dose, at the Falcon 4i-calib
 
 Two consequences of the same mechanism. On the left, detected efficiency
 drops fast with incident dose rate: more electrons arriving in the same
-frame means more of them land in an already-occupied cell. SPECTER
-calibrates `coincidence_radius = 2.0` px against real Falcon 4i
-beam-only micrographs spanning 0.15-31.29 e⁻/px/s, with the counting
-efficiency DQE(0) = 0.92 modelled explicitly, reproducing the measured
-detected-electron yield to ~3% RMSE. An earlier value of 2.394 px was fitted
-without DQE(0) and absorbed that loss into the radius. The radius belongs to
-the camera unit and its counting configuration, so it is a prior for other
-cameras of the same model, not a constant. On the right, the exclusion
+frame means more of them land in an already-occupied cell. The exclusion
+radius of the Falcon 4i at 300 kV is calibrated at 2.0 physical pixels
+against real beam-only micrographs spanning 0.15-31.29 e⁻/px/s, with the
+counting efficiency DQE(0) = 0.92 modelled explicitly, reproducing the
+measured detected-electron yield to ~3% RMSE. The K2 Summit's 2.54 physical
+pixels is obtained by inverting the same model against Campbell et al.
+(2015)'s measurement of a 25% loss at ~12 e⁻/px/s and 400 frames per second.
+Both values are listed in `detectors.EXCLUSION_RADIUS_PX`; a radius belongs
+to the camera unit and its counting configuration, so it is a prior for
+other cameras of the same model, not a constant. On the right, the exclusion
 mechanism itself imprints a low-spatial-frequency dip in the noise power
 spectrum relative to plain Poisson: an electron's presence excludes its
 own neighborhood for an instant, which suppresses variance at scales
@@ -138,10 +144,43 @@ larger than the exclusion radius while leaving the high-frequency
 (per-pixel) noise floor nearly untouched. That matches the signature
 reported for real DED coincidence loss.
 
+### From a detector radius to a simulation radius
+
+The calibrated radius and the `coincidence_radius` setting are in different
+units. `EXCLUSION_RADIUS_PX` is in physical detector pixels and applies per
+*hardware* frame, the rate at which the camera counts
+(`detectors.HARDWARE_FRAME_RATE_HZ`: 320 Hz for the Falcon 4i, 400 Hz for the
+K2, 1500 Hz for the K3). `coincidence_radius` is in pixels of the simulated
+image and applies per simulated frame, of which there are `n_frames`. A
+simulation usually runs at a coarser pixel and with far fewer frames than the
+camera recorded, so the radius is converted at constant occupancy, the mean
+number of electrons per exclusion cell per frame, on which the mean loss
+depends alone:
+
+\[
+\lambda = \frac{\dot D_\text{px}}{f_\text{hw}}\,\pi r_\text{det}^2,
+\qquad
+r_\text{sim} = \sqrt{\frac{\lambda}{\pi\, D\, p^2 / n_\text{frames}}},
+\]
+
+with \(\dot D_\text{px}\) the dose rate in e⁻ per physical pixel per second,
+\(f_\text{hw}\) the hardware frame rate, \(D\) the image dose in e⁻/Å² and
+\(p\) the simulated pixel size (`detectors.coincidence_occupancy` and
+`detectors.coincidence_radius_for_simulation`). A Falcon 4i at 4 e⁻/px/s gives
+\(\lambda = 4/320 \cdot \pi \cdot 2.0^2 = 0.157\); simulated at 1 Å,
+40 e⁻/Å² and 40 frames, that is 1 e⁻ per pixel per frame and
+\(r_\text{sim} = 0.22\) px. The conversion preserves the mean loss and its
+dependence on contrast, but not the spatial extent of the exclusion, which
+only a detector stage run at the physical pixel and frame rate would
+reproduce.
+
 `n_frames` controls dose fractionation: it splits the total dose across
 `n_frames` independent applications of the coincidence model rather than
 one large-dose frame, matching how a real detector reads out multiple
-frames per exposure.
+frames per exposure. When `dose_weights_path` (on `Camera`) supplies a
+motion-correction job's per-frame exposure-filter weights, their frame count
+takes precedence over `n_frames`, since it records the fractionation the
+weights were computed for; a mismatch is reported with a warning.
 
 ## References
 
@@ -149,6 +188,10 @@ frames per exposure.
   formation. In *Current Approaches to Cryo-Electron Microscopy*,
   *Progress in Molecular Biology and Translational Science*. Elsevier.
   [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
 - Zambon, P. (2024). Modeling the impact of coincidence loss on count
   rate statistics and noise performance in counting detectors for imaging
   applications. *Frontiers in Physics*, 12, 1408430.

@@ -1,9 +1,10 @@
 # Frozen-plasmon forward model
 
-SPECTER now provides an **opt-in Python API** for exposure-resolved, Himes-inspired
-zero-loss simulation. It uses production multislice, optics and detector code.
-Existing generator calls retain their current model. The API requires explicit
-material/source data rather than guessing atom identities from a real volume.
+The frozen-plasmon model is an **opt-in Python API** for exposure-resolved
+zero-loss simulation, following Himes and Grigorieff (2021). It uses the same
+multislice, optics and detector code as the generators, which do not invoke it
+unless asked. The API requires explicit material and source data rather than
+inferring atom identities from a real-valued volume.
 
 ## Available components
 
@@ -85,8 +86,8 @@ The filter is dimensionless and has unit DC. Source coefficients establish the
 absorption magnitude. For uniform number density `n` (Å⁻³), MFP `L` (Å), and
 interaction parameter `sigma`, an MFP-calibrated coefficient is
 `1 / (2 * sigma * L * n)` V Å³ per scattering centre. Different species can use
-measured relative cross-section weights. The result is MFP-calibrated, not an
-independent prediction of the absolute inelastic cross-section.
+measured relative cross-section weights. The magnitude is therefore
+MFP-calibrated (see [Limitations](#limitations)).
 
 Paired fields remain real while rotated. The transverse plasmon operator runs
 **after beam-frame sampling**. Its halo fetches neighbouring source pixels
@@ -96,9 +97,13 @@ continuous material. Check source extent, halo size and propagation padding
 separately. `padding=0` uses a periodic transverse convolution and is appropriate
 only when that boundary condition is intended.
 
-`IterativeScattering(..., alpha=0)` accepts `absorption_source=...` and
-`absorption_filter=...`. With no filter, the paired source is an imaginary
-potential directly, allowing an MFP comparison through identical operators.
+The paired propagation is reached through `IterativeScattering.forward(V, pose,
+..., absorption_source=..., absorption_filter=...)`, which dispatches to
+`IterativeScattering.multislice_absorptive(V, source, theta_matrix,
+absorption_filter, ...)`. Both are call arguments, not constructor arguments;
+the instance itself must be built with `scattering_model="multislice"` and
+`alpha=0`. With no filter, the paired source is an imaginary potential
+directly, allowing an MFP comparison through identical operators.
 Both fields retain gradients under tilt and checkpointing. Inputs have shape
 `(B,Z,Y,X)` and matching real dtype/device. CPU volumes may stream to a GPU.
 
@@ -112,33 +117,44 @@ after rendering. A fixed detector seed leaves the caller's RNG unchanged.
 
 The shared forward is differentiable with `noise_model=None`, and returns
 pre-detector intensities for fitting. Keep source priors and trajectories fixed
-during optimization. Automatic fitting of a material decomposition or a latent
-water trajectory in `TomogramReconstructor` is not implemented. Its existing
+during optimization (see [Limitations](#limitations)). `TomogramReconstructor`'s existing
 unsupported-model guards remain applicable.
 
-## Validation and scope
+## Validation
 
 `tests/test_frozen_plasmon.py` covers Beer–Lambert attenuation, eager/iterative
 wave and gradient parity, tilted checkpointing, source halos, exact intensity
 integration, detector dose accounting, seeded replay, atomic source strength,
 solvent evolution, damage DC preservation and CPU/GPU agreement.
 
-Run the same-particle integration comparison:
+## Limitations
 
-```sh
-uv run python dev/inelastic_comparison/validate_production.py
-```
+- **No measured loss spectrum is bundled.** `PlasmonFilter.approximate_drude`
+  is a development substitute; a parameterization faithful to Himes and
+  Grigorieff (2021) requires a measured single-scattering EELS spectrum
+  supplied through `PlasmonFilter.from_csv`, together with empirically
+  determined species strengths.
+- **The absorption magnitude is MFP-calibrated, not predicted.** A matching
+  ice mean free path validates the overall normalization only; it does not
+  show that the spatial spectrum of the absorption is correct. Transmission
+  and spatial spectrum need independent checks.
+- **No experimental or cisTEM benchmark exists.** The model has not been
+  compared against cisTEM's implementation or against experimental
+  energy-filtered images for absolute counts, protein–ice contrast,
+  exposure-dependent solvent noise or objective-aperture effects, with
+  identical elastic potentials and incident dose across the static MFP,
+  spectral and configuration-ensemble variants.
+- **Zero-loss channel only.** The model removes inelastically scattered
+  electrons from the zero-loss image. It does not synthesize detected
+  energy-loss electrons with their energy-dependent optics, which unfiltered
+  imaging would require; changing the attenuation constant does not
+  substitute for that.
+- **No material decomposition is inferred.** Source fields and solvent
+  trajectories are fixed inputs. Fitting them, or a latent water trajectory,
+  inside `TomogramReconstructor` is not implemented.
 
-Results, arrays and a left/right figure are written to
-`dev/inelastic_comparison/production_validation/`. This 2 Å integration check
-uses the approximate Drude spectrum and the prototype's MFP-calibrated species
-weights. It does not supersede the earlier fine-grid numerical audit or prove
-absolute experimental agreement.
+## References
 
-The implementation supplies the algorithmic path. A publication-faithful
-parameterization still requires measured EELS and empirical species strengths,
-and a matched experimental/cisTEM benchmark. The model describes loss from the
-zero-loss channel; it does not synthesize detected energy-loss electrons with
-energy-dependent optics for unfiltered imaging.
-
-Reference: [Himes & Grigorieff (2021), IUCrJ 8, 943–953](https://doi.org/10.1107/S2052252521008538).
+- Himes, B. A., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+  radiation-sensitive samples using multislice wave propagation. *IUCrJ*, 8,
+  943–953. [doi:10.1107/S2052252521008538](https://doi.org/10.1107/S2052252521008538)

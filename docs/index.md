@@ -61,7 +61,7 @@ A simulated cryo-ET specimen
 
 -   :material-download:{ .lg .middle } **Installation**
 
-    Set up SPECTER with `uv` and confirm it works with a small CPU run.
+    Set up SPECTER with `uv` and confirm the `specter` command is available.
 
     [:octicons-arrow-right-24: Install](installation.md)
 
@@ -125,13 +125,22 @@ Every workflow below is a `specter` subcommand driven by a TOML config.
 
     [:octicons-arrow-right-24: Reconstruct a volume](user-guide/reconstruction.md)
 
+-   :material-compare:{ .lg .middle } **Match a dataset**
+
+    `specter match particles` derives a simulation config that matches a
+    real particle set, and reports how close the match is.
+
+    [:octicons-arrow-right-24: Match an experimental dataset](user-guide/dataset-twin.md)
+
 </div>
 
 Override any config field on the command line; see
 [Configure a run](user-guide/configuration.md). Have a run record itself as
 a tracked job; see [Manage jobs](user-guide/jobs.md). SPECTER caches
 structures you fetch by accession code and shares them across projects; see
-[Manage the PDB cache](user-guide/cache.md).
+[Manage the PDB cache](user-guide/cache.md). To hand particle metadata to
+RELION, `specter convert cs2star` converts a CryoSPARC `.cs` file to a
+`.star` file; see [`specter convert`](api/cli/convert.md).
 
 ### Concepts
 

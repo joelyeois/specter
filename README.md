@@ -39,6 +39,7 @@ from images.
 - [CLI at a glance](#cli-at-a-glance)
 - [Documentation](#documentation)
 - [Repository layout](#repository-layout)
+- [Tests](#tests)
 - [FAQ](#faq)
 - [License](#license)
 - [Getting help](#getting-help)
@@ -51,8 +52,8 @@ from images.
 - **Per-electron detector.** Individual electrons are placed and merged when they land too close together, reproducing the low-frequency suppression that real counting detectors show.
 - **Validated against experiment.** Simulated particles pooled with real EMPIAR-11377 particles and run through a single CryoSPARC 2D classification job sort into the same classes, in roughly the same proportion, across nearly all 50 classes — see the [particle-stack guide](https://joelyeois.github.io/specter/user-guide/particle-stack/#example-matching-empiar-11377).
 - **One model, both directions.** The forward model that generates images (`ImageGenerator`/`MicrographGenerator`/`TiltSeriesGenerator`) is the same model that drives reconstruction (`Ghostbuster`/`TomogramGhostbuster`), so a change to the physics applies in both directions rather than to a simulator alone.
-- **GPU-accelerated.** Volume rotation, potential calculation, and wave propagation all run on PyTorch, with multi-GPU dispatch for particle stacks, tilt series, and ice cache generation.
-- **Tracked runs.** Every simulation and reconstruction is recorded as a numbered job (`specter jobs list/show/diff`), so parameters and provenance are never lost between experiments.
+- **GPU-accelerated.** Volume rotation, potential calculation, and wave propagation all run on PyTorch, with multi-GPU support for particle stacks, ice cache generation, and the two gold-standard reconstruction halves.
+- **Tracked runs.** Every reconstruction, and any simulation run with `--project` or `--job_id`, is recorded as a numbered job (`specter jobs list/show/diff`), so parameters and provenance are kept between experiments.
 
 ---
 
@@ -79,8 +80,8 @@ export CLIBD_MON=/path/to/monomers
 ```
 
 See the [installation guide](https://joelyeois.github.io/specter/installation/)
-for the conda/pip alternative, GPU notes, the Monomer Library in full, and
-troubleshooting an install outside a git checkout.
+for the conda/pip alternative, choosing a CUDA version, and the Monomer
+Library in full.
 
 ---
 
@@ -163,7 +164,9 @@ reconstruction, and job management — lives in the docs:
 Simulation is driven by the `specter` command (`specter simulate particles`,
 `micrograph`, `tiltseries`, `specter build tomogram`, `specter build ice`),
 and reconstruction by `specter reconstruct particle`, also spelled
-`specter ghostbuster particle`. Interactive notebooks are in
+`specter ghostbuster particle`. `specter match particles` derives a
+simulation config from a real particle set, and `specter convert cs2star`
+converts CryoSPARC particle metadata to RELION. Interactive notebooks are in
 `demo-notebooks/`.
 
 ---
@@ -177,7 +180,9 @@ and reconstruction by `specter reconstruct particle`, also spelled
 | `specter build tomogram` | Composite a specimen volume from membranes, filaments, microtubules, beads, and packed protein species. |
 | `specter simulate tiltseries` | A cryo-ET tilt series through a tomogram specimen volume, with dose accumulation across tilts. |
 | `specter build ice` | A replacement `IceBank` library at a pixel size the bundled cache doesn't cover. |
-| `specter reconstruct particle` (alias: `specter ghostbuster particle`) | Reconstruct a 3D map from a particle stack, jointly refining pose, translation, and defocus. |
+| `specter reconstruct particle` (alias: `specter ghostbuster particle`) | Reconstruct a 3D map from a particle stack. Pose, translation, and defocus refinement are off by default and not yet validated. |
+| `specter match particles` | Derive a `matched.toml` for `specter simulate particles` from a real particle set, with a report of how close the match is. |
+| `specter convert cs2star` | Convert a CryoSPARC particle `.cs` file to a RELION `.star` file, pointing at the same image stacks. |
 | `specter jobs list/show/diff` | Inspect and compare parameters and provenance across past runs. |
 | `specter cache dir/info/clean` | Locate, inspect, or clear the cache of downloaded PDB/mmCIF structures. |
 
@@ -192,7 +197,7 @@ takes its built-in default. See
 
 | | |
 |---|---|
-| [Installation](https://joelyeois.github.io/specter/installation/) | Set up SPECTER with `uv` and confirm it works with a small CPU run. |
+| [Installation](https://joelyeois.github.io/specter/installation/) | Set up SPECTER with `uv` and confirm the `specter` command is available. |
 | [Quickstart](https://joelyeois.github.io/specter/quickstart/) | Simulate a particle stack from a PDB code in one command. |
 | [User guide](https://joelyeois.github.io/specter/user-guide/particle-stack/) | Particle stacks, micrographs, tilt series, tomogram specimens, ice caches, configuration, and job management. |
 | [Concepts](https://joelyeois.github.io/specter/concepts/pipeline-overview/) | How potential, specimen, scattering, aberration and detector compose into one forward model. |
@@ -206,7 +211,8 @@ takes its built-in default. See
 src/specter/        # main package: physics simulator + Ghostbuster reconstruction
   imagegenerator/    # ImageGenerator, MicrographGenerator, TiltSeriesGenerator
   ghostbuster/       # Reconstructor, Ghostbuster, tomogram reconstruction
-  specimen/          # membranes, filaments, microtubules, crowding, ice
+  specimen/          # membranes, filaments, microtubules, tomogram specimen assembly
+  ice/               # amorphous ice generation and the IceBank library
   cli/               # the `specter` command
   pipelines/         # end-to-end functions behind each CLI subcommand
 demo-notebooks/      # interactive, always-working usage examples
@@ -243,7 +249,7 @@ via PyTorch/Lightning; a CPU-only install path is documented in the
 [installation guide](https://joelyeois.github.io/specter/installation/).
 A GPU accelerates volume rotation, potential calculation, and wave
 propagation, and multiple GPUs can be used at once for particle stacks,
-tilt series, and ice cache generation.
+ice cache generation, and gold-standard reconstruction.
 
 **Does this replace RELION or CryoSPARC?**
 No. SPECTER can read a real CryoSPARC `.cs` or RELION `.star` file and use

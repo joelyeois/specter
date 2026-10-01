@@ -35,8 +35,10 @@ mode, so no separate `uv pip install -e .` step is needed.
         ╭─ Commands ───────────────────────────────────────────────────────────────────╮
         │ build        Build specimen volumes and reusable assets                      │
         │ cache        Inspect and clear the cache of downloaded PDB/mmCIF structures. │
+        │ convert      Convert particle metadata between CryoSPARC and RELION.         │
         │ ghostbuster  Reconstruct 3D volumes from experimental images                 │
         │ jobs         Inspect and compare tracked SPECTER jobs.                       │
+        │ match        Derive simulation settings that match an experimental dataset   │
         │ reconstruct  Reconstruct 3D volumes from experimental images                 │
         │ simulate     Simulate cryo-EM/cryo-ET data                                   │
         ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -178,7 +180,8 @@ specter build tomogram --config configs/tomogram.toml --monomer_library_path ~/m
 ```
 
 `monomer_library_path` is available on `specter simulate particles`,
-`specter simulate micrograph` and `specter build tomogram`. It takes
+`specter simulate micrograph`, `specter build tomogram` and
+`specter match particles`. It takes
 precedence over `$CLIBD_MON`; left unset, the variable still applies, so
 nothing that already relies on it needs changing.
 

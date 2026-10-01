@@ -31,10 +31,10 @@ by name rather than ignored.
 A config file is a flat set of fields, grouped into tables for
 readability only. `specter simulate particles`, for instance, reads a
 `ParticleStackConfig`, whose fields sit in `configs/particle.toml` under
-`[data]`, `[specimen]`, `[microscope]`, `[sampling]`, `[models]`,
-`[postprocessing]`, `[compute]`, `[output]`, and `[advanced]`. The table
-names carry no meaning for the loader: it flattens every table into one
-namespace before validating the fields, so `[specimen]`'s `pdb_source`
+`[data]`, `[specimen]`, `[microscope]`, `[absorption]`, `[sampling]`,
+`[models]`, `[postprocessing]`, `[compute]`, `[output]`, `[job]`, and
+`[advanced]`. The table names carry no meaning for the loader: it
+flattens every table into one namespace before validating the fields, so `[specimen]`'s `pdb_source`
 and `[microscope]`'s `voltage` end up as siblings on the same dataclass.
 Writing a field under the wrong table heading, or with no table at all,
 works the same as writing it under the "correct" one.
@@ -44,7 +44,8 @@ of the command's `--help`, ending in `[advanced]`: what a first run has
 to decide is above that table, and what has a default that is usually
 right is below it. Copies you edit are free to depart from that.
 
-Six commands each have their own config dataclass and canonical TOML:
+Seven commands each have their own config dataclass, and all but
+`specter match particles` ship a canonical TOML:
 
 | Command | Config dataclass | Example TOML |
 |---|---|---|
@@ -54,17 +55,15 @@ Six commands each have their own config dataclass and canonical TOML:
 | `specter build tomogram` | `TomogramConfig` | `configs/tomogram.toml` |
 | `specter build ice` | `IceCacheConfig` | `configs/ice.toml` |
 | `specter reconstruct particle` | `ReconstructionConfig` | `configs/reconstruct.toml` |
+| `specter match particles` | `MatchConfig` | none |
 
 Every field a command accepts, along with its default and a one-line
-description, appears in that command's `--help` output and in the
-comments of its canonical TOML. This page covers how the two layers
-combine, not a field-by-field listing.
+description, appears in that command's `--help` output and, where one
+ships, in the comments of its canonical TOML. This page covers how the
+two layers combine, not a field-by-field listing.
 
-`--config` itself always has a default: each command falls back to its own
-canonical TOML in `configs/` when `--config` is omitted, so `specter
-simulate particles` with no arguments at all is a complete, runnable command.
 Copy the canonical file and edit it for a real run rather than starting from
-an empty TOML; every field left out of your copy still gets a sane default
+an empty TOML; every field left out of your copy still gets its default
 from the dataclass itself.
 
 An unrecognised field in a TOML file causes a load-time error naming the
@@ -98,9 +97,10 @@ you typed it, else the TOML file's value if it sets that field, else the
 dataclass's own default. There is no fourth source and no field-by-field
 opt-out of this order.
 
-`list[...]`-typed fields (for example a tomogram's `[[targets]]` or
-`[[filler]]` tables) work in TOML/Python only: no single CLI token can
-represent a list of tables, so these fields have no matching flag. Set
+`list[...]`-typed fields (for example a tomogram's `targets` and `filler`
+lists, written in `configs/tomogram.toml` as inline tables under
+`[targets]` and `[filler]`, or its `[[membrane]]` tables) work in
+TOML/Python only: no single CLI token can represent a list of tables, so these fields have no matching flag. Set
 them in the config file or from Python.
 
 ```bash
@@ -116,11 +116,22 @@ specter simulate particles \
 
 ### Per-particle sampling fields on the command line
 
-A handful of fields (`dose`, `defocus`, `coincidence_radius`,
-`potential_scale`, `astigmatism`, `astigmatism_angle`, depending on the
-command) accept either a constant or a `[low, high]` range sampled per
-particle/micrograph/tomogram. In TOML this is naturally a list: `defocus
-= [5000.0, 15000.0]`. A CLI flag can only carry one token, so you write
+Some fields accept either a constant or a `[low, high]` range sampled per
+particle, micrograph, or bead:
+
+- `specter simulate particles`: `dose`, `defocus`, `coincidence_radius`,
+  `potential_scale`, `astigmatism`, `astigmatism_angle`, `phaseshift`,
+  `tiltx`, `tilty`, `trefoil1`, `trefoil2` and `tetrafoil1` to
+  `tetrafoil4`.
+- `specter simulate micrograph`: `dose`, `defocus`, `coincidence_radius`
+  and `potential_scale`.
+- `specter build tomogram`: `bead_roughness`.
+
+Two micrograph fields share the same two-number spelling without being
+sampled: `ice_thickness_range` gives a wedge's minimum and maximum
+thickness, and `ice_hole_offset` gives the hole centre as `[x, y]`.
+
+In TOML a range is naturally a list: `defocus = [5000.0, 15000.0]`. A CLI flag can only carry one token, so you write
 the same range as a comma-separated string instead: `--defocus
 5000,15000`. `specter` accepts that comma-separated spelling inside a
 TOML file too, so a config written before the list form existed keeps

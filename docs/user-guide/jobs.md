@@ -19,8 +19,8 @@ you use to inspect and compare runs afterwards.
 
 ## Which commands track runs
 
-Tracking is opt-in for every forward-simulation command, and mandatory for
-reconstruction:
+Tracking is opt-in for most commands, never available for
+`specter build ice`, and mandatory for reconstruction:
 
 | Command | Job-type folder | Tracked by default? |
 |---|---|---|
@@ -28,6 +28,7 @@ reconstruction:
 | `specter simulate micrograph` | `micrographs` | No -- set `--project` or `--job_id` |
 | `specter simulate tiltseries` | `tiltseries` | No -- set `--project` or `--job_id` |
 | `specter build tomogram` | `tomograms` | No -- set `--project` or `--job_id` |
+| `specter match particles` | `match` | No -- set `--project` or `--job_id` |
 | `specter build ice` | -- | Never -- no `--project`/`--job_id` flags exist |
 | `specter reconstruct particle` (`specter ghostbuster particle`) | `reconstructions` | **Always** |
 
@@ -129,8 +130,10 @@ writes to `particles/apoferritin/particles/J001/`, using the TOML's
 literal `output_dir = "particles"` as the tracked root. It does **not**
 walk up for a `.specter` marker, because `output_dir` was never unset to
 begin with. To get the `.specter`-discovered project root instead, clear
-`output_dir` in the config (comment out the line, or pass
-`--output_dir ""` at the command line) before adding `--project`.
+`output_dir` in the config by commenting out or deleting the line before
+adding `--project`. Passing `--output_dir ""` does not do the same: an
+empty string is a set value, so the job tree is rooted at the current
+directory rather than at the `.specter`-discovered root.
 `configs/reconstruct.toml` ships with `output_dir` commented out for
 exactly this reason: reconstruction is always tracked, so its canonical
 config leaves the field unset and lets `.specter` discovery pick the root,
@@ -354,7 +357,7 @@ A job id that doesn't exist under the given project and base directory
 fails with the same message `diff` and `get` share:
 
 ```text
-No job 'J999' found under apoferritin-demo (searched every job-type subfolder)
+No job 'J999' found under particles/apoferritin-demo (searched every job-type subfolder)
 ```
 
 ## `specter jobs diff`
@@ -417,7 +420,7 @@ reports as changed.
   resolutions).
 - [Configure a run](configuration.md): the TOML/CLI override mechanics that
   produce the values recorded in `params`.
-- [Generate a CryoSPARC dataset twin](dataset-twin.md): tracking a
+- [Match an experimental dataset](dataset-twin.md): tracking a
   full-dataset run's parameters and provenance with `--project`.
 - [`specter.jobs`](../api/jobs.md): the Python API (`Job`, `JobDatabase`,
   `base_directory`) behind every command on this page, for scripting job

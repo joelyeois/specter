@@ -48,7 +48,14 @@ rejected by name rather than ignored.
 ```toml
 # Canonical default config for `specter simulate particles`.
 # Any field can be overridden on the command line, e.g.:
-#   specter simulate particles --config particle.toml --n_particles 3000
+#   specter simulate particles --config configs/particle.toml --n_particles 3000
+
+# Where the particles come from. Left unset, the run synthesizes them and
+# everything below applies as written; given a file, the poses and
+# per-particle CTF come from it instead.
+[data]
+# cs_path = "path/to/particles.cs"      # a CryoSPARC .cs file
+# star_path = "path/to/particles.star"  # ... or a RELION .star file (mutually exclusive)
 
 [specimen]
 pdb_source = "6bdf"
@@ -114,30 +121,52 @@ SPECTER places protein species in two priority stages within their
 region: `[targets]` first, each at an exact instance count (the annotated
 ground truth, always exported to picks), then `[filler]` second, packed
 around the already-placed targets to crowd out the rest of that region
-(excluded from picks by default). Generation order runs membranes, then
-filaments, then this protein fill; each stage avoids the previous ones'
-placements. `configs/tomogram.toml` looks like this:
+(excluded from picks by default). Filler draws from the species listed by
+hand plus any bundled reference table switched on, such as
+`filler_from_pei2016`, and `filler_occupancy_fraction` caps how much of
+each region it may fill; packing stops earlier if it jams. Generation
+order runs membranes, then filaments, then this protein fill; each stage
+avoids the previous ones' placements. `configs/tomogram.toml` looks like this:
 
 ```toml
 # Canonical default config for `specter build tomogram`.
+# Any field can be overridden on the command line, e.g.:
+#   specter build tomogram --config configs/tomogram.toml --n_tomograms 4
 
 [specimen]
-target_shape = [300, 1200, 1200]  # (Z, Y, X) voxels
-voxel_size = 5.0                       # Å/voxel
-filler_occupancy_fraction = 0.5    # bare-sphere volume fraction budget for filler, per region
+target_shape = [300, 1200, 1200]    # (Z, Y, X) voxels
+voxel_size = 5.0                    # A/voxel
+clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
+filler_occupancy_fraction = 1.0     # a ceiling, not a target: packing stops when it jams
 
+# Target species: exact-count, placed first, written to picks as ground truth.
 [targets]
 targets = [
-    { pdb_source = "1bxn", n_copies = 20 },  # cytosolic RNA polymerase II complex (large)
+    { pdb_source = "7VD8", n_copies = 15 },  # apoferritin
+    { pdb_source = "1FA2", n_copies = 15 },  # beta-amylase
+    { pdb_source = "6DRV", n_copies = 15 },  # beta-galactosidase
+    { pdb_source = "6QZP", n_copies = 15 },  # ribosome
+    { pdb_source = "7B75", n_copies = 15 },  # thyroglobulin
+    { pdb_source = "6N4V", n_copies = 15 },  # virus-like particle
 ]
 
+# Filler species: ratio-weighted background crowding, placed after targets,
+# around them. Hand-listed species and the bundled reference tables are
+# additive.
 [filler]
 filler = [
-    { pdb_source = "1mbo" },  # myoglobin (small)
+    { pdb_source = "1fa2", location = "lumen" },  # beta amylase, as an example lumen filler
 ]
 
+# 20 generic cytosolic proteins, Pei et al. 2016, BMC Bioinformatics 17:405,
+# at equal ratios.
+filler_from_pei2016 = true
+
 [[membrane]]
-shape_backend = "spherical_harmonics"   # omit [[membrane]] entirely for no membranes
+shape_backend = "spherical_harmonics"
+bilayer_thickness = 38.0
+sh_axes_range = [150.0, 500.0]      # SEMI-axes, A
+n_copies = 3
 
 # ... see the full file: configs/tomogram.toml
 ```

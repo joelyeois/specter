@@ -26,6 +26,14 @@ Standalone top-level modules, outside any subpackage.
 
 ::: specter.memory
 
+## specter.devices
+
+::: specter.devices
+
+## specter.cpu_threads
+
+::: specter.cpu_threads
+
 ## specter.arrays
 
 ::: specter.arrays

@@ -1,10 +1,14 @@
 # Command line
 
-`specter` is the command-line entry point to everything in this package. Every
-subcommand loads a TOML config, applies the flags you passed on top of it, and
-calls into `specter.pipelines`; the flags and the config fields are the same
-set of settings under two spellings, so anything in the reference can be
-written either way. [Configure a run](../../user-guide/configuration.md) covers
+`specter` is the command-line entry point to everything in this package. Each
+`simulate`, `build`, `reconstruct` and `match` subcommand loads a TOML config,
+applies the flags you passed on top of it, and calls into `specter.pipelines`;
+for these commands the flags and the config fields are the same set of
+settings under two spellings, so anything in the reference can be written
+either way. The utility groups `jobs`, `cache` and `convert` take no config:
+`jobs` reads the records that tracked runs have already written, `cache`
+inspects and clears the PDB download cache, and `convert` rewrites particle
+metadata between CryoSPARC and RELION formats. [Configure a run](../../user-guide/configuration.md) covers
 the config file itself, and the
 [User Guide](../../user-guide/particle-stack.md) walks through each command on
 a real task.

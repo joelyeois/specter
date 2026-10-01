@@ -11,16 +11,9 @@ from click.testing import CliRunner
 
 from specter.cli._cli import cli
 
-# Building a tomogram costs far more the first time in a process than every
-# time after: 17.9 s cold against 0.21 s to repeat it and 4.05 s at a voxel
-# size not seen yet, on a 24x32x32 box that is already as small as the
-# assertions allow. Almost all of that is one-off warmup -- lazy imports and
-# the per-species potential kernels -- which a process shares internally and
-# a subprocess throws away. Running the CLI in-process lets the whole module
-# amortise one warmup instead of paying it per test: 6m16s -> 1m11s serially,
-# and 2626 s -> 1467 s of CPU. The `python -m specter.cli._cli` entry point is
-# pinned in a real subprocess by tests/test_cli_config_defaults.py and
-# tests/test_cli_reconstruct.py, not here.
+# In-process invocation shares lazy imports and cached per-species potential
+# kernels between CLI cases. Real subprocess entry-point coverage lives in
+# test_cli_simulate.py, test_cli_config_defaults.py and test_cli_reconstruct.py.
 
 
 @dataclass
@@ -55,8 +48,8 @@ targets = [
 ]
 
 [specimen]
-target_shape = [24, 32, 32]
-voxel_size = 10.0
+target_shape = [24, 48, 48]
+voxel_size = 4.0
 filler_occupancy_fraction = 0.0
 seed = 0
 

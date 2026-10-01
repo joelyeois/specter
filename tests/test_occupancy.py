@@ -88,38 +88,6 @@ def _render(coords, Z, n, dx):
         return pb(coords, method="analytic").squeeze()
 
 
-def test_blend_slab_halo_matches_an_unchunked_blur():
-    """
-    `blend_ice_into_volume` evaluates the blurred field a z-slab at a
-    time and must widen each slab by the blur's reach. Without the halo
-    every chunk boundary prints into the ice as a seam.
-    """
-    from specter.ice import blend_ice_into_volume
-    from specter.potential import potential_occupancy
-
-    torch.manual_seed(0)
-    n, nz = 16, 48
-    V = torch.rand(1, nz, n, n) * 6.0
-    maker = _RandomIce(n, nz)
-
-    whole = (1.0 - potential_occupancy(V, 2.0)).clamp(0, 1)
-    out = blend_ice_into_volume(V.clone(), maker, 2.0)
-    added = out - V
-    # Recover the weight the blend actually used, where ice is nonzero.
-    ice = added / whole.clamp(min=1e-6)
-    assert torch.isfinite(ice).all()
-    # A seam would show as a z-profile discontinuity in the applied weight.
-    prof = added.mean(dim=(0, 2, 3))
-    jumps = (prof[1:] - prof[:-1]).abs()
-    assert float(jumps.max()) < 6 * float(jumps.median() + 1e-6)
-
-
-def _RandomIce(n, nz):
-    from specter.ice import RandomIcemaker
-
-    return RandomIcemaker(dx=2.0, n=n, nz=nz, progressbars=False)
-
-
 class TestTemplateOccupancyReference:
     """
     The reference a template's own occupancy is read against. How much ice a

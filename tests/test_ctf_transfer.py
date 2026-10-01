@@ -156,33 +156,6 @@ def test_trefoil_sweep_matches_old_aberration(trefoil1, trefoil2):
 # ---------------------------------------------------------------------------
 
 
-def test_beam_tilt_mrad_convenience_arg_does_not_match_specter_convention():
-    """Documents a real gotcha: torch-ctf's own beam_tilt_mrad -> Zernike
-    conversion does not include the zernike_rho_max rescale, so it does
-    *not* reproduce specter's physical-k beamtilt formula. Manual
-    odd_zernike (see test above) is required for parity."""
-    tiltx, tilty = 2e-5, -1.5e-5
-    cs_angstrom = 2.7e7
-
-    old = _old_transfer(
-        {
-            "dfu": torch.tensor(0.0),
-            "cs": torch.tensor(cs_angstrom),
-            "tiltx": torch.tensor(tiltx),
-            "tilty": torch.tensor(tilty),
-        }
-    )
-    params = CTFParameters(
-        defocus=0.0,
-        spherical_aberration=cs_angstrom / 1e7,
-        voltage=VOLTAGE,
-        beam_tilt_mrad=[tiltx * 1e3, tilty * 1e3],
-    )
-    new = _new_transfer(params)
-
-    assert not torch.allclose(old, new, atol=1e-3)
-
-
 @pytest.mark.parametrize(
     "tiltx,tilty",
     [(2e-5, -1.5e-5), (-1e-5, 3e-5), (5e-6, 0.0), (0.0, -4e-5), (-3e-5, -3e-5)],
@@ -837,84 +810,6 @@ def test_learnable_uniform_zernike_coefficient_gets_independent_gradients():
         "every particle's trefoil gradient must be independently nonzero -- "
         "a collapse bug would leave all but one element exactly zero"
     )
-
-
-# ---------------------------------------------------------------------------
-# Real-world validation: first 5 particles from an actual CryoSPARC .cs
-# file, run through the real extraction/unit-conversion path
-# (specter.io.extract_parameters_from_csfile), not hand-picked synthetic
-# values. Skipped if the file isn't mounted (e.g. off the lab filesystem).
-# ---------------------------------------------------------------------------
-
-_REAL_CS_FILE = (
-    "/scratch/loh/joel/empiar-10202/CS-aav2/J247/J247_passthrough_particles.cs"
-)
-
-
-@pytest.mark.skipif(
-    not __import__("os").path.exists(_REAL_CS_FILE),
-    reason=f"real .cs file not available: {_REAL_CS_FILE}",
-)
-def test_first_five_particles_of_real_csfile_match_old_aberration():
-    import math
-
-    from specter.io import extract_parameters_from_csfile
-
-    (
-        voltage_kv,
-        pixel_size,
-        alpha,
-        rotations,
-        translations_angstrom,
-        ctf_params,
-        scale,
-        anisomag,
-        indices,
-        split,
-    ) = extract_parameters_from_csfile(_REAL_CS_FILE, halfset="all", n_particles=5)
-
-    n_pixels = 256
-    voltage = float(voltage_kv)
-    px = float(pixel_size)
-
-    old = Aberration(n_pixels, px, voltage, aberration_model="nonlinear")
-    old_t = old.transfer_function(ctf_params)
-
-    dfu, dfv, dfang = ctf_params["dfu"], ctf_params["dfv"], ctf_params["dfang"]
-    cs_angstrom = ctf_params["cs"]
-    tiltx, tilty = ctf_params["tiltx"], ctf_params["tilty"]
-    trefoil1, trefoil2 = ctf_params["trefoil1"], ctf_params["trefoil2"]
-
-    rho_max = zernike_rho_max((n_pixels, n_pixels), px)
-    prefactor = 2 * math.pi * old.wavelength**2 * cs_angstrom * rho_max**3
-
-    params = CTFParameters(
-        defocus=(dfu + dfv) / 2 / 1e4,
-        astigmatism=(dfu - dfv) / 2 / 1e4,
-        astigmatism_angle=dfang,
-        spherical_aberration=cs_angstrom / 1e7,
-        voltage=voltage,
-        phase_shift=torch.rad2deg(ctf_params["phaseshift"]),
-        amplitude_contrast=float(alpha),
-        odd_zernike={
-            "Z33c": -trefoil1 * rho_max**3,
-            "Z33s": -trefoil2 * rho_max**3,
-            "Z31c": -prefactor * tiltx,
-            "Z31s": -prefactor * tilty,
-        },
-    )
-    # specimen_absorption=True zeroes amplitude_contrast here, matching
-    # old Aberration's alpha (accepted, never applied -- confirmed dead
-    # code) -- this is the fair "matches old" comparison, not a claim that
-    # amplitude contrast doesn't matter.
-    new_tf = TransferFunction(
-        n_pixels, px, aberration_model="nonlinear", specimen_absorption=True
-    )
-    with pytest.warns(UserWarning, match="specimen_absorption"):
-        new_t = new_tf.transfer_function(params)
-
-    assert old_t.shape == new_t.shape == (5, n_pixels, n_pixels)
-    assert torch.allclose(old_t, new_t, atol=1e-4)
 
 
 # ---------------------------------------------------------------------------

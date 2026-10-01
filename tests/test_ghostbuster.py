@@ -6,9 +6,9 @@ defocus, spherical aberration, phase shift, beam tilt (tiltx/tilty),
 trefoil (trefoil1/trefoil2), B-factor envelope, and anisotropic
 magnification.
 
-On the first run each test saves its output as a fixture under
-tests/test_data/. Subsequent runs load the fixture and assert numerical
-identity. Delete the corresponding .pt file and re-run to regenerate.
+Outputs are compared against committed tensors in tests/test_data/.
+Missing references fail and must be regenerated explicitly after reviewing
+an intentional output change.
 """
 
 from __future__ import annotations
@@ -540,7 +540,7 @@ def test_fsc_ref_and_cryosparc_ref_load_from_file(
 def test_use_2d_mask_weights_loss(
     tiny_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
 ) -> None:
-    """use_2d_mask=True projects fsc_mask and produces a finite weighted loss."""
+    """Residuals outside the projected FSC mask contribute no loss."""
     n = tiny_volume.shape[-1]
     mask = torch.zeros(n, n, n)
     mask[4:12, 4:12, 4:12] = 1.0
@@ -557,9 +557,17 @@ def test_use_2d_mask_weights_loss(
         propagation=Propagation(scattering_model="projection"),
     )
     out = model.forward(torch.tensor([0]))
-    images = torch.randn_like(out)
-    loss = model._compute_loss(out, images, torch.tensor([0]))
-    assert torch.isfinite(loss)
+    idx = torch.tensor([0])
+    projected = model._project_fsc_mask_2d(idx, out.shape)
+    assert (projected == 0).any()
+    assert (projected > 0).any()
+
+    images = out.detach() + (projected == 0).float()
+    torch.testing.assert_close(model._compute_loss(out, images, idx), torch.tensor(0.0))
+
+    images = out.detach() + 2.0
+    expected = (4.0 * projected).mean()
+    torch.testing.assert_close(model._compute_loss(out, images, idx), expected)
 
 
 def test_use_2d_mask_requires_tensor_mask(
@@ -855,6 +863,22 @@ def test_every_refined_parameter_receives_a_gradient(
         assert grad is not None, f"{name} received no gradient"
         assert torch.isfinite(grad).all(), f"{name} gradient is not finite"
         assert grad.abs().sum() > 0, f"{name} gradient is identically zero"
+
+
+@pytest.mark.parametrize("lr_D", [None, 1e-3], ids=["fixed", "refined"])
+def test_default_defocus_offset_is_independent_between_reconstructors(
+    gb_kwargs: dict, lr_D: float | None
+) -> None:
+    kwargs = dict(
+        gb_kwargs, lr_D=lr_D, propagation=Propagation(scattering_model="projection")
+    )
+    first = Reconstructor(**kwargs)
+    sibling = Reconstructor(**kwargs)
+    with torch.no_grad():
+        first.defocus_offset.add_(5000.0)
+    later = Reconstructor(**kwargs)
+    for model in (sibling, later):
+        torch.testing.assert_close(model.defocus_offset, torch.tensor(0.0))
 
 
 def test_defocus_offset_changes_the_rendered_image(

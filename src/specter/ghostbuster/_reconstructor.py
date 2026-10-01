@@ -83,6 +83,9 @@ class Reconstructor(_BaseReconstructor):
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float
         Total electron dose (fluence) per image in e⁻/Å².
+    defocus_offset : torch.Tensor, optional
+        Offset added to the per-particle defocus, in Å. None creates a fresh
+        zero tensor for this reconstruction.
     lr : float, optional
         Learning rate for volume V. None disables V optimisation.
     lr_R : float, optional
@@ -142,7 +145,7 @@ class Reconstructor(_BaseReconstructor):
         voltage: float,
         dose_per_angstrom: float,
         anisomag: torch.Tensor | None = None,
-        defocus_offset: torch.Tensor = torch.tensor(0.0),
+        defocus_offset: torch.Tensor | None = None,
         bfactor: float | torch.Tensor | None = None,
         propagation: Propagation = Propagation(),
         optics: Optics = Optics(),
@@ -225,6 +228,8 @@ class Reconstructor(_BaseReconstructor):
         self.voxel_size = voxel_size
         self.voltage = voltage
         self._register_volume(V, lr)
+        if defocus_offset is None:
+            defocus_offset = V.new_zeros(())
         self._register_ctf_params(ctf_params, defocus_offset, lr_D)
         self._register_pose_params(quaternions, translations, lr_R, lr_T)
         self._register_anisomag_and_scale(anisomag, scale, quaternions.shape[0])

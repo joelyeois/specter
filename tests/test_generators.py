@@ -1,10 +1,9 @@
 """
 Golden-output regression tests for all four image generators.
 
-On the first run, each test saves its output as a fixture under
-tests/test_data/. Subsequent runs load the fixture and assert that
-the output is numerically identical. To regenerate a fixture, delete
-the corresponding .pt file and re-run.
+Outputs are compared against committed tensors in tests/test_data/.
+Missing references fail and must be regenerated explicitly after reviewing
+an intentional output change.
 """
 
 from __future__ import annotations
@@ -32,6 +31,17 @@ from specter.specimen import MicrographSpecimenGenerator
 # the exact conversion keeps the suppression grid bit-identical, so the
 # fixtures still verify the physics rather than just the new parameterization.
 _CR = 1.8 / math.sqrt(2 * math.pi)
+
+
+def test_missing_golden_reference_fails_without_writing(
+    tmp_path, monkeypatch, save_or_compare
+):
+    import conftest
+
+    monkeypatch.setattr(conftest, "FIXTURE_DIR", tmp_path / "references")
+    with pytest.raises(AssertionError, match="Missing golden reference"):
+        save_or_compare("missing", torch.ones(2, 2))
+    assert not conftest.FIXTURE_DIR.exists()
 
 
 @pytest.fixture
@@ -1227,6 +1237,9 @@ def test_image_generator_state_dict_round_trips(small_volume, ctf_params):
 
 
 @pytest.mark.parametrize(
+    "entrypoint", ["volume", "coordinates", "specimen", "micrograph", "tilt_series"]
+)
+@pytest.mark.parametrize(
     ("ice", "expected"),
     [
         (Ice(model="random", parameterization="lobato"), "lobato"),
@@ -1234,50 +1247,68 @@ def test_image_generator_state_dict_round_trips(small_volume, ctf_params):
     ],
     ids=["explicit_lobato", "shared_default"],
 )
-def test_sibling_generators_resolve_the_same_ice_parameterization(
-    ice, expected, small_coords, small_volume, ctf_params
+def test_generators_resolve_the_requested_ice_kernel(
+    entrypoint, ice, expected, small_coords, ctf_params, monkeypatch
 ):
-    """Ice is modelled the way the caller asked, in either generator, and the
-    two image generators must not drift apart unnoticed.
+    """Every entry point builds the requested water kernel, including defaults."""
+    from specter.ice._kernels import build_water_kernel
 
-    ImageGeneratorFromCoordinates used to take no ice_parameterization at
-    all, so its ice silently fell back to resolve_icemaker's own default
-    while its ImageGenerator sibling honoured the setting -- the two
-    regression fixtures were being generated with different ice for months.
-    Each regression fixture pins a generator against its OWN past and never
-    against its sibling, so the pair can diverge with the suite green.
-
-    Comparing the resolved icemakers rather than the images keeps this cheap
-    and specific: it fails on the settings that drifted, not on a pixel
-    difference that could come from anywhere. When neither is told, both must
-    land on the same default, and that default is the bulk-material one
-    (kirkland), not PotentialBuilder's.
-    """
-    coords, atomic_numbers = small_coords
+    n = 16
+    volume = torch.zeros(n, n, n)
     common = dict(
-        nxy=16,
         pixel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.tensor([[0.0, 0.0]]),
         ctf_params=ctf_params,
         voltage=300.0,
         dose_per_angstrom=2.0,
         ice=ice,
         verbose=False,
     )
-    from_coords = ImageGeneratorFromCoordinates(
-        coordinates=coords, atomic_numbers=atomic_numbers, **common
+    pose = dict(
+        quaternions=torch.tensor([[0.0, 0.0, 0.0, 1.0]]),
+        translations=torch.zeros(1, 2),
     )
-    from_volume = ImageGenerator(
-        scattering_potential=small_volume,
-        **{k: v for k, v in common.items() if k != "nxy"},
-    )
+    if entrypoint == "volume":
+        maker = ImageGenerator(volume, **pose, **common, progressbars=False).icemaker
+    elif entrypoint == "coordinates":
+        coords, atomic_numbers = small_coords
+        maker = ImageGeneratorFromCoordinates(
+            coords, atomic_numbers, nxy=n, **pose, **common
+        ).icemaker
+    elif entrypoint == "specimen":
+        maker = MicrographSpecimenGenerator(
+            volume, 2.0, n, ice=ice, progressbars=False
+        ).icemaker
+    else:
+        # These constructors immediately consume their icemaker to blend ice
+        # into a prebuilt canvas. Inspect that actual input to the blend.
+        import specter.imagegenerator._micrograph as micrograph
+        import specter.imagegenerator._tiltseries as tiltseries
 
-    assert (
-        from_coords.icemaker.parameterization == from_volume.icemaker.parameterization
-    )
-    assert from_coords.icemaker.parameterization == expected
-    assert from_volume.icemaker.parameterization == expected
+        seen = []
+
+        def capture(volume, icemaker, *args, **kwargs):
+            seen.append(icemaker)
+            return volume
+
+        module = micrograph if entrypoint == "micrograph" else tiltseries
+        monkeypatch.setattr(module, "blend_ice_into_volume", capture)
+        if entrypoint == "micrograph":
+            MicrographGenerator(
+                volume.unsqueeze(0), micrograph_size=n, **common, progressbars=False
+            )
+        else:
+            TiltSeriesGenerator(
+                volume.unsqueeze(0),
+                micrograph_size=n,
+                angles=torch.tensor([0.0]),
+                **common,
+                progressbars=False,
+            )
+        assert len(seen) == 1
+        maker = seen[0]
+
+    assert maker.parameterization == expected
+    torch.testing.assert_close(maker.ice_kernel, build_water_kernel(2.0, expected))
 
 
 @pytest.mark.parametrize("ice_thickness", [0.0, 200.0, 2000.0])

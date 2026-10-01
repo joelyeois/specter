@@ -276,7 +276,7 @@ def render_report(
 
     md_path = os.path.join(out_dir, "match_report.md")
     png_path = os.path.join(out_dir, "match_report.png")
-    with open(md_path, "w") as fh:
+    with open(md_path, "w", encoding="utf-8") as fh:
         fh.write(render_markdown(report))
     render_figure(report, sim, exp, png_path)
     return md_path, png_path

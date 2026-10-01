@@ -148,17 +148,17 @@ specter = "specter.cli._cli:main"
 
 
 [tool.pytest.ini_options]
-# Run parallel by default: a bare `pytest tests/` is ~19 min serial and ~3 min
-# here. `worksteal` rather than the default `load` scheduler because this suite
-# is very unevenly weighted -- a handful of tomogram/CLI tests dominate, and
-# handing out work up front leaves workers idle behind a straggler (5:28 -> 3:13
-# for the same CPU time). 32 workers pairs with the 4 threads/worker that
-# tests/conftest.py sets, to match this host's 128 cores; both are host-specific
-# tuning, so lower them together on a smaller machine.
+# A bare `uv run pytest` runs the maintained non-network suite. Measured at
+# 2m10s on this 128-core host after reducing CLI startup and fixture costs.
+# Work stealing balances the uneven numerical tests. 32 workers pairs with
+# the 4 threads/worker that tests/conftest.py sets; lower the worker count on
+# a smaller machine. Runtime varies with machine load and available hardware.
 #
 # Use `-n 0` to disable, which is what you want for `--pdb`, `-s`, or any single
 # test -- the 32 worker startups cost more than a short test does.
-addopts = "-n 32 --dist worksteal"
+# Override with `-m ''` to include network tests, or `-m network` for only those.
+testpaths = ["tests"]
+addopts = "-n 32 --dist worksteal -m 'not network'"
 markers = [
     "network: needs internet access (fetches structures from RCSB)",
 ]

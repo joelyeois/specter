@@ -99,11 +99,21 @@ def test_blended_conserves_sum() -> None:
     assert torch.allclose(out.sum(), expected, atol=1e-3)
 
 
-def test_blended_without_conserve_sum_is_still_finite() -> None:
+def test_blended_without_conserve_sum_preserves_a_constant_field() -> None:
+    torch.manual_seed(2)
+    blocks = torch.full((4, 8, 8, 8), 3.5)
+    out = tile_volume_from_blocks_blended(blocks, (1, 20, 20, 20), conserve_sum=False)
+    torch.testing.assert_close(out, torch.full_like(out, 3.5))
+
+
+def test_blended_without_conserve_sum_stays_within_source_bounds() -> None:
     torch.manual_seed(2)
     blocks = torch.rand(4, 8, 8, 8)
     out = tile_volume_from_blocks_blended(blocks, (1, 20, 20, 20), conserve_sum=False)
     assert torch.isfinite(out).all()
+    assert out.min() >= blocks.min() - 1e-6
+    assert out.max() <= blocks.max() + 1e-6
+    assert out.std() > 0
 
 
 def test_blended_handles_non_integer_multiple_target() -> None:

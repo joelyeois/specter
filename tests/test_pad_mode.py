@@ -1,74 +1,93 @@
-"""
-Every generator states its XY pad mode explicitly, and states the right one.
-
-`pad_volume`'s ``xy_pad_mode`` defaults to "constant" because it is a generic
-array helper. Relying on that default is what let `ImageGenerator` and
-`ImageGeneratorFromCoordinates` -- the same job, one class apart -- disagree
-silently, so every call site here names its mode even when it matches.
-
-The two modes are not a style choice, and the split is not by module:
-
-- **Single-particle boxes zero-pad the protein channel.** "reflect" would
-  mirror the target particle into the margin, placing deterministic copies of
-  it just outside the box, correlated with the particle being imaged. Real
-  neighbours sit at random positions and orientations, which is what `crowd`
-  models. Note this pads the protein only: `solvate` reflect-pads the ice
-  separately and crowding is generated at the padded size, so the margin is
-  never vacuum overall.
-- **`MicrographGenerator` reflects.** Its volume is a whole specimen field, so
-  mirroring continues a statistically similar one rather than inventing
-  correlated copies of a single target.
-"""
+"""Particle margins contain no protein; micrograph margins extend the specimen."""
 
 from __future__ import annotations
 
-import ast
-from pathlib import Path
-
 import pytest
+import torch
+import torch.nn.functional as F
 
-import specter.imagegenerator._generator as generator_module
-
-PACKAGE = Path(generator_module.__file__).parent
-
-#: module file name -> the xy_pad_mode every pad_volume call in it must name.
-EXPECTED_MODE = {
-    "_generator.py": "constant",  # ImageGenerator, ImageGeneratorFromCoordinates
-    "_micrograph.py": "reflect",  # MicrographGenerator
-}
-
-
-def _pad_volume_calls(path: Path) -> list[ast.Call]:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    return [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "pad_volume"
-    ]
+from specter.imagegenerator import (
+    ImageGenerator,
+    ImageGeneratorFromCoordinates,
+    MicrographGenerator,
+)
+from specter.settings import Camera, Propagation
 
 
-@pytest.mark.parametrize("name,expected", sorted(EXPECTED_MODE.items()))
-def test_pad_volume_calls_name_the_expected_mode(name: str, expected: str) -> None:
-    calls = _pad_volume_calls(PACKAGE / name)
-    assert calls, f"{name} no longer calls pad_volume -- update EXPECTED_MODE"
-    for call in calls:
-        modes = [k.value for k in call.keywords if k.arg == "xy_pad_mode"]
-        assert modes, (
-            f"{name}:{call.lineno} calls pad_volume without xy_pad_mode, so it "
-            "inherits the generic default instead of stating a choice."
-        )
-        assert isinstance(modes[0], ast.Constant) and modes[0].value == expected, (
-            f"{name}:{call.lineno} pads with {modes[0].value!r}, expected {expected!r}."
-        )
-
-
-def test_no_unlisted_module_pads() -> None:
-    """A new generator must make the same decision deliberately."""
-    unlisted = sorted(
-        p.name
-        for p in PACKAGE.glob("*.py")
-        if p.name not in EXPECTED_MODE and _pad_volume_calls(p)
+@pytest.mark.parametrize(
+    "from_coordinates", [False, True], ids=["volume", "coordinates"]
+)
+def test_particle_generators_zero_pad_the_protein_channel(
+    monkeypatch, from_coordinates
+):
+    n = 8
+    common = dict(
+        pixel_size=2.0,
+        quaternions=torch.tensor([[0.0, 0.0, 0.0, 1.0]]),
+        translations=torch.zeros(1, 2),
+        ctf_params={"dfu": torch.tensor([5000.0])},
+        voltage=300.0,
+        dose_per_angstrom=2.0,
+        propagation=Propagation(scattering_model="projection", pad_fft=True),
+        camera=Camera(noise_model=None),
+        verbose=False,
     )
-    assert not unlisted, f"pad_volume called in unlisted module(s): {unlisted}"
+    idx = torch.tensor([0])
+    if from_coordinates:
+        gen = ImageGeneratorFromCoordinates(
+            coordinates=torch.tensor([[6.0, 0.0, 0.0], [-6.0, 1.0, 0.0]]),
+            atomic_numbers=torch.tensor([6, 6]),
+            nxy=n,
+            **common,
+        )
+        unpadded = gen.potentialbuilder(gen.rotate(gen.quaternions, gen.translations))
+        if unpadded.ndim == 3:
+            unpadded = unpadded.unsqueeze(0)
+    else:
+        gen = ImageGenerator(
+            scattering_potential=torch.ones(n, n, n), progressbars=False, **common
+        )
+        unpadded = gen.rotate(gen.quaternions, gen.translations)
+    assert unpadded[..., 1:-1, 1:-1].sum() > 0
+    # Observe the specimen passed to propagation, before any scattering,
+    # CTF or detector operation can hide a padding difference.
+    monkeypatch.setattr(gen, "process_volume", lambda volume, idx: volume)
+    padded = gen(idx)
+    expected = F.pad(unpadded, (n // 2,) * 4 + (0, 0), mode="constant")
+    assert not torch.equal(
+        expected, F.pad(unpadded, (n // 2,) * 4 + (0, 0), mode="reflect")
+    )
+    torch.testing.assert_close(padded, expected)
+    assert padded[..., : n // 2, :].count_nonzero() == 0
+    assert padded[..., -n // 2 :, :].count_nonzero() == 0
+    assert padded[..., :, : n // 2].count_nonzero() == 0
+    assert padded[..., :, -n // 2 :].count_nonzero() == 0
+
+
+def test_micrograph_generator_reflects_the_specimen_into_the_margin(monkeypatch):
+    n = 8
+    volume = torch.arange(n**3, dtype=torch.float32).reshape(1, n, n, n) / 10
+    gen = MicrographGenerator(
+        volume.clone(),
+        n,
+        2.0,
+        {"dfu": torch.tensor([5000.0])},
+        300.0,
+        2.0,
+        propagation=Propagation(scattering_model="projection", pad_fft=True),
+        camera=Camera(noise_model=None),
+        progressbars=False,
+        verbose=False,
+    )
+    seen = []
+
+    def capture(volume, **kwargs):
+        seen.append(volume.clone())
+        return torch.ones(volume.shape[0], *volume.shape[-2:], dtype=torch.complex64)
+
+    monkeypatch.setattr(gen.iterative_scattering, "forward", capture)
+    gen(torch.tensor([0]))
+    assert len(seen) == 1
+    expected = F.pad(volume, (n // 2,) * 4 + (0, 0), mode="reflect")
+    torch.testing.assert_close(seen[0], expected)
+    assert seen[0][..., : n // 2, :].count_nonzero() > 0

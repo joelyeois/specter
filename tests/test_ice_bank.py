@@ -465,27 +465,55 @@ def test_bundled_ice_data_resolves_inside_the_package():
         assert package_root in path.parents
 
 
-def test_bundled_data_is_declared_as_package_data():
-    """Being inside the package is necessary but not sufficient -- setuptools
-    only copies data files matched by [tool.setuptools.package-data], so a
-    missing glob ships a wheel whose data silently isn't there."""
-    import tomllib
+def test_built_wheel_contains_bundled_scientific_data(tmp_path):
+    """Check the distributable itself, regardless of how its data globs are written."""
+    import shutil
+    import subprocess
+    import sys
+    import zipfile
     from pathlib import Path
 
-    pyproject = Path(__file__).parent.parent / "pyproject.toml"
-    if not pyproject.is_file():  # installed without the source tree
-        pytest.skip("pyproject.toml not available")
-    globs = tomllib.loads(pyproject.read_text())["tool"]["setuptools"]["package-data"][
-        "specter"
-    ]
+    repo = Path(__file__).resolve().parent.parent
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    for name in ("pyproject.toml", "README.md"):
+        shutil.copy2(repo / name, checkout / name)
+    shutil.copytree(
+        repo / "src",
+        checkout / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"),
+    )
+    built = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from setuptools.build_meta import build_wheel; build_wheel('dist')",
+        ],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
+    wheels = list((checkout / "dist").glob("*.whl"))
+    assert len(wheels) == 1
 
-    for required in (
-        "ice_data/*.pt",
-        "ice_data/ice_cache/*.pt",
-        "atom_data/*.txt",
-        "atom_data/*.json",  # params_cat.json backs the default shtyrov path
-    ):
-        assert required in globs, f"{required} missing from package-data"
+    package = repo / "src" / "specter"
+    required = {
+        "specter/" + str(path.relative_to(package))
+        for pattern in (
+            "atom_data/*.txt",
+            "atom_data/*.json",
+            "ice_data/*.pt",
+            "ice_data/ice_cache/*.pt",
+            "ice_data/ice_cache/manifest.json",
+        )
+        for path in package.glob(pattern)
+    }
+    assert "specter/atom_data/params_cat.json" in required
+    assert "specter/ice_data/ice_cache/manifest.json" in required
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        missing = required - set(wheel.namelist())
+    assert not missing, f"Scientific data missing from wheel: {sorted(missing)}"
 
 
 def _blend_reference(V, icemaker, pixel_size):

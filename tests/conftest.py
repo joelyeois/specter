@@ -119,25 +119,23 @@ def tiny_volume():
 @pytest.fixture
 def save_or_compare():
     """
-    Golden-output helper: ``save_or_compare(name, tensor)`` saves the tensor
-    as ``tests/test_data/<name>.pt`` on first run (and skips the test), and
-    asserts the tensor matches it on every later run. Delete the file to
-    regenerate after an intentional output change.
+    Compare a tensor against its committed ``tests/test_data/<name>.pt``
+    reference. Missing references fail; regeneration must be an explicit,
+    reviewed step after an intentional output change.
     """
     import torch
 
     def _save_or_compare(name: str, tensor) -> None:
         path = FIXTURE_DIR / f"{name}.pt"
-        if path.exists():
-            expected = torch.load(path, weights_only=True)
-            assert torch.allclose(tensor.float(), expected.float(), atol=1e-4), (
-                f"Regression failure for '{name}'. "
-                "Delete the fixture file and re-run to regenerate."
-            )
-        else:
-            FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
-            torch.save(tensor.cpu(), path)
-            pytest.skip(f"Fixture '{name}.pt' generated — re-run to verify.")
+        assert path.is_file(), f"Missing golden reference: {path}"
+        expected = torch.load(path, weights_only=True)
+        torch.testing.assert_close(
+            tensor.detach().cpu().float(),
+            expected.float(),
+            atol=1e-4,
+            rtol=1e-5,
+            msg=f"Regression failure for '{name}'; review the output before regenerating.",
+        )
 
     return _save_or_compare
 

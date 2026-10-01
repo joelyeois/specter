@@ -322,6 +322,27 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
     assert matched.bfactor is None
 
 
+def test_report_preserves_angstrom_symbols_in_an_ascii_locale(tmp_path: Path) -> None:
+    """Report files use UTF-8 even when a worker's locale uses ASCII."""
+    import locale
+
+    from specter.match import MatchReport, PoseAlignmentResult, render_report
+
+    report = MatchReport(pose=PoseAlignmentResult(0.8, 0.1, 1.0, 10.0), pixel_size=2.5)
+    images = torch.randn(5, 16, 16, generator=torch.Generator().manual_seed(0))
+    previous_locale = locale.setlocale(locale.LC_CTYPE)
+    try:
+        locale.setlocale(locale.LC_CTYPE, "C")
+        markdown_path, figure_path = render_report(
+            report, images, images, str(tmp_path)
+        )
+    finally:
+        locale.setlocale(locale.LC_CTYPE, previous_locale)
+
+    assert "3.7 Å water-ring excess" in Path(markdown_path).read_text(encoding="utf-8")
+    assert Path(figure_path).is_file()
+
+
 def test_rescale_metadata_follows_a_fourier_cropped_stack(tmp_path: Path) -> None:
     """A .cs extracted at 360 px / 0.5695 A describes 200 px images at 1.0251 A;
     pixel-unit shifts scale the other way so shifts in Angstrom are unchanged."""

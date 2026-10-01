@@ -25,6 +25,11 @@ from specter.pipelines import (
 )
 from specter.pipelines._tomogram import tomogram_output_path
 
+# These tests check pipeline wiring and output bookkeeping. A small bundled
+# structure exercises the same paths without parsing a large assembly or
+# depending on the developer's download cache.
+_PDB_FIXTURE = str(Path(__file__).parent / "test_data" / "1mbo.cif")
+
 # Every field _load_csfile_parameters (specter.io._cryosparc) reads off a
 # CryoSPARC passthrough .cs -- fabricated here so the test needs no real
 # external dataset. Values are deliberately distinct from
@@ -242,8 +247,10 @@ def test_run_particle_stack_rejects_seed_with_auto_batchsize(tmp_path: Path) -> 
 def _minimal_tomogram_config(**overrides) -> TomogramConfig:
     defaults = dict(
         target_shape=[24, 48, 48],
-        voxel_size=12.0,
-        targets=[{"pdb_source": "6bdf", "n_copies": 1}],
+        # Coarse voxels grow the supersampled atomic kernels cubically.
+        # At 4 A this box still comfortably holds the small test structure.
+        voxel_size=4.0,
+        targets=[{"pdb_source": _PDB_FIXTURE, "n_copies": 1}],
         device="cpu",
         write_picks=False,
         write_segmentation=False,
@@ -386,7 +393,7 @@ def test_run_tilt_series_chained_tomogram_config_creates_two_separate_jobs(
     assert tomogram_config.project is None  # not independently configured
 
     config = TiltSeriesConfig(
-        voxel_size=12.0,
+        voxel_size=tomogram_config.voxel_size,
         micrograph_size=48,
         min_tilt_angle=-5,
         max_tilt_angle=5,
@@ -426,7 +433,7 @@ def test_run_tilt_series_chained_tomogram_config_respects_explicit_tracking(
         project="shared-tomograms", output_dir=str(tmp_path)
     )
     config = TiltSeriesConfig(
-        voxel_size=12.0,
+        voxel_size=tomogram_config.voxel_size,
         micrograph_size=48,
         min_tilt_angle=-5,
         max_tilt_angle=5,
@@ -543,6 +550,7 @@ def test_run_micrograph_forwards_absorption_and_exposure_settings(
         n_pixels=32,
         micrograph_size=64,
         ice_model="random",
+        bulk_scattering_factors="lobato",
         device="cpu",
         output_dir=str(tmp_path),
         **_EXPOSURE_FIELDS,
@@ -551,6 +559,12 @@ def test_run_micrograph_forwards_absorption_and_exposure_settings(
         run_micrograph(config)
     _assert_exposure_bundles(seen)
     assert specimen["ice"].motion_variance == 0.38
+    assert specimen["icemaker"].parameterization == "lobato"
+    from specter.ice._kernels import build_water_kernel
+
+    torch.testing.assert_close(
+        specimen["icemaker"].ice_kernel, build_water_kernel(config.pixel_size, "lobato")
+    )
 
 
 def test_run_tilt_series_forwards_absorption_and_exposure_settings(

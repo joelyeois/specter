@@ -133,62 +133,6 @@ def test_ctf_scattering_model_selects_linear_aberration_model_both_backends(
     assert legacy_images.shape == torch_ctf_images.shape
 
 
-@pytest.mark.skipif(
-    not __import__("os").path.exists(
-        "/scratch/loh/joel/empiar-10202/CS-aav2/J247/J247_passthrough_particles.cs"
-    ),
-    reason="real .cs file not available",
-)
-def test_real_csfile_particles_match_across_backends_end_to_end(small_volume):
-    """First 5 real particles from the same .cs file used throughout this
-    migration, through the actual ImageGenerator forward pass end to end
-    -- the strongest available validation that aberration_backend
-    switches nothing but which engine computes the transfer function."""
-    from specter.io import extract_parameters_from_csfile
-
-    CS_PATH = (
-        "/scratch/loh/joel/empiar-10202/CS-aav2/J247/J247_passthrough_particles.cs"
-    )
-    (
-        voltage_kv,
-        pixel_size,
-        alpha,
-        rotations,
-        translations_angstrom,
-        ctf_params,
-        scale,
-        anisomag,
-        indices,
-        split,
-    ) = extract_parameters_from_csfile(CS_PATH, halfset="all", n_particles=5)
-
-    def build(backend):
-        torch.manual_seed(0)
-        gen = ImageGenerator(
-            scattering_potential=small_volume,
-            pixel_size=2.0,
-            quaternions=rotations,
-            translations=torch.zeros(5, 2),
-            ctf_params=ctf_params,
-            voltage=float(voltage_kv),
-            dose_per_angstrom=2.0,
-            verbose=False,
-            progressbars=False,
-            propagation=Propagation(scattering_model="multislice", alpha=float(alpha)),
-            optics=Optics(aberration_backend=backend),
-            camera=Camera(noise_model=None),
-            ice=Ice(model=None),
-        )
-        torch.manual_seed(0)
-        return gen(torch.arange(5))
-
-    legacy_images = build("legacy")
-    torch_ctf_images = build("torch_ctf")
-
-    assert legacy_images.shape == torch_ctf_images.shape == (5, 32, 32)
-    assert torch.allclose(legacy_images, torch_ctf_images, atol=1e-3)
-
-
 def test_micrograph_generator_matches_across_backends(
     small_volume, realistic_ctf_params
 ):

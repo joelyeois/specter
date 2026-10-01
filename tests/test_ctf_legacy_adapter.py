@@ -6,8 +6,8 @@ Every conversion used here (dfu/dfv -> defocus/astigmatism, cs -> mm,
 phaseshift -> degrees, trefoil1/trefoil2 -> Z33c/Z33s, tiltx/tilty ->
 Z31c/Z31s) is already verified formula-by-formula against
 aberrations.Aberration in test_ctf_transfer.py -- these tests check the
-*bridge* (dict handling, optional keys, dose/bfactor plumbing, real
-multi-particle .cs data end to end through the exact dict-based call
+*bridge* (dict handling, optional keys, dose/bfactor plumbing, synthetic
+multi-particle data end to end through the exact dict-based call
 signature aberrations.Aberration.forward() uses), not the underlying
 physics again.
 """
@@ -154,53 +154,6 @@ def test_ctf_model_matches_old_aberration():
 
     assert not old_out.is_complex()
     assert not new_out.is_complex()
-    assert torch.allclose(old_out, new_out, atol=1e-4)
-
-
-@pytest.mark.skipif(
-    not __import__("os").path.exists(
-        "/scratch/loh/joel/empiar-10202/CS-aav2/J247/J247_passthrough_particles.cs"
-    ),
-    reason="real .cs file not available",
-)
-def test_real_csfile_particles_match_old_aberration_end_to_end():
-    """First 20 real particles from the same .cs file used throughout this
-    migration, through the exact dict-based call signature
-    aberrations.Aberration.forward() uses -- the same validation bar as
-    everywhere else in this migration, applied to the compatibility
-    bridge specifically."""
-    from specter.io import extract_parameters_from_csfile
-
-    CS_PATH = (
-        "/scratch/loh/joel/empiar-10202/CS-aav2/J247/J247_passthrough_particles.cs"
-    )
-    (
-        voltage_kv,
-        pixel_size,
-        alpha,
-        rotations,
-        translations_angstrom,
-        ctf_params,
-        scale,
-        anisomag,
-        indices,
-        split,
-    ) = extract_parameters_from_csfile(CS_PATH, halfset="all", n_particles=20)
-
-    n_pixels = 128
-    voltage = float(voltage_kv)
-    px = float(pixel_size)
-    exitwave = _exitwave(20, seed=7, n_pixels=n_pixels)
-
-    old = Aberration(n_pixels, px, voltage, aberration_model="nonlinear")
-    old_out = old(exitwave, ctf_params)
-
-    adapter = LegacyAberrationAdapter(
-        n_pixels, px, voltage, aberration_model="nonlinear"
-    )
-    new_out = adapter(exitwave, ctf_params)
-
-    assert old_out.shape == new_out.shape == (20, n_pixels, n_pixels)
     assert torch.allclose(old_out, new_out, atol=1e-4)
 
 

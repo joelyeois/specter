@@ -217,6 +217,24 @@ tests/               # pytest suite
 
 ---
 
+## Tests
+
+```bash
+uv run pytest
+```
+
+The default runs the non-network suite in `tests/` with 32 workers and work
+stealing, using four CPU threads per worker. It measured 2m 10s on a 128-core
+host; runtime varies with hardware and load. Use `-n 4` on smaller machines,
+or `-n 0` for a single module:
+
+```bash
+uv run pytest -n 0 tests/test_cryosparc.py
+uv run pytest -m ""  # include tests that fetch structures from the internet
+```
+
+---
+
 ## FAQ
 
 **Do I need a GPU?**

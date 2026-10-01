@@ -266,6 +266,18 @@ class MLBOP:
         device = rij_t.device
         dtype = rij_t.dtype
 
+        # A cached Verlet list includes skin-only neighbours with f_C == 0.
+        # Remove them before expanding each atom's pairs into m_i**2 triplets,
+        # rather than allocating those triplets and discarding them afterward.
+        # Filter only this evaluation: the cache must retain pairs that can
+        # become active again before its next rebuild. Use the actual cutoff
+        # weight (in the kernel dtype) to match the validity test below.
+        active = (self.f_C(rij_t) > 0.0).nonzero(as_tuple=True)[0]
+        i_idx_t = i_idx_t.index_select(0, active)
+        j_idx_t = j_idx_t.index_select(0, active)
+        rij_t = rij_t.index_select(0, active)
+        vec_t = vec_t.index_select(0, active)
+
         # Group the pair list by central atom i (stable, so the order within
         # an atom's group is the input order).
         order = torch.argsort(i_idx_t, stable=True)

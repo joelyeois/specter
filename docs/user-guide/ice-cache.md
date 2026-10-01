@@ -4,7 +4,7 @@ For the underlying physics, see [Ice structure](../concepts/ice.md).
 
 `GradientSKIcemaker` generates amorphous ice by optimising water positions
 against the structure factor $S(k)$ and ML-BOP energy of real low-density
-amorphous ice. That optimisation costs six to seven minutes for a
+amorphous ice. That optimisation costs several minutes for a
 production-scale cell (see [Cost](#cost)), far too much to repeat per
 simulation. `IceBank` therefore separates the two: it optimises and stores
 each configuration once, and a simulation draws a randomly rotated,
@@ -61,6 +61,58 @@ Defaults come from `configs/ice.toml`, and every flag overrides one field of
 it. The [command reference](../api/cli/build.md#specter-build-ice) lists them all.
 
 ## Cost
+
+### Filtering inactive ML-BOP neighbours
+
+ML-BOP evaluates only neighbours whose cutoff weight is positive. The Verlet
+cache retains its extra 1 Å skin, so a neighbour can become active again without
+a new search, but each evaluation filters skin-only pairs **before** enumerating
+three-body triplets. This saves work without changing the physical cutoff,
+optimisation recipe, float64 positions, float32 kernels or fixed-point storage.
+
+GPU validation on NVIDIA L40 cards with PyTorch 2.5.1+cu121 used the geometry and
+250-step ceiling from `configs/ice.toml`: 256³ voxels, `dx = 1.0`, 527,178 beads,
+and the normal plateau stopping rule. Three complete builds compared the old
+enumeration with the filtered enumeration (four CPU threads per process):
+
+| seed | seconds, old → filtered | steps, old → filtered | peak allocated GiB, old → filtered | saved $S(k)$ loss, old → filtered |
+|-----:|------------------------:|----------------------:|----------------------------------:|----------------------------------:|
+| 1000 | 570.5 → 280.4 | 250 → 174 | 6.01 → 4.76 | 0.00163 → 0.00110 |
+| 1001 | 236.3 → 193.9 | 97 → 108 | 7.37 → 4.76 | 0.000853 → 0.00532 |
+| 1002 | 421.0 → 181.3 | 187 → 103 | 6.01 → 4.77 | 0.00132 → 0.00714 |
+
+Peak **reserved** memory across these builds fell from 10.14 to 5.70 GiB.
+Whole-build speedups were 1.22–2.32x, including different stopping iterations.
+To isolate kernel cost, five warmed, synchronized energy-and-backward trials
+on each of two bundled cells and a full-size random start measured 1.51–1.80x
+speedup and 1.06–1.26 GiB less peak allocated memory. Relative energy differences
+were at most $2.3\times10^{-7}$ and gradient L2 differences $1.2\times10^{-8}$.
+
+There is no reduction in numerical dtype precision, but CUDA accumulation and
+floating-point reduction changes can alter the L-BFGS trajectory and stopping
+point. The filtered builds' median saved-coordinate loss was 0.00532, versus
+0.00132 for the fresh controls. Recomputing all 20 shipped cells gave a median
+of 0.00356 and range 0.000222–0.0221; all three filtered builds fell within that
+range. Their energies, −0.232, −0.222 and −0.202 eV/atom, also fell within the
+shipped −0.270 to −0.193 range. These runs demonstrate comparable quality to the
+shipped library, with a higher median error than the fresh controls; they do
+not establish identical results for individual seeds.
+
+A fourth cell exercised the implemented code through the actual CLI:
+
+```bash
+specter build ice --config configs/ice.toml --n_configs 1 --seed_start 1003 --device cuda:1 --output_dir ice-validation
+```
+
+It completed in 143.5 seconds (77 steps), with 4.78 GiB allocated / 5.46 GiB
+reserved, saved-coordinate loss 0.01026 and energy −0.1953 eV/atom, also within
+the shipped ranges. It wrote 527,178 fixed-point coordinates and the manifest.
+
+### Scaling with cell size
+
+The scaling tables below were measured before filtering skin-only pairs.
+Use the comparison above for current default-size costs, and rerun
+`docs-figures/ice_cache_timing.py` to budget another geometry or GPU.
 
 Generating a configuration is expensive, and how expensive depends steeply on
 the cell size. Each row below is three complete configurations on one NVIDIA
@@ -141,8 +193,8 @@ Three properties of the command exist to make a multi-hour run practical:
 - **Configurations shard across devices.** `--device 0,1,2,3` runs one worker
   process per GPU, each taking a disjoint slice, so four GPUs finish a library
   roughly four times faster. `--device auto` uses every visible GPU. Size the
-  pool against the reserved column: one configuration per GPU at a time, so
-  `n = 256` needs roughly 8 GiB free on **each** device in the pool.
+  pool against the measured reserved peak with room for variation: one
+  configuration per GPU at a time, on **each** device in the pool.
 - **Runs resume.** A configuration whose file already exists is skipped, so
   re-running the same command after an interruption generates only what is
   missing. Pass `--overwrite True` to regenerate regardless.

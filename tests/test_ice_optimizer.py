@@ -175,6 +175,75 @@ def test_compute_energy_with_cache_matches_fresh_search_and_rebuilds_on_drift():
     assert torch.isfinite(e0["E_total"])
 
 
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize(
+    ("dtype", "compute_dtype"),
+    [(torch.float32, None), (torch.float64, None), (torch.float64, torch.float32)],
+)
+@pytest.mark.parametrize(
+    "coords",
+    [
+        [[0, 0, 0], [2.9, 0, 0], [0, 3.3, 0], [4.1, 0, 0], [7.9, 0, 0]],
+        [[0, 0, 0], [3.8, 0, 0]],
+        [[0, 0, 0], [3.5530, 0, 0], [0, 3.5540, 0], [0, 0, 3.2]],
+    ],
+    ids=["mixed", "all_inactive", "near_cutoff"],
+)
+def test_cached_skin_pairs_match_dense_energy_and_gradient(
+    device, dtype, compute_dtype, coords
+):
+    """Skin-only pairs contribute neither energy, statistics nor forces."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    model = MLBOP(device=device)
+    pos = torch.tensor(coords, dtype=dtype, device=device, requires_grad=True)
+    cache = NeighborListCache()
+    i, j, shift = cache.pairs(
+        pos, torch.eye(3, dtype=dtype, device=device) * 30, model.r_cut
+    )
+    vec = pos.index_select(0, j) - pos.index_select(0, i) + shift
+    if compute_dtype is not None:
+        vec = vec.to(compute_dtype)
+    r = vec.norm(dim=1)
+    assert (model.f_C(r) == 0).any()
+    ref = _dense_three_body_reference(model, len(pos), i, j, r, vec)
+    actual = model.compute_energy(
+        pos, 30.0, neighbor_cache=cache, compute_dtype=compute_dtype
+    )
+    rtol, atol = (1e-10, 1e-12) if r.dtype == torch.float64 else (2e-5, 2e-6)
+    for key in ref:
+        torch.testing.assert_close(
+            actual[key], ref[key], rtol=rtol, atol=atol, equal_nan=True
+        )
+    (actual_grad,) = torch.autograd.grad(actual["E_total"], pos, retain_graph=True)
+    (ref_grad,) = torch.autograd.grad(ref["E_total"], pos)
+    assert torch.isfinite(actual_grad).all()
+    torch.testing.assert_close(actual_grad, ref_grad, rtol=rtol, atol=atol)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_skin_pair_can_reactivate_without_cache_rebuild(device):
+    """Filtering an evaluation must not remove a future bond from the cache."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    model = MLBOP(device=device)
+    cache = NeighborListCache(skin=1.0)
+    pos = torch.tensor([[0, 0, 0], [3.8, 0, 0]], dtype=torch.float64, device=device)
+    inactive = model.compute_energy(pos, 30.0, neighbor_cache=cache)
+    assert inactive["E_total"] == 0
+    assert cache.i is not None and cache.i.numel() == 2
+    assert cache.rebuilds == 1
+
+    moved = pos.clone()
+    moved[1, 0] = 3.4  # 0.4 A movement, below skin / 2.
+    cached = model.compute_energy(moved, 30.0, neighbor_cache=cache)
+    fresh = model.compute_energy(moved, 30.0)
+    assert cache.rebuilds == 1
+    assert cached["E_total"] != 0
+    for key in fresh:
+        torch.testing.assert_close(cached[key], fresh[key], equal_nan=True)
+
+
 def test_cache_requires_periodic_boundaries():
     model = MLBOP(device="cpu")
     pos = _random_water(30, 14.0, seed=3)

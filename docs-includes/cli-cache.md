@@ -4,9 +4,11 @@
 
 Inspect and clear the cache of downloaded PDB/mmCIF structures.
 
-Holds only structures fetched by accession code. Files you supply by
-path are read in place and never cached, so clearing this is always
-safe -- everything in it can be re-downloaded.
+Holds structures fetched by accession code, plus parsed forms (atom
+positions, elements, bonded-species types) of every structure loaded,
+including files you supply by path. Those files are read in place and
+never copied here, so clearing this is always safe: downloads are
+re-fetched and parsed entries are rebuilt on next use.
 
 Override the location with $SPECTER_PDB_CACHE, or move every
 XDG-aware tool's cache at once with $XDG_CACHE_HOME.
@@ -18,7 +20,7 @@ specter cache [OPTIONS] COMMAND [ARGS]...
 | Command | Description |
 | --- | --- |
 | [`dir`](#specter-cache-dir) | Print the cache directory. |
-| [`info`](#specter-cache-info) | Show the cache directory, file count and total size. |
+| [`info`](#specter-cache-info) | Show the cache directory, structure and parsed-entry counts, and size. |
 | [`clean`](#specter-cache-clean) | Delete every cached structure. |
 
 ## `specter cache dir` { #specter-cache-dir }
@@ -31,7 +33,7 @@ specter cache dir [OPTIONS]
 
 ## `specter cache info` { #specter-cache-info }
 
-Show the cache directory, file count and total size.
+Show the cache directory, structure and parsed-entry counts, and size.
 
 ```text
 specter cache info [OPTIONS]

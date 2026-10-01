@@ -57,8 +57,10 @@ class TomogramPlacement:
     """One placed cytosolic/lumen instance, for ground-truth bookkeeping.
 
     `role` is "target" for a `TomogramProteinSpec` placed via `n_copies`
-    (exact count), "filler" for one placed via `ratio` -- `export_picks`
-    excludes "filler" placements by default.
+    (exact count), "filler" for one placed via `ratio`. `export_picks`
+    includes "filler" placements by default (``include_filler=True``),
+    writing them to a separate ``-filler``-suffixed file when the same
+    `(species_id, location)` is also placed as a target.
     """
 
     species_id: str

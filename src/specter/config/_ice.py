@@ -38,8 +38,8 @@ class IceCacheConfig:
         8,
         help=(
             "Number of independent ice configurations to generate. "
-            "Each costs a full optimisation run -- tens of minutes at the default "
-            "n=256, dx=1.0."
+            "Each costs a full optimisation run, about 3-9 minutes on one GPU at "
+            "the default n=256, dx=1.0."
         ),
         check="positive",
     )

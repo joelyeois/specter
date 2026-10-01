@@ -357,7 +357,7 @@ class Ghostbuster(_GhostbusterBase):
                     f"row {row} is slice {idx} of {stack}, not slice {row}. Reading "
                     f"{Path(mrc_file).name} by row would pair every pose with "
                     "another particle's image. Point mrc_file at a stack written in "
-                    "this file's row order (`specter export particles` writes one), "
+                    "this file's row order (`specter.io.write_row_ordered_csfile` writes one), "
                     "or pass address_by_blob_idx to read this one where the .cs "
                     "says the images are."
                 )

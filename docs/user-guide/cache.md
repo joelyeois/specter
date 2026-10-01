@@ -1,7 +1,7 @@
 # Manage the PDB cache
 
 Every SPECTER config that names a structure by accession code
-(`pdb_source` in a particle, micrograph, or tomogram config) fetches it
+(`pdb_source` in a particle, micrograph, tomogram, or match config) fetches it
 from RCSB the first time it's needed and keeps the downloaded file for
 reuse. That cache lives outside any project, at `~/.cache/specter/pdb` by
 default, because a structure fetched from RCSB is the same file
@@ -35,20 +35,35 @@ export SPECTER_PDB_CACHE=/scratch/$USER/specter-pdb-cache
 Set it in your shell profile (or the job script's environment) so every
 `specter` invocation agrees on the same location.
 
+A single run can also point elsewhere without touching the environment.
+The particle, micrograph, tomogram and match configs each carry a
+`pdb_cache_dir` field, settable in the TOML or with `--pdb_cache_dir` on
+the command line; left unset, it resolves to the directory above. The
+`specter cache` commands always read the environment-resolved directory,
+not a per-run override.
+
 ## Inspecting the cache
 
 ```bash
 specter cache info
 ```
 
-reports the resolved directory, how many structures are stored, and their
-total size on disk. On this machine, with a cache built up over ordinary use:
+reports the resolved directory, how many structures have been downloaded,
+how many parsed entries are stored (see [Clearing the
+cache](#clearing-the-cache) for what these are), and the total size on
+disk. With a cache built up over ordinary use:
 
 ```text
 Location: /home/user/.cache/specter/pdb
 Structures: 32
+Parsed entries: 57
 Size: 130.4 MB
 ```
+
+`Structures` counts downloaded files only. `Parsed entries` is usually the
+larger number, since one structure gets a separate entry for each
+combination of parse settings, and structures you supply by path get
+parsed entries without being downloaded.
 
 An empty or not-yet-created cache reports as such rather than erroring:
 
@@ -66,7 +81,7 @@ specter cache clean
 deletes the entire cache directory, after confirming how much it will free:
 
 ```text
-Delete 32 cached structure(s) (130.4 MB) from /home/user/.cache/specter/pdb? [y/N]:
+Delete 32 cached structure(s) and 57 parsed entr(ies) (130.4 MB) from /home/user/.cache/specter/pdb? [y/N]:
 ```
 
 Pass `-y`/`--yes` to skip the prompt in a script or CI job:
@@ -76,7 +91,7 @@ specter cache clean --yes
 ```
 
 ```text
-✓ Removed 32 structure(s), 130.4 MB freed.
+✓ Removed 32 structure(s) and 57 parsed entr(ies), 130.4 MB freed.
 ```
 
 Running `clean` against an already-empty or missing cache is a no-op rather
@@ -108,9 +123,12 @@ where they were -- which is the same guarantee `uv cache clean` and
 
 ## Referencing a structure
 
-`pdb_source` shows up wherever a config names a structure: particle and
-micrograph configs at the top level, tomogram configs inside
-`[[targets]]` and `[[filler]]` tables:
+`pdb_source` shows up wherever a config names a structure: particle,
+micrograph and match configs as an ordinary field; tomogram configs inside
+the inline tables of the `targets` and `filler` lists (under `[targets]`
+and `[filler]` in `configs/tomogram.toml`) and in each
+`[[membrane_transmembrane_specs]]` table. A `[[filaments]]` entry names its
+monomer structure with `code` instead, which takes the same two forms:
 
 ```toml
 pdb_source = "6qzp"                        # fetched into the cache

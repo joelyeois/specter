@@ -13,8 +13,8 @@ its output in the order it reads its inputs rather than the order of the
 rows it emits. So those columns are read here for two purposes: to *check* a
 stack really is in row order before trusting it (`row_order_conflict`), and
 to resolve images in place when asked (`particle_image_refs`), which is what
-`specter export particles` uses to write a row-ordered stack in the first
-place.
+`specter.io.write_row_ordered_csfile` uses to write a row-ordered stack in the
+first place.
 """
 
 from __future__ import annotations

@@ -104,7 +104,7 @@ class _PickExportMixin:
             If True, also write pick files for `role == "filler"`
             cytosol/lumen placements (suffixed ``-filler`` on a
             target/filler `(species_id, location)` collision, to avoid
-            overwriting the target's own file). Default False.
+            overwriting the target's own file). Default True.
         include_beads : bool, optional
             If True (default), also write every gold fiducial to a single
             ``gold-bead`` pick file, regardless of radius or which

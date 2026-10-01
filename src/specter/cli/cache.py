@@ -7,9 +7,13 @@ files. A tool that keeps a cache out of sight owes the user a way to ask
 where it is and to clear it, the way ``uv cache dir``/``uv cache clean`` and
 ``pip cache dir``/``pip cache purge`` do.
 
-Safe by construction: only downloads land in this directory. A structure the
-user supplies by path is read where it lies and never copied here (see
-`specter.pdb.PDB`), so ``clean`` can never delete something irreplaceable.
+Safe by construction: everything in this directory is reproducible. It holds
+structures downloaded by accession code, plus a ``parsed/`` subfolder of
+parsed forms (atom positions, elements, bonded-species types) for any
+structure specter has loaded, downloaded or local. A structure the user
+supplies by path is read where it lies and never copied here (see
+`specter.pdb.PDB`); only its derived parsed form is stored, so ``clean`` can
+never delete something irreplaceable.
 """
 
 from __future__ import annotations
@@ -27,18 +31,37 @@ from specter.progress import console
 from ._click_options import CONTEXT_SETTINGS
 
 
-def _cache_contents(cache_dir: Path) -> tuple[int, int]:
-    """Return ``(file_count, total_bytes)`` for a cache directory."""
-    n_files = 0
+def _cache_contents(cache_dir: Path) -> tuple[int, int, int]:
+    """
+    Count a cache directory's contents.
+
+    Parameters
+    ----------
+    cache_dir : Path
+        Root of the structure cache.
+
+    Returns
+    -------
+    tuple of int
+        ``(n_structures, n_parsed, total_bytes)``: downloaded structure files,
+        parsed-structure entries under ``parsed/``, and the size of both.
+    """
+    parsed_dir = cache_dir / "parsed"
+    n_structures = 0
+    n_parsed = 0
     total = 0
     for root, _dirs, files in os.walk(cache_dir):
+        is_parsed = Path(root).is_relative_to(parsed_dir)
         for name in files:
             try:
                 total += os.path.getsize(os.path.join(root, name))
             except OSError:
                 continue
-            n_files += 1
-    return n_files, total
+            if is_parsed:
+                n_parsed += 1
+            else:
+                n_structures += 1
+    return n_structures, n_parsed, total
 
 
 def _format_size(n_bytes: int) -> str:
@@ -58,9 +81,11 @@ def build_cache_group() -> click.RichGroup:
     def cache() -> None:
         """Inspect and clear the cache of downloaded PDB/mmCIF structures.
 
-        Holds only structures fetched by accession code. Files you supply by
-        path are read in place and never cached, so clearing this is always
-        safe -- everything in it can be re-downloaded.
+        Holds structures fetched by accession code, plus parsed forms (atom
+        positions, elements, bonded-species types) of every structure loaded,
+        including files you supply by path. Those files are read in place and
+        never copied here, so clearing this is always safe: downloads are
+        re-fetched and parsed entries are rebuilt on next use.
 
         Override the location with $SPECTER_PDB_CACHE, or move every
         XDG-aware tool's cache at once with $XDG_CACHE_HOME.
@@ -73,14 +98,15 @@ def build_cache_group() -> click.RichGroup:
 
     @cache.command(name="info")
     def info_cmd() -> None:
-        """Show the cache directory, file count and total size."""
+        """Show the cache directory, structure and parsed-entry counts, and size."""
         cache_dir = Path(default_pdb_cache_dir())
         console.print(f"[bold]Location:[/bold] {cache_dir}")
         if not cache_dir.is_dir():
             console.print("[dim]Empty -- nothing downloaded yet.[/dim]")
             return
-        n_files, total = _cache_contents(cache_dir)
-        console.print(f"[bold]Structures:[/bold] {n_files}")
+        n_structures, n_parsed, total = _cache_contents(cache_dir)
+        console.print(f"[bold]Structures:[/bold] {n_structures}")
+        console.print(f"[bold]Parsed entries:[/bold] {n_parsed}")
         console.print(f"[bold]Size:[/bold] {_format_size(total)}")
 
     @cache.command(name="clean")
@@ -97,17 +123,17 @@ def build_cache_group() -> click.RichGroup:
         if not cache_dir.is_dir():
             console.print(f"Nothing to clean -- {cache_dir} does not exist.")
             return
-        n_files, total = _cache_contents(cache_dir)
+        n_structures, n_parsed, total = _cache_contents(cache_dir)
         if not yes:
             click.confirm(
-                f"Delete {n_files} cached structure(s) ({_format_size(total)}) "
-                f"from {cache_dir}?",
+                f"Delete {n_structures} cached structure(s) and {n_parsed} "
+                f"parsed entr(ies) ({_format_size(total)}) from {cache_dir}?",
                 abort=True,
             )
         shutil.rmtree(cache_dir)
         console.print(
-            f"[green]✓[/green] Removed {n_files} structure(s), "
-            f"{_format_size(total)} freed."
+            f"[green]✓[/green] Removed {n_structures} structure(s) and "
+            f"{n_parsed} parsed entr(ies), {_format_size(total)} freed."
         )
 
     return cache  # type: ignore[return-value]

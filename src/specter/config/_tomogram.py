@@ -64,9 +64,11 @@ class TomogramConfig:
     # filler species sharing the same location, default 1.0 -- equal
     # attempt-weight across species if left at the default for all of
     # them). Placed SECOND within its location, around any already-placed
-    # targets there, budgeted by filler_occupancy_fraction. Excluded from
-    # picks by default (see write_picks/TomogramProteinSpec.role). In TOML,
-    # provide as [[filler]] tables.
+    # targets there, budgeted by filler_occupancy_fraction. Exported to picks
+    # by default, into a separate "-filler"-suffixed file when the same
+    # (species, location) is also a target (see write_picks and
+    # TomogramSpecimenGenerator.export_picks). In TOML, provide as [[filler]]
+    # tables.
     filler: list[dict[str, Any]] = setting(
         factory=list,
         help=(
@@ -75,8 +77,9 @@ class TomogramConfig:
             "'cytosol'|'lumen' (optional, default 'cytosol'), 'ratio': 1.0 "
             "(optional, relative attempt-weight among other filler species sharing "
             "the same location)}. Placed SECOND within its location, around any "
-            "already-placed targets there. Excluded from picks by default (see "
-            "write_picks)."
+            "already-placed targets there. Exported to picks by default, in a "
+            "separate '-filler'-suffixed file when the same species and location "
+            "is also a target (see write_picks)."
         ),
     )
     # Additive to filler above: pull extra filler species from the
@@ -319,10 +322,10 @@ class TomogramConfig:
         help=(
             "Atomic scattering-factor parameterization for "
             "everything rendered from atoms: targets, filler, filaments, "
-            "microtubules, carbon film, bilayer and transmembrane proteins. A "
+            "microtubules, bilayer and transmembrane proteins. A "
             "[[membrane]] table naming its own 'parameterization' overrides this for "
-            "that population. Gold fiducials fall back to Peng under 'shtyrov', "
-            "which has no elemental gold."
+            "that population. The carbon film and gold beads take "
+            "bulk_scattering_factors instead."
         ),
     )
     # Everything specter renders that is NOT a biomolecule: the carbon film and gold beads.
@@ -555,9 +558,9 @@ class TomogramConfig:
             "PotentialBuilder rendering) -- packing itself always runs on CPU "
             "regardless (vesin's neighbor list is both slower and OOM-prone on "
             "GPU at realistic particle counts). A comma-separated list of GPU "
-            "indices (or 'auto', every visible GPU) pools those GPUs for "
-            "concurrent per-species rendering (see render_workers); the first "
-            "entry becomes the primary device for everything else."
+            "indices pools those GPUs for concurrent per-species rendering "
+            "(see render_workers); the first entry becomes the primary device "
+            "for everything else. There is no 'auto': name every GPU to use."
         ),
     )  # falls back to CPU when none is available
     # Device for the shared canvas tensors (volume/instance_labels/
@@ -618,7 +621,7 @@ class TomogramConfig:
             "production-scale sweep -- see "
             "specter.specimen._parallel_render.recommend_render_workers. Round-"
             "robins across device's GPU pool when device is set to a "
-            "comma-separated list or 'auto' (see device above); device choice was "
+            "comma-separated list of GPU indices (see device above); device choice was "
             "measured to barely matter at the recommended worker count."
         ),
     )

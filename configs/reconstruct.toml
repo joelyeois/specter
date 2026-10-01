@@ -13,7 +13,8 @@
 # supplies the images, paired with it by row -- row i of the .cs is slice i of
 # the stack. That is checked, not assumed: a CryoSPARC restack does not write
 # its stack in row order, and such a stack is refused rather than read wrong.
-# `specter export particles` writes a row-ordered pair from any CryoSPARC set.
+# The Python function `specter.io.write_row_ordered_csfile` writes a row-ordered
+# .cs (and, with stack_out, a matching stack) from any CryoSPARC set.
 [data]
 cs_file = "path/to/particles.cs"
 mrc_file = "path/to/particles.mrcs"

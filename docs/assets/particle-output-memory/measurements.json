@@ -1,0 +1,391 @@
+{
+  "cli": {
+    "before": {
+      "checkout": "/tmp/specter-particle-baseline",
+      "device": "cuda:1",
+      "gpu": "NVIDIA L40",
+      "torch": "2.5.1+cu121",
+      "threads": 4,
+      "seed": 83,
+      "cli_seconds": 143.69520955905318,
+      "generation": {
+        "seconds": 140.76574785262346,
+        "n": 3000,
+        "batchsize": 2,
+        "pad_nxy": 512,
+        "nz": 256,
+        "collect_flags": {
+          "collect_exitwaves": false,
+          "collect_clean_exitwaves": false
+        },
+        "shapes": [
+          [
+            3000,
+            256,
+            256
+          ],
+          null,
+          null
+        ]
+      },
+      "peak_allocated_bytes": 1424017408,
+      "peak_reserved_bytes": 2004877312,
+      "host_rss_max_bytes": 5694746624,
+      "host_rss_peaks_bytes": {
+        "setup": 1282203648,
+        "generation": 3231715328,
+        "saving": 5694746624,
+        "all": 5694746624
+      },
+      "lifetime_samples": [
+        {
+          "batch": 100,
+          "rss_bytes": 1813286912,
+          "gpu_allocated_bytes": 268935680
+        },
+        {
+          "batch": 200,
+          "rss_bytes": 1865732096,
+          "gpu_allocated_bytes": 268934656
+        },
+        {
+          "batch": 300,
+          "rss_bytes": 1918447616,
+          "gpu_allocated_bytes": 268933632
+        },
+        {
+          "batch": 400,
+          "rss_bytes": 1970892800,
+          "gpu_allocated_bytes": 268941824
+        },
+        {
+          "batch": 500,
+          "rss_bytes": 2023608320,
+          "gpu_allocated_bytes": 268936192
+        },
+        {
+          "batch": 600,
+          "rss_bytes": 2076053504,
+          "gpu_allocated_bytes": 268941312
+        },
+        {
+          "batch": 700,
+          "rss_bytes": 2128498688,
+          "gpu_allocated_bytes": 268935168
+        },
+        {
+          "batch": 800,
+          "rss_bytes": 2181214208,
+          "gpu_allocated_bytes": 268939776
+        },
+        {
+          "batch": 900,
+          "rss_bytes": 2233659392,
+          "gpu_allocated_bytes": 268934144
+        },
+        {
+          "batch": 1000,
+          "rss_bytes": 2286104576,
+          "gpu_allocated_bytes": 268937216
+        },
+        {
+          "batch": 1100,
+          "rss_bytes": 2338541568,
+          "gpu_allocated_bytes": 268934656
+        },
+        {
+          "batch": 1200,
+          "rss_bytes": 2391257088,
+          "gpu_allocated_bytes": 268934144
+        },
+        {
+          "batch": 1300,
+          "rss_bytes": 2443702272,
+          "gpu_allocated_bytes": 268935680
+        },
+        {
+          "batch": 1400,
+          "rss_bytes": 2496147456,
+          "gpu_allocated_bytes": 268938240
+        },
+        {
+          "batch": 1500,
+          "rss_bytes": 2548592640,
+          "gpu_allocated_bytes": 268936704
+        }
+      ],
+      "generator_source": "/tmp/specter-particle-baseline/src/specter/pipelines/_common.py",
+      "source_sha256": {
+        "_common.py": "f515c2062a8c445018c533c11b3c9b3dfa13c529ed0f0ac152046e7c91dd5ee9",
+        "_particles.py": "a65e0dca8d16a82fcdb1e35a7bf30f8452ac004567546b13ff06591df159f05b"
+      }
+    },
+    "after": {
+      "checkout": "/tmp/specter-particle-output-memory",
+      "device": "cuda:3",
+      "gpu": "NVIDIA L40",
+      "torch": "2.5.1+cu121",
+      "threads": 4,
+      "seed": 83,
+      "cli_seconds": 144.6017333343625,
+      "generation": {
+        "seconds": 141.79411117732525,
+        "n": 3000,
+        "batchsize": 2,
+        "pad_nxy": 512,
+        "nz": 256,
+        "collect_flags": {
+          "collect_exitwaves": false,
+          "collect_clean_exitwaves": false
+        },
+        "shapes": [
+          [
+            3000,
+            256,
+            256
+          ],
+          null,
+          null
+        ]
+      },
+      "peak_allocated_bytes": 1424017408,
+      "peak_reserved_bytes": 2004877312,
+      "host_rss_max_bytes": 4162351104,
+      "host_rss_peaks_bytes": {
+        "setup": 1260683264,
+        "generation": 2536488960,
+        "saving": 4162351104,
+        "all": 4162351104
+      },
+      "lifetime_samples": [
+        {
+          "batch": 100,
+          "rss_bytes": 1801691136,
+          "gpu_allocated_bytes": 268935680
+        },
+        {
+          "batch": 200,
+          "rss_bytes": 1854136320,
+          "gpu_allocated_bytes": 268934656
+        },
+        {
+          "batch": 300,
+          "rss_bytes": 1906851840,
+          "gpu_allocated_bytes": 268933632
+        },
+        {
+          "batch": 400,
+          "rss_bytes": 1959567360,
+          "gpu_allocated_bytes": 268941824
+        },
+        {
+          "batch": 500,
+          "rss_bytes": 2012012544,
+          "gpu_allocated_bytes": 268936192
+        },
+        {
+          "batch": 600,
+          "rss_bytes": 2064457728,
+          "gpu_allocated_bytes": 268941312
+        },
+        {
+          "batch": 700,
+          "rss_bytes": 2116902912,
+          "gpu_allocated_bytes": 268935168
+        },
+        {
+          "batch": 800,
+          "rss_bytes": 2169348096,
+          "gpu_allocated_bytes": 268939776
+        },
+        {
+          "batch": 900,
+          "rss_bytes": 2221756416,
+          "gpu_allocated_bytes": 268934144
+        },
+        {
+          "batch": 1000,
+          "rss_bytes": 2274349056,
+          "gpu_allocated_bytes": 268937216
+        },
+        {
+          "batch": 1100,
+          "rss_bytes": 2326790144,
+          "gpu_allocated_bytes": 268934656
+        },
+        {
+          "batch": 1200,
+          "rss_bytes": 2379231232,
+          "gpu_allocated_bytes": 268934144
+        },
+        {
+          "batch": 1300,
+          "rss_bytes": 2431610880,
+          "gpu_allocated_bytes": 268935680
+        },
+        {
+          "batch": 1400,
+          "rss_bytes": 2484043776,
+          "gpu_allocated_bytes": 268938240
+        },
+        {
+          "batch": 1500,
+          "rss_bytes": 2536488960,
+          "gpu_allocated_bytes": 268936704
+        }
+      ],
+      "generator_source": "/tmp/specter-particle-output-memory/src/specter/pipelines/_common.py",
+      "source_sha256": {
+        "_common.py": "56c1ce29828affa354e4eb543ca5510574374a136c48a56176d79fb07d94f9fe",
+        "_particles.py": "d35b6b05503ce4adf9d2dae633d258b4b4f0045801885f0c0c0fba52faef8a5f"
+      }
+    }
+  },
+  "ddp_cli": {
+    "before": {
+      "checkout": "/tmp/specter-particle-baseline",
+      "device": "0,3",
+      "gpu": "NVIDIA L40",
+      "torch": "2.5.1+cu121",
+      "threads": 4,
+      "seed": 83,
+      "cli_seconds": 87.26321453973651,
+      "generation": {
+        "seconds": 84.15972189977765,
+        "n": 3000,
+        "batchsize": 2,
+        "gpu_ids": [
+          0,
+          3
+        ]
+      },
+      "peak_allocated_bytes": 1394462720,
+      "peak_reserved_bytes": 1518338048,
+      "host_rss_max_bytes": 5775527936,
+      "host_rss_peaks_bytes": {
+        "setup": 1252343808,
+        "generation": 4202491904,
+        "saving": 5775527936,
+        "all": 5775527936
+      },
+      "lifetime_samples": [],
+      "process_tree": {
+        "peak_processes": 258,
+        "peak_aggregate_pss_bytes": 6578761728
+      },
+      "generator_source": "/tmp/specter-particle-baseline/src/specter/pipelines/_common.py",
+      "source_sha256": {
+        "_common.py": "f515c2062a8c445018c533c11b3c9b3dfa13c529ed0f0ac152046e7c91dd5ee9",
+        "_particles.py": "a65e0dca8d16a82fcdb1e35a7bf30f8452ac004567546b13ff06591df159f05b"
+      }
+    },
+    "after": {
+      "checkout": "/tmp/specter-particle-output-memory",
+      "device": "0,3",
+      "gpu": "NVIDIA L40",
+      "torch": "2.5.1+cu121",
+      "threads": 4,
+      "seed": 83,
+      "cli_seconds": 82.88752848654985,
+      "generation": {
+        "seconds": 80.00240675359964,
+        "n": 3000,
+        "batchsize": 2,
+        "gpu_ids": [
+          0,
+          3
+        ]
+      },
+      "peak_allocated_bytes": 1394462720,
+      "peak_reserved_bytes": 1518338048,
+      "host_rss_max_bytes": 4653969408,
+      "host_rss_peaks_bytes": {
+        "setup": 1254973440,
+        "generation": 3262435328,
+        "saving": 4653969408,
+        "all": 4653969408
+      },
+      "lifetime_samples": [],
+      "process_tree": {
+        "peak_processes": 2,
+        "peak_aggregate_pss_bytes": 4442052608
+      },
+      "generator_source": "/tmp/specter-particle-output-memory/src/specter/pipelines/_common.py",
+      "source_sha256": {
+        "_common.py": "401f4bd14460d1254e5db559ef7e2139c4c2b2912712fc9b04656ae50ef20003",
+        "_particles.py": "d35b6b05503ce4adf9d2dae633d258b4b4f0045801885f0c0c0fba52faef8a5f"
+      }
+    }
+  },
+  "paired_storage": {
+    "n": 3000,
+    "shape": [
+      3000,
+      256,
+      256
+    ],
+    "same_generated_batches": true,
+    "trials": [
+      {
+        "before": {
+          "collection_seconds": 0.6659933179616928,
+          "normalization_seconds": 0.6473116241395473
+        },
+        "after": {
+          "collection_seconds": 0.7357583791017532,
+          "normalization_seconds": 0.19669108092784882
+        },
+        "accuracy": {
+          "bitwise_equal": true,
+          "max_abs": 0.0,
+          "pixel_count": 196608000
+        }
+      },
+      {
+        "after": {
+          "collection_seconds": 0.7377429567277431,
+          "normalization_seconds": 0.2972387857735157
+        },
+        "before": {
+          "collection_seconds": 0.46102287247776985,
+          "normalization_seconds": 0.6816505007445812
+        },
+        "accuracy": {
+          "bitwise_equal": true,
+          "max_abs": 0.0,
+          "pixel_count": 196608000
+        }
+      },
+      {
+        "before": {
+          "collection_seconds": 0.466289721429348,
+          "normalization_seconds": 0.6821876913309097
+        },
+        "after": {
+          "collection_seconds": 0.7340689040720463,
+          "normalization_seconds": 0.27892061695456505
+        },
+        "accuracy": {
+          "bitwise_equal": true,
+          "max_abs": 0.0,
+          "pixel_count": 196608000
+        }
+      }
+    ]
+  },
+  "same_batch_accuracy": {
+    "bitwise_equal": true,
+    "unequal_pixels": 0,
+    "pixel_count": 196608000,
+    "relative_l2": 0.0,
+    "max_abs": 0.0
+  },
+  "independent_cli_accuracy": {
+    "bitwise_equal": false,
+    "unequal_pixels": 102179857,
+    "pixel_count": 196608000,
+    "relative_l2": 0.0015404655260136178,
+    "max_abs": 0.4207327961921692
+  },
+  "radial_power_relative_l2": 0.0
+}

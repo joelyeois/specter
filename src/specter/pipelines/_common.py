@@ -8,7 +8,7 @@ import glob
 import os
 import time
 from contextlib import contextmanager
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterator
 
 import torch
 
@@ -300,6 +300,39 @@ def _crop_center(t: torch.Tensor, nxy: int) -> torch.Tensor:
     return t[..., cy - half : cy + half + (nxy % 2), cx - half : cx + half + (nxy % 2)]
 
 
+class _HostStack:
+    """Copy batches into one CPU stack without retaining or concatenating them."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+        self.count = 0
+        self.tensor: torch.Tensor | None = None
+
+    def append(self, batch: torch.Tensor) -> None:
+        end = self.count + len(batch)
+        if end > self.n:
+            raise RuntimeError("generation produced more images than requested")
+        if self.tensor is None:
+            self.tensor = torch.empty(
+                (self.n, *batch.shape[1:]), dtype=batch.dtype, device="cpu"
+            )
+        elif (
+            batch.shape[1:] != self.tensor.shape[1:] or batch.dtype != self.tensor.dtype
+        ):
+            raise RuntimeError(
+                "generation changed image shape or dtype between batches"
+            )
+        self.tensor[self.count : end].copy_(batch.detach())
+        self.count = end
+
+    def finish(self) -> torch.Tensor:
+        if self.tensor is None or self.count != self.n:
+            raise RuntimeError(
+                f"generation produced {self.count} images, expected {self.n}"
+            )
+        return self.tensor
+
+
 def _generate_single(
     model: Any,
     n: int,
@@ -310,22 +343,20 @@ def _generate_single(
 ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
     """Run image generation on a single device."""
     idx = torch.arange(n)
-    images: list[torch.Tensor] = []
-    exitwaves: list[torch.Tensor] = []
-    clean_exitwaves: list[torch.Tensor] = []
+    images = _HostStack(n)
+    exitwaves = _HostStack(n)
+    clean_exitwaves = _HostStack(n)
     with torch.no_grad():
         for i in track(range(0, n, batchsize), description="Generating images"):
             batch = model(idx[i : i + batchsize])
-            images.append(batch.detach().cpu())
+            images.append(batch)
             if collect_exitwaves:
-                exitwaves.append(model.exitwaves.detach().cpu())
+                exitwaves.append(model.exitwaves)
             if collect_clean_exitwaves:
-                clean_exitwaves.append(model.clean_exitwaves.detach().cpu())
-    images_t = torch.concat(images, dim=0)
-    exitwaves_t = torch.concat(exitwaves, dim=0) if collect_exitwaves else None
-    clean_exitwaves_t = (
-        torch.concat(clean_exitwaves, dim=0) if collect_clean_exitwaves else None
-    )
+                clean_exitwaves.append(model.clean_exitwaves)
+    images_t = images.finish()
+    exitwaves_t = exitwaves.finish() if collect_exitwaves else None
+    clean_exitwaves_t = clean_exitwaves.finish() if collect_clean_exitwaves else None
     return images_t, exitwaves_t, clean_exitwaves_t
 
 
@@ -362,8 +393,10 @@ def _reassemble_rank_files(
             "its share of the images."
         )
 
-    all_preds = torch.cat([torch.load(f) for f in prediction_files], dim=0)
-    all_indices = torch.cat([torch.load(f) for f in index_files], dim=0)
+    rank_indices = [
+        torch.load(f, map_location="cpu", weights_only=True) for f in index_files
+    ]
+    all_indices = torch.cat(rank_indices, dim=0)
     sort_order = torch.argsort(all_indices)
     if not torch.equal(all_indices[sort_order], torch.arange(n)):
         raise RuntimeError(
@@ -371,7 +404,20 @@ def _reassemble_rank_files(
             f"index(es) for a run of {n}; the ranks did not between them "
             "produce each particle exactly once."
         )
-    images = all_preds[sort_order]
+    images = None
+    for path, indices in zip(prediction_files, rank_indices, strict=True):
+        shard = torch.load(path, map_location="cpu", weights_only=True)
+        if len(shard) != len(indices):
+            raise RuntimeError(
+                "rank predictions and particle indices have different lengths"
+            )
+        if images is None:
+            images = torch.empty((n, *shard.shape[1:]), dtype=shard.dtype)
+        elif images.shape[1:] != shard.shape[1:] or images.dtype != shard.dtype:
+            raise RuntimeError("rank predictions have different image shapes or dtypes")
+        images[indices] = shard
+        del shard
+    assert images is not None
 
     for f in prediction_files + index_files:
         os.remove(f)
@@ -405,12 +451,24 @@ def _generate_multi(
         def __init__(
             self, out_dir: str, save_exitwaves: bool, save_clean_exitwaves: bool
         ) -> None:
-            super().__init__("epoch")
+            # A batch writer keeps Lightning from accumulating epoch predictions.
+            super().__init__("batch")
             self.out_dir = out_dir
             self.save_exitwaves = save_exitwaves
             self.save_clean_exitwaves = save_clean_exitwaves
-            self._exitwaves: list = []
-            self._clean_exitwaves: list = []
+
+        def on_predict_start(
+            self, trainer: L.Trainer, pl_module: L.LightningModule
+        ) -> None:
+            dataloader = trainer.predict_dataloaders
+            assert dataloader is not None
+            # Lightning's prediction sampler lives inside the batch sampler;
+            # the loader's top-level sampler may still describe all ranks.
+            local_n = len(dataloader.batch_sampler.sampler)
+            self._images = _HostStack(local_n)
+            self._exitwaves = _HostStack(local_n)
+            self._clean_exitwaves = _HostStack(local_n)
+            self._indices = _HostStack(local_n)
 
         def on_predict_batch_end(
             self,
@@ -421,40 +479,45 @@ def _generate_multi(
             batch_idx: int,
             dataloader_idx: int = 0,
         ) -> None:
+            self._images.append(outputs)
+            self._indices.append(batch.cpu())
             if self.save_exitwaves and hasattr(pl_module, "exitwaves"):
-                self._exitwaves.append(pl_module.exitwaves.cpu())
+                self._exitwaves.append(pl_module.exitwaves)
             if self.save_clean_exitwaves and hasattr(pl_module, "clean_exitwaves"):
-                self._clean_exitwaves.append(pl_module.clean_exitwaves.cpu())
+                self._clean_exitwaves.append(pl_module.clean_exitwaves)
 
-        def write_on_epoch_end(
+        def on_predict_epoch_end(
             self,
             trainer: L.Trainer,
             pl_module: L.LightningModule,
-            predictions: Sequence[Any],
-            batch_indices: Sequence[Any],
         ) -> None:
             rank = trainer.global_rank
-            images = torch.concat(list(predictions), dim=0)
+            images = self._images.finish()
             torch.save(images, os.path.join(self.out_dir, f"predictions_{rank}.pt"))
-            idx = torch.squeeze(torch.tensor(batch_indices)).reshape(-1)
+            idx = self._indices.finish()
             torch.save(idx, os.path.join(self.out_dir, f"batch_indices_{rank}.pt"))
-            if self.save_exitwaves and self._exitwaves:
+            if self.save_exitwaves:
                 torch.save(
-                    torch.cat(self._exitwaves, dim=0),
+                    self._exitwaves.finish(),
                     os.path.join(self.out_dir, f"exitwaves_{rank}.pt"),
                 )
-            if self.save_clean_exitwaves and self._clean_exitwaves:
+            if self.save_clean_exitwaves:
                 torch.save(
-                    torch.cat(self._clean_exitwaves, dim=0),
+                    self._clean_exitwaves.finish(),
                     os.path.join(self.out_dir, f"clean_exitwaves_{rank}.pt"),
                 )
+            # Trainer/callback reference cycles can outlive prediction. Once
+            # the shards are written, no rank stack is needed for reassembly.
+            del self._images, self._indices, self._exitwaves, self._clean_exitwaves
 
     os.makedirs(output_dir, exist_ok=True)
     dataloader: DataLoader = DataLoader(
         torch.arange(n),  # type: ignore[arg-type]
         batch_size=batchsize,
         shuffle=False,
-        num_workers=os.cpu_count() or 0,
+        # The dataset contains only integer indices; workers add startup and
+        # memory cost without doing any image decoding or preprocessing.
+        num_workers=0,
     )
 
     trainer = L.Trainer(
@@ -471,7 +534,7 @@ def _generate_multi(
     trainer.predict(model, dataloaders=dataloader, return_predictions=False)
 
     # Every rank saves its own predictions_<rank>.pt from inside
-    # `write_on_epoch_end`, and nothing in Lightning synchronises the ranks
+    # `on_predict_epoch_end`, and nothing in Lightning synchronises the ranks
     # afterwards. Without this barrier rank 0 globs the directory while a
     # slower rank is still writing its (multi-gigabyte) tensor, reassembles
     # only the shares that happen to be on disk, and deletes them -- so a

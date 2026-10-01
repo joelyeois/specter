@@ -590,8 +590,14 @@ def _save_stack(
     if is_main:
         section("Post-processing")
     if config.normalize_particles:
-        particles, _means, _stds = normalize_particles(images)
-        particles = -particles
+        # This pipeline owns the stack. Normalize each independent image in
+        # bounded chunks, reusing its storage instead of holding several
+        # whole-stack subtraction/division/negation temporaries.
+        for start in range(0, len(images), 64):
+            chunk = images[start : start + 64]
+            normalized, _means, _stds = normalize_particles(chunk)
+            chunk.copy_(-normalized)
+        particles = images
     else:
         particles = images
 

@@ -87,6 +87,15 @@ physics parameters not covered by the RELION spec
 read it with [`starfile`](https://github.com/teamtomo/starfile) /
 [`mrcfile`](https://github.com/ccpem/mrcfile) from Python.
 
+Output batches are copied into preallocated host stacks, and per-particle
+normalization runs in bounded chunks using the same background mask and
+statistics. This reduces host RAM for large stacks without changing batch
+size or simulation precision. Multi-GPU generation reads particle indices
+in each rank directly, collects batches without retaining Lightning's epoch
+predictions, and reassembles one rank shard at a time in particle order.
+See the [production comparison](../assets/particle-output-memory/README.md)
+for GPU/host memory, timings, and matched image/Fourier checks.
+
 ## Example: matching EMPIAR-11377
 
 As a check against real data, the config below drives

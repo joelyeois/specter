@@ -98,6 +98,37 @@ shipped −0.270 to −0.193 range. These runs demonstrate comparable quality to
 shipped library, with a higher median error than the fresh controls; they do
 not establish identical results for individual seeds.
 
+The following figures use the saved coordinates from those six builds.
+Blue is the original enumeration, orange is the filtered enumeration, and
+the grey envelope contains the radial spectra of all 20 shipped cells.
+
+![Before and after Fourier spectra](../assets/ice-active-pairs/fourier_comparison.png)
+
+The lower panels magnify the amplitude residual below 0.5 Å⁻¹, where the
+spherical frequency shells are complete. Across the filtered cells, the
+largest target-relative amplitude deviation in that range is 0.0224%.
+About 98–99.6% of their squared radial residual is in the incomplete shells
+above 0.5 Å⁻¹, including the sparsely populated corner bins. This describes
+the existing production loss; the loss still includes every bin.
+
+![Saved density and Fourier power for seed 1001](../assets/ice-active-pairs/ice_and_fourier_seed_1001.png)
+
+The upper images show the same central 4 Å water-density slab; the lower
+images show the central plane of the full 3D Fourier power spectrum.
+Display scales match across all seeds. Different optimizer trajectories
+produce different molecular arrangements, despite closely matching radial
+spectral shapes.
+
+![Measured build and kernel timings with saved-coordinate quality](../assets/ice-active-pairs/timing_and_quality.png)
+
+Download the [six-page figure comparison](../assets/ice-active-pairs/ice_comparison.pdf),
+[build timings](../assets/ice-active-pairs/timings.csv),
+[radial spectra](../assets/ice-active-pairs/spectra.csv), or
+[measurement notes](../assets/ice-active-pairs/README.md).
+Render all figures from the committed measurements on CPU with
+`uv run python docs-figures/ice_active_pairs.py`. Its `--recompute` option
+recomputes spectra from the original saved validation cells on a GPU.
+
 A fourth cell exercised the implemented code through the actual CLI:
 
 ```bash

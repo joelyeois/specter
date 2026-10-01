@@ -13,10 +13,12 @@ are the four an acquisition record carries and no particle file does.
 | refined particle set | `--metadata_path` | a CryoSPARC passthrough `.cs` or a RELION `.star` |
 | particle images | `--images_path` (optional) | the stack the metadata refers to, in its order; unset reads the paths the file itself points at |
 | atomic model | `--pdb_source` | PDB accession or local file, with the assembly that matches the particle |
-| detector | `--detector_model` | methods section, EMDB record |
+| detector | `--detector_model` | methods section, EMDB record; the default, `unknown`, applies no MTF, no DQE(0) and no coincidence loss, and the report says so |
 | total dose per movie, e⁻/Å² | `--dose` | methods section, EMDB record, import settings |
 | dose rate, e⁻/physical px/s | `--dose_rate` | methods section; unset falls back to the detector's typical rate and the report says so |
 | energy filter | `--energy_filter` | methods section; recorded in the report |
+| exposure-filter weights (optional) | `--dose_weights_path`, `--dose_weights_max_frequency` | the per-frame weights the motion correction applied, e.g. CryoSPARC's `refm_empirical_dw.npy`, carried into every probe and the matched config; unset `--dose_weights_max_frequency` is derived from the motion-correction job's own files |
+| absorption (optional) | `--absorption_model`, `--inelastic_mfp_solvent`, `--inelastic_mfp_specimen` | default `inelastic_mfp`, which ignores the dataset's amplitude contrast; unset mean free paths take the measured ice value for the voltage, and give the specimen the ice's value |
 
 The particle set must be aligned to the atomic model: its poses have to
 reproduce the experimental views when the model is rendered at them. A
@@ -100,6 +102,15 @@ loop of simulating thousands of particles and classifying them in
 CryoSPARC while parameters are being chosen; a mixed 2D classification
 remains the right final validation, run once, with two seeds, reading the
 count of classes near the input ratio alongside chi-squared.
+
+A simulated stack is written as a `.mrcs` with a RELION `.star`, which
+CryoSPARC imports directly. To bring the experimental refinement into the
+same RELION format, for example to pool both sets through one import path,
+[`specter convert cs2star`](../api/cli/convert.md) converts a CryoSPARC
+particle `.cs` (joined with its passthrough file where the job splits them)
+into a RELION 3.1 `.star`. It converts metadata only and leaves the image
+stacks where they are; `--image-basename` writes image paths in the form
+CryoSPARC's particle importer expects.
 
 It does not fit a B-factor, a potential scale or a coincidence radius to
 the classification. Each of those was, in earlier hand tuning, standing in

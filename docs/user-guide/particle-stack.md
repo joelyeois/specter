@@ -37,6 +37,11 @@ TOML/CLI field reference.
 - **Specimen**: `pdb_source` (fetched and cached under
   `~/.cache/specter/pdb/`), `assembly` (biological assembly vs. asymmetric unit),
   `n_pixels`/`pixel_size` for the simulation box, `ice_thickness`.
+  `ice_thickness` sets the depth of the ice column and so the contrast; it
+  does not change the specimen. Crowding neighbours are placed within
+  `crowd_max_distance_z` of the particle, which defaults to the template's
+  own depth rather than the full box depth, so thicker ice adds water above
+  and below the neighbour slab instead of more neighbours.
 - **Microscope**: `voltage`, `dose`, `cs`, `alpha` (amplitude contrast).
 - **Sampling**: `defocus`, `shift` (max in-plane shift), `n_particles`.
 - **Models**: `scattering_model` (`multislice` is the accurate default;
@@ -56,8 +61,10 @@ documents it field-by-field.
 ## Per-particle sampling ranges
 
 `dose`, `defocus`, `coincidence_radius`, `potential_scale`, `astigmatism`,
-and `astigmatism_angle` each take either a single number (constant for every
-particle) or a `[low, high]` pair, sampled uniformly per particle:
+`astigmatism_angle`, `phaseshift`, the beam tilts `tiltx`/`tilty`, and the
+higher-order aberrations `trefoil1`/`trefoil2` and
+`tetrafoil1`-`tetrafoil4` each take either a single number (constant for
+every particle) or a `[low, high]` pair, sampled uniformly per particle:
 
 ```toml
 [sampling]
@@ -73,6 +80,55 @@ On the command line the same fields take a comma-separated string, since a
 flag can only carry one token: `--defocus 5000,15000`. That spelling still
 works in a TOML file too, so configs written before the numeric form keep
 working.
+
+## Absorption, radiation damage and solvent motion
+
+The CLI's Absorption panel, together with two exposure fields, controls how
+the simulation removes electrons from the image and how it treats the
+specimen and the solvent under the electron dose. Every field is off by
+default, and the defaults reproduce the amplitude-contrast model.
+
+- **Absorption**: `absorption_model` selects where the imaginary potential
+  comes from. The default, `"alpha"`, scales the real potential by the
+  amplitude-contrast ratio `alpha`. `"inelastic_mfp"` instead derives it per
+  material from a measured inelastic mean free path: `inelastic_mfp_solvent`
+  for the ice (unset takes the measured value for the run's voltage, 3950 Å
+  at 300 kV and 2030 Å at 120 kV, and an estimate with a warning elsewhere)
+  and `inelastic_mfp_specimen` for the particle (unset gives the particle
+  the ice's value, so it carries no absorption contrast; 2460 Å is the
+  derived value for protein at 300 kV). `alpha` is then set to 0, including
+  the value read from a `.cs`/`.star` file and the one written to the output
+  `.star`. `objective_aperture` (semi-angle in mrad, unset by default)
+  additionally charges the elastic scattering beyond the aperture as
+  absorption, and requires `absorption_model = "inelastic_mfp"`.
+  `"inelastic_mfp"` is not available with `scattering_model = "ctf"`. See
+  [Scattering](../concepts/scattering/index.md#mean-free-path-absorption-support).
+- **Dose weighting**: `dose_weights_path` points at a `(n_frames, n_bins)`
+  `.npy` of an exposure filter's per-frame weights, such as CryoSPARC's
+  `refm_empirical_dw.npy`, and requires `n_frames`. The frames are then
+  summed in Fourier space under those weights rather than equally, which
+  leaves the signal unchanged and raises the noise floor toward Nyquist as a
+  signal-preserving dose weighting does in real data.
+  `dose_weights_max_frequency` is the frequency, in 1/Å, of the last weight
+  bin; unset derives it from the motion-correction job's own files, since
+  the pixel size alone does not determine it.
+- **Radiation damage**: with `dose_envelope = true`, the Grant & Grigorieff
+  (2015) envelope acts on the transfer function by default
+  (`dose_envelope_target = "transfer_function"`), which fades the solvent
+  together with the particle. `dose_envelope_target = "specimen"` instead
+  damages the particle's own potential, and those of its crowding
+  neighbours, before the ice is added, so the water keeps its structure.
+  The occupancy that decides how much ice each voxel receives is read from
+  the undamaged particle. See [Aberrations](../concepts/aberrations.md#envelopes).
+- **Solvent motion**: `ice_motion_variance` is the beam-induced displacement
+  of the water per axis, in Å² per e⁻/Å² (McMullan et al. 2015 measured
+  0.38 at 300 kV). The ice fluctuation is filtered to what survives the
+  summed exposure, frame weights included, and its mean is kept. Unset, the
+  ice is frozen. One filter serves the whole ice canvas, so the dose must be
+  a single value rather than a range. With `dose_envelope` on it requires
+  `dose_envelope_target = "specimen"`, since an envelope on the transfer
+  function would fade the solvent a second time. See
+  [Ice structure](../concepts/ice.md#the-solvent-under-exposure).
 
 ## Output: .mrcs + .star
 
@@ -119,6 +175,14 @@ specter simulate particles \
     --device cuda:0
 ```
 
+`--coincidence_radius 0.8` and `--potential_scale 0.5` are the values the
+figures below were generated with, and they were set by hand. They are not
+recommended settings: a potential scale or coincidence radius tuned to make
+a simulation resemble a dataset stands in for physics the model lacks.
+To derive settings for a real dataset, use
+[`specter match particles`](dataset-twin.md), which takes the coincidence
+radius from the detector and dose rate and fits neither quantity.
+
 Pass `--star_path particles.star` instead of `--cs_path` to drive the same
 code path from a RELION `.star` file: SPECTER reads both the single-block
 layout it writes itself and the RELION 3.1+ two-block (`optics` +
@@ -156,17 +220,26 @@ This second figure isn't reproducible from the repo alone: it requires
 running CryoSPARC. But `docs-figures/data/empiar-11377-mixed-2dclasses.csv`
 holds the per-particle class assignments behind it, committed to the repo.
 [`docs-figures/particle_stack_empiar_11377.py`](https://github.com/joelyeois/specter/blob/main/docs-figures/particle_stack_empiar_11377.py)
-regenerates both figures. For the full 2000-particle `.cs`-driven workflow
-rather than the 5-row demo slice, see [Generate a CryoSPARC dataset
-twin](dataset-twin.md).
+regenerates both figures. To derive a simulation config for a full
+experimental particle set rather than the 5-row demo slice, see [Match an
+experimental dataset](dataset-twin.md).
 
 ## Inspecting the forward model (exit waves)
 
-Set `save_exitwaves = true` (post-detector-free signal) or
-`save_clean_exitwaves = true` (noiseless) to also write
-`<filename>_exitwave.mrcs` / `<filename>_clean_exitwave.mrcs` alongside the
-usual output. This is useful for debugging the forward model or comparing
-signal before `Detector` applies its effects, without re-running the whole
+Set `save_exitwaves = true` to also write the exit wave of the full
+specimen, the complex wave leaving the volume before the transfer function
+and the detector are applied. Set `save_clean_exitwaves = true` to write the
+exit wave of the specimen alone: the particle and its crowding neighbours
+without ice, without absorption, and without radiation damage, which serves
+as the reference those effects are measured against. Each complex wave is
+written as a magnitude/phase pair of stacks alongside the usual output:
+
+- `<filename>_exitwave_magnitude.mrcs` and `<filename>_exitwave_phase.mrcs`
+- `<filename>_clean_exitwave_magnitude.mrcs` and
+  `<filename>_clean_exitwave_phase.mrcs`
+
+These are useful for debugging the forward model, or for comparing signal
+before the aberration and detector stages, without re-running the whole
 pipeline.
 
 ## Batch size
@@ -233,8 +306,9 @@ For the plain end-to-end notebook version of this page, see
 
 ## See also
 
-- [Generate a CryoSPARC dataset twin](dataset-twin.md): the full
-  `.cs`-driven workflow this page's example is a slice of.
+- [Match an experimental dataset](dataset-twin.md): deriving a simulation
+  config from a real particle set, the full `.cs`-driven workflow this
+  page's example is a slice of.
 - [Using the ice cache](ice-cache.md): `ice_model` options and `IceBank`.
 - [Configure a run](configuration.md): complete TOML/CLI field reference.
 - [Manage jobs](jobs.md): recording runs under a project name.

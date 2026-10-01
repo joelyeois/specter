@@ -111,7 +111,7 @@ its projection are equivalent.
 **The rotation origin is RELION's, not the geometric centre.** Volumes
 rotate about index \([n_z/\!/2,\, n_y/\!/2,\, n_x/\!/2]\) by default
 (`origin="relion"`). Passing `origin="center"` moves it to
-\([(n+1)/2, \ldots]\). The difference is half a voxel, which appears as a
+\([(n_z-1)/2,\, (n_y-1)/2,\, (n_x-1)/2]\). The difference is half a voxel, which appears as a
 systematic subpixel shift when comparing against a package that made the
 other choice.
 
@@ -127,8 +127,11 @@ Conversion into `specter`'s representation:
 ## Applying a pose: real space or Fourier space
 
 You apply a pose to a volume by one of two interchangeable methods,
-selected via `rotate_mode` on `ImageGenerator`, `Reconstructor`,
-`Ghostbuster`, and `ParticleStackConfig`. Both express the same
+selected by the `rotate_mode` field of the `Propagation` settings group,
+passed as `propagation=Propagation(rotate_mode=...)` to `ImageGenerator`,
+`Reconstructor` or `Ghostbuster`. In a TOML config or on the command line
+it is the flat field `rotate_mode` of `ParticleStackConfig` and
+`ReconstructionConfig`. Both methods express the same
 convention, and both start from the same affine built above; they differ
 only in where the interpolation happens.
 
@@ -246,8 +249,14 @@ where the true reference plane sits at the scattering centroid instead.
 ## Potentials and intensities
 
 Potential volumes are in **volts**. A box of water at the density of
-amorphous ice returns a mean potential of 4.8 V against a literature mean
-inner potential of approximately 4.5 V. The scattering factors returned
+amorphous ice, rendered with the default `bulk_scattering_factors =
+"kirkland"`, returns a mean potential of about 4.55 V. That is within 0.4%
+of the 4.53 V an isolated-atom superposition of one oxygen and two
+hydrogens over the molecular volume of amorphous ice predicts. The
+measured mean inner potential of liquid water, 4.48 ± 0.19 V (Yesibolati
+et al. 2020), scales to about 4.21 V at the density of amorphous ice. An
+isolated-atom superposition cannot represent bonding and is expected to
+sit above such a measurement. The scattering factors returned
 by the `*_fourier` functions in `atom/_atomic_potentials.py` are in Å;
 multiplying by \(c_1 = 2\pi a_0 e = 47.9\) V·Å² converts them to the
 V·Å³ Fourier-space potential; `PotentialBuilder` applies this factor.
@@ -315,9 +324,30 @@ header, since they have no accompanying STAR file.
 ## Reproducibility
 
 `specter.seed(n)` seeds Python's `random`, NumPy, and PyTorch on CPU and
-on all CUDA devices. It does not set `torch.backends.cudnn.deterministic`,
-so runs involving cuDNN-backed operations may still differ at the level
-of floating-point reduction order.
+on all CUDA devices, and so controls every random draw `specter` makes.
+It does not make a run bit-reproducible. `torch.use_deterministic_algorithms`
+is not enabled, since it costs performance, and two sources of
+nondeterminism remain.
+
+- **The forward model** varies at about \(2 \times 10^{-5}\) relative from
+  run to run, through the order of GPU reductions and FFTs. Poisson
+  sampling then discretises that variation: most pixels round to the same
+  integer count, and the few that cross a rounding boundary differ by a
+  whole draw. Two identical seeded runs of `specter simulate tiltseries`
+  differ on about 0.1% of pixels, by up to 74 counts. With
+  `noise_model = "none"` the same runs differ on almost every pixel, but
+  only at about \(2 \times 10^{-5}\) relative.
+- **`specter build tomogram`** renders its species in parallel and
+  accumulates them in a nondeterministic order. Two seeded runs differ on
+  about 29% of voxels, by about \(6 \times 10^{-6}\) V on a volume
+  peaking near 24 V.
+
+What a seed does guarantee is the specimen: which species are placed, how
+many, and where are identical from run to run, and the labels, picks and
+region volumes `specter build tomogram` writes are byte-identical. When
+comparing two versions of the code at a fixed seed, run the same version
+twice as a control, since the differences above appear in that comparison
+as well.
 
 ## References
 
@@ -336,6 +366,10 @@ of floating-point reduction order.
   estimation from electron micrographs. *Journal of Structural Biology*
   **192**(2), 216–221.
   [doi:10.1016/j.jsb.2015.08.008](https://doi.org/10.1016/j.jsb.2015.08.008)
+- Yesibolati, M. N., Laganá, S., Sun, H., Beleggia, M., Kathmann, S. M.,
+  Kasama, T., & Mølhave, K. (2020). Mean inner potential of liquid water.
+  *Physical Review Letters* **124**(6), 065502.
+  [doi:10.1103/PhysRevLett.124.065502](https://doi.org/10.1103/PhysRevLett.124.065502)
 - Zhang, K. (2016). Gctf: Real-time CTF determination and correction.
   *Journal of Structural Biology* **193**(1), 1–12.
   [doi:10.1016/j.jsb.2015.11.003](https://doi.org/10.1016/j.jsb.2015.11.003)

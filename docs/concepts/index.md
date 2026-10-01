@@ -16,6 +16,7 @@ the [User Guide](../user-guide/particle-stack.md).
     - Cryo-ET
         - [Overview](cryoet-specimen/index.md)
         - Membrane shape
+            - [Overview](membrane-shape/index.md)
             - [Spherical harmonics](membrane-shape/spherical-harmonics.md)
             - [Swept spline](membrane-shape/swept-spline.md)
         - [Bilayer & transmembrane proteins](cryoet-specimen/bilayer.md)
@@ -31,5 +32,6 @@ the [User Guide](../user-guide/particle-stack.md).
         - [Multislice](scattering/multislice.md)
         - [Rytov](scattering/rytov.md)
         - [Other propagation modes](scattering/other-modes.md)
+        - [Frozen-plasmon forward model](scattering/frozen-plasmon.md)
     - [Aberrations](aberrations.md)
     - [Detector](detector.md)

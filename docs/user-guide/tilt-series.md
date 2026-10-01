@@ -72,7 +72,7 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
   envelopes; set either to enable it. `energy_spread`, `deltaV_V`,
   `deltaI_I` feed the Cc envelope specifically. `dose_envelope` applies the
   Grant & Grigorieff (2015) radiation-damage envelope per tilt: each tilt
-  is treated as a plain exposure of `dose_per_angstrom` taken after the
+  is treated as a plain exposure of `dose_per_tilt` taken after the
   summed dose of the tilts before it, in index order, so supply the tilt
   geometry in acquisition order for a dose-symmetric scheme. See
   [Aberrations](../concepts/aberrations.md).

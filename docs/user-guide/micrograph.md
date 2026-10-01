@@ -39,7 +39,7 @@ TOML/CLI field reference.
   built at `n_pixels`, then many copies are placed across a
   `micrograph_size` field via crowding.
 - **Microscope**: `voltage`, `dose` (total dose for the whole micrograph,
-  not per particle), `cs`, `alpha`.
+  not per particle), `defocus`, `cs`, `alpha`.
 - **Dataset**: `n_micrographs`, how many independent micrographs to
   generate in one run.
 - **Models**: `scattering_model`, `noise_model`, `detector_model`, same
@@ -119,7 +119,8 @@ not measurable. Lateral variation on its own is harmless.
 ## Absorption, radiation damage and solvent motion
 
 The micrograph command models the same absorption and exposure physics as
-[particle generation](particle-stack.md), with the same fields.
+[particle generation](particle-stack.md#absorption-radiation-damage-and-solvent-motion),
+with the same fields.
 
 - **Absorption**: `absorption_model = "inelastic_mfp"` replaces the
   amplitude-contrast ratio with an imaginary potential derived from measured
@@ -178,7 +179,8 @@ chunk at a time, which changes cost, not the result.
 ## Single-device only
 
 `specter simulate micrograph` does not accept a comma-separated device list
-the way `specter simulate particles`/`specter simulate tiltseries` do.
+the way `specter simulate particles` does; `specter simulate tiltseries` is
+single-device for the same reason.
 Each micrograph needs its own freshly regenerated ice and crowding
 specimen between forward passes
 (`MicrographGenerator.regenerate_specimen`), and a single micrograph at

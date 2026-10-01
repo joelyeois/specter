@@ -8,10 +8,14 @@ Every `BaseImager` subclass (`ImageGenerator`, `MicrographGenerator`,
 
 1. **[Scattering](scattering/index.md)**: propagate the electron wave
    through \(V\) (multislice, Rytov, first Born, or plain projection) to
-   get an exit wave.
+   get an exit wave. Absorption enters here as the imaginary part of the
+   potential: by default it is the real potential scaled by the
+   amplitude-contrast ratio, and under `absorption_model="inelastic_mfp"`
+   it is derived per material from measured inelastic mean free paths.
 2. **[Aberrations](aberrations.md)**: apply the microscope's transfer
    function (defocus, spherical aberration, astigmatism, and the
-   associated envelopes) to the exit wave.
+   associated envelopes) to the exit wave. A generator constructed with
+   `optics=None` skips this stage.
 3. **[Detector](detector.md)**: model the physical detector's MTF, noise,
    and (for direct electron detectors) coincidence loss.
 

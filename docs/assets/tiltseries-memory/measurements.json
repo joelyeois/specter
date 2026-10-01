@@ -1,0 +1,286 @@
+{
+  "cli": {
+    "before": {
+      "checkout": "/tmp/specter-tiltseries-baseline",
+      "device": "cuda:1",
+      "gpu": "NVIDIA L40",
+      "torch": "2.5.1+cu121",
+      "threads": 4,
+      "seed": 73,
+      "noise": "poisson",
+      "cli_seconds": 934.6064650267363,
+      "python_process_seconds": 948.9963577091694,
+      "generation": {
+        "seconds": 37.59481896832585,
+        "volume_shape": [
+          1,
+          300,
+          2014,
+          2014
+        ],
+        "volume_device": "cuda:1",
+        "per_tilt_solvent": false,
+        "per_tilt_damage": false,
+        "collect_flags": {},
+        "returned_shapes": [
+          [
+            1,
+            61,
+            1200,
+            1200
+          ],
+          [
+            1,
+            61,
+            1200,
+            1200
+          ],
+          [
+            1,
+            61,
+            1200,
+            1200
+          ]
+        ]
+      },
+      "peak_allocated_bytes": 9980617728,
+      "peak_reserved_bytes": 10066329600,
+      "sampled_driver_peak_bytes": 10596909056,
+      "host_rss_peaks_bytes": {
+        "setup": 90012495872,
+        "generation": 29033345024,
+        "saving": 29033345024,
+        "all": 90012495872
+      },
+      "host_rss_max_bytes": 90129821696,
+      "source_sha256": {
+        "_tiltseries.py0": "95eebf0687e2996dd08b798e9cd3230c7814a92b649c8130109b96afec660f40",
+        "_tiltseries.py1": "1b4312a891195905c7e24b4ad5ea2ffc6e48f1174163b10ee61c4c1e63f5f62e"
+      },
+      "output_files": [
+        {
+          "path": "tilt_series.star",
+          "bytes": 7732
+        },
+        {
+          "path": "tilt_series.mrcs",
+          "bytes": 351361024
+        }
+      ]
+    },
+    "after": {
+      "checkout": "/tmp/specter-tiltseries-memory",
+      "device": "cuda:3",
+      "gpu": "NVIDIA L40",
+      "torch": "2.5.1+cu121",
+      "threads": 4,
+      "seed": 73,
+      "noise": "poisson",
+      "cli_seconds": 938.794025093317,
+      "python_process_seconds": 950.9210395030677,
+      "generation": {
+        "seconds": 35.20127930864692,
+        "volume_shape": [
+          1,
+          300,
+          2014,
+          2014
+        ],
+        "volume_device": "cuda:3",
+        "per_tilt_solvent": false,
+        "per_tilt_damage": false,
+        "collect_flags": {
+          "collect_exitwaves": false,
+          "collect_clean_images": false
+        },
+        "returned_shapes": [
+          [
+            1,
+            61,
+            1200,
+            1200
+          ],
+          null,
+          null
+        ]
+      },
+      "peak_allocated_bytes": 5113127936,
+      "peak_reserved_bytes": 5198839808,
+      "sampled_driver_peak_bytes": 5729419264,
+      "host_rss_peaks_bytes": {
+        "setup": 89855750144,
+        "generation": 29001695232,
+        "saving": 29001695232,
+        "all": 89855750144
+      },
+      "host_rss_max_bytes": 90155282432,
+      "source_sha256": {
+        "_tiltseries.py0": "ea2bb43bff7c77d590945fee78e7eaab3160ec23eb7cc58c416162af47bc3373",
+        "_tiltseries.py1": "273b84a2f38fe8c3cf0f56900a2141293d8b5327cf2d090827ed65dc6bcd78de"
+      },
+      "output_files": [
+        {
+          "path": "tilt_series.star",
+          "bytes": 7732
+        },
+        {
+          "path": "tilt_series.mrcs",
+          "bytes": 351361024
+        }
+      ]
+    },
+    "after_same_gpu": {
+      "checkout": "/tmp/specter-tiltseries-memory",
+      "device": "cuda:1",
+      "gpu": "NVIDIA L40",
+      "torch": "2.5.1+cu121",
+      "threads": 4,
+      "seed": 73,
+      "noise": "poisson",
+      "cli_seconds": 902.8377705998719,
+      "python_process_seconds": 913.6099644824862,
+      "generation": {
+        "seconds": 32.82562768086791,
+        "volume_shape": [
+          1,
+          300,
+          2014,
+          2014
+        ],
+        "volume_device": "cuda:1",
+        "per_tilt_solvent": false,
+        "per_tilt_damage": false,
+        "collect_flags": {
+          "collect_exitwaves": false,
+          "collect_clean_images": false
+        },
+        "returned_shapes": [
+          [
+            1,
+            61,
+            1200,
+            1200
+          ],
+          null,
+          null
+        ]
+      },
+      "peak_allocated_bytes": 5113127936,
+      "peak_reserved_bytes": 5198839808,
+      "sampled_driver_peak_bytes": 5729419264,
+      "host_rss_peaks_bytes": {
+        "setup": 89793961984,
+        "generation": 29072912384,
+        "saving": 29072912384,
+        "all": 89793961984
+      },
+      "host_rss_max_bytes": 90236502016,
+      "source_sha256": {
+        "_tiltseries.py0": "ea2bb43bff7c77d590945fee78e7eaab3160ec23eb7cc58c416162af47bc3373",
+        "_tiltseries.py1": "273b84a2f38fe8c3cf0f56900a2141293d8b5327cf2d090827ed65dc6bcd78de"
+      },
+      "output_files": [
+        {
+          "path": "tilt_series.star",
+          "bytes": 7732
+        },
+        {
+          "path": "tilt_series.mrcs",
+          "bytes": 351361024
+        }
+      ]
+    }
+  },
+  "paired_generation": {
+    "seed": 173,
+    "same_model": true,
+    "shape": [
+      1,
+      300,
+      2014,
+      2014
+    ],
+    "baseline_path": "/tmp/specter-tiltseries-baseline/src/specter/imagegenerator/_tiltseries.py",
+    "candidate_path": "/tmp/specter-tiltseries-memory/src/specter/imagegenerator/_tiltseries.py",
+    "trials": [
+      {
+        "before": {
+          "seconds": 32.65436848625541,
+          "peak_allocated_bytes": 9980617728,
+          "peak_reserved_bytes": 10060038144
+        },
+        "after": {
+          "seconds": 32.60060155391693,
+          "peak_allocated_bytes": 5113127936,
+          "peak_reserved_bytes": 5192548352
+        },
+        "accuracy": {
+          "bitwise_equal": true,
+          "relative_l2": 0.0,
+          "max_abs": 0.0
+        }
+      },
+      {
+        "after": {
+          "seconds": 32.73018918558955,
+          "peak_allocated_bytes": 5113127936,
+          "peak_reserved_bytes": 5192548352
+        },
+        "before": {
+          "seconds": 32.96039932966232,
+          "peak_allocated_bytes": 9980617728,
+          "peak_reserved_bytes": 10060038144
+        },
+        "accuracy": {
+          "bitwise_equal": true,
+          "relative_l2": 0.0,
+          "max_abs": 0.0
+        }
+      },
+      {
+        "before": {
+          "seconds": 34.74304434657097,
+          "peak_allocated_bytes": 9980617728,
+          "peak_reserved_bytes": 10060038144
+        },
+        "after": {
+          "seconds": 34.7388797365129,
+          "peak_allocated_bytes": 5113127936,
+          "peak_reserved_bytes": 5192548352
+        },
+        "accuracy": {
+          "bitwise_equal": true,
+          "relative_l2": 0.0,
+          "max_abs": 0.0
+        }
+      }
+    ]
+  },
+  "paired_medians": {
+    "before": {
+      "seconds": 32.96039932966232,
+      "peak_allocated_bytes": 9980617728.0,
+      "peak_reserved_bytes": 10060038144.0
+    },
+    "after": {
+      "seconds": 32.73018918558955,
+      "peak_allocated_bytes": 5113127936.0,
+      "peak_reserved_bytes": 5192548352.0
+    }
+  },
+  "same_volume_accuracy": {
+    "bitwise_equal": true,
+    "unequal_pixels": 0,
+    "pixel_count": 87840000,
+    "relative_l2": 0.0,
+    "max_abs": 0.0
+  },
+  "independent_cli_accuracy": {
+    "bitwise_equal": false,
+    "unequal_pixels": 19829,
+    "pixel_count": 87840000,
+    "relative_l2": 0.0005937244890244154,
+    "max_abs": 2.0
+  },
+  "radial_power_relative_l2": 0.0
+}

@@ -216,9 +216,12 @@ def run_tilt_series(
     # --- Generating ---
     section(f"Generating tilt series on {device_target}")
     with torch.no_grad():
-        images, exitwaves, _clean = model.generate_tilt_series(torch.tensor([0]))
+        images, exitwaves, _clean = model.generate_tilt_series(
+            torch.tensor([0]),
+            collect_exitwaves=config.save_exitwaves,
+            collect_clean_images=False,
+        )
     images = images[0].cpu()  # (n_tilts, H, W)
-    exitwaves = exitwaves[0].cpu()  # (n_tilts, H, W) complex
 
     # --- Post-processing ---
     if config.normalize_tilt_series:
@@ -255,6 +258,8 @@ def run_tilt_series(
         )
 
         if config.save_exitwaves:
+            assert exitwaves is not None
+            exitwaves = exitwaves[0].cpu()  # (n_tilts, H, W) complex
             # From the settings this run built, not `model.ice`: the
             # MicrographGenerator base resets that attribute, so it always
             # read as no ice and every exit wave was named "clean".

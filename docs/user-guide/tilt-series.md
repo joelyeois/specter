@@ -122,6 +122,17 @@ writes the complex exit wave as two separate `.mrcs` files:
 `clean_exitwave_*` when `ice_model="none"`). `normalize_tilt_series`
 zero-means and unit-normalizes each tilt image independently before saving.
 
+The CLI collects exit waves only when `save_exitwaves=true` and does not
+retain the additional noiseless image stack. In the Python API,
+`TiltSeriesGenerator.generate_tilt_series` still returns all three stacks
+by default. Pass `collect_exitwaves=False` or `collect_clean_images=False`
+to skip a diagnostic; its position in the returned tuple will be `None`.
+These options preserve the detected images and their random-number stream.
+At a potential scale of exactly 1, generation also reuses the padded
+volume rather than allocating a scaled copy.
+See the [production comparison](../assets/tiltseries-memory/README.md)
+for measured GPU memory, timings, and matching image/Fourier figures.
+
 ## Chaining with `specter build tomogram`
 
 Two ways to run the specimen-building and imaging stages back to back:

@@ -9,7 +9,7 @@ from specter import logger
 
 from dataclasses import replace
 from collections.abc import Callable
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence, overload
 
 import roma
 import torch
@@ -1024,9 +1024,31 @@ class TiltSeriesGenerator(MicrographGenerator):
         if series is not None:
             series.to("cpu")
 
+    @overload
     def generate_tilt_series(
-        self, idx: int | torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        self,
+        idx: int | torch.Tensor,
+        *,
+        collect_exitwaves: Literal[True] = True,
+        collect_clean_images: Literal[True] = True,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]: ...
+
+    @overload
+    def generate_tilt_series(
+        self,
+        idx: int | torch.Tensor,
+        *,
+        collect_exitwaves: bool = True,
+        collect_clean_images: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]: ...
+
+    def generate_tilt_series(
+        self,
+        idx: int | torch.Tensor,
+        *,
+        collect_exitwaves: bool = True,
+        collect_clean_images: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
         """
         Generate a complete tilt series for the given batch indices.
 
@@ -1034,21 +1056,24 @@ class TiltSeriesGenerator(MicrographGenerator):
         ----------
         idx : int or torch.Tensor
             Batch indices (selects CTF/anisomag parameters).
+        collect_exitwaves, collect_clean_images : bool
+            Collect the corresponding diagnostics on the host. Both default
+            to True; disabling either returns None in that position.
 
         Returns
         -------
         tilt_series : torch.Tensor
             Detected images, shape (B, N_tilts, Y, X).
-        exitwaves : torch.Tensor
+        exitwaves : torch.Tensor or None
             Exit waves, shape (B, N_tilts, Y, X).
-        clean_images : torch.Tensor
+        clean_images : torch.Tensor or None
             ``|detector_waves|²`` before noise, shape (B, N_tilts, Y, X).
         """
         self._ensure_volume_placed()
 
         tilt_series = []
-        exitwaves = []
-        clean_images = []
+        exitwaves: list[torch.Tensor] | None = [] if collect_exitwaves else None
+        clean_images: list[torch.Tensor] | None = [] if collect_clean_images else None
         B = len(idx) if isinstance(idx, torch.Tensor) else 1
         n_tilts = len(self.quaternions)
 
@@ -1056,7 +1081,9 @@ class TiltSeriesGenerator(MicrographGenerator):
         damaged = self._specimen_spectrum is not None
         per_tilt = damaged or self._solvent_series is not None
         if not per_tilt:
-            volume_scaled = self.volume * scale
+            volume_scaled = (
+                self.volume if self._potential_scale_is_unity else self.volume * scale
+            )
 
         for i in track(
             range(n_tilts),
@@ -1076,7 +1103,13 @@ class TiltSeriesGenerator(MicrographGenerator):
                     self._render_tilt_solvent(dose_i)
                 if damaged:
                     self._render_exposure(dose_i, float(self.pre_exposure[i]))
-                volume_scaled = self.volume * scale.to(self.volume.device)
+                # Resolve the current volume after rendering: exposure or
+                # solvent placement can replace it or move it to the host.
+                volume_scaled = (
+                    self.volume
+                    if self._potential_scale_is_unity
+                    else self.volume * scale.to(self.volume.device)
+                )
             Q = self.quaternions[i].unsqueeze(0).expand(B, -1)
             T = self.translations[i].unsqueeze(0).expand(B, -1)
 
@@ -1131,13 +1164,15 @@ class TiltSeriesGenerator(MicrographGenerator):
             )
 
             tilt_series.append(image.detach().cpu())
-            exitwaves.append(exitwave.detach().cpu())
+            if exitwaves is not None:
+                exitwaves.append(exitwave.detach().cpu())
             # |psi|^2 on the device: the host then receives a real image
             # rather than a complex one, and the CPU does no elementwise work.
-            clean_images.append((detector_waves.detach().abs() ** 2).cpu())
+            if clean_images is not None:
+                clean_images.append((detector_waves.detach().abs() ** 2).cpu())
 
         return (
             torch.stack(tilt_series, dim=1),
-            torch.stack(exitwaves, dim=1),
-            torch.stack(clean_images, dim=1),
+            torch.stack(exitwaves, dim=1) if exitwaves is not None else None,
+            torch.stack(clean_images, dim=1) if clean_images is not None else None,
         )

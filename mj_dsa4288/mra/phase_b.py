@@ -5,14 +5,13 @@ Here SPECTER's forward model is used end-to-end (fixed view, random in-plane
 shifts, optional CTF / Poisson noise / detector / ice), so the data no longer
 follow the paper's white-Gaussian model. The question is which of the paper's
 predictions survive each added term. Noise is set by dose rather than by
-``sigma``, so the effective SNR is measured empirically with
-:func:`effective_snr` (clean versus noisy stacks of the same particles).
+``sigma``.
 
-The returned stacks are ordinary tensors that the estimators in
-:mod:`mj_dsa4288.mra.em` accept unchanged. Note two departures from Phase A:
+The returned stacks are ordinary ``[n, Y, X]`` tensors. Note two departures
+from Phase A:
 
 * shifts are real-space (not cyclic), so ``max_shift`` must keep the particle
-  inside the box, and EM's cyclic shift search is then a harmless superset;
+  inside the box;
 * with a CTF switched on, the estimand is the CTF-filtered projection, not the
   projection itself. Compare against a clean CTF-on reference image.
 """
@@ -155,34 +154,3 @@ def generate_stack(model: Any, n: int, batch_size: int = 64) -> torch.Tensor:
             idx = torch.arange(start, min(start + batch_size, n), device=model.device)
             out.append(model(idx).detach().cpu().float())
     return torch.cat(out, 0)
-
-
-def effective_snr(clean: torch.Tensor, noisy: torch.Tensor) -> tuple[float, float]:
-    """
-    Empirical SNR of a noisy stack relative to the matching clean stack.
-
-    Returns
-    -------
-    tuple[float, float]
-        ``(paper_snr, pixel_snr)``: ``||clean||^2 / ||noise||^2`` per image and
-        ``var(clean) / var(noise)`` per pixel, both averaged over the stack.
-    """
-    noise = noisy - clean
-    paper = (clean.pow(2).sum((1, 2)) / noise.pow(2).sum((1, 2))).mean()
-    pixel = (clean.var((1, 2)) / noise.var((1, 2))).mean()
-    return float(paper), float(pixel)
-
-
-def standardise_stack(
-    images: torch.Tensor, clean_reference: torch.Tensor
-) -> tuple[torch.Tensor, float]:
-    """
-    Put a physics stack on the paper's footing: zero-mean, unit-norm reference.
-
-    Subtracts the global mean intensity and divides by the norm of the clean
-    reference so the reference has ``||theta|| = 1``. Returns the scaled stack
-    and the scale factor. Do **not** z-score each noisy image individually.
-    """
-    ref = clean_reference - clean_reference.mean()
-    scale = float(ref.norm())
-    return (images - clean_reference.mean()) / scale, scale

@@ -35,8 +35,7 @@ def synthetic_template(
     is strictly positive at every frequency, so every Fourier coefficient is
     non-zero almost surely (the genericity condition of Section 2.2). The
     result is normalised to unit 2-norm after adding ``mean_offset`` times the
-    template's RMS as a constant, so the first moment is usable for the scale
-    fix in :func:`mj_dsa4288.mra.jennrich.homojen`.
+    template's RMS as a constant, so the first moment is non-zero.
 
     Parameters
     ----------
@@ -151,7 +150,7 @@ def template_from_pdb(
     pdb_id : str
         Four-character PDB code or local mmCIF/PDB path.
     num_pixels : int, optional
-        Box size in pixels. Keep small (32 to 64); the bispectrum is O(d^3).
+        Box size in pixels.
     pixel_size : float, optional
         Pixel size in Angstrom.
     quaternion : torch.Tensor, optional

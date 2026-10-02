@@ -1,0 +1,55 @@
+{
+  "tomogram.mrc": {
+    "shape": [
+      300,
+      1200,
+      1200
+    ],
+    "bitwise_equal": false,
+    "max_abs_error": 1.0967254638671875e-05,
+    "different_voxels": 167140282,
+    "relative_l2": 1.2743496938099698e-07,
+    "header_stats_equal": false
+  },
+  "tomogram_membrane_labels.mrc": {
+    "shape": [
+      300,
+      1200,
+      1200
+    ],
+    "bitwise_equal": true,
+    "max_abs_error": 0.0,
+    "different_voxels": 0,
+    "relative_l2": 0.0,
+    "header_stats_equal": true
+  },
+  "tomogram_protein_labels.mrc": {
+    "shape": [
+      300,
+      1200,
+      1200
+    ],
+    "bitwise_equal": true,
+    "max_abs_error": 0.0,
+    "different_voxels": 0,
+    "relative_l2": 0.0,
+    "header_stats_equal": true
+  },
+  "tomogram_regions.mrc": {
+    "shape": [
+      300,
+      1200,
+      1200
+    ],
+    "bitwise_equal": true,
+    "max_abs_error": 0.0,
+    "different_voxels": 0,
+    "relative_l2": 0.0,
+    "header_stats_equal": true
+  },
+  "picks": {
+    "files": 29,
+    "same_names": true,
+    "bitwise_equal": true
+  }
+}

@@ -171,6 +171,12 @@ be slow or run out of memory past a small smoke-test box, so
   (a single unchunked batch can reach 8+ GB); leave unset for
   small runs.
 
+The CLI releases each membrane's dense geometry field after generating its
+density and transmembrane proteins. Python callers can retain those fields
+for inspection: `TomogramSpecimenGenerator` defaults to
+`retain_membrane_fields=True`. The [full shipped-config comparison](../assets/tomogram-memory/report.md)
+includes GPU memory measurements, output checks and Fourier figures.
+
 ## Benchmarks: resolution vs. time and memory
 
 To see how `voxel_size` trades off against runtime and memory, this

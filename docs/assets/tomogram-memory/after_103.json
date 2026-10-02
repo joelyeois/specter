@@ -1,0 +1,75 @@
+{
+  "checkout": "/tmp/specter-tomogram-memory",
+  "device": "cuda:3",
+  "gpu": "NVIDIA L40",
+  "torch": "2.5.1+cu121",
+  "seed": 103,
+  "threads": 4,
+  "stages": [
+    {
+      "stage": "_stage_carbon",
+      "seconds": 2.440914835780859,
+      "allocated_bytes": 2168596480,
+      "peak_allocated_bytes": 5933390848
+    },
+    {
+      "stage": "_stage_membranes",
+      "seconds": 21.24995669722557,
+      "allocated_bytes": 6920749056,
+      "peak_allocated_bytes": 10615714304
+    },
+    {
+      "stage": "_stage_filaments",
+      "seconds": 3.20256145298481,
+      "allocated_bytes": 7352749056,
+      "peak_allocated_bytes": 10615714304
+    },
+    {
+      "stage": "_stage_beads",
+      "seconds": 1.0989606380462646e-05,
+      "allocated_bytes": 7352749056,
+      "peak_allocated_bytes": 10615714304
+    },
+    {
+      "stage": "_load_structures",
+      "seconds": 0.9354024790227413,
+      "allocated_bytes": 7352749056,
+      "peak_allocated_bytes": 10615714304
+    },
+    {
+      "stage": "_stage_species",
+      "seconds": 16.14653380960226,
+      "allocated_bytes": 7421037568,
+      "peak_allocated_bytes": 10615714304
+    },
+    {
+      "stage": "_stage_species",
+      "seconds": 2.1030509620904922,
+      "allocated_bytes": 7421037568,
+      "peak_allocated_bytes": 10615714304
+    },
+    {
+      "stage": "generate",
+      "seconds": 46.1272509470582,
+      "allocated_bytes": 6557037568,
+      "peak_allocated_bytes": 10615714304
+    }
+  ],
+  "shape": [
+    300,
+    1200,
+    1200
+  ],
+  "accumulator_device": "cuda:3",
+  "protein_instances": 20651,
+  "filament_instances": 746,
+  "microtubule_dimers": 4745,
+  "membrane_instances": 6,
+  "transmembrane_instances": 148,
+  "cli_seconds": 70.4474775083363,
+  "peak_allocated_bytes": 10615714304,
+  "peak_reserved_bytes": 13151240192,
+  "sampled_driver_peak_bytes": 13679722496,
+  "host_max_rss_bytes": 6535667712,
+  "cupy_reserved_bytes_end": 1361280512
+}

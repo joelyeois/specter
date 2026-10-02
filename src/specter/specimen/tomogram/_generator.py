@@ -335,6 +335,12 @@ class TomogramSpecimenGenerator(
         for a large field of view whose canvas exceeds GPU VRAM but fits
         in system RAM -- see this generator's own module-level discussion
         for the numbers this matters at.
+    retain_membrane_fields : bool, optional
+        Keep each membrane generator's dense geometry field after surface-site
+        placement. Default True for Python callers inspecting those fields.
+        False releases completed fields and skipped-instance densities;
+        the CLI uses this mode because its density, labels and picks need no
+        retained fields. A later generate() rebuilds them.
 
     Attributes
     ----------
@@ -432,6 +438,7 @@ class TomogramSpecimenGenerator(
         render_devices: list[str | torch.device] | None = None,
         progressbars: bool = True,
         accumulator_device: str | torch.device | Literal["auto"] | None = None,
+        retain_membrane_fields: bool = True,
     ):
         if (
             not protein_specs
@@ -495,6 +502,7 @@ class TomogramSpecimenGenerator(
         self.render_workers = resolve_render_workers(render_workers, len(protein_specs))
         self.render_devices = resolve_render_devices(device, render_devices)
         self.progressbars = progressbars
+        self.retain_membrane_fields = retain_membrane_fields
         # Where the shared, potentially very large canvas tensors (volume/
         # instance_labels/membrane_labels) live -- default None resolves
         # to `device` (identical to the pre-existing behaviour: everything

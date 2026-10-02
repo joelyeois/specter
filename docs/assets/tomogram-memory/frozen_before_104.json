@@ -1,0 +1,76 @@
+{
+  "checkout": "/tmp/specter-tomogram-baseline",
+  "device": "cuda:3",
+  "gpu": "NVIDIA L40",
+  "torch": "2.5.1+cu121",
+  "seed": 104,
+  "threads": 4,
+  "frozen_components": "/tmp/specter-tomogram-validation/components_104",
+  "stages": [
+    {
+      "stage": "_stage_carbon",
+      "seconds": 6.197500094771385,
+      "allocated_bytes": 2168596480,
+      "peak_allocated_bytes": 6022201856
+    },
+    {
+      "stage": "_stage_membranes",
+      "seconds": 19.598774075508118,
+      "allocated_bytes": 8121440256,
+      "peak_allocated_bytes": 12377613824
+    },
+    {
+      "stage": "_stage_filaments",
+      "seconds": 3.1722111590206623,
+      "allocated_bytes": 8553453568,
+      "peak_allocated_bytes": 12377613824
+    },
+    {
+      "stage": "_stage_beads",
+      "seconds": 1.1052936315536499e-05,
+      "allocated_bytes": 8553453568,
+      "peak_allocated_bytes": 12377613824
+    },
+    {
+      "stage": "_load_structures",
+      "seconds": 0.9204674959182739,
+      "allocated_bytes": 8553453568,
+      "peak_allocated_bytes": 12377613824
+    },
+    {
+      "stage": "_stage_species",
+      "seconds": 15.931590378284454,
+      "allocated_bytes": 8621920256,
+      "peak_allocated_bytes": 12377613824
+    },
+    {
+      "stage": "_stage_species",
+      "seconds": 2.0448404140770435,
+      "allocated_bytes": 8621920256,
+      "peak_allocated_bytes": 12377613824
+    },
+    {
+      "stage": "generate",
+      "seconds": 47.91113758459687,
+      "allocated_bytes": 7757906944,
+      "peak_allocated_bytes": 12377613824
+    }
+  ],
+  "shape": [
+    300,
+    1200,
+    1200
+  ],
+  "accumulator_device": "cuda:3",
+  "protein_instances": 20604,
+  "filament_instances": 691,
+  "microtubule_dimers": 4631,
+  "membrane_instances": 6,
+  "transmembrane_instances": 188,
+  "cli_seconds": 71.87878808379173,
+  "peak_allocated_bytes": 12377613824,
+  "peak_reserved_bytes": 14923333632,
+  "sampled_driver_peak_bytes": 15453913088,
+  "host_max_rss_bytes": 6569140224,
+  "cupy_reserved_bytes_end": 1361280512
+}

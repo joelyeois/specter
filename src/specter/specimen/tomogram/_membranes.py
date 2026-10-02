@@ -44,6 +44,7 @@ class _MembraneStageMixin:
     device: str | torch.device
     accumulator_device: torch.device
     progressbars: bool
+    retain_membrane_fields: bool
     regions: dict[str, torch.Tensor] | None
     membrane_labels: torch.Tensor | None
     placed_membrane_instances: list[MembraneInstance]
@@ -239,6 +240,9 @@ class _MembraneStageMixin:
                 mi.generator.generate()
                 progress.update(membrane_task, advance=1)
                 if mi.generator.clipped_at_boundary:
+                    if not self.retain_membrane_fields:
+                        mi.generator.field = None
+                        mi.generator.volume = None
                     warnings.warn(
                         "TomogramSpecimenGenerator: a membrane instance's own "
                         "working grid was too small for the organelle size it "
@@ -258,9 +262,16 @@ class _MembraneStageMixin:
                 bare_bilayer = mi.generator.volume
                 assert bare_bilayer is not None  # generate() just ran
                 bare_peak = float(bare_bilayer.max())
+                del bare_bilayer
                 tm_placements = mi.generator.place_transmembrane(
                     min_spacing_angstrom=self.min_transmembrane_spacing
                 )
+                # The field is needed for surface-site placement, but not
+                # for compositing, labels or subsequent tomogram stages.
+                # CLI runs need only those outputs; retaining every dense
+                # field would keep completed organelles in GPU memory.
+                if not self.retain_membrane_fields:
+                    mi.generator.field = None
                 offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
                 for tp in tm_placements:
                     tp.center_xyz = tp.center_xyz + offset
@@ -454,6 +465,7 @@ class _MembraneStageMixin:
                     # one's higher ids.
                     next_instance_id += len(mi.generator.placements)
                     mi.generator.transmembrane_labels = None
+                del tm_labels
                 shell_mask = shell_mask.cpu()
                 instance_shell_masks.append((mi, shell_mask))
                 self.placed_membrane_instances.append(mi)

@@ -675,6 +675,7 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     )
 
     gen = build_tomogram_generator(config)
+    gen.retain_membrane_fields = False
     volume = gen.generate()
     if gen.membrane_instances:
         console.print(

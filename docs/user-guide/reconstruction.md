@@ -239,7 +239,17 @@ auto-numbering needs a single process to choose the job directory. A
 `gold` run does not need one, since its orchestrator opens the job once
 before spawning the halves. `--precision`
 controls Lightning's training precision (`16-mixed` by default, forced to
-`32` on CPU); `--num_workers` sets dataloader worker processes.
+`32` on CPU); `--num_workers` sets dataloader worker processes. It defaults
+to `0`: the particle images are already resident in memory, so workers add
+process startup and interprocess transfers to each batch. You can still
+set it explicitly for a workload where workers help.
+
+Normalized particle stacks are converted to counts in bounded blocks,
+reusing their private storage. The conversion arithmetic and training
+precision are unchanged. See the [GPU comparison report](../assets/reconstruction-input-memory/report.md)
+for complete five-epoch timings, host/GPU memory measurements and Fourier/FSC
+comparisons at 256- and 512-pixel input sizes. The memory saving is on the host;
+whole-command speed gains depend on the workload.
 
 ## Symmetry
 

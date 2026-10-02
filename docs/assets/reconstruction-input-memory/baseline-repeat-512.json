@@ -1,0 +1,24 @@
+[
+  {
+    "halfset": "A",
+    "shape": [
+      512,
+      512,
+      512
+    ],
+    "bitwise_equal": false,
+    "relative_l2": 7.001983866158971e-06,
+    "max_abs_V": 7.545948028564453e-05
+  },
+  {
+    "halfset": "B",
+    "shape": [
+      512,
+      512,
+      512
+    ],
+    "bitwise_equal": false,
+    "relative_l2": 6.978604350403037e-06,
+    "max_abs_V": 7.581710815429688e-05
+  }
+]

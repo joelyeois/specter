@@ -208,12 +208,24 @@ class Ghostbuster(_GhostbusterBase):
         voxel_size = float(
             pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
         )
-        images = _images_to_counts(
-            images,
-            image_units,
-            dose_per_angstrom * voxel_size**2,
-            flip_contrast=image_units == "normalized",
-        )
+        dose_per_pixel = dose_per_angstrom * voxel_size**2
+        if image_units == "normalized" and images.is_floating_point():
+            # This stack is privately owned, so reuse it. Keep the existing
+            # conversion arithmetic on bounded blocks instead of retaining
+            # several full stacks during sign reversal, scaling and addition.
+            for block in images.split(64):
+                block.copy_(
+                    _images_to_counts(
+                        block, image_units, dose_per_pixel, flip_contrast=True
+                    )
+                )
+        else:
+            images = _images_to_counts(
+                images,
+                image_units,
+                dose_per_pixel,
+                flip_contrast=image_units == "normalized",
+            )
 
         # preprocessed particle data (not hyperparams — not logged by job.create)
         self._images = images
@@ -363,7 +375,9 @@ class Ghostbuster(_GhostbusterBase):
                 )
             console.print(f"Loading particle stack from {Path(mrc_file).name} ...")
             with mrcfile.mmap(str(mrc_file)) as mrc:
-                images = torch.as_tensor(mrc.data[rows].copy())
+                # Integer-list indexing already makes a writable, owned copy,
+                # independent of the mmap. A second copy doubles load scratch.
+                images = torch.as_tensor(mrc.data[rows])
 
         h, w = images.shape[-2], images.shape[-1]
         console.print(

@@ -53,7 +53,7 @@ bin_factor = 8
 [compute]
 device = "cuda"        # cpu | cuda | cuda:1 | 0,1 (trains across both via DDP)
 precision = "16-mixed" # forced to 32 on CPU
-num_workers = 8
+num_workers = 0       # images are already resident; worker processes add IPC overhead
 
 # Every run is numbered and tracked -- there is no untracked mode, the way
 # neither RELION nor CryoSPARC has one. The directory is

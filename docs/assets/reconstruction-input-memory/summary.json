@@ -1,0 +1,135 @@
+{
+  "cases": [
+    {
+      "box": 256,
+      "particles": 10000,
+      "pixel_size_A": 1.058998942375183,
+      "halfmaps": [
+        {
+          "halfset": "A",
+          "bitwise_equal": false,
+          "relative_l2": 1.3703568149403372e-05,
+          "max_abs_V": 0.00010919570922851562
+        },
+        {
+          "halfset": "B",
+          "bitwise_equal": false,
+          "relative_l2": 1.36925133535577e-05,
+          "max_abs_V": 0.00011748075485229492
+        }
+      ],
+      "halfmap_resolution": [
+        "8.170 \u00c5",
+        "8.170 \u00c5"
+      ],
+      "map_to_model_resolution": [],
+      "max_halfmap_fsc_difference": 7.450580596923828e-07,
+      "preprocessed_images_and_parameters_bitwise_equal": true,
+      "cli_seconds": [
+        598.4259649924934,
+        525.3078807033598
+      ],
+      "cli_speedup": 1.1391909144618815,
+      "tree_peak_pss_GiB": [
+        5.450061798095703,
+        3.811661720275879
+      ],
+      "worker_peak_gpu_allocated_GiB": [
+        1.1835384368896484,
+        1.1835384368896484
+      ],
+      "worker_peak_gpu_reserved_GiB": [
+        1.345703125,
+        1.345703125
+      ],
+      "worker_peak_driver_GiB": [
+        1.853515625,
+        1.853515625
+      ],
+      "worker_peak_loading_rss_GiB": [
+        5.550266265869141,
+        3.2589759826660156
+      ],
+      "fit_seconds": [
+        563.3615310676396,
+        490.28811287507415
+      ],
+      "training_step_median_ms": [
+        25.571327209472656,
+        25.554943084716797
+      ],
+      "loading_all_particles_peak_rss_GiB": [
+        10.431316375732422,
+        5.547077178955078
+      ],
+      "measurement_count": "One complete before/after gold run per box; no repeated whole-CLI speedup claim."
+    },
+    {
+      "box": 512,
+      "particles": 2000,
+      "pixel_size_A": 0.7310000061988831,
+      "halfmaps": [
+        {
+          "halfset": "A",
+          "bitwise_equal": false,
+          "relative_l2": 7.002142977100318e-06,
+          "max_abs_V": 8.821487426757812e-05
+        },
+        {
+          "halfset": "B",
+          "bitwise_equal": false,
+          "relative_l2": 6.978819523841589e-06,
+          "max_abs_V": 7.2479248046875e-05
+        }
+      ],
+      "halfmap_resolution": [
+        "9.599 \u00c5",
+        "9.599 \u00c5"
+      ],
+      "map_to_model_resolution": [
+        "36.944 \u00c5",
+        "36.944 \u00c5"
+      ],
+      "max_halfmap_fsc_difference": 5.662441253662109e-07,
+      "preprocessed_images_and_parameters_bitwise_equal": true,
+      "cli_seconds": [
+        1013.7265281006694,
+        1068.4393083825707
+      ],
+      "cli_speedup": 0.9487918688009271,
+      "tree_peak_pss_GiB": [
+        12.773602485656738,
+        11.34646224975586
+      ],
+      "worker_peak_gpu_allocated_GiB": [
+        9.294410228729248,
+        9.294410228729248
+      ],
+      "worker_peak_gpu_reserved_GiB": [
+        9.763671875,
+        9.763671875
+      ],
+      "worker_peak_driver_GiB": [
+        10.271484375,
+        10.271484375
+      ],
+      "worker_peak_loading_rss_GiB": [
+        4.586673736572266,
+        2.6846771240234375
+      ],
+      "fit_seconds": [
+        965.8469515033066,
+        1020.7031999602914
+      ],
+      "training_step_median_ms": [
+        200.4714813232422,
+        214.07334899902344
+      ],
+      "loading_all_particles_peak_rss_GiB": [
+        8.473495483398438,
+        4.5667724609375
+      ],
+      "measurement_count": "One complete before/after gold run per box; no repeated whole-CLI speedup claim."
+    }
+  ]
+}

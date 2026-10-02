@@ -1,0 +1,54 @@
+[
+  {
+    "workers": 0,
+    "particles": 1005,
+    "box": 512,
+    "batchsize": 3,
+    "batches": 300,
+    "warmup": 20,
+    "measured_batches": 280,
+    "wall_seconds": 60.836550671607256,
+    "wall_ms_per_batch": 217.27339525574018,
+    "median_gpu_training_ms": 199.68820190429688,
+    "gpu_peak_allocated_bytes": 9979092480
+  },
+  {
+    "workers": 8,
+    "particles": 1005,
+    "box": 512,
+    "batchsize": 3,
+    "batches": 300,
+    "warmup": 20,
+    "measured_batches": 280,
+    "wall_seconds": 61.56434799730778,
+    "wall_ms_per_batch": 219.87267141895637,
+    "median_gpu_training_ms": 200.38646697998047,
+    "gpu_peak_allocated_bytes": 9979092480
+  },
+  {
+    "workers": 8,
+    "particles": 1005,
+    "box": 512,
+    "batchsize": 3,
+    "batches": 300,
+    "warmup": 20,
+    "measured_batches": 280,
+    "wall_seconds": 61.57674724236131,
+    "wall_ms_per_batch": 219.91695443700468,
+    "median_gpu_training_ms": 200.34204864501953,
+    "gpu_peak_allocated_bytes": 9979092480
+  },
+  {
+    "workers": 0,
+    "particles": 1005,
+    "box": 512,
+    "batchsize": 3,
+    "batches": 300,
+    "warmup": 20,
+    "measured_batches": 280,
+    "wall_seconds": 61.14726182073355,
+    "wall_ms_per_batch": 218.38307793119125,
+    "median_gpu_training_ms": 200.75758361816406,
+    "gpu_peak_allocated_bytes": 9979092480
+  }
+]

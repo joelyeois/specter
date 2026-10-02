@@ -1,0 +1,16 @@
+{
+  "source": "/scratch/loh/joel/empiar-10254/CS-empiar-10254/J9/J9_particles.cs",
+  "count": 10000,
+  "box": 256,
+  "pixel_size_A": 1.058998942375183,
+  "dose_per_angstrom": 64.0,
+  "halfsets": {
+    "0": 5000,
+    "1": 5000
+  },
+  "unique_uids": 10000,
+  "uids_sha256": "e1617be732f75f85742fb51c9743f392eb41fad5769cd9ac807697878028b138",
+  "normalization": "Full-image mean/std, float64 arithmetic; float32 output. Same frozen prepared data for both variants.",
+  "source_files": 900,
+  "split": "Frozen balanced random partition (seed 10254); J9 ab-initio metadata originally assigns every row to split 0. Used to compare implementations; FSC is not an independent certification of the upstream poses."
+}

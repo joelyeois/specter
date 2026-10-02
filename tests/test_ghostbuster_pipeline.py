@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 import torch
 
+from specter.cpu_threads import limited_cpu_threads
 from specter.ghostbuster import (
     Ghostbuster,
     TomogramGhostbuster,
@@ -92,6 +93,67 @@ def test_ghostbuster_counts_stack_is_used_as_is(mrc_file: Path) -> None:
     with mrcfile.mmap(str(mrc_file)) as mrc:
         raw = torch.as_tensor(mrc.data.copy())
     assert torch.equal(gb._images, raw)
+
+
+@pytest.mark.parametrize("halfset", ["all", "A", "B"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float16, np.int16])
+def test_particle_stack_conversion_preserves_rows_and_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, halfset: str, dtype: type
+) -> None:
+    """Cross the preprocessing block boundary and keep the mmap untouched.
+
+    Float stacks reuse their owned storage; integer stacks retain the original
+    conversion's type and arithmetic. Halfset filtering must still pair every
+    pose with its original image, including the final incomplete block.
+    """
+    n = 131
+    monkeypatch.setattr(_cryosparc, "Dataset", fake_cryosparc_dataset(n, PIXEL_SIZE))
+    rng = np.random.default_rng(42)
+    raw = (rng.normal(size=(n, BOX, BOX)) * 10).astype(dtype)
+    path = tmp_path / "owned_stack.mrcs"
+    with mrcfile.new(path, overwrite=True) as mrc:
+        mrc.set_data(raw)
+    gb = Ghostbuster(
+        cs_file="fake.cs",
+        mrc_file=path,
+        dose_per_angstrom=3.25,
+        halfset=halfset,  # type: ignore[arg-type]
+        propagation=Propagation(scattering_model="projection"),
+    )
+    rows = np.arange(n)
+    if halfset in ("A", "B"):
+        rows = rows[rows % 2 == (0 if halfset == "A" else 1)]
+    counts = 3.25 * PIXEL_SIZE**2
+    expected = counts**0.5 * (-torch.as_tensor(raw[rows])) + counts
+    assert torch.equal(gb._images, expected)
+    # The returned stack remains owned and writable after the mmap closes.
+    gb._images.fill_(123.0)
+    with mrcfile.mmap(path) as mrc:
+        np.testing.assert_array_equal(mrc.data, raw)
+
+
+def test_resident_loader_worker_count_preserves_epoch_order(mrc_file: Path) -> None:
+    """Removing workers must preserve shuffled batches and parent RNG draws."""
+    # A forked worker resets Torch to one thread; inherit that setting to
+    # avoid forking an active CPU pool in this regression test.
+    with limited_cpu_threads(1):
+        orders = []
+        next_draws = []
+        for workers in (2, 0):
+            gb = Ghostbuster(
+                "fake.cs",
+                mrc_file,
+                2.0,
+                num_workers=workers,
+                batchsize=3,
+                propagation=Propagation(scattering_model="projection"),
+            )
+            _, loader = gb._build_reconstructor_and_loader(gb._images, PIXEL_SIZE, 3)
+            torch.manual_seed(77)
+            orders.append([torch.cat([idx for _, idx in loader]) for _ in range(5)])
+            next_draws.append(torch.rand(5))
+        assert all(torch.equal(a, b) for a, b in zip(*orders))
+        assert torch.equal(*next_draws)
 
 
 @pytest.mark.parametrize("alpha,expected", [(None, 0.1), (0.0, 0.0), (0.5, 0.5)])

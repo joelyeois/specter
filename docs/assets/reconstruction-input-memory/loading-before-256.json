@@ -1,0 +1,35 @@
+{
+  "checkout": "/tmp/specter-reconstruction-baseline",
+  "cs_file": "/tmp/specter-reconstruction-validation/data/empiar10254-10000.cs",
+  "mrc_file": "/tmp/specter-reconstruction-validation/data/empiar10254-10000.mrcs",
+  "dose": 64.0,
+  "halfset": "all",
+  "shape": [
+    10000,
+    256,
+    256
+  ],
+  "dtype": "torch.float32",
+  "loading_seconds": 27.726232826709747,
+  "loading_peak_rss_bytes": 11200540672,
+  "images_sha256": "dffcb518192c971728c62f6481c15c09bed50de9f2ab1a26a50dde6fbf3e7c33",
+  "rotations_sha256": "517afc327630792376250e68ce7e178b5b7cb03ba585eefd7e157e131e08c8f6",
+  "translations_sha256": "f65e279794849ce0a24075d81c3d768df13ecc9f7d476e7e2d37905550ef4a8f",
+  "scale_sha256": "c29707cc9550b230d346b6eed762976b8206f02cc6a708135806e81da8120652",
+  "ctf_sha256": {
+    "cs": "40359c78f5305dd624e6e96e85dce65f73068cca73cb57de47c81a95a421405b",
+    "dfu": "31c95a62dd7cd9a905a4801b4c1e0803667b40a0c65d8fa7ffe6cbdc3b0bd212",
+    "dfv": "339e0a37c45ce9ab93c635953dc378c7b0bbc7308e67d9d0ec4e6475aad5efc9",
+    "dfang": "81551201a652d1b1e8ee400d4d1e9f1fb01e6e96fad1deee370e8b9ddb503bd9",
+    "tiltx": "7a180ae8a41f7642f1fb9368f8521393512e70f69cdaeeb3d5b930c08f65c3d9",
+    "tilty": "d4379c83ff2b68add6c596bd8566c7088cdf8540844473cb550b0d77dc0c001f",
+    "phaseshift": "e7e2dcff542de95352682dc186432e98f0188084896773f1973276b0577d5305",
+    "trefoil1": "8b098639c8329dfde5cf64a76c46534f2ada9c74535be6ab3af1109f7a978174",
+    "trefoil2": "d57df88ae17cd00eca448406373e44a1a1e34c206a60c88182f93a28b3fe147f",
+    "tetrafoil1": "2d65b8ddcc5c2fbea53db3435bb61dd46e9782275bd88a019e3afb51019b711f",
+    "tetrafoil2": "e7e2dcff542de95352682dc186432e98f0188084896773f1973276b0577d5305",
+    "tetrafoil3": "e7e2dcff542de95352682dc186432e98f0188084896773f1973276b0577d5305",
+    "tetrafoil4": "2d65b8ddcc5c2fbea53db3435bb61dd46e9782275bd88a019e3afb51019b711f"
+  },
+  "anisomag_sha256": null
+}

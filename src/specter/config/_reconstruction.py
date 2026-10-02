@@ -186,7 +186,9 @@ class ReconstructionConfig:
         help="Lightning trainer precision, e.g. 16-mixed or 32. Forced to 32 on CPU.",
     )
     num_workers: int = setting(
-        8, help="Dataloader worker processes.", check="non_negative"
+        0,
+        help="Dataloader worker processes; 0 avoids multiprocessing for resident images.",
+        check="non_negative",
     )
 
     # --- Output & job tracking ---

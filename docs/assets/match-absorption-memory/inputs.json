@@ -1,0 +1,32 @@
+{
+  "metadata": {
+    "path": "/scratch/loh/joel/empiar-11377/claude_match/j446_2000_passthrough_512.cs",
+    "sha256": "f8189b7945b77abbf39c99b14aea3316156c0a6dbf90cb4a8a5b1a3789d21cf6"
+  },
+  "pdb": {
+    "path": "/mnt/cbis/home/e0788253/.cache/specter/pdb/8b0x-assembly1.cif",
+    "sha256": "c7d3992b80c03395bc34c35925ebc8a9c492fd0e8e7fba98f25135ec17e3c41b"
+  },
+  "weights": {
+    "path": "/scratch/loh/joel/empiar-11377/CS-empiar-11377/J34/refm_empirical_dw.npy",
+    "sha256": "7d45bb2dbacba4dc90a9bec5208b1d06777b80fd13fd5d0ecb73f26a57d8cb05"
+  },
+  "images": {
+    "path": "/scratch/loh/joel/empiar-11377/claude_match/exp_2000_j446_512.mrcs",
+    "shape_used": [
+      200,
+      512,
+      512
+    ],
+    "first_200_data_sha256": "4468cfef72767bc40fc0b6a89e398879a3bda581595f08bf7e5a0570c3f0ec1e"
+  },
+  "uniform_control": {
+    "shape": [
+      200,
+      256,
+      256
+    ],
+    "pixel_size_A": 1.462,
+    "data_sha256": "0c45559cc615907cd91a77c8fffcae67a8ac54512fa94bee1cb985f203cd4502"
+  }
+}

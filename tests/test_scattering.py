@@ -12,6 +12,82 @@ from specter.scattering import (
 from specter.fft import fft2, ifft2
 
 
+@pytest.mark.parametrize("sign", ["negative", "positive"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("uniform_absorption", [0.0, 0.03])
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda:0",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="needs CUDA"
+            ),
+        ),
+    ],
+)
+def test_multislice_separate_absorption_matches_complex_volume(
+    sign, dtype, uniform_absorption, device
+):
+    """Pairing fields per chunk preserves both waves and material gradients.
+
+    Three images and 19 slices exercise noncontiguous batch/chunk views,
+    reversed traversal and the final incomplete eight-slice chunk. Explicit
+    absorption must also bypass a nonzero amplitude-contrast setting.
+    """
+    torch.manual_seed(43)
+    shape = (3, 19, 16, 16)
+    elastic = torch.rand(shape, device=device, dtype=dtype).requires_grad_()
+    absorption = (0.1 * torch.rand(shape, device=device, dtype=dtype)).requires_grad_()
+    model = Scattering(
+        16,
+        1.3,
+        300.0,
+        alpha=0.2,
+        klim=0.66,
+        ews_curvature_sign=sign,
+        uniform_absorption=uniform_absorption,
+        progressbars=False,
+    ).to(device=device, dtype=dtype)
+    reference = model(torch.complex(elastic, absorption))
+    want_grads = torch.autograd.grad(
+        reference.abs().square().sum(), (elastic, absorption)
+    )
+    actual = model(elastic, absorption_potential=absorption)
+    got_grads = torch.autograd.grad(actual.abs().square().sum(), (elastic, absorption))
+    assert torch.equal(actual, reference)
+    for actual_grad, reference_grad in zip(got_grads, want_grads, strict=True):
+        torch.testing.assert_close(actual_grad, reference_grad, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("model", ["rytov", "projection", "firstborn", "kinematic"])
+def test_separate_absorption_preserves_other_scattering_models(model):
+    torch.manual_seed(9)
+    v = torch.rand(2, 9, 12, 12)
+    absorption = torch.rand_like(v) * 0.1
+    scattering = Scattering(12, 1.0, 300.0, scattering_model=model, nz=9, alpha=0.2)
+    assert torch.equal(
+        scattering(v, absorption_potential=absorption),
+        scattering(torch.complex(v, absorption)),
+    )
+
+
+@pytest.mark.parametrize("invalid", ["shape", "dtype", "complex"])
+def test_multislice_rejects_incompatible_absorption_fields(invalid):
+    v = torch.ones(1, 9, 8, 8)
+    absorption = torch.zeros_like(v)
+    if invalid == "shape":
+        absorption = absorption[:, :1]
+    elif invalid == "dtype":
+        absorption = absorption.double()
+    else:
+        absorption = absorption.to(torch.complex64)
+    scattering = Scattering(8, 1.0, 300.0)
+    with pytest.raises(ValueError, match="real and share shape, dtype and device"):
+        scattering(v, absorption_potential=absorption)
+
+
 def test_multislice_checkpointing_matches_uncheckpointed(dummy_volume):
     """Gradient checkpointing must not change the multislice exit wave."""
     scat_iter = IterativeScattering(

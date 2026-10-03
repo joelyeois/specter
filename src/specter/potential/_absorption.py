@@ -696,18 +696,17 @@ def inelastic_absorption_potential(
     -------
     torch.Tensor
         Absorption potential in volts, same shape and dtype as `v`. Combine
-        with `v` via ``torch.complex(v, v_ab)`` and hand that to
-        :class:`~specter.scattering.Scattering`, which uses a complex
-        potential as given and ignores its ``alpha``.
+        with `v` via ``torch.complex(v, v_ab)``, or pass the two fields to
+        :class:`~specter.scattering.Scattering` with
+        ``absorption_potential=v_ab``. Multislice assembles the latter in
+        bounded slice chunks. Explicit absorption bypasses ``alpha``.
 
     Notes
     -----
-    Absorption costs nothing in time -- the wave is complex either way, so
-    only an elementwise term changes -- but materialising a complex volume
-    costs 3.5x the resident memory at a 512 box, because it defeats
-    :meth:`~specter.scattering.Scattering.multislice`'s per-chunk
-    complexification. Building the complex volume a slice chunk at a time
-    keeps it near 2x.
+    The occupancy result is privately owned and reused for the absorption
+    field, avoiding two full-volume arithmetic temporaries. Passing separate
+    fields to multislice also avoids a whole complex copy. Occupancy,
+    attenuation, precision and the order of arithmetic are unchanged.
 
     The field is an isotropic pointwise function of the potential, so it
     rotates with the specimen exactly as the elastic potential does and can be
@@ -731,7 +730,7 @@ def inelastic_absorption_potential(
         return torch.full_like(v, v_solvent)
     v_specimen = absorption_potential(mfp_specimen_A, voltage_kv)
     occupancy = _occupancy_chunked(v, voxel_size, full_potential, max_voxels_per_slab)
-    return occupancy * (v_specimen - v_solvent) + v_solvent
+    return occupancy.mul_(v_specimen - v_solvent).add_(v_solvent)
 
 
 def apply_amplitude_contrast(v: torch.Tensor, alpha: float = 0.1) -> torch.Tensor:

@@ -28,6 +28,46 @@ from specter.potential import (
 )
 from specter.scattering import Scattering
 
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("cap", [2**10, 2**26])
+def test_material_absorption_reuses_occupancy_without_changing_values_or_gradients(
+    dtype, cap
+):
+    """The two arithmetic temporaries can reuse the private occupancy field."""
+    from specter.potential._absorption import _occupancy_chunked, absorption_potential
+
+    torch.manual_seed(33)
+    specimen = (torch.rand(2, 9, 10, 10, dtype=dtype) * 4).requires_grad_()
+    reference_density = torch.tensor(8.0, dtype=dtype, requires_grad=True)
+    original = specimen.detach().clone()
+    v_water = absorption_potential(INELASTIC_MFP_ICE_A, VOLTAGE)
+    v_protein = absorption_potential(INELASTIC_MFP_PROTEIN_A, VOLTAGE)
+    occupancy = _occupancy_chunked(specimen, 1.5, reference_density, cap)
+    reference = occupancy * (v_protein - v_water) + v_water
+    expected_grads = torch.autograd.grad(
+        reference.square().sum(), (specimen, reference_density), allow_unused=True
+    )
+    actual = inelastic_absorption_potential(
+        specimen,
+        1.5,
+        VOLTAGE,
+        mfp_solvent_A=INELASTIC_MFP_ICE_A,
+        mfp_specimen_A=INELASTIC_MFP_PROTEIN_A,
+        full_potential=reference_density,
+        max_voxels_per_slab=cap,
+    )
+    actual_grads = torch.autograd.grad(
+        actual.square().sum(), (specimen, reference_density), allow_unused=True
+    )
+    assert torch.equal(actual, reference)
+    assert torch.equal(specimen.detach(), original)
+    # Occupancy deliberately detaches the specimen; preserve that behavior
+    # and the gradient of a differentiable occupancy reference.
+    assert actual_grads[0] is expected_grads[0] is None
+    torch.testing.assert_close(actual_grads[1], expected_grads[1], rtol=0, atol=0)
+
+
 VOLTAGE = 300.0
 
 

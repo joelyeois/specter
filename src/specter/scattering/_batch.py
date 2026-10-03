@@ -157,7 +157,9 @@ class Scattering(L.LightningModule):
         else:
             self.kmask = kmask
 
-    def multislice(self, V: torch.Tensor) -> torch.Tensor:
+    def multislice(
+        self, V: torch.Tensor, *, absorption_potential: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """
         Compute exit wave using multislice algorithm.
 
@@ -173,6 +175,11 @@ class Scattering(L.LightningModule):
             amplitude contrast (``self.alpha``) is applied to each slice
             chunk as it is consumed, or already complex (absorptive), in
             which case it is used as given.
+        absorption_potential : torch.Tensor, optional
+            Imaginary potential supplied as a real tensor, in volts, with the same shape,
+            dtype and device as real ``V``. When supplied, the two fields are
+            assembled into complex slices in bounded chunks, and ``alpha``
+            is not applied again.
 
         Returns
         -------
@@ -193,6 +200,18 @@ class Scattering(L.LightningModule):
         loop -- 4 GB for a 512-pixel box with ``pad_fft`` -- for a value
         each slice consumes once.
         """
+        if absorption_potential is not None:
+            if (
+                not V.is_floating_point()
+                or not absorption_potential.is_floating_point()
+                or V.shape != absorption_potential.shape
+                or V.dtype != absorption_potential.dtype
+                or V.device != absorption_potential.device
+            ):
+                raise ValueError(
+                    "elastic and absorption potentials must be real and share "
+                    "shape, dtype and device"
+                )
         F = self._F_step_real + 1j * self._F_step_imag
 
         # Fold the bandlimit into the propagator once, rather than once per
@@ -215,14 +234,20 @@ class Scattering(L.LightningModule):
         # consumed, not by `torch.flip(V, dims=(1,))` up front: the whole-volume
         # flip is a full copy of the padded volume (6 GB for three 512-pixel
         # boxes), for a slice order the loop can produce for free.
-        chunks: Sequence[torch.Tensor] = V.split(
-            _kernels._MULTISLICE_SLICE_CHUNK, dim=1
+        chunk_size = _kernels._MULTISLICE_SLICE_CHUNK
+        chunks: Sequence[torch.Tensor] = V.split(chunk_size, dim=1)
+        absorption_chunks = (
+            absorption_potential.split(chunk_size, dim=1)
+            if absorption_potential is not None
+            else None
         )
         reverse = self.ews_curvature_sign == "negative"
         if reverse:
             chunks = chunks[::-1]
-        for chunk in track(
-            chunks,
+            if absorption_chunks is not None:
+                absorption_chunks = absorption_chunks[::-1]
+        for i in track(
+            range(len(chunks)),
             description="Multislicing",
             transient=True,
             disable=not (self.progressbars),
@@ -230,7 +255,9 @@ class Scattering(L.LightningModule):
             # transmission functions for the whole chunk, in one kernel.
             # .to() here rather than per slice keeps a volume that lives off
             # the compute device streaming in bounded-size blocks.
-            chunk = chunk.to(self.device)
+            chunk = chunks[i].to(self.device)
+            if absorption_chunks is not None:
+                chunk = torch.complex(chunk, absorption_chunks[i].to(self.device))
             if reverse:
                 chunk = chunk.flip(1)
             if not chunk.is_complex():
@@ -525,7 +552,9 @@ class Scattering(L.LightningModule):
         projection = 2 * self.sigma * self.pixel_size * torch.sum(V, 1)
         return projection
 
-    def forward(self, V: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, V: torch.Tensor, *, absorption_potential: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """
         Perform scattering on a batch of 3D potentials.
 
@@ -540,6 +569,9 @@ class Scattering(L.LightningModule):
         ----------
         V : torch.Tensor
             Batch of 3D potentials.
+        absorption_potential : torch.Tensor, optional
+            Separate imaginary potential in volts. Multislice consumes it in
+            bounded chunks; other models assemble the complex volume as usual.
 
         Returns
         -------
@@ -549,8 +581,10 @@ class Scattering(L.LightningModule):
         if self.scattering_model == "multislice":
             # amplitude contrast is applied per chunk inside multislice --
             # see its docstring for why not here.
-            return self.multislice(V)
-        elif self.scattering_model == "rytov":
+            return self.multislice(V, absorption_potential=absorption_potential)
+        if absorption_potential is not None:
+            V = torch.complex(V, absorption_potential)
+        if self.scattering_model == "rytov":
             # amplitude contrast folded into the slice sum's scalar (the
             # model is linear in V), not materialised as a complex volume.
             return self.rytov(V)

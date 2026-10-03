@@ -1,0 +1,17 @@
+[inputs]
+metadata_path = "/scratch/loh/joel/empiar-11377/claude_match/j446_2000_passthrough_512.cs"
+images_path = "/scratch/loh/joel/empiar-11377/claude_match/exp_2000_j446_512.mrcs"
+pdb_source = "/mnt/cbis/home/e0788253/.cache/specter/pdb/8b0x-assembly1.cif"
+assembly = false
+
+[acquisition]
+detector_model = "falcon4i_300kv"
+dose = 40.0
+n_frames = 40
+absorption_model = "inelastic_mfp"
+inelastic_mfp_solvent = 3950.0
+inelastic_mfp_specimen = 2460.0
+dose_weights_path = "/scratch/loh/joel/empiar-11377/CS-empiar-11377/J34/refm_empirical_dw.npy"
+
+[compute]
+probe_workers = 0

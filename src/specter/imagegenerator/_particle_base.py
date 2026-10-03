@@ -604,9 +604,6 @@ class ParticleGeneratorBase(BaseImager):
                     V, self.pixel_size, self.objective_aperture, self.voltage
                 )
 
-        if v_ab is not None:
-            V = torch.complex(V, v_ab)
-            del v_ab
         # Set here rather than in `_build_scattering`: the propagator is
         # constructed before `icemaker` is, and whether there is a medium to
         # absorb in is part of the answer.
@@ -614,7 +611,14 @@ class ParticleGeneratorBase(BaseImager):
 
         if self.verbose:
             logger.info(f"Applying scattering using {self.scattering_model} model")
-        self.exitwaves = self.scattering(V)
+        if v_ab is None:
+            self.exitwaves = self.scattering(V)
+        else:
+            # Keep material absorption separate until each transmission chunk
+            # consumes it. A full complex copy of a thick padded volume can
+            # occupy many GiB even though each slice is read only once.
+            self.exitwaves = self.scattering(V, absorption_potential=v_ab)
+            del v_ab
 
         if self.verbose:
             logger.info(f"Applying aberrations using {self.aberration_model} model")

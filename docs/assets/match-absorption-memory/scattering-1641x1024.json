@@ -1,0 +1,58 @@
+[
+  {
+    "variant": "complex",
+    "shape": [
+      1,
+      1641,
+      1024,
+      1024
+    ],
+    "seconds": 0.24933907017111778,
+    "peak_allocated_bytes": 27841789952,
+    "peak_reserved_bytes": 34416361472,
+    "bitwise_equal": true,
+    "max_abs_difference": 0.0
+  },
+  {
+    "variant": "paired",
+    "shape": [
+      1,
+      1641,
+      1024,
+      1024
+    ],
+    "seconds": 0.254657581448555,
+    "peak_allocated_bytes": 14076084224,
+    "peak_reserved_bytes": 20650655744,
+    "bitwise_equal": true,
+    "max_abs_difference": 0.0
+  },
+  {
+    "variant": "paired",
+    "shape": [
+      1,
+      1641,
+      1024,
+      1024
+    ],
+    "seconds": 0.23710215464234352,
+    "peak_allocated_bytes": 14076084224,
+    "peak_reserved_bytes": 20650655744,
+    "bitwise_equal": true,
+    "max_abs_difference": 0.0
+  },
+  {
+    "variant": "complex",
+    "shape": [
+      1,
+      1641,
+      1024,
+      1024
+    ],
+    "seconds": 0.2492397427558899,
+    "peak_allocated_bytes": 27841789952,
+    "peak_reserved_bytes": 34416361472,
+    "bitwise_equal": true,
+    "max_abs_difference": 0.0
+  }
+]

@@ -1,0 +1,50 @@
+{
+  "material-0": {
+    "before_seconds": 1391.2944137603045,
+    "after_seconds": 1328.4770359173417,
+    "speedup": 1.0472852568351594,
+    "runtime_change_percent": -4.515031270281877,
+    "peak_allocated_bytes": {
+      "before_GiB": 26.6930832862854,
+      "after_GiB": 26.23520803451538,
+      "saved_GiB": 0.45787525177001953,
+      "saved_percent": 1.7153329454648314
+    },
+    "peak_reserved_bytes": {
+      "before_GiB": 42.228515625,
+      "after_GiB": 39.01171875,
+      "saved_GiB": 3.216796875,
+      "saved_percent": 7.617594005827666
+    },
+    "driver_peak_bytes": {
+      "before_GiB": 42.728515625,
+      "after_GiB": 39.513671875,
+      "saved_GiB": 3.21484375,
+      "saved_percent": 7.523883530648623
+    }
+  },
+  "uniform-256": {
+    "before_seconds": 368.07552095502615,
+    "after_seconds": 377.3175162486732,
+    "speedup": 0.9755060528715129,
+    "runtime_change_percent": 2.5108964784366306,
+    "peak_allocated_bytes": {
+      "before_GiB": 9.293076992034912,
+      "after_GiB": 9.293076992034912,
+      "saved_GiB": 0.0,
+      "saved_percent": 0.0
+    },
+    "peak_reserved_bytes": {
+      "before_GiB": 12.53515625,
+      "after_GiB": 12.53515625,
+      "saved_GiB": 0.0,
+      "saved_percent": 0.0
+    },
+    "driver_peak_bytes": {
+      "before_GiB": 13.03515625,
+      "after_GiB": 13.03515625,
+      "saved_GiB": 0.0,
+      "saved_percent": 0.0
+    }
+  }
+}

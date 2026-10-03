@@ -1,0 +1,306 @@
+{
+  "checkout": "/tmp/specter-match-absorption",
+  "config": "/tmp/specter-match-validation/uniform-256.toml",
+  "seed": 0,
+  "device": "cuda:3",
+  "gpu": "NVIDIA L40",
+  "torch": "2.5.1+cu121",
+  "cli_seconds": 377.3175162486732,
+  "stages": [
+    {
+      "name": "pose_check",
+      "seed": 0,
+      "particles": 64,
+      "batchsize": 4,
+      "nxy": 128,
+      "padded_nxy": 256,
+      "nz": 128,
+      "seconds": 15.680175419896841,
+      "peak_allocated_bytes": 1332236288,
+      "peak_reserved_bytes": 1461714944
+    },
+    {
+      "name": "probe_ice0",
+      "seed": 0,
+      "particles": 64,
+      "batchsize": 4,
+      "nxy": 128,
+      "padded_nxy": 256,
+      "nz": 128,
+      "seconds": 14.004635453224182,
+      "peak_allocated_bytes": 1834532352,
+      "peak_reserved_bytes": 2225078272
+    },
+    {
+      "name": "probe_ice400",
+      "seed": 0,
+      "particles": 64,
+      "batchsize": 4,
+      "nxy": 128,
+      "padded_nxy": 256,
+      "nz": 136,
+      "seconds": 11.753550335764885,
+      "peak_allocated_bytes": 1939455488,
+      "peak_reserved_bytes": 2453667840
+    },
+    {
+      "name": "probe_ice800",
+      "seed": 0,
+      "particles": 64,
+      "batchsize": 4,
+      "nxy": 128,
+      "padded_nxy": 256,
+      "nz": 273,
+      "seconds": 19.803303115069866,
+      "peak_allocated_bytes": 3733996544,
+      "peak_reserved_bytes": 4951375872
+    },
+    {
+      "name": "probe_ice1200",
+      "seed": 0,
+      "particles": 64,
+      "batchsize": 4,
+      "nxy": 128,
+      "padded_nxy": 256,
+      "nz": 410,
+      "seconds": 29.95873596891761,
+      "peak_allocated_bytes": 4591159296,
+      "peak_reserved_bytes": 6568280064
+    },
+    {
+      "name": "probe_crowd0",
+      "seed": 0,
+      "particles": 64,
+      "batchsize": 4,
+      "nxy": 128,
+      "padded_nxy": 256,
+      "nz": 410,
+      "seconds": 29.230689957737923,
+      "peak_allocated_bytes": 4584860160,
+      "peak_reserved_bytes": 6568280064
+    },
+    {
+      "name": "probe_crowd1",
+      "seed": 0,
+      "particles": 64,
+      "batchsize": 4,
+      "nxy": 128,
+      "padded_nxy": 256,
+      "nz": 410,
+      "seconds": 23.108387131243944,
+      "peak_allocated_bytes": 4591159296,
+      "peak_reserved_bytes": 6568280064
+    },
+    {
+      "name": "probe_crowd1.3",
+      "seed": 0,
+      "particles": 64,
+      "batchsize": 4,
+      "nxy": 128,
+      "padded_nxy": 256,
+      "nz": 410,
+      "seconds": 13.81999458745122,
+      "peak_allocated_bytes": 4591128064,
+      "peak_reserved_bytes": 6568280064
+    },
+    {
+      "name": "battery_seed0",
+      "seed": 0,
+      "particles": 200,
+      "batchsize": 4,
+      "nxy": 256,
+      "padded_nxy": 512,
+      "nz": 820,
+      "seconds": 130.85246236994863,
+      "peak_allocated_bytes": 9978362880,
+      "peak_reserved_bytes": 13459521536
+    },
+    {
+      "name": "battery_seed1",
+      "seed": 1,
+      "particles": 200,
+      "batchsize": 4,
+      "nxy": 256,
+      "padded_nxy": 512,
+      "nz": 820,
+      "seconds": 82.03177804499865,
+      "peak_allocated_bytes": 9978365440,
+      "peak_reserved_bytes": 13459521536
+    }
+  ],
+  "peak_allocated_bytes": 9978365440,
+  "peak_reserved_bytes": 13459521536,
+  "driver_peak_bytes": 13996392448,
+  "host_peak_rss_bytes": 2599899136,
+  "replay_potentials": "/tmp/specter-match-validation/potentials-uniform-256",
+  "report": {
+    "verdict": "residual: the simulation is 9x cleaner than the experiment in at least one band coarser than 6.7 \u00c5. No parameter of the forward model closes this; see Warnings.",
+    "pose_alignment": {
+      "matched": 0.21498528122901917,
+      "shuffled": 0.07977455109357834,
+      "fraction_above": 0.9375,
+      "z_score": 12.666711807250977
+    },
+    "derived": {
+      "voltage": {
+        "value": 300.0,
+        "source": "metadata"
+      },
+      "pixel_size": {
+        "value": 1.462,
+        "source": "metadata"
+      },
+      "dose": {
+        "value": 40.0,
+        "source": "metadata"
+      },
+      "detector_model": {
+        "value": "falcon4i_300kv",
+        "source": "detector table"
+      },
+      "coincidence_radius": {
+        "value": 0.153,
+        "source": "fallback"
+      },
+      "dose_envelope": {
+        "value": true,
+        "source": "fixed"
+      },
+      "ice_motion_variance": {
+        "value": 0.38,
+        "source": "fixed"
+      },
+      "detector_pixel_size": {
+        "value": 0.731,
+        "source": "metadata"
+      },
+      "ice_thickness": {
+        "value": 1200.0,
+        "source": "probe"
+      },
+      "crowd_min_distance": {
+        "value": 360.8,
+        "source": "probe"
+      },
+      "bfactor": {
+        "value": 0.0,
+        "source": "fixed"
+      }
+    },
+    "warnings": [
+      "dose_rate not given: using falcon4i_300kv's typical 4 e/px/s. At physical rates the effect of this value on the images is small.",
+      "energy_filter not stated; recorded as unknown.",
+      "The experimental particle signal falls off faster than the simulated one between 10 and 4 \u00c5 (residual envelope B = 129 \u00c5\u00b2): conformational heterogeneity, pose or CTF-estimation error, or damage beyond the model. Reported, not applied.",
+      "The simulation is 9x cleaner than the experiment in a band coarser than 6.7 \u00c5 after every derivable parameter is set. This is not a parameter; on the datasets tried so far it tracks the absence of an energy filter."
+    ],
+    "band_power_ratio": [
+      0.2931954860687256,
+      0.6931605935096741,
+      0.9318757057189941,
+      1.005529522895813,
+      0.9977056980133057
+    ],
+    "edge_band_means": {
+      "sim": [
+        -0.002929164096713066,
+        0.0019393465481698513,
+        -0.00031800958095118403,
+        -0.0010481015779078007
+      ],
+      "exp": [
+        -0.0017978627001866698,
+        -0.0034073926508426666,
+        -0.0027875236701220274,
+        -0.007005997467786074
+      ]
+    },
+    "annulus_std": {
+      "sim": [
+        0.9820957183837891,
+        1.0367140769958496,
+        1.0121368169784546,
+        0.9786003828048706,
+        0.9748952984809875,
+        0.9762831330299377,
+        0.9750979542732239
+      ],
+      "exp": [
+        0.7099228501319885,
+        0.8093597292900085,
+        0.827104926109314,
+        0.8129156231880188,
+        0.7904950976371765,
+        0.8783754706382751,
+        0.8989288210868835
+      ]
+    },
+    "water_ring_excess": {
+      "sim": 0.12917089462280273,
+      "exp": 0.16062355041503906
+    },
+    "probe_scores": {
+      "ice_thickness": [
+        [
+          0.0,
+          0.11389974449187612
+        ],
+        [
+          400.0,
+          0.09449200678832625
+        ],
+        [
+          800.0,
+          0.09929381248677442
+        ],
+        [
+          1200.0,
+          0.09070460953389056
+        ]
+      ],
+      "crowd_multiple": [
+        [
+          0.0,
+          0.075508895534771
+        ],
+        [
+          1.0,
+          0.09070460953389056
+        ],
+        [
+          1.3,
+          0.06435118905535073
+        ]
+      ]
+    },
+    "matched_pose_snr": {
+      "ratio_sim_over_exp": [
+        1.6126047394960754e-16,
+        4.750741952291604,
+        8.53156141318192,
+        12.335425266824386,
+        NaN
+      ],
+      "snr_sim": [
+        0.019319819286465645,
+        0.12997278571128845,
+        0.04778597503900528,
+        0.016996566206216812,
+        0.00460866978392005
+      ],
+      "snr_exp": [
+        119805050880000.0,
+        0.027358418330550194,
+        0.005601081997156143,
+        0.0013778662541881204,
+        -0.061533354222774506
+      ],
+      "signal_plateau": 0.588236927986145,
+      "residual_bfactor": 128.90626770253013
+    },
+    "twin": {
+      "exp_vs_sim": 0.06491318345069885,
+      "sim_vs_sim": 0.04954167827963829,
+      "cohen_d": -0.2569649815559387
+    }
+  }
+}

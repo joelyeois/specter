@@ -69,9 +69,15 @@ specter match particles \
    with `--write_stack N` a stack of `N` particles simulated from the
    matched config.
 
-Under three minutes on one GPU at a 256 px box, and under two with four
-GPUs named in `--device`; the two-seed comparison at the native box is most
-of it. The full stack is extra.
+Runtime depends on native box size, ice thickness, absorption settings and
+available GPUs; the two-seed comparison at the native box is usually most
+of it. The optional full stack is extra. With a material-specific
+`inelastic_mfp_specimen`, multislice keeps the elastic and absorption fields
+separate and assembles complex potentials a slice chunk at a time. This
+avoids a full complex-volume copy without changing numerical precision.
+The default uniform absorption already uses bounded chunks. See the
+[production memory, timing and Fourier comparisons](../assets/match-absorption-memory/README.md)
+for measured results and the remaining memory limits.
 
 ## Reading the report
 

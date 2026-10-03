@@ -1,0 +1,138 @@
+{
+  "case": "uniform-256",
+  "stacks": [
+    {
+      "file": "battery_seed0.mrcs",
+      "shape": [
+        200,
+        256,
+        256
+      ],
+      "pixels": 13107200,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "70ef45e01178fcd0d80c72a5b903b26067c920d7f9e0d317e55065986494f581",
+      "after_sha256": "70ef45e01178fcd0d80c72a5b903b26067c920d7f9e0d317e55065986494f581"
+    },
+    {
+      "file": "battery_seed1.mrcs",
+      "shape": [
+        200,
+        256,
+        256
+      ],
+      "pixels": 13107200,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "e340539546957537cbbe7de1c71301afdc5f25740a9021065fca6590ebe3b748",
+      "after_sha256": "e340539546957537cbbe7de1c71301afdc5f25740a9021065fca6590ebe3b748"
+    },
+    {
+      "file": "pose_check.mrcs",
+      "shape": [
+        64,
+        128,
+        128
+      ],
+      "pixels": 1048576,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "4b04b2812f0610d58229f08f78415f4ea66d708cce8247a78604e758187e798a",
+      "after_sha256": "4b04b2812f0610d58229f08f78415f4ea66d708cce8247a78604e758187e798a"
+    },
+    {
+      "file": "probe_crowd0.mrcs",
+      "shape": [
+        64,
+        128,
+        128
+      ],
+      "pixels": 1048576,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "f547ca652a1c859ccfea8ea79c1c33b653986fe0e8290ad4d027dd4a14889fad",
+      "after_sha256": "f547ca652a1c859ccfea8ea79c1c33b653986fe0e8290ad4d027dd4a14889fad"
+    },
+    {
+      "file": "probe_crowd1.3.mrcs",
+      "shape": [
+        64,
+        128,
+        128
+      ],
+      "pixels": 1048576,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "1ea643b6ed3621bcfeab4f1ce2f2cab2d0e1653a761d83113f6ded8272aeb1c0",
+      "after_sha256": "1ea643b6ed3621bcfeab4f1ce2f2cab2d0e1653a761d83113f6ded8272aeb1c0"
+    },
+    {
+      "file": "probe_crowd1.mrcs",
+      "shape": [
+        64,
+        128,
+        128
+      ],
+      "pixels": 1048576,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "c7b434575a73543c5ce3acbd0b4262a0c0b5ee6e564be558e412a795a65e627c",
+      "after_sha256": "c7b434575a73543c5ce3acbd0b4262a0c0b5ee6e564be558e412a795a65e627c"
+    },
+    {
+      "file": "probe_ice0.mrcs",
+      "shape": [
+        64,
+        128,
+        128
+      ],
+      "pixels": 1048576,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "9485de2bf0841a0879eee452c0b0a3883cac85dc0c42474a0164eb7d335c6a94",
+      "after_sha256": "9485de2bf0841a0879eee452c0b0a3883cac85dc0c42474a0164eb7d335c6a94"
+    },
+    {
+      "file": "probe_ice1200.mrcs",
+      "shape": [
+        64,
+        128,
+        128
+      ],
+      "pixels": 1048576,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "c7b434575a73543c5ce3acbd0b4262a0c0b5ee6e564be558e412a795a65e627c",
+      "after_sha256": "c7b434575a73543c5ce3acbd0b4262a0c0b5ee6e564be558e412a795a65e627c"
+    },
+    {
+      "file": "probe_ice400.mrcs",
+      "shape": [
+        64,
+        128,
+        128
+      ],
+      "pixels": 1048576,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "f78760d383802afc1d8fa8a940089e30299defe614c0acc9be80608e92e0ff2c",
+      "after_sha256": "f78760d383802afc1d8fa8a940089e30299defe614c0acc9be80608e92e0ff2c"
+    },
+    {
+      "file": "probe_ice800.mrcs",
+      "shape": [
+        64,
+        128,
+        128
+      ],
+      "pixels": 1048576,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "before_sha256": "c00006eeda540456f6a23b228da5769fe6fc5b20f38f07b6cc127d4e8a4cd52f",
+      "after_sha256": "c00006eeda540456f6a23b228da5769fe6fc5b20f38f07b6cc127d4e8a4cd52f"
+    }
+  ],
+  "pixels": 34603008,
+  "report_bitwise_equal": true,
+  "matched_settings_equal": true
+}

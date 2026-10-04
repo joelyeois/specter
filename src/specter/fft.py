@@ -720,10 +720,20 @@ def _apply_radial_envelope_on_device_(
     del spectrum
 
 
+_RADIAL_FFT_MAX_ELEMENTS = 1 << 22
+_RADIAL_FFT_SINGLE_BATCH_ELEMENTS = 1 << 26
+
+
 def _radial_chunks(nz: int, ny: int, nkx: int) -> tuple[int, int]:
-    """The z-slab and y-chunk sizes that bound each FFT's scratch to ~2^26."""
-    slab = max(1, min(nz, (1 << 26) // max(1, ny * nkx)))
-    ychunk = max(1, min(ny, (1 << 26) // max(1, nz * nkx)))
+    """Keep small single-batch plans; bound large FFT batches to ~2^22."""
+    # Changing a cuFFT batch can change its last-bit rounding. A tiny change
+    # in an expected electron count can then change the random stream in
+    # the coincidence detector. Preserve the existing single-batch plans
+    # when the whole half-spectrum fits the previous 2^26-element budget.
+    if nz * ny * nkx <= _RADIAL_FFT_SINGLE_BATCH_ELEMENTS:
+        return nz, ny
+    slab = max(1, min(nz, _RADIAL_FFT_MAX_ELEMENTS // max(1, ny * nkx)))
+    ychunk = max(1, min(ny, _RADIAL_FFT_MAX_ELEMENTS // max(1, nz * nkx)))
     return slab, ychunk
 
 
@@ -737,8 +747,14 @@ def _radial_rfft3(v: torch.Tensor) -> torch.Tensor:
     1368 x 1024^2), which is exactly the thick-ice case that matters. So
     the transform is done separably and chunked -- rfft2 over (Y, X) a
     z-slab at a time into a preallocated spectrum, fft along Z a y-chunk
-    at a time in place, and the inverse the same way back -- so no chunk's
-    scratch exceeds ~2^26 elements.
+    at a time in place, and the inverse the same way back -- so large-field
+    scratch stays near 2^22 elements per batch, with a minimum of one xy
+    plane or one y-row of complete z-lines. Smaller fields whose
+    complete half-spectrum fits 2^26 elements retain their previous single
+    batches, preserving cuFFT rounding and seeded detector realizations.
+    These are batches of independent 2D transforms or independent z-lines,
+    not truncated spatial transforms:
+    every frequency and the full 3D volume are still processed.
     """
     nz, ny, nx = v.shape
     nkx = nx // 2 + 1
@@ -753,6 +769,12 @@ def _radial_rfft3(v: torch.Tensor) -> torch.Tensor:
     return spectrum
 
 
+# Interpolation keeps float coordinates and two int64 indices, unlike the
+# FFT's single complex chunk. Bound it separately and reuse scratch so
+# weighting does not add several GiB above a thick padded half-spectrum.
+_RADIAL_ENVELOPE_MAX_ELEMENTS = 1 << 22
+
+
 def _multiply_radial_envelope(
     spectrum: torch.Tensor,
     out: torch.Tensor,
@@ -763,7 +785,7 @@ def _multiply_radial_envelope(
     """``out = spectrum * envelope(|k|)``, a z-slab at a time; `out` may be `spectrum`."""
     nz, ny, nx = shape
     dev = spectrum.device
-    slab, _ = _radial_chunks(nz, ny, nx // 2 + 1)
+    slab = max(1, min(nz, _RADIAL_ENVELOPE_MAX_ELEMENTS // (ny * (nx // 2 + 1))))
     kz = torch.fft.fftfreq(nz, d=pixel_size, device=dev)
     ky = torch.fft.fftfreq(ny, d=pixel_size, device=dev)
     kx = torch.fft.rfftfreq(nx, d=pixel_size, device=dev)
@@ -783,18 +805,23 @@ def _multiply_radial_envelope(
     env_table = envelope(k_table)
     for z0 in range(0, nz, slab):
         z1 = min(nz, z0 + slab)
-        k = torch.sqrt(kz[z0:z1, None, None] ** 2 + kyx[None])
-        pos = (k / k_max * (n_table - 1)).clamp_(0, n_table - 1)
+        # These are private scratch arrays. Reuse their storage as their
+        # previous values die, preserving the existing operation order and
+        # the same 4096-point table and interpolation arithmetic.
+        pos = torch.sqrt(kz[z0:z1, None, None] ** 2 + kyx[None])
+        pos.div_(k_max).mul_(n_table - 1).clamp_(0, n_table - 1)
         lo = pos.floor()
-        frac = pos - lo
         i0 = lo.long()
+        frac = pos.sub_(lo)
+        del lo
         i1 = (i0 + 1).clamp_(max=n_table - 1)
-        weight = torch.lerp(env_table[i0], env_table[i1], frac)
+        weight = env_table[i0]
+        weight.lerp_(env_table[i1], frac)
         if out is spectrum:
             spectrum[z0:z1] *= weight
         else:
             torch.mul(spectrum[z0:z1], weight, out=out[z0:z1])
-        del k, pos, lo, frac, i0, i1, weight
+        del pos, frac, i0, i1, weight
 
 
 def _radial_irfft3_into(spectrum: torch.Tensor, v: torch.Tensor) -> None:

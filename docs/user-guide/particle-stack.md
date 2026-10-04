@@ -130,6 +130,12 @@ default, and the defaults reproduce the amplitude-contrast model.
   function would fade the solvent a second time. See
   [Ice structure](../concepts/ice.md#the-solvent-under-exposure).
 
+Specimen damage and solvent exposure filter the complete 3D field. Large
+fields use bounded FFT and weighting batches to limit GPU scratch while
+keeping the same resolution, dose and frame count. See the
+[production timing, memory and Fourier comparison](../assets/dose-damage-memory/README.md)
+for measured savings and the remaining memory limits.
+
 ## Output: .mrcs + .star
 
 Results land in `output_dir` as `<filename>.mrcs` (the image stack) and

@@ -1,0 +1,95 @@
+{
+  "512 px native": {
+    "shape": [
+      1641,
+      1024,
+      1024
+    ],
+    "voxels": 1720713216,
+    "bitwise_equal": true,
+    "variants": {
+      "before": {
+        "median_seconds": 0.5816472750157118,
+        "peak_allocated_GiB": 25.183911323547363,
+        "stages_seconds": [
+          0.15993823669850826,
+          0.2128800768405199,
+          0.2079801969230175
+        ]
+      },
+      "after": {
+        "median_seconds": 0.2548300754278898,
+        "peak_allocated_GiB": 22.5459566116333,
+        "stages_seconds": [
+          0.08098730631172657,
+          0.07383525557816029,
+          0.09918545745313168
+        ]
+      }
+    },
+    "speedup": 2.2824906912539946,
+    "allocated_saved_GiB": 2.6379547119140625
+  },
+  "256 px native": {
+    "shape": [
+      820,
+      512,
+      512
+    ],
+    "voxels": 214958080,
+    "bitwise_equal": true,
+    "variants": {
+      "before": {
+        "median_seconds": 0.0946552250534296,
+        "peak_allocated_GiB": 5.557168006896973,
+        "stages_seconds": [
+          0.030742812901735306,
+          0.031812604516744614,
+          0.03126799128949642
+        ]
+      },
+      "after": {
+        "median_seconds": 0.0441148467361927,
+        "peak_allocated_GiB": 2.9165430068969727,
+        "stages_seconds": [
+          0.015309810638427734,
+          0.014482330530881882,
+          0.013550391420722008
+        ]
+      }
+    },
+    "speedup": 2.1456546277825455,
+    "allocated_saved_GiB": 2.640625
+  },
+  "Tilt padded geometry": {
+    "shape": [
+      300,
+      2014,
+      2014
+    ],
+    "voxels": 1216858800,
+    "bitwise_equal": true,
+    "variants": {
+      "before": {
+        "median_seconds": 0.5133961476385593,
+        "peak_allocated_GiB": 18.627814292907715,
+        "stages_seconds": [
+          0.16612899489700794,
+          0.15132848545908928,
+          0.1951091829687357
+        ]
+      },
+      "after": {
+        "median_seconds": 0.22180774807929993,
+        "peak_allocated_GiB": 15.984122276306152,
+        "stages_seconds": [
+          0.07540260255336761,
+          0.05767708271741867,
+          0.0878550335764885
+        ]
+      }
+    },
+    "speedup": 2.3145997021484197,
+    "allocated_saved_GiB": 2.6436920166015625
+  }
+}

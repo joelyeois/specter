@@ -78,6 +78,9 @@ avoids a full complex-volume copy without changing numerical precision.
 The default uniform absorption already uses bounded chunks. See the
 [production memory, timing and Fourier comparisons](../assets/match-absorption-memory/README.md)
 for measured results and the remaining memory limits.
+The shared dose-damage and solvent-exposure filters have a separate
+[production FFT comparison](../assets/dose-damage-memory/README.md), including
+the default uniform-absorption path.
 
 ## Reading the report
 

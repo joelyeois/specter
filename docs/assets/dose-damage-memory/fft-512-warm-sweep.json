@@ -1,0 +1,296 @@
+{
+  "gpu": "NVIDIA L40",
+  "torch": "2.5.1+cu121",
+  "resident_bytes": 10324279296,
+  "warmed_production_plans": true,
+  "results": [
+    {
+      "variant": "before",
+      "envelope_elements": null,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.5833235308527946,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.16013499721884727,
+          "peak_allocated_bytes": 25170862080,
+          "peak_reserved_bytes": 25176309760
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.21432657912373543,
+          "peak_allocated_bytes": 27041018880,
+          "peak_reserved_bytes": 27319599104
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.2079782783985138,
+          "peak_allocated_bytes": 25703538688,
+          "peak_reserved_bytes": 27319599104
+        }
+      ],
+      "peak_allocated_bytes": 27041018880,
+      "peak_reserved_bytes": 27319599104,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "after",
+      "envelope_elements": 67108864,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.5823119841516018,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.15984218940138817,
+          "peak_allocated_bytes": 25175056384,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.21317164227366447,
+          "peak_allocated_bytes": 25977779200,
+          "peak_reserved_bytes": 26247954432
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.2083125114440918,
+          "peak_allocated_bytes": 25707732992,
+          "peak_reserved_bytes": 26247954432
+        }
+      ],
+      "peak_allocated_bytes": 25977779200,
+      "peak_reserved_bytes": 26247954432,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "after",
+      "envelope_elements": 16777216,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.5462522692978382,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.16008328273892403,
+          "peak_allocated_bytes": 25175056384,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.17722727730870247,
+          "peak_allocated_bytes": 24565740544,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.20792214944958687,
+          "peak_allocated_bytes": 25707732992,
+          "peak_reserved_bytes": 25979518976
+        }
+      ],
+      "peak_allocated_bytes": 25707732992,
+      "peak_reserved_bytes": 25979518976,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "after",
+      "envelope_elements": 8388608,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.5009994022548199,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.1603308618068695,
+          "peak_allocated_bytes": 25175056384,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.13145708292722702,
+          "peak_allocated_bytes": 24330400768,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.20832791179418564,
+          "peak_allocated_bytes": 25707732992,
+          "peak_reserved_bytes": 25979518976
+        }
+      ],
+      "peak_allocated_bytes": 25707732992,
+      "peak_reserved_bytes": 25979518976,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "after",
+      "envelope_elements": 4194304,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.433997742831707,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.16020502150058746,
+          "peak_allocated_bytes": 25175056384,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.06520561501383781,
+          "peak_allocated_bytes": 24212730880,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.20774758607149124,
+          "peak_allocated_bytes": 25707732992,
+          "peak_reserved_bytes": 25979518976
+        }
+      ],
+      "peak_allocated_bytes": 25707732992,
+      "peak_reserved_bytes": 25979518976,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "after",
+      "envelope_elements": 1048576,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.627048596739769,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.1604628935456276,
+          "peak_allocated_bytes": 25175056384,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.2574637345969677,
+          "peak_allocated_bytes": 24124478464,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.20827120542526245,
+          "peak_allocated_bytes": 25707732992,
+          "peak_reserved_bytes": 25979518976
+        }
+      ],
+      "peak_allocated_bytes": 25707732992,
+      "peak_reserved_bytes": 25979518976,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "before",
+      "envelope_elements": null,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.5818177424371243,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.1601703204214573,
+          "peak_allocated_bytes": 25175056384,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.21258189529180527,
+          "peak_allocated_bytes": 27045213184,
+          "peak_reserved_bytes": 27319599104
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.20821233093738556,
+          "peak_allocated_bytes": 25707732992,
+          "peak_reserved_bytes": 27319599104
+        }
+      ],
+      "peak_allocated_bytes": 27045213184,
+      "peak_reserved_bytes": 27319599104,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "after",
+      "envelope_elements": 4194304,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.435059517621994,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.15981389582157135,
+          "peak_allocated_bytes": 25175056384,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.06662837788462639,
+          "peak_allocated_bytes": 24212730880,
+          "peak_reserved_bytes": 25444745216
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.20780181884765625,
+          "peak_allocated_bytes": 25707732992,
+          "peak_reserved_bytes": 25979518976
+        }
+      ],
+      "peak_allocated_bytes": 25707732992,
+      "peak_reserved_bytes": 25979518976,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    }
+  ]
+}

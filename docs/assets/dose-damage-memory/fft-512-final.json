@@ -1,0 +1,156 @@
+{
+  "gpu": "NVIDIA L40",
+  "torch": "2.5.1+cu121",
+  "resident_bytes": 10324279296,
+  "warmed_production_plans": true,
+  "results": [
+    {
+      "variant": "before",
+      "envelope_elements": null,
+      "fft_elements": 67108864,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.5834914967417717,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.16022441536188126,
+          "peak_allocated_bytes": 25170862080,
+          "peak_reserved_bytes": 25176309760
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.2143360786139965,
+          "peak_allocated_bytes": 27041018880,
+          "peak_reserved_bytes": 27319599104
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.20805911347270012,
+          "peak_allocated_bytes": 25703538688,
+          "peak_reserved_bytes": 27319599104
+        }
+      ],
+      "peak_allocated_bytes": 27041018880,
+      "peak_reserved_bytes": 27319599104,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "after",
+      "envelope_elements": 4194304,
+      "fft_elements": 4194304,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.25562809035182,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.08063263818621635,
+          "peak_allocated_bytes": 24162263040,
+          "peak_reserved_bytes": 24169676800
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.0746309757232666,
+          "peak_allocated_bytes": 24208536576,
+          "peak_reserved_bytes": 24232591360
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.09952960535883904,
+          "peak_allocated_bytes": 24191623168,
+          "peak_reserved_bytes": 24232591360
+        }
+      ],
+      "peak_allocated_bytes": 24208536576,
+      "peak_reserved_bytes": 24232591360,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "after",
+      "envelope_elements": 4194304,
+      "fft_elements": 4194304,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.25403206050395966,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.08134197443723679,
+          "peak_allocated_bytes": 24162263040,
+          "peak_reserved_bytes": 24169676800
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.07303953543305397,
+          "peak_allocated_bytes": 24208536576,
+          "peak_reserved_bytes": 24232591360
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.09884130954742432,
+          "peak_allocated_bytes": 24191623168,
+          "peak_reserved_bytes": 24232591360
+        }
+      ],
+      "peak_allocated_bytes": 24208536576,
+      "peak_reserved_bytes": 24232591360,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    {
+      "variant": "before",
+      "envelope_elements": null,
+      "fft_elements": 67108864,
+      "shape": [
+        1641,
+        1024,
+        1024
+      ],
+      "pixel_size_A": 0.731,
+      "seconds": 0.5798030532896519,
+      "stages": [
+        {
+          "name": "_radial_rfft3",
+          "seconds": 0.15965205803513527,
+          "peak_allocated_bytes": 25170862080,
+          "peak_reserved_bytes": 25176309760
+        },
+        {
+          "name": "_multiply_radial_envelope",
+          "seconds": 0.2114240750670433,
+          "peak_allocated_bytes": 27041018880,
+          "peak_reserved_bytes": 27319599104
+        },
+        {
+          "name": "_radial_irfft3_into",
+          "seconds": 0.20790128037333488,
+          "peak_allocated_bytes": 25703538688,
+          "peak_reserved_bytes": 27319599104
+        }
+      ],
+      "peak_allocated_bytes": 27041018880,
+      "peak_reserved_bytes": 27319599104,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    }
+  ]
+}

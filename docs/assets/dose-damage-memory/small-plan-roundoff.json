@@ -1,0 +1,56 @@
+[
+  {
+    "shape": [
+      128,
+      256,
+      256
+    ],
+    "pixel_size_A": 2.924,
+    "all_smaller_batches": {
+      "bitwise_equal": false,
+      "max_abs_difference": 2.9802322387695312e-08,
+      "relative_l2": 8.363169712310992e-08
+    },
+    "preserved_single_batch": {
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    }
+  },
+  {
+    "shape": [
+      136,
+      256,
+      256
+    ],
+    "pixel_size_A": 2.924,
+    "all_smaller_batches": {
+      "bitwise_equal": false,
+      "max_abs_difference": 2.9802322387695312e-08,
+      "relative_l2": 9.435335357466101e-08
+    },
+    "preserved_single_batch": {
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    }
+  },
+  {
+    "shape": [
+      256,
+      512,
+      512
+    ],
+    "pixel_size_A": 1.462,
+    "all_smaller_batches": {
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    },
+    "preserved_single_batch": {
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0,
+      "relative_l2": 0.0
+    }
+  }
+]

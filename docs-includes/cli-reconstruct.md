@@ -69,7 +69,7 @@ specter reconstruct particle [OPTIONS]
 | --- | --- | --- | --- |
 | `--device` | `TEXT` | `cuda` | cpu \| cuda \| cuda:N \| a bare GPU index \| a comma-separated list of GPU indices (0,1), which trains across them via Lightning DDP with gradients all-reduced every step. |
 | `--precision` | `TEXT` | `16-mixed` | Lightning trainer precision, e.g. 16-mixed or 32. Forced to 32 on CPU. |
-| `--num_workers` | `INTEGER` | `8` | Dataloader worker processes. |
+| `--num_workers` | `INTEGER` | `0` | Dataloader worker processes; 0 avoids multiprocessing for resident images. |
 
 **Output & job tracking**{ #specter-reconstruct-particle-output-job-tracking }
 

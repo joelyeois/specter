@@ -96,8 +96,18 @@ the experiment's signal and noise at every scale. A ratio that is flat and
 modest is a contrast or dose question; a ratio that grows with frequency is
 an envelope. If a broad excess remains after every derivable parameter is
 set, the report says so: that residual is not a parameter of the forward
-model, and no knob should be turned to hide it. On the datasets tried so
-far it tracked the absence of an energy filter.
+model, and no knob should be turned to hide it. Without an energy filter
+some residual is expected, since the forward model removes inelastically
+scattered electrons but does not add their image back.
+
+Each ratio is reported with a 68% interval from a bootstrap over the
+compared particles. The interval is wide wherever the experiment carries
+little signal, which with a few hundred particles is usually the finest
+band: a ratio of 454 there can have an interval of 118 to 4500. A band
+coarser than 6.7 Å counts as a residual only when the lower end of its
+interval exceeds 3, so a point value above 3 that the data cannot
+distinguish from it does not change the verdict. A ratio of `inf` means the
+experiment shows no coherent signal in that band at all.
 
 The overlaid **power spectra** are there because they are the view most
 people know, not because they decide anything. A stack can have half the

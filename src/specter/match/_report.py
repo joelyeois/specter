@@ -20,6 +20,35 @@ from ._metrics import (
 )
 
 
+#: A band coarser than 6.7 Å counts as a residual when the lower end of its
+#: interval says the simulation is more than this many times cleaner.
+EXCESS_THRESHOLD = 3.0
+
+
+def coarse_excess(snr: MatchedPoseSNR) -> tuple[float, float, float] | None:
+    """
+    The worst band coarser than 6.7 Å whose interval lies wholly above
+    `EXCESS_THRESHOLD`, as ``(ratio, lo, hi)``, or None if there is none.
+
+    Judged on the lower bound, so a point value above the threshold that its
+    own bootstrap cannot distinguish from it is not reported as a residual.
+    """
+    bands = [
+        (r, lo, hi)
+        for r, lo, hi in zip(snr.ratio[:3], snr.ratio_lo[:3], snr.ratio_hi[:3])
+        if not math.isnan(lo) and lo > EXCESS_THRESHOLD
+    ]
+    return max(bands, key=lambda b: b[1]) if bands else None
+
+
+def ratio_text(ratio: float, lo: float, hi: float) -> str:
+    """``"12x (68%: 9-17x)"``; an unbounded ratio says the experiment shows no signal."""
+    if math.isinf(ratio):
+        return f"at least {lo:.0f}x (no measurable experimental signal)"
+    upper = "unbounded" if math.isinf(hi) else f"{hi:.0f}x"
+    return f"{ratio:.0f}x (68%: {lo:.0f}x to {upper})"
+
+
 @dataclass
 class DerivedValue:
     """One derived simulation parameter and where it came from."""
@@ -57,13 +86,13 @@ class MatchReport:
             return "FAIL: poses are not aligned to the model; nothing downstream is meaningful."
         if self.snr is None:
             return "incomplete"
-        excess = [r for r in self.snr.ratio[:3] if not math.isnan(r)]
-        worst = max(excess) if excess else float("nan")
-        if worst <= 3.0:
+        worst = coarse_excess(self.snr)
+        if worst is None:
             return "match: simulated and experimental SNR agree within 3x at every scale coarser than 6.7 Å."
         return (
-            f"residual: the simulation is {worst:.0f}x cleaner than the experiment in at least one "
-            "band coarser than 6.7 Å. No parameter of the forward model closes this; see Warnings."
+            f"residual: the simulation is {ratio_text(*worst)} cleaner than the experiment "
+            "in at least one band coarser than 6.7 Å. No parameter of the forward model "
+            "closes this; see Warnings."
         )
 
     def summary(self) -> dict[str, Any]:
@@ -84,6 +113,7 @@ class MatchReport:
         if self.snr is not None:
             out["matched_pose_snr"] = {
                 "ratio_sim_over_exp": self.snr.ratio,
+                "ratio_interval_68": [self.snr.ratio_lo, self.snr.ratio_hi],
                 "snr_sim": self.snr.snr_sim,
                 "snr_exp": self.snr.snr_exp,
                 "signal_plateau": self.snr.signal_plateau,
@@ -133,6 +163,12 @@ def render_markdown(report: MatchReport, toml_name: str = "matched.toml") -> str
             "| band | " + " | ".join(BAND_LABELS) + " |",
             "|---|" + "---|" * len(BAND_LABELS),
             "| ratio | " + " | ".join(_f(r) for r in report.snr.ratio) + " |",
+            "| 68% interval | "
+            + " | ".join(
+                f"{_f(lo)} to {_f(hi)}"
+                for lo, hi in zip(report.snr.ratio_lo, report.snr.ratio_hi)
+            )
+            + " |",
             "| SNR sim | " + " | ".join(_f(r, 3) for r in report.snr.snr_sim) + " |",
             "| SNR exp | " + " | ".join(_f(r, 3) for r in report.snr.snr_exp) + " |",
             "",
@@ -234,10 +270,21 @@ def render_figure(
 
     ax = fig.add_subplot(bottom[1])
     if report.snr is not None:
-        keep = [
-            i for i, r in enumerate(report.snr.ratio) if not math.isnan(r) and r > 0
-        ]
-        ax.bar(range(len(keep)), [report.snr.ratio[i] for i in keep], color="tab:red")
+        keep = [i for i, r in enumerate(report.snr.ratio) if math.isfinite(r) and r > 0]
+        values = [report.snr.ratio[i] for i in keep]
+        # An unbounded upper end is drawn to the top of the axis.
+        lower = [v - report.snr.ratio_lo[i] for v, i in zip(values, keep)]
+        upper = [min(report.snr.ratio_hi[i], 1e4) - v for v, i in zip(values, keep)]
+        ax.bar(range(len(keep)), values, color="tab:red")
+        ax.errorbar(
+            range(len(keep)),
+            values,
+            yerr=[lower, upper],
+            fmt="none",
+            ecolor="k",
+            capsize=3,
+            label="68% interval",
+        )
         ax.axhspan(0.5, 2.0, color="tab:green", alpha=0.15, label="within 2x")
         ax.set_yscale("log")
         ax.set_xticks(range(len(keep)))

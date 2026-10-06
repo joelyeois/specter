@@ -110,8 +110,9 @@ class MatchConfig:
         None,
         help=(
             "Whether an energy filter (slit) was used. Recorded in "
-            "the report: on today's evidence unfiltered data carry a residual the "
-            "forward model cannot express."
+            "the report: the forward model removes inelastically scattered "
+            "electrons without adding their image back, so unfiltered data are "
+            "expected to leave a residual."
         ),
     )  # None = not stated
     absorption_model: AbsorptionModel = setting(

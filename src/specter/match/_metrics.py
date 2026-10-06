@@ -412,6 +412,12 @@ def _residual_envelope(
     return bfactor, bfactor_se
 
 
+#: Bootstrap resamples of the particles behind each band's interval.
+_SNR_BOOTSTRAP = 500
+#: Two-sided coverage of the reported interval (16th to 84th percentile).
+_SNR_INTERVAL = (0.16, 0.84)
+
+
 @dataclass
 class MatchedPoseSNR:
     """Outcome of `matched_pose_snr`."""
@@ -419,9 +425,59 @@ class MatchedPoseSNR:
     snr_sim: list[float]
     snr_exp: list[float]
     ratio: list[float]
+    ratio_lo: list[float]  # 16th percentile of `ratio` over a particle bootstrap
+    ratio_hi: list[float]  # 84th percentile; inf when the experiment may hold no signal
     signal_plateau: float  # exp/sim signal amplitude ratio at 33-12 Å (z-scored units)
     residual_bfactor: float  # Å², Guinier slope of the exp/sim signal ratio, 10-4 Å
     residual_bfactor_stderr: float  # Å², 1 sigma on the above; NaN when not fitted
+
+
+def _band_spectra(
+    sim: torch.Tensor, sim2: torch.Tensor, exp: torch.Tensor, pixel_size: float
+) -> torch.Tensor:
+    """
+    Per-particle sums over each of `BANDS` of the four spectra the matched-pose
+    SNR is built from: ``Re(S1 S2*)``, ``Re(E S1*)``, ``|E|^2`` and ``|S1|^2``.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape (n_particles, len(BANDS), 4), float64.
+    """
+    n = sim.shape[-1]
+    k = _kgrid(n, pixel_size).flatten()
+    member = torch.zeros(k.numel(), len(BANDS), dtype=torch.float32)
+    for i, (lo, hi) in enumerate(BANDS):
+        member[(k >= lo) & (k < hi), i] = 1.0
+    fe, fs, fs2 = (torch.fft.fft2(_zscore(x.float())) for x in (exp, sim, sim2))
+    spectra = (
+        (fs * fs2.conj()).real,
+        (fe * fs.conj()).real,
+        fe.abs() ** 2,
+        fs.abs() ** 2,
+    )
+    return torch.stack(
+        [s.reshape(s.shape[0], -1) @ member for s in spectra], dim=-1
+    ).double()
+
+
+def _band_snr(terms: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    SNR of both stacks and their ratio per band, from particle-averaged band sums.
+
+    A band whose simulated cross-power is not positive has no simulated signal
+    to compare against and is NaN. A band where the experiment's coherent
+    signal does not exceed its own noise has an unbounded ratio and is inf.
+    """
+    s_ss, s_es, p_e, p_s = terms.mean(0).unbind(-1)
+    signal_e = s_es**2 / s_ss
+    snr_e = signal_e / (p_e - signal_e)
+    snr_s = s_ss / (p_s - s_ss)
+    ratio = snr_s / snr_e
+    ratio = torch.where(snr_e > 0, ratio, torch.full_like(ratio, float("inf")))
+    nan = torch.full_like(ratio, float("nan"))
+    ratio = torch.where(s_ss > 0, ratio, nan)
+    return torch.where(s_ss > 0, snr_s, nan), torch.where(s_ss > 0, snr_e, nan), ratio
 
 
 def matched_pose_snr(
@@ -436,12 +492,26 @@ def matched_pose_snr(
     simulated seeds give the simulated signal power directly,
     ``<S1 S2*>``, and the experiment's coherent signal comes from
     ``<E S1*>``; what each stack has left over is its noise. The ratio of
-    the two SNRs per band is the number that separated the datasets that
-    mixed in CryoSPARC from the ones that did not: flat near 1-5 on the
-    energy-filtered sets, growing to 40-100x with frequency on the
-    unfiltered ones. The Guinier slope of ``a(k)`` between 10 and 4 Å is
-    the envelope the experiment's particle carries beyond the simulation,
-    reported as a residual and never applied.
+    the two SNRs per band says how much cleaner the simulation is than the
+    experiment at each scale. The Guinier slope of ``a(k)`` between 10 and
+    4 Å is the envelope the experiment's particle carries beyond the
+    simulation, reported as a residual and never applied.
+
+    Every spectrum is summed over a band's pixels, and over the particles,
+    BEFORE any division. Dividing per radial shell and averaging the shell
+    ratios instead, as this function did until 2026-10-06, fails wherever a
+    CTF zero falls inside a band for most of the stack: ``<S1 S2*>`` is then
+    near zero in one shell, that shell's ratio is unbounded, and it decides
+    the band. On EMPIAR-11752, whose defocus is near 5400 Å throughout, it
+    reported two of five bands as undefined, a negative experimental SNR,
+    and 0.00 for a control stack whose correct ratio is exactly 1; the band
+    sums give 0.97-1.05 on that control. The same holds for the 33-12 Å
+    signal amplitude, which read -1.2e11 there.
+
+    The interval is a particle bootstrap of the same estimator. It matters
+    most in the finest bands, where a few hundred particles carry little
+    experimental signal: on EMPIAR-11377 the 4-3 Å ratio of 454 had an
+    interval of 118 to 4500.
 
     Parameters
     ----------
@@ -456,27 +526,36 @@ def matched_pose_snr(
     -------
     MatchedPoseSNR
     """
+    terms = _band_spectra(sim, sim2, exp, pixel_size)
+    snr_s, snr_e, ratio = _band_snr(terms)
+    # Seeded, so the same stacks always give the same report.
+    gen = torch.Generator().manual_seed(0)
+    n_particles = terms.shape[0]
+    draws = torch.randint(0, n_particles, (_SNR_BOOTSTRAP, n_particles), generator=gen)
+    boot = torch.stack([_band_snr(terms[i])[2] for i in draws])
+    # "nearest", not linear: a resample with no experimental signal is inf,
+    # and interpolating between two infs gives NaN.
+    lo, hi = (
+        torch.nanquantile(boot, q, dim=0, interpolation="nearest")
+        for q in _SNR_INTERVAL
+    )
+    s_ss_band, s_es_band = terms[:, 1, 0].mean(), terms[:, 1, 1].mean()
+    plateau = float(s_es_band / s_ss_band) if s_ss_band > 0 else float("nan")
+
     n = sim.shape[-1]
     k = _kgrid(n, pixel_size)
     kk = _kbins(n, pixel_size)
     fe, fs, fs2 = (torch.fft.fft2(_zscore(x.float())) for x in (exp, sim, sim2))
     s_ss = _radial((fs * fs2.conj()).real.mean(0), k, pixel_size)
     s_es = _radial((fe * fs.conj()).real.mean(0), k, pixel_size)
-    p_e = _radial((fe.abs() ** 2).mean(0), k, pixel_size)
-    p_s = _radial((fs.abs() ** 2).mean(0), k, pixel_size)
-    a = s_es / s_ss.clamp(min=1e-9)
-    snr_e = (a**2 * s_ss) / (p_e - a**2 * s_ss).clamp(min=1e-9)
-    snr_s = s_ss / (p_s - s_ss).clamp(min=1e-9)
-    ratio = []
-    for band in BANDS:
-        se, ss = _band_mean(snr_e, kk, band), _band_mean(snr_s, kk, band)
-        ratio.append(ss / se if se > 0 else float("nan"))
     bfac, bfac_se = _residual_envelope(kk, s_es, s_ss)
     return MatchedPoseSNR(
-        snr_sim=[_band_mean(snr_s, kk, b) for b in BANDS],
-        snr_exp=[_band_mean(snr_e, kk, b) for b in BANDS],
-        ratio=ratio,
-        signal_plateau=_band_mean(a, kk, BANDS[1]),
+        snr_sim=snr_s.tolist(),
+        snr_exp=snr_e.tolist(),
+        ratio=ratio.tolist(),
+        ratio_lo=lo.tolist(),
+        ratio_hi=hi.tolist(),
+        signal_plateau=plateau,
         residual_bfactor=bfac,
         residual_bfactor_stderr=bfac_se,
     )

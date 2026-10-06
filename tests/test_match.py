@@ -20,6 +20,7 @@ from specter.detectors import (
     coincidence_radius_for_simulation,
 )
 from specter.match import (
+    MatchedPoseSNR,
     dumps_toml,
     edge_band_means,
     matched_index_correlation,
@@ -116,6 +117,67 @@ def test_matched_pose_snr_recovers_a_known_noise_ratio() -> None:
     assert res.residual_bfactor_stderr < 60.0
     twin = twin_test(sim1, sim2, exp)
     assert twin.cohen_d > 1.0  # the experiment is measurably noisier than a second seed
+
+
+def test_matched_pose_snr_survives_a_ctf_zero_shared_by_the_stack() -> None:
+    """A transfer zero inside a band, common to every particle, must not decide it.
+
+    The signal goes through sin(pi (k/k0)^2), which is zero at k0 and
+    sqrt(2) k0, both inside the 33-12 Å band, so the simulated cross-power
+    is ~0 in those shells. Dividing per shell made such a band undefined, or
+    gave an unbounded value, on EMPIAR-11752. The band sums must still recover
+    the true noise ratio, and an exact-pose control must read 1.
+    """
+    n, box, px = 128, 64, 2.0
+    k0 = 0.055
+    k = torch.sqrt(
+        torch.fft.fftfreq(box, d=px)[:, None] ** 2
+        + torch.fft.fftfreq(box, d=px)[None, :] ** 2
+    )
+    transfer = torch.sin(math.pi * (k / k0) ** 2)
+    white = torch.randn(n, box, box, generator=torch.Generator().manual_seed(21))
+    signal = torch.fft.ifft2(torch.fft.fft2(white) * transfer).real
+
+    def noise(seed: int) -> torch.Tensor:
+        return 0.5 * torch.randn(
+            n, box, box, generator=torch.Generator().manual_seed(seed)
+        )
+
+    sim1, sim2 = signal + noise(22), signal + noise(23)
+    exp = signal + 2.0 * noise(24)
+    res = matched_pose_snr(sim1, sim2, exp, px)
+    control = matched_pose_snr(sim1, sim2, signal + noise(25), px)
+    for band in range(4):  # the 4-3 Å band is beyond Nyquist at 2 Å
+        assert res.ratio[band] == pytest.approx(4.0, rel=0.35)
+        assert control.ratio[band] == pytest.approx(1.0, rel=0.25)
+        assert res.ratio_lo[band] <= res.ratio[band] <= res.ratio_hi[band]
+    # Same signal in both, measured on z-scored images: the amplitude ratio is
+    # the ratio of the two stacks' standard deviations, not 1.
+    assert res.signal_plateau == pytest.approx(float(sim1.std() / exp.std()), rel=0.1)
+
+
+def test_verdict_counts_a_band_only_when_its_interval_clears_the_threshold() -> None:
+    from specter.match import MatchReport, PoseAlignmentResult
+
+    def report(ratio: float, lo: float, hi: float) -> MatchReport:
+        snr = MatchedPoseSNR(
+            snr_sim=[1.0] * 5,
+            snr_exp=[1.0] * 5,
+            ratio=[1.0, ratio, 1.0, 1.0, 1.0],
+            ratio_lo=[0.9, lo, 0.9, 0.9, 0.9],
+            ratio_hi=[1.1, hi, 1.1, 1.1, 1.1],
+            signal_plateau=1.0,
+            residual_bfactor=float("nan"),
+            residual_bfactor_stderr=float("nan"),
+        )
+        return MatchReport(pose=PoseAlignmentResult(0.8, 0.1, 1.0, 10.0), snr=snr)
+
+    # A point estimate of 5x whose interval reaches down to 2x is not a residual.
+    assert report(5.0, 2.0, 9.0).verdict.startswith("match")
+    resolved = report(5.0, 4.0, 6.5).verdict
+    assert resolved.startswith("residual") and "4x to 6x" in resolved
+    unbounded = report(float("inf"), 8.0, float("inf")).verdict
+    assert "no measurable experimental signal" in unbounded
 
 
 def test_edge_band_means_flag_a_shared_border_pattern() -> None:

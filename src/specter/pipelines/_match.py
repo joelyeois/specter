@@ -75,7 +75,7 @@ from specter.match import (
     water_ring_excess,
 )
 from specter.match._metadata import recorded_box, rescale_metadata
-from specter.match._report import DerivedValue
+from specter.match._report import DerivedValue, coarse_excess, ratio_text
 from specter.pdb import PDB
 
 from specter.devices import parse_device, resolve_available_device
@@ -762,9 +762,9 @@ def _derive_detector_settings(
         )
     if config.energy_filter is False:
         report.warnings.append(
-            "No energy filter: on every unfiltered dataset tried so far the experiment carried "
-            "a broad signal-to-noise deficit no forward-model parameter reproduces (an inelastic "
-            "background). Expect a residual in the SNR ratio below."
+            "No energy filter: inelastically scattered electrons reach the detector, and the "
+            "forward model removes them without adding their image back. Expect a residual in "
+            "the SNR ratio below."
         )
     elif config.energy_filter is None:
         report.warnings.append("energy_filter not stated; recorded as unknown.")
@@ -959,16 +959,19 @@ def _compare_two_seeds(
         water_ring_excess(exp_b, pixel_size),
     )
     report.n_battery = config.n_battery
-    excess = [r for r in snr.ratio[:3] if math.isfinite(r)]
-    if excess and max(excess) > 3.0:
+    worst = coarse_excess(snr)
+    if worst is not None:
         report.warnings.append(
-            f"The simulation is {max(excess):.0f}x cleaner than the experiment in a band coarser "
-            "than 6.7 Å after every derivable parameter is set. This is not a parameter; "
-            "on the datasets tried so far it tracks the absence of an energy filter."
+            f"The simulation is {ratio_text(*worst)} cleaner than the experiment in a band "
+            "coarser than 6.7 Å after every derivable parameter is set. This is not a parameter "
+            "of the forward model and is reported rather than fitted."
         )
     console.print(
         "SNR ratio sim/exp per band: "
-        + ", ".join(f"{r:.2f}" for r in snr.ratio)
+        + ", ".join(
+            f"{r:.2f} [{lo:.2f}, {hi:.2f}]"
+            for r, lo, hi in zip(snr.ratio, snr.ratio_lo, snr.ratio_hi)
+        )
         + f" | twin d = {report.twin.cohen_d:.2f}"
     )
 

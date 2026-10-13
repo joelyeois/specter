@@ -25,6 +25,8 @@ import math
 import warnings
 
 import numpy as np
+from collections.abc import Sequence
+
 import torch
 import torch.nn.functional as F
 import lightning as L
@@ -233,6 +235,7 @@ class Detector(L.LightningModule):
         coincidence_radius: torch.Tensor,
         anisomag: torch.Tensor | None = None,
         nxy: int | None = None,
+        seeds: Sequence[int] | None = None,
     ) -> torch.Tensor:
         """
         Simulate detection process: conversion to intensity, magnification, MTF, and noise.
@@ -249,6 +252,9 @@ class Detector(L.LightningModule):
             Anisotropic magnification matrices.
         nxy : int, optional
             Output image size in pixels. If provided, center-crops the image.
+        seeds : sequence of int, optional
+            One RNG seed per image for the noise draws, see
+            :meth:`detect_expected_counts`.
 
         Returns
         -------
@@ -257,7 +263,7 @@ class Detector(L.LightningModule):
         """
         images = self.image(aberrated_exitwave, dose)
         return self.detect_expected_counts(
-            images, dose, coincidence_radius, anisomag, nxy
+            images, dose, coincidence_radius, anisomag, nxy, seeds=seeds
         )
 
     def from_intensity(
@@ -289,11 +295,16 @@ class Detector(L.LightningModule):
         coincidence_radius: torch.Tensor,
         anisomag: torch.Tensor | None = None,
         nxy: int | None = None,
+        seeds: Sequence[int] | None = None,
     ) -> torch.Tensor:
         """Apply spatial detector response and sampling to expected counts.
 
         Input counts already include dose, pixel area and detection efficiency.
-        Noise is drawn only here, after configuration integration.
+        Noise is drawn only here, after configuration integration. With
+        `seeds`, one per image, each image's draws come from its own
+        generator seeded to its entry, so they depend on nothing but that
+        seed -- not on the batch it arrived in or on what was drawn before.
+        Without, every draw comes from the global RNG.
         """
         # Set default crop size
         if nxy is None:
@@ -350,8 +361,21 @@ class Detector(L.LightningModule):
             if self.noise_model == "poisson"
             else None
         )
+        if seeds is None:
+            generators: list[torch.Generator | None] = [None] * len(radii)
+        else:
+            if len(seeds) != len(radii):
+                raise ValueError(
+                    f"{len(seeds)} seeds for {len(radii)} images: pass one per image"
+                )
+            generators = [
+                torch.Generator(device=images.device).manual_seed(int(s)) for s in seeds
+            ]
         return torch.stack(
-            [self._apply_coincidence(img, r, weights) for img, r in zip(images, radii)]
+            [
+                self._apply_coincidence(img, r, weights, generator=g)
+                for img, r, g in zip(images, radii, generators)
+            ]
         )
 
     def apply_detector_physics(
@@ -360,6 +384,7 @@ class Detector(L.LightningModule):
         pixel_size: float,
         dose_per_angstrom_sq_per_frame: float,
         coinc_radius_pixels: float = 0.6,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """
         Simulates a single frame of a Direct Electron Detector (DED), using a
@@ -377,6 +402,9 @@ class Detector(L.LightningModule):
         coinc_radius_pixels : float, optional
             Effective coincidence exclusion radius in pixels -- see
             :meth:`apply_coincidence` for the definition and calibration.
+        generator : torch.Generator, optional
+            RNG for every draw in the frame, on `intensity_map`'s device.
+            Default the global RNG.
 
         Notes
         -----
@@ -404,7 +432,9 @@ class Detector(L.LightningModule):
             # below, and a zero pad crops the frame to nothing.
             h, w = intensity_map.shape
             dose_per_pixel = dose_per_angstrom_sq_per_frame * (pixel_size**2)
-            return torch.poisson(intensity_map * (dose_per_pixel * h * w))
+            return torch.poisson(
+                intensity_map * (dose_per_pixel * h * w), generator=generator
+            )
 
         # Nominal cell side, chosen so cell area == pi*r^2 (see Notes above).
         cell_size_nominal = coinc_radius_pixels * math.sqrt(math.pi)
@@ -431,7 +461,7 @@ class Detector(L.LightningModule):
         lambda_map = intensity_map * total_expected
 
         # sample electrons per pixel
-        counts = torch.poisson(lambda_map)
+        counts = torch.poisson(lambda_map, generator=generator)
 
         # get pixels that received electrons
         iy, ix = torch.nonzero(counts, as_tuple=True)
@@ -449,16 +479,16 @@ class Detector(L.LightningModule):
         coords = torch.stack([ix.float(), iy.float()], dim=1)
 
         # add subpixel jitter
-        coords += torch.rand((n_e, 2), device=device)
+        coords += torch.rand((n_e, 2), device=device, generator=generator)
 
         # 3. Assign electrons to coincidence grid cells
         # Introduce a slight randomization to the cell size to mimic detector variation
         cell_size = cell_size_nominal * (
-            1 + 0.05 * torch.randn(1, device=device)
+            1 + 0.05 * torch.randn(1, device=device, generator=generator)
         ).clamp(0.8, 1.2)
 
         # Random shift to prevent the grid from "locking" onto specific pixels
-        shift = (torch.rand(2, device=device) - 0.5) * cell_size
+        shift = (torch.rand(2, device=device, generator=generator) - 0.5) * cell_size
         shifted_coords = coords + shift
 
         # Calculate cell coordinates
@@ -471,7 +501,7 @@ class Detector(L.LightningModule):
         grid_w = math.ceil(det_w / (cell_size_nominal * 0.8)) + 2
         grid_h = math.ceil(det_h / (cell_size_nominal * 0.8)) + 2
         n_cells = grid_w * grid_h
-        perm = torch.randperm(n_e, device=device)
+        perm = torch.randperm(n_e, device=device, generator=generator)
         if n_cells <= min(_COINCIDENCE_MAX_DENSE_CELLS, 4 * n_e):
             cell_id = (cell_y + 1) * grid_w + (cell_x + 1)
             permuted_cells = cell_id[perm]
@@ -580,6 +610,7 @@ class Detector(L.LightningModule):
         img: torch.Tensor,
         coincidence_radius: float,
         weights: torch.Tensor | None,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """
         Body of :meth:`apply_coincidence`, with the frame-weight grids given.
@@ -593,6 +624,8 @@ class Detector(L.LightningModule):
         weights : torch.Tensor or None
             ``self._frame_weight_grids(img.shape, img.device)``, hoisted so a
             batch builds it once rather than once per image.
+        generator : torch.Generator, optional
+            RNG for every draw, on `img`'s device. Default the global RNG.
 
         Returns
         -------
@@ -603,7 +636,7 @@ class Detector(L.LightningModule):
             return img
 
         if coincidence_radius <= 0.0 and self.dose_weights is None:
-            return torch.poisson(torch.clamp(img, min=0.0))
+            return torch.poisson(torch.clamp(img, min=0.0), generator=generator)
 
         if self.n_frames is None:
             raise ValueError(
@@ -649,6 +682,7 @@ class Detector(L.LightningModule):
                 self.pixel_size,
                 dose_effective / n_frames,
                 coinc_radius_pixels=coincidence_radius,
+                generator=generator,
             )
             if weights is None:
                 final_image += frame

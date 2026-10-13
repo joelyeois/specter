@@ -256,8 +256,12 @@ def test_scatter_coincidence_matches_stable_sort(
     intensity = torch.rand(shape, device=device)
     intensity /= intensity.sum()
     # Exercise both clamped cell widths as well as the nominal one.
+    # `apply_detector_physics` forwards its (possibly None) per-image
+    # generator to every draw; `torch.full` takes none, so drop it.
     monkeypatch.setattr(
-        torch, "randn", lambda *a, **kw: torch.full(a, cell_jitter, **kw)
+        torch,
+        "randn",
+        lambda *a, generator=None, **kw: torch.full(a, cell_jitter, **kw),
     )
     with monkeypatch.context() as ref:
         ref.setattr(microscope, "_COINCIDENCE_MAX_DENSE_CELLS", 0)

@@ -67,30 +67,66 @@ subsequent propagation steps continue to convert. A specimen thick enough
 that phase-to-amplitude conversion happens *within* it, rather than only
 once at the detector, needs multislice instead of a single-step model.
 
-## The Kirkland bandlimit (`klim`)
+## Grid aliasing: `oversample` and `klim`
 
 Each slice's transmission-then-propagation step is a circular
-(FFT-based) convolution: content that would scatter to a spatial
-frequency above the grid's Nyquist limit wraps around instead of being
-lost. Because the recursion reuses the same fixed-size grid at every one
-of the potentially thousands of slices in a thick specimen, this aliasing
-compounds slice over slice. Kirkland's fix is to zero out the
-outer, `klim`-controlled fraction of \(k\)-space after every propagation
-step (`self.kmask`), sacrificing some legitimate high-frequency signal to
-prevent it aliasing back in as low-frequency noise:
+(FFT-based) convolution on a fixed grid. The transmission function
+\(t = e^{i\sigma V \Delta z}\) and the wave \(\psi\) each carry content up to
+the grid's Nyquist frequency, so their product reaches twice it, and the
+part above Nyquist wraps around instead of being lost. Because the
+recursion reuses the same grid at every one of the potentially thousands
+of slices in a thick specimen, this aliasing compounds slice over slice.
+
+SPECTER's default remedy is to refine the grid rather than to cut the
+band. With `oversample = 2`, each slice is interpolated onto an xy grid
+twice as fine before the exponential (Fourier zero-padding, which adds no
+content), the recursion runs there, and the exit wave is Fourier-cropped
+back to the volume's grid. The product then has room to exist, and the
+result is converged: measured against a 4x reference on a 6bdf particle at
+1 Å/px, the 2x grid agrees to 3e-7 of the scattered power, the float32
+noise floor, with no bandlimit applied at all. On the volume's own grid
+(`oversample = 1`) the wrapped content costs 0.2% of the scattered power
+in thin ice and 1.1% in 2000 Å of ice, rising to 1.9% in the shells near
+Nyquist and about 0.3% at low frequencies. The cost is roughly three times
+the multislice time; no additional volume memory is used, since slices are
+interpolated a chunk at a time.
+
+`oversample` is the Fourier-space counterpart of `pad_fft`. Both give
+the FFT headroom by zero-padding, in dual domains: `pad_fft` pads real
+space, a wider frame at the same pixel size, which refines the
+\(k\)-sampling but leaves the Nyquist frequency where it was, and so
+prevents the wave wrapping at the frame edge; `oversample` pads Fourier
+space, finer pixels in the same frame, which raises the Nyquist frequency
+but leaves the \(k\)-sampling alone, and so prevents the product wrapping
+at Nyquist. Neither does the other's job. The errors quoted above were
+measured with `pad_fft` on.
+
+`klim` is the older remedy, Kirkland's: zero the outer fraction of
+\(k\)-space after every propagation step so that nothing can wrap into the
+retained band. It is kept for comparison, and its cutoff is a fraction of
+the volume's Nyquist on whichever grid the recursion runs on. It is more
+expensive in a way that is easy to miss. The content above the cut is
+genuinely scattered, and in a thick specimen it scatters again into the
+low frequencies: cutting at 0.66 of Nyquist left ten times more error at
+low frequencies than leaving the aliasing in place (2% of the scattered
+power against 0.3%, at 2000 Å of ice), besides discarding the band above
+the cut outright. `klim` is therefore `None` in every shipped config.
 
 ![Radial power spectrum of the exit wave with and without klim=0.66, at the full 320 Å slab thickness.](../../assets/images/multislice-klim-bandlimit.png){ width="600" }
 ///caption
 Radial power spectrum of the exit wave with and without klim=0.66, at the full 320 Å slab thickness.
 ///
 
-Below the `klim`-scaled cutoff, the two curves overlap: content there is
-untouched. Above it, `klim` suppresses content by roughly ten orders of
-magnitude. `klim` is `None` by default (no bandlimiting) in every shipped
-config: discarding real high-resolution signal to suppress an aliasing
-artifact that is often negligible at typical pixel sizes and specimen
-thicknesses is a tradeoff that depends on the specimen and resolution, so
-SPECTER leaves the choice to you.
+The same wrap occurs wherever a band-limited field is exponentiated.
+`rytov` and `projection` are linear in the potential up to their one final
+exponential, and that exponential aliases on the volume grid at the same
+level as the whole multislice recursion: 1.2e-3 of the scattered power in
+thin ice and 1.0e-2 in 2000 Å of ice, with the same frequency profile. Both
+therefore take their exponential on the `oversample` grid as well, at the
+cost of one fine-grid exponential per image rather than per slice. `firstborn`
+and `ctf` are linear throughout and need nothing; `kinematic` exponentiates
+each slice separately and its harmonics are hundreds of times smaller, so it
+is left on the volume grid.
 
 ## Ewald sphere curvature and the traversal order
 

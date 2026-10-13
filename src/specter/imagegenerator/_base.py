@@ -453,6 +453,7 @@ class BaseImager(L.LightningModule):
             self.propagation, self.optics, self.voltage
         )
         self.klim = self.propagation.klim
+        self.oversample = self.propagation.oversample
         self.ews_curvature_sign = self.propagation.ews_curvature_sign
         self.noise_model = self.camera.noise_model
         self.detector_model = self.camera.detector_model
@@ -925,6 +926,7 @@ class BaseImager(L.LightningModule):
             self.voltage,
             alpha=0,
             klim=self.klim,
+            oversample=self.oversample,
             ews_curvature_sign=self.ews_curvature_sign,
             progressbars=self.progressbars,
         ).to(self.device)

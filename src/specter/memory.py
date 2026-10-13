@@ -72,6 +72,8 @@ from typing import Literal
 import psutil
 import torch
 
+from .scattering._kernels import _MULTISLICE_SLICE_CHUNK
+
 __all__ = [
     "MAX_AUTO_BATCHSIZE",
     "available_memory_bytes",
@@ -101,6 +103,12 @@ _FIXED_OVERHEAD_BYTES = 350_000_000
 
 #: float32 -- the dtype the potential/ice volumes are built in.
 _BYTES_PER_ELEMENT = 4
+
+#: Complex64 copies of one multislice chunk (`_MULTISLICE_SLICE_CHUNK` slices
+#: of the propagation grid) live at once: the interpolated slices, their
+#: transmission functions and the FFT scratch. Three matches the measured
+#: 0.17 GB/particle at pad 512, oversample 2 (3 x 8 x 1024^2 x 8 B = 0.2 GB).
+_FINE_GRID_COMPLEX_COPIES = 3
 
 #: Fraction of *currently free* device memory an auto batch may target.
 #:
@@ -145,7 +153,9 @@ _SATURATION_PADDED_VOXELS = 160_000_000
 MAX_AUTO_BATCHSIZE = 8
 
 
-def estimate_peak_bytes(batchsize: int, nxy: int, nz: int, pad_nxy: int) -> int:
+def estimate_peak_bytes(
+    batchsize: int, nxy: int, nz: int, pad_nxy: int, oversample: int = 1
+) -> int:
     """
     Estimate peak memory for one forward pass of the particle pipeline.
 
@@ -160,6 +170,9 @@ def estimate_peak_bytes(batchsize: int, nxy: int, nz: int, pad_nxy: int) -> int:
     pad_nxy : int
         FFT-padded XY size (``nxy + 2 * (nxy // 2)`` when ``pad_fft``, else
         ``nxy``).
+    oversample : int, optional
+        `Propagation.oversample`: the multislice recursion runs on an xy
+        grid this many times finer. Default 1.
 
     Returns
     -------
@@ -169,10 +182,23 @@ def estimate_peak_bytes(batchsize: int, nxy: int, nz: int, pad_nxy: int) -> int:
     """
     padded_volume = nz * pad_nxy**2 * _BYTES_PER_ELEMENT
     template_volume = nxy**3 * _BYTES_PER_ELEMENT
+    # The multislice chunk's complex temporaries on the fine grid, over what
+    # the fitted per-particle copies already hold at oversample=1: measured
+    # +0.17 GB per particle at a 256 box (pad 512, oversample 2), batch 4
+    # going 1.82 -> 2.50 GB with the volume terms unchanged.
+    fine_grid = (
+        _FINE_GRID_COMPLEX_COPIES
+        * _MULTISLICE_SLICE_CHUNK
+        * (oversample**2 - 1)
+        * pad_nxy**2
+        * 2
+        * _BYTES_PER_ELEMENT
+    )
     return int(
         _PADDED_COPIES_PER_PARTICLE * batchsize * padded_volume
         + _TEMPLATE_COPIES_PER_PARTICLE * batchsize * template_volume
         + _TEMPLATE_COPIES * template_volume
+        + batchsize * fine_grid
         + _FIXED_OVERHEAD_BYTES
     )
 

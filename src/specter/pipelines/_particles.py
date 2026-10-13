@@ -182,7 +182,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     # LOCAL_RANK is absent in the original process and set (0, 1, ...) in DDP workers
     is_main = "LOCAL_RANK" not in os.environ
 
-    _seed_run(config, is_main)
+    run_seed = _seed_run(config, is_main)
 
     # --- Building 3D scattering potential ---
     if is_main:
@@ -271,6 +271,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
         potential_scale=potential_scale,
         bfactor=config.bfactor,
         molecular_mass=molecular_mass_from_atoms(pdb.atomic_numbers),
+        seed=run_seed,
     )
 
     if config.save_clean_exitwaves:
@@ -340,28 +341,17 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     _print_total_time(t_start)
 
 
-def _seed_run(config: ParticleStackConfig, is_main: bool) -> None:
-    """Seed every draw from ``config.seed``, or from a fresh seed that is printed."""
-    if config.seed is not None:
-        # Stochastic stages (ice crop selection, Poisson noise) draw from the
-        # global RNG stream inside each forward pass, so the batch boundaries
-        # decide which draw lands on which particle -- change the batch size
-        # and the same seed gives a different stack. That is harmless when the
-        # batch size is pinned, but `batchsize="auto"` is sized to whatever
-        # memory happens to be free on the device at run time, so it can differ
-        # between machines, GPUs, or two runs on a busy node. Rather than
-        # quietly hand back an unreproducible stack, refuse the combination.
-        if config.batchsize == "auto":
-            raise ValueError(
-                "seed is set but batchsize='auto': 'auto' sizes the batch to "
-                "the memory free on the device at run time, and batching "
-                "changes which random draw reaches which particle, so the "
-                "same seed would not reproduce the same stack on another "
-                "machine. Pin an integer batchsize (e.g. batchsize=32, or "
-                "--batchsize 32) to make the run reproducible, or drop the "
-                "seed to accept a non-reproducible run."
-            )
-    _seed_or_draw(config.seed, announce=is_main)
+def _seed_run(config: ParticleStackConfig, is_main: bool) -> int:
+    """
+    Seed every draw from ``config.seed``, or from a fresh seed that is printed.
+
+    Returns the seed the run uses. The up-front draws (poses, defocus, dose)
+    come off the global stream this seeds; the draws inside each forward
+    pass (crowding, ice, noise) are derived per particle from the same seed
+    by `ImageGenerator`, which is what lets ``batchsize="auto"`` and any
+    number of DDP ranks reproduce one seeded stack.
+    """
+    return _seed_or_draw(config.seed, announce=is_main)
 
 
 def _resolve_imaging_parameters(
@@ -553,7 +543,13 @@ def _resolve_batchsize(
         )
         if is_main:
             peak_gib = (
-                estimate_peak_bytes(batchsize, config.n_pixels, model.nz, model.pad_nxy)
+                estimate_peak_bytes(
+                    batchsize,
+                    config.n_pixels,
+                    model.nz,
+                    model.pad_nxy,
+                    model.oversample,
+                )
                 / 1024**3
             )
             free_gib = available_memory_bytes(sizing_device) / 1024**3

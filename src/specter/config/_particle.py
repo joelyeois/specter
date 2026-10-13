@@ -467,6 +467,13 @@ class ParticleStackConfig:
         ),
         check="non_negative",
     )  # fraction of Nyquist
+    oversample: int = setting(
+        2,
+        help=(
+            "Grid refinement for the multislice recursion, the Fourier-space counterpart of pad_fft: slices are interpolated onto an xy grid this many times finer (same frame, higher Nyquist) and the exit wave is cropped back, so the transmission-times-wave product no longer wraps at Nyquist. 1 reproduces the volume-grid recursion (0.2-1.1% of the scattered power in error, 1.9% at Nyquist); 2 is at the float32 noise floor for ~3x the multislice time. Also applied to Rytov's and projection's final exponential, which aliases identically, at negligible cost; first Born and ctf are linear and unaffected."
+        ),
+        check="positive",
+    )
     rotate_mode: RotateMode = setting(
         "real",
         help=(
@@ -547,9 +554,9 @@ class ParticleStackConfig:
     # --- Advanced: reproducibility ---
     seed: int | None = seed_setting(
         "pose, CTF, dose, ice, crowding and noise sampling",
-        "Auto-generated and logged if unset. A set seed requires an integer "
-        "batchsize: 'auto' sizes batches to free memory, and batching decides "
-        "which draw reaches which particle.",
+        "Auto-generated and logged if unset. Each particle's crowding, ice and "
+        "noise are drawn from a generator seeded by (seed, particle index), so "
+        "the stack is the same for any batchsize and any number of devices.",
     )
 
     # --- Advanced: aberration richness for synthetic (non-.cs-driven) generation ---

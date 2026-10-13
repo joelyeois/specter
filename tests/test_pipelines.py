@@ -223,25 +223,36 @@ def test_run_particle_stack_auto_batchsize(tmp_path: Path) -> None:
         assert mrc.data.shape == (3, 32, 32)
 
 
-def test_run_particle_stack_rejects_seed_with_auto_batchsize(tmp_path: Path) -> None:
+def test_run_particle_stack_seed_reproduces_across_batch_sizes(tmp_path: Path) -> None:
     """
-    A seeded run must not silently accept batchsize="auto".
-
-    Batching decides which random draw (ice crop, Poisson noise) reaches which
-    particle, and "auto" is sized to the memory free on the device at run time
-    -- so the same seed would give a different stack on a different machine.
+    The same seed gives the same stack at batchsize 1 and 3, with every
+    stochastic stage on (random ice, crowding, Poisson noise): per-particle
+    draws are derived from (seed, particle index), so batching -- including
+    the "auto" batchsize a seeded run used to be refused with -- cannot
+    change which draw reaches which particle.
     """
-    config = ParticleStackConfig(
-        pdb_source="6bdf",
-        n_pixels=32,
-        n_particles=2,
-        seed=11,
-        device="cpu",
-        output_dir=str(tmp_path),
-    )
-    assert config.batchsize == "auto"
-    with pytest.raises(ValueError, match="batchsize"):
+    stacks = []
+    for batchsize, name in ((1, "one"), (3, "three"), ("auto", "auto")):
+        config = ParticleStackConfig(
+            pdb_source=_PDB_FIXTURE,
+            n_pixels=32,
+            pixel_size=4.0,
+            n_particles=3,
+            seed=11,
+            batchsize=batchsize,
+            scattering_model="projection",
+            ice_model="random",
+            noise_model="poisson",
+            detector_model="none",
+            device="cpu",
+            output_dir=str(tmp_path),
+            filename=name,
+        )
         run_particle_stack(config)
+        with mrcfile.open(tmp_path / f"{name}.mrcs") as mrc:
+            stacks.append(mrc.data.copy())
+    assert np.array_equal(stacks[0], stacks[1])
+    assert np.array_equal(stacks[0], stacks[2])
 
 
 def _minimal_tomogram_config(**overrides) -> TomogramConfig:

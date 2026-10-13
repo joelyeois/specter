@@ -50,8 +50,6 @@ save_clean_exitwaves = false
 device = "cuda"                  # cpu | cuda | cuda:0 | 0,1,2,3 (multi-GPU)
 batchsize = "auto"               # particles per forward pass; "auto" takes the smaller of what
                                  # fits the free memory on `device` and what is worth batching.
-                                 # Pin an integer if you set a seed, since batching decides
-                                 # which random draw reaches which particle.
 
 [output]
 output_dir = "particles"
@@ -115,7 +113,11 @@ ews_curvature_sign = "positive"  # negative | positive, matches CryoSPARC's conv
                                  # unset keeps the full Nyquist range
 rotate_mode = "real"             # real | fourier
 potential_scale = 1.0            # unitless; single value, or [low, high] (< 1 approximates thicker ice)
-pad_fft = true
+pad_fft = true                   # real-space FFT headroom: a wider frame, same pixels, so the
+                                 # wave cannot wrap at the frame edge
+oversample = 2                  # the Fourier-space counterpart of pad_fft: finer pixels, same
+                                 # frame, so the transmission x wave product has room below
+                                 # Nyquist; 1 = the volume's own grid (aliases), 2 = converged
 
 # --- Ice ---
 ice_model = "gd"                 # gd | random | none
@@ -164,5 +166,7 @@ anisomag_m10 = 0.0
 anisomag_m11 = 1.0
 
 # --- Reproducibility ---
-# seed = 20260731                # RNG seed for pose/CTF/dose sampling; auto-generated and
-                                 # logged if unset. Requires an integer `batchsize` above.
+# seed = 20260731                # RNG seed for pose/CTF/dose/ice/crowding/noise sampling;
+                                 # auto-generated and logged if unset. Per-particle draws are
+                                 # derived from (seed, particle index), so any batchsize and
+                                 # any number of devices reproduce the same stack.

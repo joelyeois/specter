@@ -232,6 +232,7 @@ class TomogramReconstructor(_BaseReconstructor):
             voltage,
             scattering_model=scattering_model,
             klim=propagation.klim,
+            oversample=propagation.oversample,
             alpha=propagation.alpha,
         )
         # Derived from scattering_model, not user-configurable independently

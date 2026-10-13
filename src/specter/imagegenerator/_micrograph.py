@@ -309,6 +309,7 @@ class MicrographGenerator(BaseImager):
             self.voltage,
             scattering_model=self.scattering_model,
             klim=self.klim,
+            oversample=self.oversample,
             alpha=self.alpha,
             progressbars=self.progressbars,
         )

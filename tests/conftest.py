@@ -121,12 +121,29 @@ def save_or_compare():
     """
     Compare a tensor against its committed ``tests/test_data/<name>.pt``
     reference. Missing references fail; regeneration must be an explicit,
-    reviewed step after an intentional output change.
+    reviewed step after an intentional output change: run the affected tests
+    with ``SPECTER_REGENERATE_GOLDEN=1 -s`` to rewrite the references, read
+    the printed relative change for each, and commit the ``.pt`` files with
+    the change that moved them.
     """
     import torch
 
     def _save_or_compare(name: str, tensor) -> None:
         path = FIXTURE_DIR / f"{name}.pt"
+        if os.environ.get("SPECTER_REGENERATE_GOLDEN") == "1":
+            # The explicit regeneration step: rewrite the reference from the
+            # current output and report how far it moved, so the change can
+            # be reviewed against the intent before the new file is committed.
+            new = tensor.detach().cpu()
+            if path.is_file():
+                old = torch.load(path, weights_only=True).float()
+                scale = old.abs().max().clamp_min(1e-12)
+                print(
+                    f"[golden] {name}: max |new - old| / max |old| = "
+                    f"{float((new.float() - old).abs().max() / scale):.3e}"
+                )
+            torch.save(new, path)
+            return
         assert path.is_file(), f"Missing golden reference: {path}"
         expected = torch.load(path, weights_only=True)
         torch.testing.assert_close(

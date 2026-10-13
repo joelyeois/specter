@@ -21,6 +21,9 @@ from ..progress import track
 from ..rotations import VolumeRotator, build_affine_matrix
 from ._kernels import (
     bandlimit_mask,
+    fourier_crop_xy,
+    fourier_upsample_xy,
+    oversampled_exp,
     frequency_grid,
     fresnel_propagator,
     phase_scale,
@@ -48,6 +51,7 @@ class IterativeScattering(L.LightningModule):
         roi_padding_mode: GridSamplePadding = "zeros",
         pad_fft: bool = False,
         fft_pad_margin: int = 16,
+        oversample: int = 1,
     ):
         """
         Parameters
@@ -109,8 +113,18 @@ class IterativeScattering(L.LightningModule):
             whole range (converged), including at production scale (nz=368, ~1000+
             multislice steps), so this does not need to scale with volume size or step
             count. Default 16.
+        oversample : int, optional
+            Run the multislice recursion on an xy grid this many times finer
+            than the sampled slices, interpolating each slice onto it, and
+            Fourier-crop the exit wave back. See
+            :class:`~specter.scattering.Scattering` for the measurement
+            behind it. Applies to multislice, and to Rytov's and projection's
+            final exponential. Default 1.
         """
         super().__init__()
+        if not isinstance(oversample, int) or oversample < 1:
+            raise ValueError(f"oversample={oversample!r} must be an integer >= 1")
+        self.oversample = oversample
         self.nxy = nxy
         self.pixel_size = pixel_size
         self.voltage = voltage
@@ -128,10 +142,16 @@ class IterativeScattering(L.LightningModule):
         self.register_buffer("k2", k**2, persistent=False)
 
         self.klim = klim
-        self._register_bandlimit("kmask", k)
+        # The multislice propagator and bandlimit live on the propagation
+        # grid, `oversample` times finer than the slices; `k2` stays on the
+        # slice grid for the single-scatter models. The bandlimit's cutoff is
+        # a fraction of the SLICE grid's Nyquist on either (bandlimit_mask
+        # reads the Nyquist off the coarse pixel size it is given).
+        k_ms = frequency_grid(nxy * oversample, pixel_size / oversample)
+        self._register_bandlimit("kmask", k_ms)
 
         # Single-step Fresnel propagator, for multislice.
-        F_step = fresnel_propagator(self.k2, self.wavelength, pixel_size)
+        F_step = fresnel_propagator(k_ms**2, self.wavelength, pixel_size)
         self.register_buffer("F_step_real", F_step.real, persistent=False)
         self.register_buffer("F_step_imag", F_step.imag, persistent=False)
 
@@ -139,7 +159,7 @@ class IterativeScattering(L.LightningModule):
         # pad_fft=True (see multislice()).
         self.padded_nxy = nxy + 2 * fft_pad_margin if pad_fft else nxy
         if pad_fft:
-            k_p = frequency_grid(self.padded_nxy, pixel_size)
+            k_p = frequency_grid(self.padded_nxy * oversample, pixel_size / oversample)
             F_step_p = fresnel_propagator(k_p**2, self.wavelength, pixel_size)
             self.register_buffer("F_step_padded_real", F_step_p.real, persistent=False)
             self.register_buffer("F_step_padded_imag", F_step_p.imag, persistent=False)
@@ -486,7 +506,8 @@ class IterativeScattering(L.LightningModule):
         # tilt-series (1200^2), micrograph (4096^2) and particle-stack shapes.
         Fk = F * kmask
 
-        exitwave = torch.ones(B, canvas, canvas, device=device, dtype=torch.complex64)
+        fine = canvas * self.oversample
+        exitwave = torch.ones(B, fine, fine, device=device, dtype=torch.complex64)
 
         if checkpoint_chunks is None:
             for i, _, slice_sample in self._iter_slices(
@@ -497,6 +518,7 @@ class IterativeScattering(L.LightningModule):
                 roi_size=roi_size,
             ):
                 slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
+                slice_complex = fourier_upsample_xy(slice_complex, self.oversample)
                 t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex)
                 exitwave = ifft2(fft2(t * exitwave) * Fk)
         else:
@@ -530,6 +552,7 @@ class IterativeScattering(L.LightningModule):
                 )
                 exitwave = self._checkpointed(chunk_fn, exitwave, V, checkpoint=True)
 
+        exitwave = fourier_crop_xy(exitwave, canvas)
         if self.pad_fft:
             exitwave = center_crop(exitwave, self.nxy, dim=(-2, -1))
         return exitwave
@@ -574,8 +597,9 @@ class IterativeScattering(L.LightningModule):
             if self.pad_fft
             else (self.F_step_real + 1j * self.F_step_imag) * self.kmask
         )
+        fine = canvas * self.oversample
         wave = torch.ones(
-            V.shape[0], canvas, canvas, device=self.device, dtype=torch.complex64
+            V.shape[0], fine, fine, device=self.device, dtype=torch.complex64
         )
         elastic_slices = self._iter_slices(
             V, theta_matrix, slice_batchsize, "Elastic slices", roi_size
@@ -599,7 +623,9 @@ class IterativeScattering(L.LightningModule):
             if imaginary.shape != elastic.shape:
                 raise ValueError("filtered absorption must match the propagation slice")
             transmission = torch.exp(
-                self.sigma * self.pixel_size * (1j * elastic - imaginary)
+                self.sigma
+                * self.pixel_size
+                * fourier_upsample_xy(1j * elastic - imaginary, self.oversample)
             )
             return ifft2(fft2(transmission * psi) * Fk)
 
@@ -628,6 +654,7 @@ class IterativeScattering(L.LightningModule):
                         use_reentrant=False,
                     )
                     elastic_block, source_block = [], []
+        wave = fourier_crop_xy(wave, canvas)
         return center_crop(wave, self.nxy, dim=(-2, -1)) if self.pad_fft else wave
 
     @staticmethod
@@ -677,6 +704,7 @@ class IterativeScattering(L.LightningModule):
                 roi_size=roi_size,
             )[:, 0]
             sc = apply_amplitude_contrast(s, alpha=self.alpha)
+            sc = fourier_upsample_xy(sc, self.oversample)
             t = torch.exp(1j * self.sigma * self.pixel_size * sc)
             exitwave = ifft2(fft2(t * exitwave) * Fk)
         return exitwave
@@ -783,7 +811,9 @@ class IterativeScattering(L.LightningModule):
                 total_potential += slices_block[:, i % slice_batchsize]
 
         total_complex = apply_amplitude_contrast(total_potential, alpha=self.alpha)
-        exitwave = torch.exp(1j * self.sigma * self.pixel_size * total_complex)
+        exitwave = oversampled_exp(
+            1j * self.sigma * self.pixel_size * total_complex, self.oversample
+        )
         return exitwave
 
     def rytov(
@@ -813,7 +843,7 @@ class IterativeScattering(L.LightningModule):
             F_i = self._get_propagator(float(nz_new - i))
             phase_sum += fft2(slice_sample) * F_i
 
-        return torch.exp(c * ifft2(phase_sum))
+        return oversampled_exp(c * ifft2(phase_sum), self.oversample)
 
     def parallel_rytov(
         self,
@@ -926,7 +956,7 @@ class IterativeScattering(L.LightningModule):
                 chunk_fn, phase_sum, V, checkpoint=checkpoint_chunks is not None
             )
 
-        return torch.exp(phase_sum)
+        return oversampled_exp(phase_sum, self.oversample)
 
     def firstborn(
         self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1

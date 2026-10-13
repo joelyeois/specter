@@ -554,7 +554,8 @@ def test_envelope_knobs_are_reachable_from_every_simulate_config(
     assert "bfactor" in params, f"{generator_name} no longer accepts bfactor"
     assert "propagation" in params, f"{generator_name} no longer takes a Propagation"
     assert "klim" in propagation_fields
-    for knob in ("bfactor", "klim"):
+    assert "oversample" in propagation_fields
+    for knob in ("bfactor", "klim", "oversample"):
         assert knob in fields, f"{config_cls} cannot set {knob}"
 
 

@@ -105,6 +105,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "crowd_max_distance_z",
             "potential_scale",
             "pad_fft",
+            "oversample",
             "scattering_factors",
             "potential_method",
             "rcut",
@@ -203,6 +204,7 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
             "ice_motion_variance",
             "bulk_scattering_factors",
             "pad_fft",
+            "oversample",
             "seed",
         ],
     ),
@@ -306,6 +308,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             # Numerics
             "potential_scale",
             "pad_fft",
+            "oversample",
             # Diagnostics and reproducibility
             "save_exitwaves",
             "save_clean_exitwaves",

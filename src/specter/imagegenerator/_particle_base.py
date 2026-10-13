@@ -23,6 +23,7 @@ from ..potential import (
     potential_occupancy_slabs,
     template_occupancy_reference,
 )
+from ..random_seed import derive_seed, seeded_rng
 from ..scattering import Scattering
 from ..settings import Crowding, Ice, Propagation
 from ._base import BaseImager
@@ -38,6 +39,15 @@ __all__ = ["ParticleGeneratorBase"]
 #: has already flattened out.
 _SOLVATE_SLAB_VOXELS = 2**26
 _SOLVATE_MAX_SLICES = 64
+
+
+# The stochastic stages of one particle's forward pass, each seeded from
+# (run seed, particle index, stage) when the generator has a seed, so no stage
+# can read another's stream. Values are arbitrary but fixed: changing one
+# changes every seeded stack.
+_SEED_STAGE_CROWD = 0
+_SEED_STAGE_ICE = 1
+_SEED_STAGE_DETECTOR = 2
 
 
 def _solvate_chunk_slices(nxy: int) -> int:
@@ -94,6 +104,50 @@ class ParticleGeneratorBase(BaseImager):
     #: when only a bare volume was given, which keeps the fixed reference.
     molecular_mass: float | None = None
     _occupancy_reference_V: float | None = None
+
+    def _init_seed(self, seed: int | None) -> None:
+        """
+        Record the run seed every stochastic stage derives its draws from.
+
+        Parameters
+        ----------
+        seed : int or None
+            With a seed, each particle's crowding, ice and detector noise
+            are drawn from generators seeded by :func:`specter.derive_seed`
+            on ``(seed, particle index, stage)``, so a seeded stack is
+            identical however it is batched and over however many DDP ranks.
+            None draws everything from the global RNG, where the batch
+            boundaries decide which draw reaches which particle.
+
+        Notes
+        -----
+        Kept as a buffer rather than a plain attribute so that Lightning's
+        DDP setup, which broadcasts rank 0's buffers before predicting,
+        hands every worker rank the seed rank 0 ran with -- the same reason
+        the poses are buffers. A worker that drew its own seed (the
+        ``seed=None`` pipeline path draws one per process) would otherwise
+        derive different per-particle streams from it.
+        """
+        if seed is None:
+            self._seed_buffer = None
+            return
+        self.register_buffer(
+            "_seed_buffer", torch.tensor(int(seed), dtype=torch.int64), persistent=False
+        )
+
+    @property
+    def seed(self) -> int | None:
+        """The run seed per-particle draws derive from, or None."""
+        buf = getattr(self, "_seed_buffer", None)
+        return None if buf is None else int(buf.item())
+
+    def _item_seeds(self, idx: torch.Tensor | int, stage: int) -> list[int] | None:
+        """One derived seed per particle in the batch for `stage`, or None."""
+        seed = self.seed
+        if seed is None:
+            return None
+        indices = torch.as_tensor(idx).reshape(-1).tolist()
+        return [derive_seed(seed, int(i), stage) for i in indices]
 
     def _set_molecular_mass(self, molecular_mass: float | None) -> None:
         """Record the template's mass, in daltons, hydrogens included."""
@@ -271,6 +325,7 @@ class ParticleGeneratorBase(BaseImager):
             self.voltage,
             scattering_model=self.scattering_model,
             klim=self.klim,
+            oversample=self.oversample,
             ews_curvature_sign=self.ews_curvature_sign,
             nz=self.nz,
             alpha=self.alpha,
@@ -357,6 +412,7 @@ class ParticleGeneratorBase(BaseImager):
         V: torch.Tensor,
         potential_scale: torch.Tensor | float = 1.0,
         free: torch.Tensor | None = None,
+        seeds: list[int] | None = None,
     ) -> torch.Tensor:
         """
         Embed the volume in amorphous ice.
@@ -380,6 +436,10 @@ class ParticleGeneratorBase(BaseImager):
             the ice by, instead of reading occupancy off `V`. How the
             specimen-damage path keeps occupancy from the undamaged
             specimen. Default None.
+        seeds : list of int, optional
+            One seed per batch item for its ice draw (crop choice, rotation,
+            translation, or the random positions). Default None, the global
+            RNG.
 
         Returns
         -------
@@ -410,25 +470,11 @@ class ParticleGeneratorBase(BaseImager):
         extra canvas, and the point is only ever to keep `potential_scale`
         out of the water budget.
         """
-        if isinstance(self.icemaker, IceBank):
-            ice = self.icemaker.generate_big_ice(
-                n=self.nxy,
-                dx=self.pixel_size,
-                nz=self.nz,
-                batchsize=len(V),
-                relax_steps=self.ice_relax_steps,
-            ).to(V.device)
-        else:
-            # Only reached with an icemaker: `process_volume` skips solvation
-            # without one.
-            icemaker = cast(RandomIcemaker, self.icemaker)
-            ice = icemaker.generate_ice(batchsize=len(V)).to(V.device)
-        # On the pure ice canvas, before the particle's hole is cut: the
-        # hole moves with the particle and never decorrelates.
-        self._apply_solvent_exposure(ice)
+        if seeds is not None and len(seeds) != V.shape[0]:
+            raise ValueError(f"{len(seeds)} ice seeds for {V.shape[0]} volumes")
 
         pad = self.nxy // 2 if self.pad_fft else 0
-        ridx = _reflect_index(ice.shape[-1], pad, ice.device) if pad else None
+        ridx = _reflect_index(self.nxy, pad, V.device) if pad else None
 
         scale = torch.as_tensor(
             potential_scale, dtype=V.dtype, device=V.device
@@ -447,7 +493,13 @@ class ParticleGeneratorBase(BaseImager):
         # figure, with no extra halo work since the blur is separable per item.
         for b in range(V.shape[0]):
             Vb = V[b : b + 1]
-            ice_b = ice[b : b + 1]
+            # The ice is drawn one item at a time: a seeded item's draw comes
+            # from its own generator, and even unseeded the batch canvas was
+            # one more whole volume held for a value each item reads once.
+            ice_b = self._draw_ice(None if seeds is None else seeds[b]).to(V.device)
+            # On the pure ice canvas, before the particle's hole is cut: the
+            # hole moves with the particle and never decorrelates.
+            self._apply_solvent_exposure(ice_b)
             full_b = full[b : b + 1] if full.shape[0] > 1 else full
             # `full` carries the per-image scale, and it has to be divided in
             # HERE rather than after: potential_occupancy clamps to [0, 1]
@@ -465,7 +517,29 @@ class ParticleGeneratorBase(BaseImager):
                     Vb, slab, start, end, free=None if free is None else free[b : b + 1]
                 )
                 del slab
+            del ice_b
         return V
+
+    def _draw_ice(self, seed: int | None) -> torch.Tensor:
+        """One ``(1, nz, nxy, nxy)`` ice canvas, from `seed` or the global RNG."""
+        if isinstance(self.icemaker, IceBank):
+            generator = None if seed is None else torch.Generator().manual_seed(seed)
+            return self.icemaker.generate_big_ice(
+                n=self.nxy,
+                dx=self.pixel_size,
+                nz=self.nz,
+                batchsize=1,
+                relax_steps=self.ice_relax_steps,
+                generator=generator,
+            )
+        # Only reached with an icemaker: `process_volume` skips solvation
+        # without one. RandomIcemaker draws from the global RNG, so a seeded
+        # item runs it on a forked, seeded copy of that stream.
+        icemaker = cast(RandomIcemaker, self.icemaker)
+        if seed is None:
+            return icemaker.generate_ice(batchsize=1)
+        with seeded_rng(seed):
+            return icemaker.generate_ice(batchsize=1)
 
     def process_volume(
         self,
@@ -520,9 +594,24 @@ class ParticleGeneratorBase(BaseImager):
             # 64-particle run at 128 px (3.5x the simulation). Under this
             # outer cap the inner ones find the pool already small and do
             # nothing.
+            crowd_seeds = self._item_seeds(idx, _SEED_STAGE_CROWD)
             with torch.no_grad(), limited_cpu_threads():
-                for i in range(len(V)):
-                    self.crowd(into=V[i])
+                if crowd_seeds is None:
+                    for i in range(len(V)):
+                        self.crowd(into=V[i])
+                else:
+                    # Every crowd draw is on the CPU (candidate positions,
+                    # orientations, the thinning), so a CPU-only fork is
+                    # enough; the shape packer's own NumPy stream is seeded
+                    # through `packing_seed`, restored afterwards.
+                    packing_seed = self.crowd.packing_seed
+                    try:
+                        for i, item_seed in enumerate(crowd_seeds):
+                            self.crowd.packing_seed = item_seed
+                            with seeded_rng(item_seed):
+                                self.crowd(into=V[i])
+                    finally:
+                        self.crowd.packing_seed = packing_seed
 
         scale = self.potential_scale[idx].reshape(-1, 1, 1, 1)
         # Skipped when every scale is 1 (the default): `V * scale` is a
@@ -592,7 +681,12 @@ class ParticleGeneratorBase(BaseImager):
             if self.verbose:
                 logger.info(f"Adding ice to volume using {self.ice_model} model")
             with torch.no_grad():
-                V = self.solvate(V, potential_scale=scale, free=free)
+                V = self.solvate(
+                    V,
+                    potential_scale=scale,
+                    free=free,
+                    seeds=self._item_seeds(idx, _SEED_STAGE_ICE),
+                )
             del free
 
         # Scattering beyond the objective aperture is charged as absorption
@@ -630,5 +724,10 @@ class ParticleGeneratorBase(BaseImager):
         cr_batch = self.coincidence_radius[idx]
         anisomag = None if self.anisomag is None else self.anisomag[idx]
         return self.detector(
-            self.detector_waves, dose_batch, cr_batch, anisomag, nxy=self.nxy
+            self.detector_waves,
+            dose_batch,
+            cr_batch,
+            anisomag,
+            nxy=self.nxy,
+            seeds=self._item_seeds(idx, _SEED_STAGE_DETECTOR),
         )

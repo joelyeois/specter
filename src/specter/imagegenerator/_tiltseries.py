@@ -673,6 +673,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             voltage,
             scattering_model=self.scattering_model,
             klim=self.klim,
+            oversample=self.oversample,
             alpha=self.alpha,
             progressbars=progressbars,
             roi_padding_mode="zeros",

@@ -220,3 +220,95 @@ def test_scalar_per_image_arguments_index_every_image_without_optics(
     with torch.no_grad():
         images = gen(torch.tensor([n_images - 1]))
     assert images.shape[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-particle seeding: a seeded stack is a function of (seed, particle index)
+# and nothing else -- not of how the particles were batched.
+# ---------------------------------------------------------------------------
+
+
+def _seeded_generator(seed: int | None) -> ImageGenerator:
+    """Every stochastic stage on: crowding, random ice, dose-fractionated
+    Poisson noise with coincidence loss."""
+    from specter.settings import Crowding
+
+    n, n_images = 24, 6
+    torch.manual_seed(0)
+    z, y, x = torch.meshgrid(*[torch.arange(n) - n / 2] * 3, indexing="ij")
+    V = 8.0 * torch.exp(-(x**2 + y**2 + z**2) / 20.0)
+    quats = rotations.random_quaternion(n_images).reshape(n_images, 4)
+    ctf = {
+        "dfu": torch.full((n_images,), 10000.0),
+        "dfv": torch.full((n_images,), 10000.0),
+    }
+    specter.seed(0)
+    gen = ImageGenerator(
+        V,
+        2.0,
+        quats,
+        torch.zeros(n_images, 2),
+        ctf,
+        300.0,
+        50.0,
+        propagation=Propagation(oversample=1, alpha=0.07),
+        camera=Camera(noise_model="poisson", n_frames=4),
+        ice=Ice(model="random", thickness=0.0),
+        crowding=Crowding(min_distance=10.0, max_distance_z=20.0),
+        coincidence_radius=1.0,
+        seed=seed,
+        progressbars=False,
+        verbose=False,
+    )
+    gen.eval()
+    return gen
+
+
+def _run_batched(seed: int | None, batches: list[list[int]]) -> torch.Tensor:
+    gen = _seeded_generator(seed)
+    with torch.no_grad():
+        return torch.cat([gen(torch.tensor(b)) for b in batches])
+
+
+def test_seeded_generator_is_independent_of_batching():
+    """One batch of six, two of three and six singles give the same stack,
+    bit for bit: each particle's crowd, ice and noise come from generators
+    seeded on its own index, so the batch boundaries cannot move a draw from
+    one particle to another. This is what lets batchsize='auto' and DDP
+    reproduce a seeded run."""
+    whole = _run_batched(123, [[0, 1, 2, 3, 4, 5]])
+    halves = _run_batched(123, [[0, 1, 2], [3, 4, 5]])
+    singles = _run_batched(123, [[i] for i in range(6)])
+    assert torch.equal(whole, halves)
+    assert torch.equal(whole, singles)
+    # The stages really ran: integer counts (Poisson) on a non-trivial image.
+    assert torch.equal(whole, whole.round())
+    assert whole.std() > 0
+
+
+def test_seeded_generator_depends_on_the_seed_and_the_index():
+    a = _run_batched(123, [[0, 1, 2, 3, 4, 5]])
+    b = _run_batched(124, [[0, 1, 2, 3, 4, 5]])
+    assert not torch.equal(a, b)
+    # Particle 3 drawn alone is particle 3, not "the first particle of a batch".
+    alone = _run_batched(123, [[3]])
+    assert torch.equal(alone[0], a[3])
+
+
+def test_unseeded_generator_keeps_the_global_stream():
+    """seed=None is the old behaviour: the global RNG, where batching decides
+    which draw lands on which particle."""
+    whole = _run_batched(None, [[0, 1, 2, 3, 4, 5]])
+    singles = _run_batched(None, [[i] for i in range(6)])
+    assert not torch.equal(whole, singles)
+    assert _seeded_generator(None).seed is None
+
+
+def test_seed_is_a_buffer_so_ddp_broadcasts_it():
+    """Lightning syncs rank 0's buffers to the workers before predicting; a
+    plain attribute would leave each worker deriving streams from its own
+    seed."""
+    gen = _seeded_generator(7)
+    assert gen.seed == 7
+    assert "_seed_buffer" in dict(gen.named_buffers())
+    assert "_seed_buffer" not in gen.state_dict()

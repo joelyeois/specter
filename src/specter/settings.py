@@ -118,10 +118,28 @@ class Propagation:
         Kirkland bandlimit as a fraction of Nyquist (``0.66`` prevents FFT
         aliasing at the cost of the highest frequencies). Default None, no
         bandlimit.
+    oversample : int
+        Grid refinement for the multislice recursion: each slice is
+        interpolated onto an xy grid this many times finer (adding no
+        content) and the exit wave is Fourier-cropped back, so the product
+        of transmission function and wave has room to exist instead of
+        wrapping at the volume's Nyquist. The Fourier-space counterpart of
+        `pad_fft`: that pads real space (a wider frame, same pixels, finer
+        k-sampling, same Nyquist) against wrap at the frame edge; this pads
+        Fourier space (same frame, finer pixels, same k-sampling, higher
+        Nyquist) against wrap at Nyquist. Neither does the other's job, and
+        the aliasing below was measured with `pad_fft` on. At 1 the wrapped content costs
+        0.2-1.1% of the scattered power (thin to 2000 A ice, 6bdf at
+        1 A/px) and 1.9% at Nyquist; at 2 the error is at the float32 noise
+        floor and no bandlimit is needed, for about 3x the multislice time.
+        Rytov and projection alias the same way through their one final
+        exponential, and take it on the fine grid too, at the cost of one
+        fine-grid exponential per image; first Born and the CTF model are
+        linear and untouched. Default 2.
     pad_fft : bool
         Give the propagation canvas FFT headroom so the multislice
-        recursion's circular convolution cannot wrap at the frame edge.
-        Default False.
+        recursion's circular convolution cannot wrap at the frame edge: the
+        real-space counterpart of `oversample`, see there. Default False.
     rotate_mode : RotateMode
         How a volume is rotated into the beam frame: trilinear in real space
         or in Fourier space. Default ``"real"``.
@@ -134,6 +152,7 @@ class Propagation:
     inelastic_mfp_specimen: float | None = None
     ews_curvature_sign: EwaldSphereSign = "negative"
     klim: float | None = None
+    oversample: int = 2
     pad_fft: bool = False
     rotate_mode: RotateMode = "real"
 
@@ -169,6 +188,8 @@ class Propagation:
             raise ValueError(
                 f"klim={self.klim} must be in (0, 1] (a fraction of Nyquist)"
             )
+        if not isinstance(self.oversample, int) or self.oversample < 1:
+            raise ValueError(f"oversample={self.oversample!r} must be an integer >= 1")
 
 
 @dataclass(frozen=True)

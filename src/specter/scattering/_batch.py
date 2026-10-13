@@ -18,6 +18,9 @@ from ..progress import track
 from . import _kernels
 from ._kernels import (
     bandlimit_mask,
+    fourier_crop_xy,
+    fourier_upsample_xy,
+    oversampled_exp,
     frequency_grid,
     fresnel_propagator,
     phase_scale,
@@ -38,6 +41,7 @@ class Scattering(L.LightningModule):
         alpha: float = 0.0,
         uniform_absorption: float = 0.0,
         progressbars: bool = True,
+        oversample: int = 1,
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -84,6 +88,25 @@ class Scattering(L.LightningModule):
             Amplitude contrast ratio. Default is 0.0.
         progressbars : bool, optional
             Whether to display progress bars during computation. Default is True.
+        oversample : int, optional
+            Run the multislice recursion on an xy grid this many times finer
+            than the volume's, and Fourier-crop the exit wave back. Each
+            slice is band-limited-interpolated onto the fine grid (no content
+            is added), so the only thing that changes is that the product of
+            the transmission function and the wave has room to exist: on the
+            volume's own grid that product reaches twice the Nyquist frequency
+            and wraps, and across thousands of slices the wrapped content
+            compounds. Measured against a 4x reference on a 6bdf particle at
+            1 A/px: 1 leaves 0.2% (thin ice) to 1.1% (2000 A of ice) of the
+            scattered power in error, rising to 1.9% at Nyquist; 2 is at the
+            float32 noise floor (3e-7), with no bandlimit needed. Costs about
+            3x the multislice time and no volume memory (slices are
+            interpolated a chunk at a time). Rytov and projection take their
+            one final exponential the same way (measured at the same 1e-3 to
+            1e-2 error on the volume grid, for one fine-grid exponential per
+            image); first Born and the CTF model are linear in the potential
+            and untouched, and kinematic's per-slice ``exp - 1`` harmonics
+            are hundreds of times smaller and left alone. Default 1.
 
         Notes
         -----
@@ -91,6 +114,9 @@ class Scattering(L.LightningModule):
            Springer US, Boston, MA, 2010.
         """
         super().__init__()
+        if not isinstance(oversample, int) or oversample < 1:
+            raise ValueError(f"oversample={oversample!r} must be an integer >= 1")
+        self.oversample = oversample
         self.nxy = nxy
         self.nz = nz
         self.pixel_size = pixel_size
@@ -112,9 +138,14 @@ class Scattering(L.LightningModule):
         k = frequency_grid(nxy, pixel_size)
         k2 = k**2
 
-        # Fresnel transfer function for multislice: one slice step.
+        # Fresnel transfer function for multislice: one slice step, on the
+        # (possibly supersampled) propagation grid. The slice thickness stays
+        # the voxel size whatever the xy grid.
+        k_ms = k
         if scattering_model == "multislice":
-            F = fresnel_propagator(k2, self.wavelength, pixel_size)
+            if oversample > 1:
+                k_ms = frequency_grid(nxy * oversample, pixel_size / oversample)
+            F = fresnel_propagator(k_ms**2, self.wavelength, pixel_size)
             self.register_buffer("_F_step_real", F.real, persistent=False)
             self.register_buffer("_F_step_imag", F.imag, persistent=False)
 
@@ -151,7 +182,11 @@ class Scattering(L.LightningModule):
             )
 
         self.klim = klim
-        kmask = bandlimit_mask(k, pixel_size, klim)
+        # `klim` is a fraction of the volume's Nyquist on every grid: the
+        # cutoff is a physical frequency, so supersampling must not move it.
+        # bandlimit_mask reads the Nyquist off the pixel size it is given,
+        # which is the coarse one here even when `k_ms` is the fine grid.
+        kmask = bandlimit_mask(k_ms, pixel_size, klim)
         if isinstance(kmask, torch.Tensor):
             self.register_buffer("kmask", kmask, persistent=False)
         else:
@@ -262,6 +297,11 @@ class Scattering(L.LightningModule):
                 chunk = chunk.flip(1)
             if not chunk.is_complex():
                 chunk = apply_amplitude_contrast(chunk, alpha=self.alpha)
+            # Interpolate BEFORE the exponential: the nonlinearity is what
+            # puts content above the volume's Nyquist, and the fine grid is
+            # there to hold it. Linear in the (complex) potential, so it
+            # commutes with the amplitude-contrast factor above.
+            chunk = fourier_upsample_xy(chunk, self.oversample)
             t_chunk = torch.exp(1j * self.sigma * self.pixel_size * chunk)
             if self.uniform_absorption:
                 # A constant imaginary potential factorises out of the
@@ -279,7 +319,7 @@ class Scattering(L.LightningModule):
                 # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
                 exitwave = ifft2(fft2(wv) * Fk)
         assert exitwave is not None, "V must have at least one z-slice"
-        return exitwave
+        return fourier_crop_xy(exitwave, V.shape[-1])
 
     @property
     def F_real(self) -> torch.Tensor:
@@ -404,9 +444,10 @@ class Scattering(L.LightningModule):
         :meth:`_fourier_slice_sum`.
         """
         scattered_k = self._fourier_slice_sum(V, None)
-        exitwave = torch.exp(
+        exitwave = oversampled_exp(
             ifft2(self._phase_scale(V) * scattered_k)
-            - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1]
+            - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1],
+            self.oversample,
         )
         return exitwave  # (B x X x Y)
 
@@ -516,9 +557,10 @@ class Scattering(L.LightningModule):
         orderings agree to float rounding (~2e-7 relative).
         """
         V_sum = torch.sum(V, 1)
-        exitwave = torch.exp(
+        exitwave = oversampled_exp(
             self._phase_scale(V) * V_sum
-            - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1]
+            - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1],
+            self.oversample,
         )
         return exitwave
 

@@ -81,6 +81,9 @@ def test_modular_pipeline_matches_image_generator():
         ews_curvature_sign="positive",
         nz=nz,
         alpha=0.0,
+        # ImageGenerator's Propagation() default; the hand-built stage has to
+        # make the same choice to compare equal.
+        oversample=Propagation().oversample,
         progressbars=False,
     )
     with torch.no_grad():

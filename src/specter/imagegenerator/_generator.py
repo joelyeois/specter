@@ -101,6 +101,12 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    seed : int, optional
+        Run seed for the per-particle draws (crowding, ice, detector noise):
+        each is seeded from ``(seed, particle index, stage)``, so a seeded
+        stack is identical however it is batched and over however many
+        devices. Poses and CTF parameters are the caller's. Default None,
+        every draw from the global RNG.
     """
 
     def __init__(
@@ -127,6 +133,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
         coincidence_radius: float | torch.Tensor = 0.0,
         periodic_potential: bool = False,
         bfactor: float | torch.Tensor | None = None,
+        seed: int | None = None,
     ):
         self.nxy = nxy
         self._init_ice_geometry(nxy, nxy, pixel_size, ice, propagation)
@@ -173,6 +180,7 @@ class ImageGeneratorFromCoordinates(ParticleGeneratorBase):
 
         self._init_optics()
         self.scattering = self._build_scattering()
+        self._init_seed(seed)
 
         self._apply_defocus_shift(
             shift_required=self.scattering_model not in ["projection", "ctf"]
@@ -323,6 +331,12 @@ class ImageGenerator(ParticleGeneratorBase):
         reads occupancy against the fixed
         :data:`~specter.potential.FULL_OCCUPANCY_POTENTIAL_V`, since a bare
         volume does not say how much molecule it holds.
+    seed : int, optional
+        Run seed for the per-particle draws (crowding, ice, detector noise):
+        each is seeded from ``(seed, particle index, stage)``, so a seeded
+        stack is identical however it is batched and over however many
+        devices. Poses and CTF parameters are the caller's. Default None,
+        every draw from the global RNG.
     """
 
     def __init__(
@@ -349,6 +363,7 @@ class ImageGenerator(ParticleGeneratorBase):
         potential_scale: float | torch.Tensor = 1.0,
         bfactor: float | torch.Tensor | None = None,
         molecular_mass: float | None = None,
+        seed: int | None = None,
     ):
         nxy = scattering_potential.shape[-1]
         volume_nz = scattering_potential.shape[0]
@@ -386,6 +401,7 @@ class ImageGenerator(ParticleGeneratorBase):
 
         self._init_optics()
         self.scattering = self._build_scattering()
+        self._init_seed(seed)
 
         if self.crowd_min_distance is not None:
             self.crowd = self._build_crowd(

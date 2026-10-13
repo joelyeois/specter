@@ -754,3 +754,178 @@ def test_projection_does_not_materialise_a_complex_volume():
     old = peak(lambda: _projection_complex_volume_reference(scat, V))
     assert old >= complex_volume_bytes
     assert new < complex_volume_bytes / 8
+
+
+# ---------------------------------------------------------------------------
+# Supersampled multislice: the recursion on a finer xy grid, cropped back.
+# ---------------------------------------------------------------------------
+
+
+def _supersampled_reference(V, factor, *, alpha, pixel_size=1.0, sign="negative"):
+    """
+    The fine-grid recursion spelled out: interpolate each slice, exponentiate,
+    propagate with a fine-grid Fresnel kernel of the SAME slice thickness,
+    Fourier-crop the exit wave. No bandlimit anywhere.
+    """
+    from specter.scattering._kernels import (
+        fourier_crop_xy,
+        fourier_upsample_xy,
+        frequency_grid,
+        fresnel_propagator,
+    )
+
+    n = V.shape[-1]
+    scat = Scattering(n, pixel_size, 300.0, progressbars=False)
+    k = frequency_grid(n * factor, pixel_size / factor)
+    F = fresnel_propagator(k**2, scat.wavelength, pixel_size).to(torch.complex64)
+    if sign == "negative":
+        V = V.flip(1)
+    psi = None
+    for z in range(V.shape[1]):
+        slab = fourier_upsample_xy(
+            apply_amplitude_contrast(V[:, z], alpha=alpha), factor
+        )
+        t = torch.exp(1j * scat.sigma * pixel_size * slab)
+        wv = t if psi is None else t * psi
+        psi = torch.fft.ifft2(torch.fft.fft2(wv) * F)
+    return fourier_crop_xy(psi, n)
+
+
+@pytest.mark.parametrize(
+    "factor, sign", [(2, "negative"), (2, "positive"), (3, "negative")]
+)
+def test_multislice_supersample_matches_fine_grid_reference(factor, sign):
+    """`oversample` is exactly the fine-grid recursion, and differs from the
+    volume-grid one (the aliasing it removes is a real, visible difference)."""
+    torch.manual_seed(0)
+    n, nz = 32, 40
+    V = torch.rand(2, nz, n, n) * 4.0
+    scat = Scattering(
+        n,
+        1.0,
+        300.0,
+        alpha=0.07,
+        oversample=factor,
+        ews_curvature_sign=sign,
+        progressbars=False,
+    )
+    got = scat(V)
+    assert got.shape == (2, n, n)
+    assert torch.equal(got, _supersampled_reference(V, factor, alpha=0.07, sign=sign))
+    coarse = Scattering(
+        n, 1.0, 300.0, alpha=0.07, ews_curvature_sign=sign, progressbars=False
+    )(V)
+    assert (got - coarse).abs().max() > 1e-5
+
+
+def test_multislice_supersample_one_is_the_volume_grid_recursion():
+    """oversample=1 is bitwise the unsupersampled path, so it stays the
+    reference the other multislice tests pin."""
+    torch.manual_seed(1)
+    V = torch.rand(1, 12, 16, 16) * 4.0
+    a = Scattering(16, 1.0, 300.0, alpha=0.07, progressbars=False)(V)
+    b = Scattering(16, 1.0, 300.0, alpha=0.07, oversample=1, progressbars=False)(V)
+    assert torch.equal(a, b)
+
+
+def test_supersample_klim_cutoff_stays_a_fraction_of_the_volume_nyquist():
+    """`klim` names a physical frequency; refining the propagation grid must
+    not move it. At klim=0.5 the exit wave carries nothing above half the
+    VOLUME's Nyquist, whichever grid the recursion ran on."""
+    from specter.scattering._kernels import frequency_grid
+
+    torch.manual_seed(2)
+    n = 32
+    V = torch.rand(1, 20, n, n) * 4.0
+    psi = Scattering(n, 1.0, 300.0, klim=0.5, oversample=2, progressbars=False)(V)
+    k = frequency_grid(n, 1.0)
+    power = torch.fft.fft2(psi[0]).abs() ** 2
+    assert power[k > 0.25].sum() < 1e-10 * power[k <= 0.25].sum()
+
+
+@pytest.mark.parametrize("pad_fft", [False, True])
+def test_iterative_supersample_matches_batch_and_checkpointed(pad_fft):
+    """IterativeScattering's three multislice loops (plain, checkpointed,
+    absorptive) agree with each other and, at identity pose without padding,
+    with Scattering on the same fine grid."""
+    torch.manual_seed(3)
+    n, nz = 32, 23
+    V = torch.rand(2, nz, n, n) * 4.0
+    theta = build_affine_matrix(torch.eye(3).expand(2, 3, 3).contiguous())
+    it = IterativeScattering(
+        n,
+        1.0,
+        300.0,
+        alpha=0.07,
+        oversample=2,
+        pad_fft=pad_fft,
+        fft_pad_margin=4,
+        progressbars=False,
+    )
+    plain = it(V, theta)
+    assert plain.shape == (2, n, n)
+    assert torch.equal(plain, it.multislice(V, theta, checkpoint_chunks=5))
+    if not pad_fft:
+        batch = Scattering(n, 1.0, 300.0, alpha=0.07, oversample=2, progressbars=False)(
+            V
+        )
+        assert torch.equal(plain, batch)
+    it0 = IterativeScattering(
+        n,
+        1.0,
+        300.0,
+        alpha=0.0,
+        oversample=2,
+        pad_fft=pad_fft,
+        fft_pad_margin=4,
+        progressbars=False,
+    )
+    absorptive = it0.multislice_absorptive(V, torch.zeros_like(V), theta)
+    assert absorptive.shape == (2, n, n)
+    assert torch.allclose(absorptive, it0(V, theta), atol=1e-6)
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, 2.0])
+def test_supersample_rejects_non_positive_integers(bad):
+    with pytest.raises(ValueError, match="oversample"):
+        Scattering(16, 1.0, 300.0, oversample=bad, progressbars=False)
+    with pytest.raises(ValueError, match="oversample"):
+        IterativeScattering(16, 1.0, 300.0, oversample=bad, progressbars=False)
+
+
+@pytest.mark.parametrize("model", ["rytov", "projection"])
+def test_single_exponential_models_oversample_their_exponential(model):
+    """Rytov and projection are linear up to one final exponential, which
+    aliases exactly like multislice's per-slice one; `oversample` takes it on
+    the fine grid. The linear phase is identical either way, so the
+    oversampled result is exp(upsample(log psi_1)) cropped, to float error."""
+    from specter.scattering._kernels import fourier_crop_xy, fourier_upsample_xy
+
+    torch.manual_seed(4)
+    n, nz = 32, 20
+    V = torch.rand(1, nz, n, n) * 4.0
+    kw = dict(scattering_model=model, nz=nz, alpha=0.07, progressbars=False)
+    coarse = Scattering(n, 1.0, 300.0, oversample=1, **kw)(V)
+    fine = Scattering(n, 1.0, 300.0, oversample=2, **kw)(V)
+    want = fourier_crop_xy(torch.exp(fourier_upsample_xy(torch.log(coarse), 2)), n)
+    assert torch.allclose(fine, want, atol=1e-5)
+    assert (fine - coarse).abs().max() > 1e-5
+    # the iterative class takes the same exponential
+    theta = build_affine_matrix(torch.eye(3).expand(1, 3, 3).contiguous())
+    it = IterativeScattering(
+        n, 1.0, 300.0, oversample=2, **{k: v for k, v in kw.items() if k != "nz"}
+    )
+    assert torch.allclose(it(V, theta), fine, atol=1e-5)
+
+
+@pytest.mark.parametrize("model", ["firstborn", "ctf"])
+def test_linear_models_ignore_oversample(model):
+    """No exponential, no product: the linear models cannot alias and the
+    setting must not change them."""
+    torch.manual_seed(5)
+    n, nz = 32, 20
+    V = torch.rand(1, nz, n, n) * 4.0
+    kw = dict(scattering_model=model, nz=nz, alpha=0.07, progressbars=False)
+    a = Scattering(n, 1.0, 300.0, oversample=1, **kw)(V)
+    b = Scattering(n, 1.0, 300.0, oversample=2, **kw)(V)
+    assert torch.equal(a, b)

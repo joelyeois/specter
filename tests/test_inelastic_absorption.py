@@ -239,12 +239,7 @@ def test_pipeline_drops_a_dataset_alpha_under_the_mfp_model() -> None:
     assert alpha == 0.1
 
 
-@pytest.mark.parametrize(
-    "specimen_mfp", [None, INELASTIC_MFP_PROTEIN_A], ids=["ice-only", "ice+protein"]
-)
-def test_generator_transmission_matches_the_mean_free_path(
-    specimen_mfp: float | None,
-) -> None:
+def test_generator_transmission_matches_the_mean_free_path() -> None:
     """
     A full generator run transmits ``exp(-t/Lambda)`` through its ice.
 
@@ -252,6 +247,13 @@ def test_generator_transmission_matches_the_mean_free_path(
     isolation but the image a generator produces, ice and aberrations
     included. Pins the wiring -- that the absorption field is read off the
     specimen before solvation and reaches `Scattering` as a complex volume.
+
+    The specimen's own, shorter mean free path is checked against the
+    ice-only *simulation* rather than the analytic value: the two runs
+    share everything but that one setting, so the comparison isolates it.
+    Against the analytic value the margin is ~1e-4, below the bias of
+    Fourier-cropping the supersampled exit wave to the pixel grid, where
+    the intensity's own above-Nyquist content folds into the mean.
     """
     import math
 
@@ -269,35 +271,39 @@ def test_generator_transmission_matches_the_mean_free_path(
         "cs": torch.tensor([2.7e7]),
         "phaseshift": torch.tensor([0.0]),
     }
-    specter.seed(3)
-    generator = ImageGenerator(
-        volume,
-        dx,
-        torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        torch.zeros(1, 2),
-        ctf_params,
-        VOLTAGE,
-        dose_per_angstrom=dose,
-        propagation=Propagation(
-            absorption_model="inelastic_mfp", inelastic_mfp_specimen=specimen_mfp
-        ),
-        ice=Ice(model="gd", thickness=thickness),
-        crowding=Crowding(n_points=0),
-        camera=Camera(noise_model="none", detector_model="none"),
-        envelopes=Envelopes(),
-        optics=Optics(),
-        progressbars=False,
-    )
-    with torch.no_grad():
-        image = generator(torch.tensor([0]))
 
-    transmission = float(image.mean()) / (dose * dx**2)
+    def transmission(specimen_mfp: float | None) -> float:
+        specter.seed(3)
+        generator = ImageGenerator(
+            volume,
+            dx,
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            torch.zeros(1, 2),
+            ctf_params,
+            VOLTAGE,
+            dose_per_angstrom=dose,
+            propagation=Propagation(
+                absorption_model="inelastic_mfp", inelastic_mfp_specimen=specimen_mfp
+            ),
+            ice=Ice(model="gd", thickness=thickness),
+            crowding=Crowding(n_points=0),
+            camera=Camera(noise_model="none", detector_model="none"),
+            envelopes=Envelopes(),
+            optics=Optics(),
+            progressbars=False,
+        )
+        with torch.no_grad():
+            image = generator(torch.tensor([0]))
+        return float(image.mean()) / (dose * dx**2)
+
     expected = math.exp(-thickness / INELASTIC_MFP_ICE_A)
+    ice_only = transmission(None)
+    with_specimen = transmission(INELASTIC_MFP_PROTEIN_A)
+    assert ice_only == pytest.approx(expected, rel=0.02)
+    assert with_specimen == pytest.approx(expected, rel=0.02)
     # The specimen is a small fraction of the box, so giving it its own
     # (shorter) mean free path moves the mean only slightly -- and downwards.
-    assert transmission == pytest.approx(expected, rel=0.02)
-    if specimen_mfp is not None:
-        assert transmission < expected
+    assert with_specimen < ice_only
 
 
 @pytest.mark.parametrize("cap", [2**14, 2**12, 2**11])

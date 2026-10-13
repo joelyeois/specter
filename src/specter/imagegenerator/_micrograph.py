@@ -13,7 +13,10 @@ import torch
 
 from specter import logger
 
+from ..random_seed import derive_seed, seeded_rng
 from ._base import (
+    _SEED_STAGE_DETECTOR,
+    _SEED_STAGE_SPECIMEN,
     BaseImager,
     RemovalMFPs,
     mfp_absorption_field,
@@ -106,6 +109,13 @@ class MicrographGenerator(BaseImager):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    seed : int, optional
+        Run seed for the draws this generator makes itself: the specimen
+        (crowding placement and ice, redrawn by :meth:`regenerate_specimen`)
+        and the detector noise, each from a generator seeded on
+        ``(seed, draw index, stage)``, so two generators built with the same
+        seed produce the same micrographs however their images are batched.
+        Default None, every draw from the global RNG.
 
     Notes
     -----
@@ -184,6 +194,7 @@ class MicrographGenerator(BaseImager):
         potential_scale: float | torch.Tensor = 1.0,
         save_clean_exitwaves: bool = False,
         bfactor: float | torch.Tensor | None = None,
+        seed: int | None = None,
         **kwargs: Any,
     ):
         if isinstance(micrograph_size, int):
@@ -273,6 +284,8 @@ class MicrographGenerator(BaseImager):
             potential_scale=potential_scale,
             bfactor=bfactor,
         )
+        self._init_seed(seed)
+        self._specimen_draws = 0
 
         # A submodule can only be attached after Module.__init__.
         if specimen_gen is not None:
@@ -310,6 +323,7 @@ class MicrographGenerator(BaseImager):
             scattering_model=self.scattering_model,
             klim=self.klim,
             oversample=self.oversample,
+            crop=False,
             alpha=self.alpha,
             progressbars=self.progressbars,
         )
@@ -552,9 +566,32 @@ class MicrographGenerator(BaseImager):
                 self.detector.dose_weights,
                 self._dose_weights_max_frequency,
             )
-        assembled = self.specimen_gen.assemble(
-            absorption=self._absorption_rates, damage=damage, ice_filter=ice_filter
-        )
+        # Each specimen draw has its own seed, so the n-th micrograph of a
+        # seeded run is the same whatever came before it. The crowd and ice
+        # draws are on the CPU; the shape packer's NumPy stream is seeded
+        # through `packing_seed`, restored afterwards.
+        seed = self.seed
+        if seed is None:
+            assembled = self.specimen_gen.assemble(
+                absorption=self._absorption_rates, damage=damage, ice_filter=ice_filter
+            )
+        else:
+            draw_seed = derive_seed(seed, self._specimen_draws, _SEED_STAGE_SPECIMEN)
+            crowd = self.specimen_gen.crowd
+            packing_seed = None if crowd is None else crowd.packing_seed
+            try:
+                if crowd is not None:
+                    crowd.packing_seed = draw_seed
+                with seeded_rng(draw_seed):
+                    assembled = self.specimen_gen.assemble(
+                        absorption=self._absorption_rates,
+                        damage=damage,
+                        ice_filter=ice_filter,
+                    )
+            finally:
+                if crowd is not None:
+                    crowd.packing_seed = packing_seed
+        self._specimen_draws += 1
         self.volume = assembled.volume
         self.absorption_potential = assembled.absorption
         if self.move_to_cpu:
@@ -790,7 +827,7 @@ class MicrographGenerator(BaseImager):
             self.clean_exitwaves = self.iterative_scattering(
                 V_clean, pose=0, slice_batchsize=self.slice_batchsize
             )
-            self.clean_exitwaves = to_batch(self.clean_exitwaves)
+            self.clean_exitwaves = self._pixel_grid(to_batch(self.clean_exitwaves))
 
         if self.absorption_potential is None:
             self.exitwaves = self.iterative_scattering(
@@ -821,13 +858,21 @@ class MicrographGenerator(BaseImager):
                 absorption_source=field,
             )
             del field
-        self.exitwaves = to_batch(self.exitwaves)
+        exitwaves = to_batch(self.exitwaves)
+        # Kept on the pixel grid for the caller; imaged from the propagation
+        # grid (see BaseImager._aberrate).
+        self.exitwaves = self._pixel_grid(exitwaves)
 
-        self.detector_waves = self._aberrate(self.exitwaves, self._ctf_batch(idx))
+        self.detector_waves = self._aberrate(exitwaves, self._ctf_batch(idx))
 
         dose_batch = self.dose_per_angstrom[idx]
         cr_batch = self.coincidence_radius[idx]
         anisomag = None if self.anisomag is None else self.anisomag[idx]
         return self.detector(
-            self.detector_waves, dose_batch, cr_batch, anisomag, nxy=self.nxy
+            self.detector_waves,
+            dose_batch,
+            cr_batch,
+            anisomag,
+            nxy=self.nxy,
+            seeds=self._item_seeds(idx, _SEED_STAGE_DETECTOR),
         )

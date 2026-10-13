@@ -36,6 +36,8 @@ from ..potential import (
     ice_inelastic_mfp,
     inelastic_absorption_potential,
 )
+from ..random_seed import derive_seed
+from ..scattering._kernels import fourier_crop_xy, fourier_upsample_xy
 from ..settings import Camera, Envelopes, Ice, Optics, Propagation
 
 __all__ = [
@@ -299,6 +301,16 @@ def mfp_absorption_field(
     )
 
 
+# The stochastic stages of one image's forward pass, each seeded from
+# (run seed, particle index, stage) when the generator has a seed, so no stage
+# can read another's stream. Values are arbitrary but fixed: changing one
+# changes every seeded stack.
+_SEED_STAGE_CROWD = 0
+_SEED_STAGE_ICE = 1
+_SEED_STAGE_DETECTOR = 2
+_SEED_STAGE_SPECIMEN = 3
+
+
 class BaseImager(L.LightningModule):
     """
     Shared base for all image-generation classes.
@@ -454,6 +466,17 @@ class BaseImager(L.LightningModule):
         )
         self.klim = self.propagation.klim
         self.oversample = self.propagation.oversample
+        # The grid the IMAGE is formed on. |psi|^2 has twice the wave's
+        # bandwidth and, for the oversampled models, cross terms with the
+        # scattering above the pixel Nyquist; both fold if the intensity is
+        # formed on the pixel grid (1.2e-3 to 1.8e-2 of the image power per
+        # shell in 2000 A of ice). So the transfer function is applied and the
+        # intensity formed on the propagation grid, and the detector samples
+        # it down. The CTF model's exit wave is a real projection imaged
+        # linearly, with nothing to square.
+        self._image_oversample = (
+            self.oversample if self.scattering_model != "ctf" else 1
+        )
         self.ews_curvature_sign = self.propagation.ews_curvature_sign
         self.noise_model = self.camera.noise_model
         self.detector_model = self.camera.detector_model
@@ -710,6 +733,50 @@ class BaseImager(L.LightningModule):
             full_potential=full_potential,
         )
 
+    def _init_seed(self, seed: int | None) -> None:
+        """
+        Record the run seed every stochastic stage derives its draws from.
+
+        Parameters
+        ----------
+        seed : int or None
+            With a seed, each particle's crowding, ice and detector noise
+            are drawn from generators seeded by :func:`specter.derive_seed`
+            on ``(seed, particle index, stage)``, so a seeded stack is
+            identical however it is batched and over however many DDP ranks.
+            None draws everything from the global RNG, where the batch
+            boundaries decide which draw reaches which particle.
+
+        Notes
+        -----
+        Kept as a buffer rather than a plain attribute so that Lightning's
+        DDP setup, which broadcasts rank 0's buffers before predicting,
+        hands every worker rank the seed rank 0 ran with -- the same reason
+        the poses are buffers. A worker that drew its own seed (the
+        ``seed=None`` pipeline path draws one per process) would otherwise
+        derive different per-particle streams from it.
+        """
+        if seed is None:
+            self._seed_buffer = None
+            return
+        self.register_buffer(
+            "_seed_buffer", torch.tensor(int(seed), dtype=torch.int64), persistent=False
+        )
+
+    @property
+    def seed(self) -> int | None:
+        """The run seed per-particle draws derive from, or None."""
+        buf = getattr(self, "_seed_buffer", None)
+        return None if buf is None else int(buf.item())
+
+    def _item_seeds(self, idx: torch.Tensor | int, stage: int) -> list[int] | None:
+        """One derived seed per particle in the batch for `stage`, or None."""
+        seed = self.seed
+        if seed is None:
+            return None
+        indices = torch.as_tensor(idx).reshape(-1).tolist()
+        return [derive_seed(seed, int(i), stage) for i in indices]
+
     def _init_optics(self) -> None:
         """Instantiate the aberration engine and ``Detector`` from the
         stored settings. Which class ``self.aberration`` is depends on
@@ -735,8 +802,8 @@ class BaseImager(L.LightningModule):
             self.aberration = None
         elif self.optics.aberration_backend == "torch_ctf":
             self.aberration = LegacyAberrationAdapter(
-                self.pad_nxy,
-                self.pixel_size,
+                self.pad_nxy * self._image_oversample,
+                self.pixel_size / self._image_oversample,
                 self.voltage,
                 aberration_model=self.aberration_model,
                 # See the "legacy" branch below for why this depends only
@@ -756,8 +823,8 @@ class BaseImager(L.LightningModule):
             )  # _dose_weighted: class attribute, False on TiltSeriesGenerator
         else:
             self.aberration = Aberration(
-                self.pad_nxy,
-                self.pixel_size,
+                self.pad_nxy * self._image_oversample,
+                self.pixel_size / self._image_oversample,
                 self.voltage,
                 aberration_model=self.aberration_model,
                 alpha=self.alpha,
@@ -788,6 +855,7 @@ class BaseImager(L.LightningModule):
             dose_weights=dose_weights,
             dose_weights_max_frequency=self._dose_weights_max_frequency,
             progressbars=self.progressbars,
+            oversample=self._image_oversample,
         )
 
     def _load_dose_weights(self) -> torch.Tensor | None:
@@ -878,10 +946,34 @@ class BaseImager(L.LightningModule):
     def _aberrate(
         self, exitwave: torch.Tensor, ctf_batch: dict[str, torch.Tensor]
     ) -> torch.Tensor:
-        """The aberration stage, or the exit wave itself when there is none."""
+        """
+        The aberration stage, or the exit wave itself when there is none.
+
+        On the image grid (see ``_image_oversample``): an exit wave still on
+        the pixel grid (first Born, kinematic, or an oversample of 1) is
+        interpolated there first, which adds nothing but gives ``|psi|^2``
+        room for its own bandwidth.
+        """
         if self.aberration is None:
             return exitwave
+        s = self._image_oversample
+        if s > 1 and exitwave.shape[-1] == self.pad_nxy:
+            exitwave = fourier_upsample_xy(exitwave, s)
         return self.aberration(exitwave, ctf_batch)
+
+    def _pixel_grid(self, wave: torch.Tensor) -> torch.Tensor:
+        """An exit wave on the pixel grid, whichever grid it was computed on."""
+        s = self._image_oversample
+        if s > 1 and wave.shape[-1] == self.pad_nxy * s:
+            return fourier_crop_xy(wave, self.pad_nxy)
+        return wave
+
+    def _pixel_intensity(self, intensity: torch.Tensor) -> torch.Tensor:
+        """An intensity formed on the image grid, sampled to the pixel grid."""
+        s = self._image_oversample
+        if s > 1 and intensity.shape[-1] == self.pad_nxy * s:
+            return fourier_crop_xy(intensity, self.pad_nxy)
+        return intensity
 
     def simulate_frozen(
         self,
@@ -927,6 +1019,7 @@ class BaseImager(L.LightningModule):
             alpha=0,
             klim=self.klim,
             oversample=self.oversample,
+            crop=False,
             ews_curvature_sign=self.ews_curvature_sign,
             progressbars=self.progressbars,
         ).to(self.device)
@@ -936,6 +1029,7 @@ class BaseImager(L.LightningModule):
             noise_model=self.noise_model,
             mtf=self.detector_mtf,
             dqe0=self.detector.dqe0,
+            oversample=self._image_oversample,
             n_frames=1,
             progressbars=self.progressbars,
         ).to(self.device)

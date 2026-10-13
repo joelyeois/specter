@@ -80,8 +80,19 @@ of slices in a thick specimen, this aliasing compounds slice over slice.
 SPECTER's default remedy is to refine the grid rather than to cut the
 band. With `oversample = 2`, each slice is interpolated onto an xy grid
 twice as fine before the exponential (Fourier zero-padding, which adds no
-content), the recursion runs there, and the exit wave is Fourier-cropped
-back to the volume's grid. The product then has room to exist, and the
+content) and the recursion runs there. The image is formed on that grid
+as well: the transfer function is applied to the fine-grid exit wave, the
+intensity \(|\psi|^2\) is taken there, and the detector samples the
+intensity to the pixel grid with a band-limited crop. The intensity of a
+band-limited wave has twice the wave's bandwidth, and in a thick specimen
+it also carries cross terms between the scattering inside the pixel band
+and the scattering above it, which a pixel integrates; forming
+\(|\psi|^2\) on the pixel grid folds both. Measured on the 2000 Å case
+against the fine-grid intensity, cropping the wave to the pixel grid first
+left 1.2e-3 of the image power in error at low frequencies and 1.8e-2 near
+Nyquist, the same size as the aliasing itself. The first-Born exit wave,
+linear in the potential and so already band-limited to the volume grid, is
+interpolated onto the image grid for the same reason. The product then has room to exist, and the
 result is converged: measured against a 4x reference on a 6bdf particle at
 1 Å/px, the 2x grid agrees to 3e-7 of the scattered power, the float32
 noise floor, with no bandlimit applied at all. On the volume's own grid

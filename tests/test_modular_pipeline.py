@@ -84,10 +84,16 @@ def test_modular_pipeline_matches_image_generator():
         # ImageGenerator's Propagation() default; the hand-built stage has to
         # make the same choice to compare equal.
         oversample=Propagation().oversample,
+        # ... and hand the imager the wave on the propagation grid: the
+        # transfer function is applied and the intensity formed there, and
+        # the detector samples the intensity to the pixel grid.
+        crop=False,
         progressbars=False,
     )
+    s = Propagation().oversample
     with torch.no_grad():
         exitwaves = scattering(V)
+    assert exitwaves.shape[-1] == pad_nxy * s
 
     # multislice evaluates the CTF at the volume's midplane, not its entry
     # face -- ImageGenerator applies this shift internally via
@@ -99,15 +105,37 @@ def test_modular_pipeline_matches_image_generator():
     }
 
     aberration = Aberration(
-        pad_nxy, pixel_size, voltage, aberration_model="nonlinear", alpha=0.0
+        pad_nxy * s, pixel_size / s, voltage, aberration_model="nonlinear", alpha=0.0
     )
     with torch.no_grad():
         detector_waves = aberration(exitwaves, manual_ctf_params)
 
-    detector = Detector(pixel_size, aberration_model="nonlinear", noise_model=None)
+    detector = Detector(
+        pixel_size, aberration_model="nonlinear", noise_model=None, oversample=s
+    )
     dose_batch = torch.full((2,), dose)
     coincidence_radius = torch.zeros(2)
     with torch.no_grad():
         actual = detector(detector_waves, dose_batch, coincidence_radius, nxy=nxy)
 
     assert torch.allclose(actual, expected, atol=1e-4)
+
+    # Cropping the WAVE to the pixel grid before imaging is a different, and
+    # wrong, composition: |psi|^2's own bandwidth and the cross terms with
+    # the scattering above Nyquist fold.
+    from specter.scattering._kernels import fourier_crop_xy
+
+    coarse_aberration = Aberration(
+        pad_nxy, pixel_size, voltage, aberration_model="nonlinear", alpha=0.0
+    )
+    coarse_detector = Detector(
+        pixel_size, aberration_model="nonlinear", noise_model=None
+    )
+    with torch.no_grad():
+        cropped = coarse_detector(
+            coarse_aberration(fourier_crop_xy(exitwaves, pad_nxy), manual_ctf_params),
+            dose_batch,
+            coincidence_radius,
+            nxy=nxy,
+        )
+    assert not torch.allclose(cropped, expected, atol=1e-4)

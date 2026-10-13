@@ -42,6 +42,7 @@ class Scattering(L.LightningModule):
         uniform_absorption: float = 0.0,
         progressbars: bool = True,
         oversample: int = 1,
+        crop: bool = True,
     ):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
@@ -107,6 +108,16 @@ class Scattering(L.LightningModule):
             image); first Born and the CTF model are linear in the potential
             and untouched, and kinematic's per-slice ``exp - 1`` harmonics
             are hundreds of times smaller and left alone. Default 1.
+        crop : bool, optional
+            Crop the exit wave of the oversampled models back to the volume's
+            grid (default). The imagers pass False and form the image on the
+            propagation grid: the intensity ``|psi|^2`` has twice the wave's
+            bandwidth, and the cross terms between in-band and above-Nyquist
+            scattering are real content a pixel integrates, so cropping the
+            WAVE first loses them -- 1.2e-3 to 1.8e-2 of the image power per
+            shell in 2000 A of ice. First Born and kinematic return the
+            volume grid either way (nothing above Nyquist to keep); the
+            imager interpolates those before the transfer function.
 
         Notes
         -----
@@ -117,6 +128,7 @@ class Scattering(L.LightningModule):
         if not isinstance(oversample, int) or oversample < 1:
             raise ValueError(f"oversample={oversample!r} must be an integer >= 1")
         self.oversample = oversample
+        self.crop = crop
         self.nxy = nxy
         self.nz = nz
         self.pixel_size = pixel_size
@@ -319,7 +331,7 @@ class Scattering(L.LightningModule):
                 # propagate wave to next slice, also applies Kirkland's 0.66 bandlimit
                 exitwave = ifft2(fft2(wv) * Fk)
         assert exitwave is not None, "V must have at least one z-slice"
-        return fourier_crop_xy(exitwave, V.shape[-1])
+        return fourier_crop_xy(exitwave, V.shape[-1]) if self.crop else exitwave
 
     @property
     def F_real(self) -> torch.Tensor:
@@ -448,6 +460,7 @@ class Scattering(L.LightningModule):
             ifft2(self._phase_scale(V) * scattered_k)
             - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1],
             self.oversample,
+            self.crop,
         )
         return exitwave  # (B x X x Y)
 
@@ -561,6 +574,7 @@ class Scattering(L.LightningModule):
             self._phase_scale(V) * V_sum
             - self.sigma * self.pixel_size * self.uniform_absorption * V.shape[1],
             self.oversample,
+            self.crop,
         )
         return exitwave
 

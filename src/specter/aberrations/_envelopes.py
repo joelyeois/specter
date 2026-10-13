@@ -16,9 +16,15 @@ Notes
 
 from __future__ import annotations
 
+import math
+
 import torch
 
 from ..constants import rest_mass_energy
+
+
+#: A Gaussian's FWHM over its standard deviation, ``2 sqrt(2 ln 2)``.
+FWHM_TO_SIGMA = 2.0 * math.sqrt(2.0 * math.log(2.0))
 
 
 def b_envelope(k2: torch.Tensor, bfactor: torch.Tensor) -> torch.Tensor:
@@ -61,12 +67,22 @@ def cs_envelope(
     defocus : torch.Tensor
         Defocus, in Å.
     convergence_angle : float
-        Beam convergence semi-angle, in milliradians.
+        Beam convergence semi-angle, in milliradians: the 1/e half-angle of a
+        Gaussian source distribution ``exp(-(theta / alpha)^2)``, Frank's
+        ``alpha_0``, which is ``sqrt(2)`` times the distribution's standard
+        deviation.
 
     Returns
     -------
     envelope : torch.Tensor
         Amplitude envelope due to partial spatial coherence.
+
+    Notes
+    -----
+    The Gaussian average of ``exp(i grad(chi) . theta)`` over source angles
+    of standard deviation ``sigma`` is ``exp(-sigma^2 |grad chi|^2 / 2)``
+    with ``grad chi = 2 pi (Cs lambda^3 k^3 + df lambda k)``; writing
+    ``alpha = sqrt(2) sigma`` gives the form below.
     """
     half_angle = convergence_angle / 1000  # mrad -> rad
     return torch.exp(
@@ -98,19 +114,37 @@ def cc_envelope(
     voltage : float
         Accelerating voltage, in Volts.
     energy_spread : float
-        FWHM of the beam energy spread, in eV.
+        FWHM of the beam energy spread, in eV, the figure a source is quoted
+        with (0.7 eV for a Schottky FEG, 0.3 for a cold FEG).
     deltaV_V : float
-        Relative high-voltage instability.
+        Relative high-voltage instability, rms.
     deltaI_I : float
-        Relative objective-lens current instability.
+        Relative objective-lens current instability, rms.
 
     Returns
     -------
     envelope : torch.Tensor
         Amplitude envelope due to partial temporal coherence.
+
+    Notes
+    -----
+    The envelope is the Gaussian average of the defocus phase
+    ``exp(-i pi lambda df k^2)`` over a defocus distribution of standard
+    deviation ``sigma_f``: ``exp(-(pi lambda sigma_f k^2)^2 / 2)``, with
+    ``sigma_f = Cc sqrt((sigma_E / E)^2 + (dV/V)^2 + (2 dI/I)^2)``. The
+    energy spread enters as a standard deviation, so the quoted FWHM is
+    divided by ``2 sqrt(2 ln 2)`` first. The reference implementation this
+    was ported from (teamtomo's ``torch_fourier_filter.envelopes``) has the
+    same Gaussian form and the same FWHM input, fed straight in; so did this
+    port until 2026-10-14, which made the exponent 5.5x too large (0.62
+    instead of 0.92 at 2 A for Cc = 2.7 mm, 0.7 eV, 300 kV). Kirkland's 1/e
+    width form is the same Gaussian with ``Delta = sqrt(2) sigma_f``.
+    ``tests/test_aberrations_envelopes.py`` pins this against an explicit
+    weighted integration over defocus.
     """
+    sigma_e = energy_spread / FWHM_TO_SIGMA
     focus_spread = cc * (
-        ((energy_spread / voltage) ** 2 + deltaV_V**2 + (2 * deltaI_I) ** 2) ** 0.5
+        ((sigma_e / voltage) ** 2 + deltaV_V**2 + (2 * deltaI_I) ** 2) ** 0.5
     )
     return torch.exp(-0.5 * (torch.pi * wavelength * focus_spread * k2) ** 2)
 

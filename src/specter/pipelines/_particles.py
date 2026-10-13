@@ -539,7 +539,13 @@ def _resolve_batchsize(
         else:
             sizing_device = str(device_target)
         batchsize = recommend_batchsize(
-            config.n_pixels, model.nz, model.pad_nxy, sizing_device, n_particles=n
+            config.n_pixels,
+            model.nz,
+            model.pad_nxy,
+            sizing_device,
+            n_particles=n,
+            oversample=model.oversample,
+            ice=model.icemaker is not None,
         )
         if is_main:
             peak_gib = (
@@ -549,6 +555,7 @@ def _resolve_batchsize(
                     model.nz,
                     model.pad_nxy,
                     model.oversample,
+                    model.icemaker is not None,
                 )
                 / 1024**3
             )

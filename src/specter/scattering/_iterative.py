@@ -52,6 +52,7 @@ class IterativeScattering(L.LightningModule):
         pad_fft: bool = False,
         fft_pad_margin: int = 16,
         oversample: int = 1,
+        crop: bool = True,
     ):
         """
         Parameters
@@ -120,11 +121,16 @@ class IterativeScattering(L.LightningModule):
             :class:`~specter.scattering.Scattering` for the measurement
             behind it. Applies to multislice, and to Rytov's and projection's
             final exponential. Default 1.
+        crop : bool, optional
+            Crop the oversampled exit wave back to the slice grid (default),
+            or return it on the propagation grid for the image to be formed
+            there; see :class:`Scattering`. Default True.
         """
         super().__init__()
         if not isinstance(oversample, int) or oversample < 1:
             raise ValueError(f"oversample={oversample!r} must be an integer >= 1")
         self.oversample = oversample
+        self.crop = crop
         self.nxy = nxy
         self.pixel_size = pixel_size
         self.voltage = voltage
@@ -552,10 +558,7 @@ class IterativeScattering(L.LightningModule):
                 )
                 exitwave = self._checkpointed(chunk_fn, exitwave, V, checkpoint=True)
 
-        exitwave = fourier_crop_xy(exitwave, canvas)
-        if self.pad_fft:
-            exitwave = center_crop(exitwave, self.nxy, dim=(-2, -1))
-        return exitwave
+        return self._output(exitwave, canvas)
 
     def multislice_absorptive(
         self,
@@ -654,8 +657,20 @@ class IterativeScattering(L.LightningModule):
                         use_reentrant=False,
                     )
                     elastic_block, source_block = [], []
-        wave = fourier_crop_xy(wave, canvas)
-        return center_crop(wave, self.nxy, dim=(-2, -1)) if self.pad_fft else wave
+        return self._output(wave, canvas)
+
+    def _output(self, wave: torch.Tensor, canvas: int) -> torch.Tensor:
+        """
+        The multislice exit wave as the caller asked for it: cropped to the
+        slice grid, or left on the propagation grid; either way with the
+        ``pad_fft`` canvas margin removed.
+        """
+        if self.crop:
+            wave = fourier_crop_xy(wave, canvas)
+        if self.pad_fft:
+            out = self.nxy if self.crop else self.nxy * self.oversample
+            wave = center_crop(wave, out, dim=(-2, -1))
+        return wave
 
     @staticmethod
     def _checkpointed(
@@ -812,7 +827,9 @@ class IterativeScattering(L.LightningModule):
 
         total_complex = apply_amplitude_contrast(total_potential, alpha=self.alpha)
         exitwave = oversampled_exp(
-            1j * self.sigma * self.pixel_size * total_complex, self.oversample
+            1j * self.sigma * self.pixel_size * total_complex,
+            self.oversample,
+            self.crop,
         )
         return exitwave
 
@@ -843,7 +860,7 @@ class IterativeScattering(L.LightningModule):
             F_i = self._get_propagator(float(nz_new - i))
             phase_sum += fft2(slice_sample) * F_i
 
-        return oversampled_exp(c * ifft2(phase_sum), self.oversample)
+        return oversampled_exp(c * ifft2(phase_sum), self.oversample, self.crop)
 
     def parallel_rytov(
         self,
@@ -956,7 +973,7 @@ class IterativeScattering(L.LightningModule):
                 chunk_fn, phase_sum, V, checkpoint=checkpoint_chunks is not None
             )
 
-        return oversampled_exp(phase_sum, self.oversample)
+        return oversampled_exp(phase_sum, self.oversample, self.crop)
 
     def firstborn(
         self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1

@@ -119,11 +119,13 @@ class Propagation:
         aliasing at the cost of the highest frequencies). Default None, no
         bandlimit.
     oversample : int
-        Grid refinement for the multislice recursion: each slice is
-        interpolated onto an xy grid this many times finer (adding no
-        content) and the exit wave is Fourier-cropped back, so the product
-        of transmission function and wave has room to exist instead of
-        wrapping at the volume's Nyquist. The Fourier-space counterpart of
+        Grid refinement for the multislice recursion and the image: each
+        slice is interpolated onto an xy grid this many times finer (adding
+        no content), so the product of transmission function and wave has
+        room to exist instead of wrapping at the volume's Nyquist; the
+        transfer function is applied and the intensity formed on that grid
+        too, since ``|psi|^2`` has twice the wave's bandwidth, and the
+        detector samples the intensity to the pixel grid. The Fourier-space counterpart of
         `pad_fft`: that pads real space (a wider frame, same pixels, finer
         k-sampling, same Nyquist) against wrap at the frame edge; this pads
         Fourier space (same frame, finer pixels, same k-sampling, higher
@@ -261,13 +263,14 @@ class Envelopes:
         Chromatic aberration coefficient in Angstrom, for the temporal-
         coherence envelope. Default None, envelope off.
     energy_spread : float
-        FWHM of the beam energy spread in eV, used by the Cc envelope.
+        FWHM of the beam energy spread in eV, as a source is quoted, used
+        by the Cc envelope (which converts it to a standard deviation).
         Default 0.7.
     deltaV_V : float
-        Relative high-voltage instability, used by the Cc envelope.
+        Relative high-voltage instability, rms, used by the Cc envelope.
         Default 0.06e-6.
     deltaI_I : float
-        Relative objective-lens current instability, used by the Cc
+        Relative objective-lens current instability, rms, used by the Cc
         envelope. Default 0.01e-6.
     dose_envelope : bool
         Apply the Grant & Grigorieff (2015) radiation-damage envelope over

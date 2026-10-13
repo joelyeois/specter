@@ -116,7 +116,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     specter.set_verbosity(logging.INFO)
     t_start = time.perf_counter()
 
-    _seed_or_draw(config.seed)
+    run_seed = _seed_or_draw(config.seed)
 
     # --- Building 3D scattering potential ---
     section("Building 3D scattering potential")
@@ -255,6 +255,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         coincidence_radius=coincidence_radius,
         potential_scale=potential_scale,
         save_clean_exitwaves=config.save_clean_exitwaves,
+        seed=run_seed,
     ).to(device)
 
     # --- Generating images ---

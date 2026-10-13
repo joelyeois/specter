@@ -206,9 +206,12 @@ def fourier_crop_xy(psi: torch.Tensor, n: int) -> torch.Tensor:
     return out.real if not psi.is_complex() else out
 
 
-def oversampled_exp(phase: torch.Tensor, factor: int) -> torch.Tensor:
+def oversampled_exp(
+    phase: torch.Tensor, factor: int, crop: bool = True
+) -> torch.Tensor:
     """
-    ``exp(phase)`` evaluated on a grid `factor` times finer and cropped back.
+    ``exp(phase)`` evaluated on a grid `factor` times finer, cropped back
+    unless `crop` is False.
 
     The exponential of a band-limited field has harmonics beyond the field's
     own band; evaluated on the field's grid they wrap. This is the one
@@ -223,17 +226,19 @@ def oversampled_exp(phase: torch.Tensor, factor: int) -> torch.Tensor:
         Complex ``(..., n, n)`` exponent, band-limited to its grid.
     factor : int
         Grid refinement, see :class:`~specter.scattering.Scattering`.
+    crop : bool, optional
+        Crop the result back to `phase`'s grid (default), or return it on
+        the fine grid for the image to be formed there.
 
     Returns
     -------
     torch.Tensor
-        ``(..., n, n)`` complex.
+        ``(..., n, n)`` complex, or ``(..., factor n, factor n)`` uncropped.
     """
     if factor == 1:
         return torch.exp(phase)
-    return fourier_crop_xy(
-        torch.exp(fourier_upsample_xy(phase, factor)), phase.shape[-1]
-    )
+    fine = torch.exp(fourier_upsample_xy(phase, factor))
+    return fourier_crop_xy(fine, phase.shape[-1]) if crop else fine
 
 
 def absorption_factor(V: torch.Tensor, alpha: float) -> complex:

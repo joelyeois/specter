@@ -23,10 +23,15 @@ from ..potential import (
     potential_occupancy_slabs,
     template_occupancy_reference,
 )
-from ..random_seed import derive_seed, seeded_rng
+from ..random_seed import seeded_rng
 from ..scattering import Scattering
 from ..settings import Crowding, Ice, Propagation
-from ._base import BaseImager
+from ._base import (
+    _SEED_STAGE_CROWD,
+    _SEED_STAGE_DETECTOR,
+    _SEED_STAGE_ICE,
+    BaseImager,
+)
 
 __all__ = ["ParticleGeneratorBase"]
 
@@ -39,15 +44,6 @@ __all__ = ["ParticleGeneratorBase"]
 #: has already flattened out.
 _SOLVATE_SLAB_VOXELS = 2**26
 _SOLVATE_MAX_SLICES = 64
-
-
-# The stochastic stages of one particle's forward pass, each seeded from
-# (run seed, particle index, stage) when the generator has a seed, so no stage
-# can read another's stream. Values are arbitrary but fixed: changing one
-# changes every seeded stack.
-_SEED_STAGE_CROWD = 0
-_SEED_STAGE_ICE = 1
-_SEED_STAGE_DETECTOR = 2
 
 
 def _solvate_chunk_slices(nxy: int) -> int:
@@ -104,50 +100,6 @@ class ParticleGeneratorBase(BaseImager):
     #: when only a bare volume was given, which keeps the fixed reference.
     molecular_mass: float | None = None
     _occupancy_reference_V: float | None = None
-
-    def _init_seed(self, seed: int | None) -> None:
-        """
-        Record the run seed every stochastic stage derives its draws from.
-
-        Parameters
-        ----------
-        seed : int or None
-            With a seed, each particle's crowding, ice and detector noise
-            are drawn from generators seeded by :func:`specter.derive_seed`
-            on ``(seed, particle index, stage)``, so a seeded stack is
-            identical however it is batched and over however many DDP ranks.
-            None draws everything from the global RNG, where the batch
-            boundaries decide which draw reaches which particle.
-
-        Notes
-        -----
-        Kept as a buffer rather than a plain attribute so that Lightning's
-        DDP setup, which broadcasts rank 0's buffers before predicting,
-        hands every worker rank the seed rank 0 ran with -- the same reason
-        the poses are buffers. A worker that drew its own seed (the
-        ``seed=None`` pipeline path draws one per process) would otherwise
-        derive different per-particle streams from it.
-        """
-        if seed is None:
-            self._seed_buffer = None
-            return
-        self.register_buffer(
-            "_seed_buffer", torch.tensor(int(seed), dtype=torch.int64), persistent=False
-        )
-
-    @property
-    def seed(self) -> int | None:
-        """The run seed per-particle draws derive from, or None."""
-        buf = getattr(self, "_seed_buffer", None)
-        return None if buf is None else int(buf.item())
-
-    def _item_seeds(self, idx: torch.Tensor | int, stage: int) -> list[int] | None:
-        """One derived seed per particle in the batch for `stage`, or None."""
-        seed = self.seed
-        if seed is None:
-            return None
-        indices = torch.as_tensor(idx).reshape(-1).tolist()
-        return [derive_seed(seed, int(i), stage) for i in indices]
 
     def _set_molecular_mass(self, molecular_mass: float | None) -> None:
         """Record the template's mass, in daltons, hydrogens included."""
@@ -326,6 +278,7 @@ class ParticleGeneratorBase(BaseImager):
             scattering_model=self.scattering_model,
             klim=self.klim,
             oversample=self.oversample,
+            crop=False,
             ews_curvature_sign=self.ews_curvature_sign,
             nz=self.nz,
             alpha=self.alpha,
@@ -624,7 +577,7 @@ class ParticleGeneratorBase(BaseImager):
         # is deliberately propagated from the real potential, and from the
         # undamaged one: it is the reference any damage is measured against.
         if getattr(self, "save_clean_exitwaves", False):
-            self.clean_exitwaves = self.scattering(V)
+            self.clean_exitwaves = self._pixel_grid(self.scattering(V))
 
         # Read the material fraction while V is still the specimen alone:
         # `solvate` writes into its input, and occupancy off a solvated volume
@@ -706,17 +659,20 @@ class ParticleGeneratorBase(BaseImager):
         if self.verbose:
             logger.info(f"Applying scattering using {self.scattering_model} model")
         if v_ab is None:
-            self.exitwaves = self.scattering(V)
+            exitwaves = self.scattering(V)
         else:
             # Keep material absorption separate until each transmission chunk
             # consumes it. A full complex copy of a thick padded volume can
             # occupy many GiB even though each slice is read only once.
-            self.exitwaves = self.scattering(V, absorption_potential=v_ab)
+            exitwaves = self.scattering(V, absorption_potential=v_ab)
             del v_ab
+        # Kept on the pixel grid for the caller; imaged from the propagation
+        # grid (see BaseImager._aberrate).
+        self.exitwaves = self._pixel_grid(exitwaves)
 
         if self.verbose:
             logger.info(f"Applying aberrations using {self.aberration_model} model")
-        self.detector_waves = self._aberrate(self.exitwaves, self._ctf_batch(idx))
+        self.detector_waves = self._aberrate(exitwaves, self._ctf_batch(idx))
 
         if self.verbose:
             logger.info(f"Applying detector and noise using {self.noise_model} model")

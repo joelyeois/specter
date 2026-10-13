@@ -23,6 +23,7 @@ from ..aberrations import Aberration, aberration_model_for_scattering
 from ..aberrations._functions import shift_defocus_to_midplane
 from ..ctf import LegacyAberrationAdapter
 from ..scattering import IterativeScattering
+from ..scattering._kernels import fourier_crop_xy, fourier_upsample_xy
 from ._base_reconstructor import _BaseReconstructor
 from ..settings import Optics, Propagation, TiltGeometry
 from specter.options import Scheduler
@@ -233,24 +234,34 @@ class TomogramReconstructor(_BaseReconstructor):
             scattering_model=scattering_model,
             klim=propagation.klim,
             oversample=propagation.oversample,
+            crop=False,
             alpha=propagation.alpha,
         )
+        # The image grid, as in BaseImager: the transfer function and the
+        # intensity on the propagation grid, sampled to the pixel grid in
+        # `_forward_tilt`. Same convention as TiltSeriesGenerator, which the
+        # parity test holds this class to.
+        self._image_oversample = (
+            propagation.oversample if scattering_model != "ctf" else 1
+        )
+        image_nxy = self.nxy * self._image_oversample
+        image_voxel = voxel_size / self._image_oversample
         # Derived from scattering_model, not user-configurable independently
         # -- see aberrations.aberration_model_for_scattering.
         aberration_model = aberration_model_for_scattering(scattering_model)
         self.aberration: Aberration | LegacyAberrationAdapter
         if optics.aberration_backend == "torch_ctf":
             self.aberration = LegacyAberrationAdapter(
-                self.nxy,
-                voxel_size,
+                image_nxy,
+                image_voxel,
                 voltage,
                 aberration_model=aberration_model,
                 lpp_params=optics.lpp_params,
             )
         else:
             self.aberration = Aberration(
-                self.nxy,
-                voxel_size,
+                image_nxy,
+                image_voxel,
                 voltage,
                 aberration_model=aberration_model,
                 alpha=propagation.alpha if aberration_model == "linear" else None,
@@ -385,8 +396,14 @@ class TomogramReconstructor(_BaseReconstructor):
                 self.voxel_size,
             )
 
+        s = self._image_oversample
+        if s > 1 and exitwave.shape[-1] == self.nxy:
+            exitwave = fourier_upsample_xy(exitwave, s)
         detector_waves = self.aberration(exitwave, ctf_batch)
-        return self.dose_per_pixel[tilt_idx] * torch.abs(detector_waves[0]) ** 2
+        intensity = torch.abs(detector_waves[0]) ** 2
+        if s > 1:
+            intensity = fourier_crop_xy(intensity, self.nxy)
+        return self.dose_per_pixel[tilt_idx] * intensity
 
     def forward(self, tilt_idx: int) -> torch.Tensor:
         """Simulate tilt image ``tilt_idx`` using the current volume."""

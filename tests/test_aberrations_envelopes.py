@@ -7,6 +7,7 @@ import torch
 
 from specter.aberrations import Aberration
 from specter.aberrations._envelopes import (
+    FWHM_TO_SIGMA,
     b_envelope,
     cc_envelope,
     cs_envelope,
@@ -65,7 +66,10 @@ def test_static_envelopes_match_their_closed_forms():
             deltaV_V=1e-6,
             deltaI_I=1e-6,
         ),
-        torch.tensor([0.9985, 0.8886, 0.4020]),
+        # exp(-(pi lambda d k^2)^2 / 2) with d = Cc sqrt((sigma_E/V)^2 + ...),
+        # sigma_E the FWHM 0.7 eV over 2 sqrt(2 ln 2). Until 2026-10-14 the FWHM
+        # went in as the sigma, which gave 0.9985, 0.8886, 0.4020 here.
+        torch.tensor([0.9992, 0.9346, 0.5934]),
         atol=1e-4,
     )
 
@@ -286,15 +290,18 @@ def test_aberration_cc_matches_closed_form():
     )
     freq = torch.fft.fftfreq(n_pixels, pixel_size)
     k2 = freq[:, None] ** 2 + freq[None, :] ** 2
-    # d = Cc sqrt((dE/V)^2 + (dV/V)^2 + (2 dI/I)^2), with V in volts.
+    # d = Cc sqrt((sigma_E/V)^2 + (dV/V)^2 + (2 dI/I)^2), with V in volts and
+    # sigma_E the quoted FWHM energy spread over 2 sqrt(2 ln 2).
     focus_spread = 2.7e7 * math.sqrt(
-        (0.7 / 300e3) ** 2 + 0.06e-6**2 + (2 * 0.01e-6) ** 2
+        (0.7 / FWHM_TO_SIGMA / 300e3) ** 2 + 0.06e-6**2 + (2 * 0.01e-6) ** 2
     )
-    assert focus_spread == pytest.approx(63.02, abs=0.01)
+    assert focus_spread == pytest.approx(26.81, abs=0.01)
     expected = torch.exp(-0.5 * (torch.pi * ab.wavelength * focus_spread * k2) ** 2)
     got = torch.abs(ab.transfer_function({"dfu": torch.tensor([10000.0])})).squeeze(0)
     assert torch.allclose(got, expected, atol=1e-6)
-    assert expected.min() < 0.5
+    # 0.85 at this grid's Nyquist (0.42 1/A); it was 0.5 while the FWHM went
+    # in as the sigma.
+    assert 0.8 < expected.min() < 0.9
 
 
 def test_aberration_dose_envelope_false_is_unchanged():
@@ -329,3 +336,73 @@ def test_ctf_batch_includes_dose():
     batch = gen._ctf_batch(torch.tensor([0, 1]))
     assert "dose" in batch
     assert torch.allclose(batch["dose"], torch.tensor([40.0, 60.0]))
+
+
+def test_cc_envelope_is_the_gaussian_defocus_average_of_a_fwhm_energy_spread():
+    """
+    The temporal envelope is what an explicit, weighted integration over
+    defocus gives for a weak-phase object, when the energy spread is read as
+    the FWHM it is documented (and quoted) as.
+
+    A Gaussian energy spread of FWHM dE gives a Gaussian defocus spread of
+    FWHM Cc dE/E. Averaging the images formed at each defocus with those
+    weights, and extracting the linear term, must reproduce CTF * E_t with
+    the envelope computed from dE. Feeding the FWHM in as if it were the
+    standard deviation (the ported form until 2026-10-14) makes the exponent
+    2 sqrt(2 ln 2) squared = 5.5x too large and fails this by a wide margin.
+    """
+    import math
+
+    from specter.constants import energy_to_wavelength
+    from specter.aberrations._envelopes import FWHM_TO_SIGMA
+
+    n, px, voltage_kv = 128, 1.0, 300.0
+    cc, energy_spread, defocus = 2.7e7, 0.7, 10000.0
+    wavelength = energy_to_wavelength(voltage_kv)
+    kx = torch.fft.fftfreq(n, px)
+    k2 = kx[:, None] ** 2 + kx[None, :] ** 2
+
+    # A weak-phase exit wave: 1 + i * small band-limited phase.
+    torch.manual_seed(0)
+    phase = torch.fft.ifft2(torch.fft.fft2(torch.randn(n, n)) * (k2 < 0.2)).real
+    phase = 1e-3 * phase / phase.std()
+    psi_k = torch.fft.fft2(1 + 1j * phase)
+
+    def linear_image_term(ctf):
+        return torch.fft.ifft2(psi_k * ctf).abs() ** 2 - 1
+
+    # Explicit integration: Gaussian defocus distribution of FWHM Cc dE / E.
+    sigma_f = cc * (energy_spread / FWHM_TO_SIGMA) / (voltage_kv * 1e3)
+    offsets = torch.linspace(-4, 4, 161) * sigma_f
+    weights = torch.exp(-0.5 * (offsets / sigma_f) ** 2)
+    weights = weights / weights.sum()
+    explicit = sum(
+        w
+        * linear_image_term(torch.exp(-1j * math.pi * wavelength * (defocus + d) * k2))
+        for w, d in zip(weights, offsets)
+    )
+
+    # The envelope, on the wave, at the nominal defocus.
+    envelope = cc_envelope(
+        k2, wavelength, cc, voltage_kv * 1e3, energy_spread, 0.0, 0.0
+    )
+    with_envelope = linear_image_term(
+        torch.exp(-1j * math.pi * wavelength * defocus * k2) * envelope
+    )
+    # The envelope is exact for the linear term; what remains is the quadratic
+    # term of a 1e-3 phase, ~1e-6 of it.
+    scale = explicit.std().item()
+    assert torch.allclose(with_envelope, explicit, atol=2e-3 * scale)
+
+    # The envelope matters here: at k = 0.5 1/A it is far from 1 ...
+    assert 0.85 < float(envelope[k2 > 0.249][0]) < 0.95
+    # ... and the FWHM-as-sigma form would not match the integration.
+    wrong = torch.exp(
+        -0.5
+        * (math.pi * wavelength * cc * energy_spread / (voltage_kv * 1e3) * k2) ** 2
+    )
+    assert not torch.allclose(
+        linear_image_term(torch.exp(-1j * math.pi * wavelength * defocus * k2) * wrong),
+        explicit,
+        atol=2e-3 * scale,
+    )

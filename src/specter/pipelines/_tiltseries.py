@@ -158,7 +158,7 @@ def run_tilt_series(
 
     t_start = time.perf_counter()
 
-    _seed_or_draw(config.seed)
+    run_seed = _seed_or_draw(config.seed)
 
     # --- Loading specimen volume ---
     section(f"Loading specimen volume from {config.volume_path}")
@@ -211,6 +211,7 @@ def run_tilt_series(
         bfactor=config.bfactor,
         tilt=bundle_from_config(TiltGeometry, config),
         coincidence_radius=config.coincidence_radius,
+        seed=run_seed,
     ).to(device_target)
 
     # --- Generating ---

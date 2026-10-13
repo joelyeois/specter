@@ -1181,7 +1181,9 @@ def test_micrograph_unit_scale_batch_propagates_once(small_volume, ctf_params):
             gen.coincidence_radius[:B],
             nxy=gen.nxy,
         )
-    assert torch.equal(gen.exitwaves, exitwaves)
+    # `exitwaves` is kept on the pixel grid; the propagator returns the
+    # image grid it was asked for (crop=False).
+    assert torch.equal(gen.exitwaves, gen._pixel_grid(exitwaves))
     assert torch.equal(images, want)
     assert not torch.equal(images[0], images[1])
 

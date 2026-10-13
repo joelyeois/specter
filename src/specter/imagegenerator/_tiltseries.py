@@ -5,6 +5,8 @@ multislice pass per tilt with the geometry padding each tilt needs.
 
 from __future__ import annotations
 
+import contextlib
+
 from specter import logger
 
 from dataclasses import replace
@@ -22,7 +24,10 @@ from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemak
 from ..ice._exposure import solvent_exposure_envelope
 from ..potential import aperture_lowpass_isotropic
 from ..settings import Camera, Envelopes, Ice, Optics, Propagation, TiltGeometry
+from ..random_seed import derive_seed, seeded_rng
 from ._base import (
+    _SEED_STAGE_DETECTOR,
+    _SEED_STAGE_ICE,
     RemovalMFPs,
     mfp_absorption_field,
     read_dose_weights,
@@ -263,6 +268,12 @@ class TiltSeriesGenerator(MicrographGenerator):
     bfactor : float or torch.Tensor or None, optional
         Isotropic B-factor envelope in Å² applied in the microscope transfer
         function. None or 0.0 means no envelope. Default None.
+    seed : int, optional
+        Run seed for the draws this generator makes itself: the ice blended
+        into the volume at construction, and each tilt's detector noise,
+        seeded on ``(seed, series index, stage, tilt)``. Two generators built
+        with the same seed produce the same series. Default None, every
+        draw from the global RNG.
 
     Notes
     -----
@@ -354,6 +365,7 @@ class TiltSeriesGenerator(MicrographGenerator):
         coincidence_radius: float | torch.Tensor = 0.0,
         bfactor: float | torch.Tensor | None = None,
         absorption_potential: torch.Tensor | None = None,
+        seed: int | None = None,
         **kwargs: Any,
     ):
         if volume is None:
@@ -448,15 +460,23 @@ class TiltSeriesGenerator(MicrographGenerator):
         # Kept for the damage series: the dose envelope on the specimen acts
         # on the dry specimen, never on the ice blended into it.
         dry = volume if damages_specimen else None
-        blended = self._blend_ice(
-            volume,
-            ice,
-            volume_icemaker,
-            pixel_size,
-            verbose,
-            progressbars,
-            ice_filter=ice_filter,
-        )
+        # The ice draw is seeded on its own, before the module is initialised
+        # (so from the argument, not `self.seed`); the CPU-side crop choice,
+        # rotation and translation are the whole draw.
+        with (
+            contextlib.nullcontext()
+            if seed is None
+            else seeded_rng(derive_seed(seed, 0, _SEED_STAGE_ICE))
+        ):
+            blended = self._blend_ice(
+                volume,
+                ice,
+                volume_icemaker,
+                pixel_size,
+                verbose,
+                progressbars,
+                ice_filter=ice_filter,
+            )
         free: torch.Tensor | None = None
         if per_tilt_solvent:
             # The specimen is padded without its ice, which each tilt adds.
@@ -570,6 +590,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             voltage=voltage,
             dose_per_angstrom=dose_per_angstrom,
             anisomag=anisomag,
+            seed=seed,
             # NOT pad_fft: MicrographGenerator/BaseImager's own pad_fft mechanism
             # (pad_nxy -> whole-volume XY padding, aberration built at pad_nxy) is
             # specific to MicrographGenerator.forward(), which TiltSeriesGenerator
@@ -674,6 +695,7 @@ class TiltSeriesGenerator(MicrographGenerator):
             scattering_model=self.scattering_model,
             klim=self.klim,
             oversample=self.oversample,
+            crop=False,
             alpha=self.alpha,
             progressbars=progressbars,
             roi_padding_mode="zeros",
@@ -945,6 +967,14 @@ class TiltSeriesGenerator(MicrographGenerator):
 
         return volume
 
+    def _tilt_seeds(self, idx: torch.Tensor | int, tilt: int) -> list[int] | None:
+        """One detector seed per series in the batch for `tilt`, or None."""
+        seed = self.seed
+        if seed is None:
+            return None
+        indices = torch.as_tensor(idx).reshape(-1).tolist()
+        return [derive_seed(seed, int(j), _SEED_STAGE_DETECTOR, tilt) for j in indices]
+
     def _tilt_index(
         self,
         i: int,
@@ -1161,16 +1191,23 @@ class TiltSeriesGenerator(MicrographGenerator):
             ]
             anisomag = None if self.anisomag is None else self.anisomag[idx]
             image = self.detector(
-                detector_waves, dose_batch, cr_batch, anisomag, nxy=None
+                detector_waves,
+                dose_batch,
+                cr_batch,
+                anisomag,
+                nxy=None,
+                seeds=self._tilt_seeds(idx, i),
             )
 
             tilt_series.append(image.detach().cpu())
             if exitwaves is not None:
-                exitwaves.append(exitwave.detach().cpu())
+                exitwaves.append(self._pixel_grid(exitwave.detach()).cpu())
             # |psi|^2 on the device: the host then receives a real image
             # rather than a complex one, and the CPU does no elementwise work.
             if clean_images is not None:
-                clean_images.append((detector_waves.detach().abs() ** 2).cpu())
+                clean_images.append(
+                    self._pixel_intensity(detector_waves.detach().abs() ** 2).cpu()
+                )
 
         return (
             torch.stack(tilt_series, dim=1),

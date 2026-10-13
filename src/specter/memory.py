@@ -87,6 +87,21 @@ __all__ = [
 #: box (one quarter of the canvas each).
 _PADDED_COPIES_PER_PARTICLE = 0.6
 
+#: The ice path's workspace, in copies of the part of the unpadded ice column
+#: that extends BEYOND the box, ``(nz - nxy) * nxy**2``. A box-deep column is
+#: a single cached config and sits on the volume terms alone (the thin-ice
+#: sweep above); a taller one is tiled, convolved periodically with complex
+#: transforms of deltas and kernel, and blended slab by slab, and until
+#: 2026-10-14 none of that was modelled: a 2000 A column at 384 px measured
+#: 10.1 GB against a 5.0 GB estimate. Re-measured across thickness and batch
+#: (dev/thick_ice_memory_probe.py): one more particle costs 0.8-1.3 extra
+#: column copies on top of the padded-canvas term (the per-item ice draw and
+#: its blend), and the batch pays a further ~8 once (6.6-9.3 across 256-512 px
+#: at 500-1000 A; ~4 where the convolution is chunked above 2^28 voxels, so
+#: that case over-estimates by about a third, on the safe side).
+_ICE_COLUMN_COPIES_PER_PARTICLE = 1.2
+_ICE_COLUMN_COPIES = 8.0
+
 #: Per-particle workspace in copies of the *unpadded* template volume
 #: (`nxy**3`): the template rotation's (nz, ny, nx, 3) sampling grid and its
 #: rotated output, built for the whole batch at once.
@@ -154,7 +169,12 @@ MAX_AUTO_BATCHSIZE = 8
 
 
 def estimate_peak_bytes(
-    batchsize: int, nxy: int, nz: int, pad_nxy: int, oversample: int = 1
+    batchsize: int,
+    nxy: int,
+    nz: int,
+    pad_nxy: int,
+    oversample: int = 1,
+    ice: bool = True,
 ) -> int:
     """
     Estimate peak memory for one forward pass of the particle pipeline.
@@ -173,6 +193,9 @@ def estimate_peak_bytes(
     oversample : int, optional
         `Propagation.oversample`: the multislice recursion runs on an xy
         grid this many times finer. Default 1.
+    ice : bool, optional
+        Whether the run solvates (an icemaker is set), which adds the ice
+        path's own working set. Default True.
 
     Returns
     -------
@@ -194,11 +217,14 @@ def estimate_peak_bytes(
         * 2
         * _BYTES_PER_ELEMENT
     )
+    ice_column = max(nz - nxy, 0) * nxy**2 * _BYTES_PER_ELEMENT if ice else 0
     return int(
         _PADDED_COPIES_PER_PARTICLE * batchsize * padded_volume
         + _TEMPLATE_COPIES_PER_PARTICLE * batchsize * template_volume
         + _TEMPLATE_COPIES * template_volume
         + batchsize * fine_grid
+        + (_ICE_COLUMN_COPIES + _ICE_COLUMN_COPIES_PER_PARTICLE * batchsize)
+        * ice_column
         + _FIXED_OVERHEAD_BYTES
     )
 
@@ -240,6 +266,8 @@ def recommend_batchsize(
     pad_nxy: int,
     device: str | torch.device,
     n_particles: int | None = None,
+    oversample: int = 1,
+    ice: bool = True,
 ) -> int:
     """
     Largest batch size worth running on `device`, given the free memory there.
@@ -291,11 +319,8 @@ def recommend_batchsize(
     )
     budget = free_bytes * fraction
 
-    per_particle = (
-        _PADDED_COPIES_PER_PARTICLE * nz * pad_nxy**2
-        + _TEMPLATE_COPIES_PER_PARTICLE * nxy**3
-    ) * _BYTES_PER_ELEMENT
-    overhead = estimate_peak_bytes(0, nxy, nz, pad_nxy)
+    overhead = estimate_peak_bytes(0, nxy, nz, pad_nxy, oversample, ice)
+    per_particle = estimate_peak_bytes(1, nxy, nz, pad_nxy, oversample, ice) - overhead
     batchsize = int(math.floor((budget - overhead) / per_particle))
 
     # Past saturation a bigger batch is not faster, so this is a ceiling on

@@ -32,6 +32,7 @@ import torch.nn.functional as F
 import lightning as L
 
 from .fft import fft2, ifft2
+from .scattering._kernels import fourier_crop_xy
 from .progress import track
 from specter.options import AberrationModel, NoiseModel
 
@@ -98,6 +99,7 @@ class Detector(L.LightningModule):
         dose_weights: torch.Tensor | None = None,
         dose_weights_max_frequency: float | None = None,
         progressbars: bool = True,
+        oversample: int = 1,
     ):
         super().__init__()
         if not 0.0 < dqe0 <= 1.0:
@@ -134,6 +136,10 @@ class Detector(L.LightningModule):
         self.register_buffer("dose_weights", dose_weights, persistent=False)
         self.dose_weights_max_frequency = dose_weights_max_frequency
         self.progressbars = progressbars
+        # The image is formed on the propagation grid, this many times finer
+        # than the pixel grid, and sampled down here before the detector's
+        # own response; see `BaseImager._init_optics`.
+        self.oversample = oversample
 
     def image(
         self, aberrated_exitwave: torch.Tensor, dose: torch.Tensor
@@ -306,6 +312,13 @@ class Detector(L.LightningModule):
         seed -- not on the batch it arrived in or on what was drawn before.
         Without, every draw comes from the global RNG.
         """
+        # The intensity on the propagation grid, sampled to the pixel grid:
+        # a band-limited (Fourier) crop, since the camera's measured MTF
+        # already carries the pixel aperture. Before anything that is defined
+        # on the pixel grid (crop size, magnification, MTF, noise).
+        if self.oversample > 1:
+            images = fourier_crop_xy(images, images.shape[-1] // self.oversample)
+
         # Set default crop size
         if nxy is None:
             nxy = images.shape[2]

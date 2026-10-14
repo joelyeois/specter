@@ -156,19 +156,21 @@ asymmetry: summing a volume's slices is commutative regardless of order.
 beyond the volume's own Z axis. `IterativeScattering.multislice`
 implements the identical recursion above, but fetches each Z-slice via
 `VolumeRotator.sample_rotated_slices` under the requested affine pose
-rather than indexing directly into `V`. Two extra mechanisms exist purely
-to control cost, not to change the physics:
+rather than indexing directly into `V`. Two further mechanisms apply:
 
-- **`pad_fft`** runs the entire recursion on a canvas padded by
-  `fft_pad_margin` pixels on each side, cropping back to `nxy` only once
-  at the end, rather than at every step. At high tilt the traversal runs
-  for 1000+ slices. With zero padding, each step's circular convolution
-  wraps slightly at the same fixed frame boundary, and that small
-  per-step leakage compounds coherently into a visible artifact along all
-  four frame edges. Padding once and cropping once avoids discarding
-  field content that is still propagating at every intermediate step;
-  padding-and-cropping at every step measurably makes results worse, not
-  better.
+- **`pad_fft`**, on by default for a tilt series, runs the entire
+  recursion on a canvas padded by `fft_pad_margin` (32) zero-filled pixels
+  on each side, cropping back to `nxy` only once at the end. The FFT treats
+  the frame as periodic, and under tilt its two edges cross the slab at
+  depths a frame width times \(\tan\theta\) apart, so an unpadded
+  recursion joins a phase step there that every slice diffracts into both
+  edges. The oversampled slice interpolation is periodic too, and rings
+  from the same join. A laterally uniform slab at 60° images 16% off flat
+  at the frame edge without the margin, 1.0% with 16 px and 0.3% with
+  32 px, for 5–9% more time per tilt. Padding once and cropping once
+  avoids discarding field content that is still propagating at every
+  intermediate step; padding-and-cropping at every step measurably makes
+  results worse, not better.
 - **`checkpoint_chunks`** wraps groups of slices in
   `torch.utils.checkpoint`, trading one extra forward pass per chunk
   during backpropagation for activation memory that scales with the

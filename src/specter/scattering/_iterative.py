@@ -50,7 +50,7 @@ class IterativeScattering(L.LightningModule):
         progressbars: bool = True,
         roi_padding_mode: GridSamplePadding = "zeros",
         pad_fft: bool = False,
-        fft_pad_margin: int = 16,
+        fft_pad_margin: int = 32,
         oversample: int = 1,
         crop: bool = True,
     ):
@@ -111,10 +111,11 @@ class IterativeScattering(L.LightningModule):
             i.e. the recursion runs at ``nxy + 2 * fft_pad_margin``. Always filled with
             zeros (not reflection): the region a tilted slice's flanks sample is real
             vacuum, not continuing material, so reflecting would fabricate density that
-            isn't there. Validated at 16-32px -- the result is identical across that
-            whole range (converged), including at production scale (nz=368, ~1000+
-            multislice steps), so this does not need to scale with volume size or step
-            count. Default 16.
+            isn't there. With ``oversample`` above 1 the slice interpolation is periodic
+            too, and a tilted slice, which holds specimen at one frame edge and not the
+            other, rings from that join in proportion to one over the margin: a uniform
+            slab at 60 degrees images 1.0% off flat at the edge with 16 px, 0.3% with
+            32 px. Default 32.
         oversample : int, optional
             Run the multislice recursion on an xy grid this many times finer
             than the sampled slices, interpolating each slice onto it, and

@@ -295,12 +295,13 @@ class TiltSeries:
         Reflect-pad the volume's XY when it is too small for the coverage.
         Default True.
     fft_pad_margin : int, optional
-        Zero-filled headroom of the multislice canvas under ``pad_fft``.
-        Zeros rather than reflection, since a tilted slice's flanks are
-        vacuum rather than continuing ice, and reflecting would fabricate
-        density there. The result is identical across 16 to 32 pixels,
-        independent of volume size or the number of multislice steps.
-        Default 16.
+        Zero-filled headroom of the multislice canvas under ``pad_fft``,
+        which a tilt series takes by default. Zeros rather than reflection,
+        since a tilted slice's flanks are vacuum rather than continuing ice,
+        and reflecting would fabricate density there. A uniform slab at 60
+        degrees images 16% off flat at the frame edge with no margin, 1.0%
+        at 16 px and 0.3% at 32 px: the oversampled slice interpolation rings
+        from the frame join in proportion to one over the margin. Default 32.
     absorption : torch.Tensor, optional
         An explicit nonnegative imaginary potential matching `volume`; it
         supplies all absorption, and the mean-free-path settings are not
@@ -340,7 +341,7 @@ class TiltSeries:
         tilt: TiltGeometry = TiltGeometry(),
         edge_margin: int = 8,
         pad_volume: bool = True,
-        fft_pad_margin: int = 16,
+        fft_pad_margin: int = 32,
         absorption: torch.Tensor | None = None,
         seed: int | None = None,
         objective_aperture: float | None = None,
@@ -548,7 +549,7 @@ class TiltSeries:
             alpha=p.alpha,
             progressbars=False,
             roi_padding_mode="zeros",
-            pad_fft=p.pad_fft,
+            pad_fft=p.pads(True),
             fft_pad_margin=fft_pad_margin,
         )
         self._warned_on_host = False

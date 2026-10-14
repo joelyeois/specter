@@ -186,9 +186,8 @@ a uniform slab of its maximum thickness costs. Particles are placed within
 each column's own slab of ice. The defocus refers to the ice's scattering
 centroid, the thickness-weighted mean height of the film, which for a level
 wedge is the box's midplane however much vacuum the box holds. A wedge also
-needs `pad_fft=True`:
-the field is periodic under the FFT, and without padding the thick edge's
-signal wraps into the thin edge. [Ice thickness profiles](../user-guide/micrograph.md#ice-thickness-profiles)
+pads its canvas by default: the field is periodic under the FFT, and without
+padding the thick edge's signal wraps into the thin edge. [Ice thickness profiles](../user-guide/micrograph.md#ice-thickness-profiles)
 covers the meniscus profile, a tilted slab and the size of the wrap-around
 effect.
 

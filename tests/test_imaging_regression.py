@@ -623,6 +623,38 @@ def test_the_ctf_keeps_the_nominal_defocus(small_volume, ctf_params):
 # ---------------------------------------------------------------------------
 
 
+def test_a_tilted_uniform_slab_images_flat_to_its_edges():
+    """
+    A laterally uniform slab must image flat at any tilt. The FFT joins the
+    frame's opposite edges, which under tilt cross the slab at different
+    depths, so an unpadded canvas darkens and rings at the edges (16% off at
+    60 degrees). A tilt series pads by default, and the 32 px margin leaves
+    0.3% from the oversampled slice interpolation.
+    """
+    nxy, px = 64, 4.0
+    volume = torch.full((1, 50, 160, 160), 4.5)
+    poses = Poses.tilt_series([60.0], axis="y")
+
+    def edge_deviation(**propagation: object) -> float:
+        series = Sample.from_volume(volume.clone(), px).tilt_series(
+            poses,
+            Exposure.tilt_series(2.0, 1),
+            voltage=300.0,
+            micrograph_size=nxy,
+            tilt=TiltGeometry(tilt_axis="y"),
+            log=False,
+            **propagation,
+        )
+        with torch.no_grad():
+            image = series.scatter(0).intensity(cc=None).pixels()[0]
+        m = (image.shape[-1] - nxy) // 2
+        columns = image[m : m + nxy, m : m + nxy].mean(dim=0)
+        return float((columns / columns[16:-16].mean() - 1).abs().max())
+
+    assert edge_deviation() < 0.01
+    assert edge_deviation(pad_fft=False) > 0.05
+
+
 def test_edge_margin_pads_beyond_the_geometric_minimum(ctf_params):
     """edge_margin adds real interpolation slack beyond the exact geometric minimum.
 

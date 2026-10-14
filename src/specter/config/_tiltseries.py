@@ -247,10 +247,13 @@ class TiltSeriesConfig:
         None, help="Isotropic B-factor envelope in Angstrom^2.", check="non_negative"
     )  # A^2
     pad_fft: bool = setting(
-        False,
+        True,
         help=(
-            "Pad volume for FFT to avoid multislice edge-wraparound "
-            "artifacts under tilt."
+            "Give the multislice canvas a zero-filled margin so the FFT cannot "
+            "join the frame's opposite edges. Under tilt those edges cross the "
+            "slab at different depths, and without the margin the image's edges "
+            "darken: a uniform slab at 60 degrees is 16% off flat. Costs about "
+            "5-9% per tilt."
         ),
     )
     detector_model: DetectorModel = setting("none", help="Detector model.")

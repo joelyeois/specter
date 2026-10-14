@@ -465,3 +465,24 @@ def test_profile_window_conserves_mean_density_against_no_profile():
     ratio = float(windowed.sum() / plain.sum())
     expected = 1.0 - 2 * prof.softness / (thickness * math.sqrt(math.pi))
     assert ratio == pytest.approx(expected, abs=0.05)
+
+
+def test_an_uneven_profile_pads_by_default():
+    """
+    The FFT joins a field's opposite edges, which match for level, uniform ice
+    and not for a wedge. Left to the default, a wedge pads and a flat slab
+    does not; an explicit pad_fft still wins.
+    """
+    px, nxy = 4.0, 32
+    for profile, padded in (
+        (IceProfile(mode="wedge", thickness_range=(40.0, 160.0)), True),
+        (IceProfile(mode="flat", mean_thickness=100.0), False),
+    ):
+        sample = _field(px, nxy, Ice(model="random", profile=profile)).draw(
+            voltage=300.0
+        )
+        with torch.no_grad():
+            waves = sample.scatter(voltage=300.0)
+            explicit = sample.scatter(voltage=300.0, pad_fft=False)
+        assert (waves.pad_nxy > nxy) is padded
+        assert explicit.pad_nxy == nxy

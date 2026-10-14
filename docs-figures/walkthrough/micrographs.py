@@ -244,7 +244,7 @@ wedge_sample = tilted.draw(voltage=300.0, seed=0, device="cuda")
 print(f"volume {tuple(wedge_sample.volume.shape)}: the thickest column sets the depth")
 
 image = (
-    wedge_sample.scatter(voltage=300.0, pad_fft=True, device="cuda")
+    wedge_sample.scatter(voltage=300.0, device="cuda")
     .apply_ctf(CTF.from_values(defocus=15000.0))
     .intensity(cc=2.7)
 )

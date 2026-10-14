@@ -136,7 +136,6 @@ series = sample.tilt_series(
     micrograph_size=384,
     ice=Ice(model="gd"),
     absorption_model="inelastic_mfp",
-    pad_fft=True,
     seed=0,
 )
 coverage = series.coverage

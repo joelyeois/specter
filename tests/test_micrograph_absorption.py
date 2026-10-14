@@ -87,7 +87,10 @@ def test_ice_profile_absorbs_only_where_the_ice_is():
     profile = IceProfile(mode="wedge", thickness_range=(60.0, 180.0), softness=4.0)
     absorbed = draw(field(Ice(model="random", profile=profile), nz, False), **MFP)
     reference = draw(field(Ice(model="random", profile=profile), nz, False))
-    wave, unabsorbed = scatter(absorbed), scatter(reference)
+    # On the field's own canvas, so the columns line up with the window; a
+    # wedge would otherwise pad by default.
+    wave = scatter(absorbed, pad_fft=False)
+    unabsorbed = scatter(reference, pad_fft=False)
     window = profile.window(nz, NXY, DX)
     solvent = absorption_potential(ice_inelastic_mfp(300.0), 300.0)
     torch.testing.assert_close(

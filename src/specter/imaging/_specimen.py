@@ -333,7 +333,7 @@ class Specimen:
     ) -> list[str]:
         """What :meth:`scatter` will do to each image, in order."""
         p = settings_group(Propagation, propagation, settings)
-        nz, nxy, pad = self.nz, self.nxy, self.pad_nxy(p.pad_fft)
+        nz, nxy, pad = self.nz, self.nxy, self.pad_nxy(p.pads(False))
         steps = [f"rotate the {nxy}^3 template to the image's pose ({p.rotate_mode})"]
         steps.append(f"pad to {nz} x {pad} x {pad} voxels")
         if self.crowding is not None:
@@ -429,7 +429,7 @@ class Specimen:
                 )
                 assert rates is not None
                 uniform = absorption_potential(rates.removal("solvent"), voltage)
-        pad_nxy = self.pad_nxy(p.pad_fft)
+        pad_nxy = self.pad_nxy(p.pads(False))
         scattering = scattering_engine(
             pad_nxy,
             self.voxel_size,
@@ -500,7 +500,7 @@ class Specimen:
         rotator = VolumeRotator(
             nz_t, ny_t, nx_t, origin="relion", mode=p.rotate_mode
         ).to(device)
-        crowd = self._build_crowd(p.pad_fft)
+        crowd = self._build_crowd(p.pads(False))
         if not self.absorbs:
             objective_aperture = None
         rates = (
@@ -548,7 +548,7 @@ class Specimen:
                 V = rotator(template, rotations.build_affine_matrix(R, T))
             else:
                 V = self._render_atoms(poses, device)
-            V = pad_volume(V, nxy, nz, thickness, p.pad_fft, xy_pad_mode="constant")
+            V = pad_volume(V, nxy, nz, thickness, p.pads(False), xy_pad_mode="constant")
 
             if crowd is not None:
                 stages.crowd_into(
@@ -596,7 +596,7 @@ class Specimen:
                         self.icemaker,
                         pixel_size=self.voxel_size,
                         nxy=nxy,
-                        pad=nxy // 2 if p.pad_fft else 0,
+                        pad=nxy // 2 if p.pads(False) else 0,
                         full=full(),
                         relax_steps=self.ice.relax_steps,
                         free=free,

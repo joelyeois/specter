@@ -95,10 +95,10 @@ Two settings are specific to this page.
 `absorption_model="inelastic_mfp"` removes inelastically scattered electrons
 from the image, as an energy filter does, at the measured mean free path of
 amorphous ice ([Mean-free-path absorption support](../concepts/scattering/index.md#mean-free-path-absorption-support)).
-`pad_fft=True` propagates on a canvas with a 16 px margin. A tilted
-multislice runs for hundreds of slices, and without the margin each slice's
-periodic convolution leaks a little across the frame edge; the leak
-accumulates into dark bands along the edges of the high tilts
+A tilt series also propagates on a canvas with a 32 px zero-filled margin
+(`pad_fft`, on by default for tilts). The FFT treats the frame as periodic,
+and under tilt its two edges cross the slab at different depths; without the
+margin the edges of the high tilts darken, by 16% at 60° for a uniform slab
 ([`IterativeScattering` and tilted volumes](../concepts/scattering/multislice.md#iterativescattering-and-tilted-volumes)).
 
 ## Imaging each tilt

@@ -93,7 +93,10 @@ Enabling a profile costs you three things:
   move it: for a level film it is the box's midplane, as for a flat slab.
   Only a film that is tilted (`ice_tilt`) and thicker on one side moves it,
   and `IceProfile.centroid` accounts for that automatically.
-- **A `wedge` needs `pad_fft = true`.** Multislice propagates by FFT, so
+- **A `wedge` needs `pad_fft = true`.** `specter simulate micrograph`
+  warns when a wedge or a nonzero `ice_tilt` runs without it, and from
+  Python a `Sample` with such a profile pads unless told otherwise.
+  Multislice propagates by FFT, so
   the field is implicitly periodic and the wave leaving one edge re-enters
   at the opposite one. A flat slab tiles seamlessly, because ice at one
   edge is statistically identical to ice at the other. A wedge does not:

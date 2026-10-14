@@ -424,13 +424,20 @@ class Sample:
                 raise ValueError("a damaged sample needs the exposure it is imaged at")
             self.series.render(sample.volume, exposure, dose, 0.0, voltage)
         nxy, nz = self.nxy, self.nz
-        pad_nxy = nxy + (nxy // 2) * 2 if p.pad_fft else nxy
+        # Opposite edges of a profile that varies across the field differ,
+        # and the unpadded FFT joins them: a 200-800 A wedge was 16% off
+        # within 200 px of its edges without padding, 0.6% with it.
+        pad_fft = p.pads(
+            self.profile is not None
+            and (self.profile.mode != "flat" or self.profile.tilt != 0.0)
+        )
+        pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
         scale_host = per_image(potential_scale, n, "potential_scale")
         unity = bool(torch.all(scale_host == 1.0))
         n_propagate = 1 if unity else n
 
         V = sample.volume.expand(n_propagate, -1, -1, -1)
-        V = pad_volume(V, nxy, nz, None, p.pad_fft, xy_pad_mode="reflect")
+        V = pad_volume(V, nxy, nz, None, pad_fft, xy_pad_mode="reflect")
         if not unity:
             V = V * scale_host.to(V.device).reshape(-1, 1, 1, 1)
         scattering = IterativeScattering(
@@ -461,7 +468,7 @@ class Sample:
                 nxy,
                 nz,
                 None,
-                p.pad_fft,
+                pad_fft,
                 xy_pad_mode="reflect",
             )
             wave = scattering(

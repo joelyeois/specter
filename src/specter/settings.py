@@ -145,10 +145,16 @@ class Propagation:
         exponential, and take it on the fine grid too, at the cost of one
         fine-grid exponential per image; first Born and the CTF model are
         linear and untouched. Default 2.
-    pad_fft : bool
+    pad_fft : bool or None
         Give the propagation canvas FFT headroom so the multislice
         recursion's circular convolution cannot wrap at the frame edge: the
-        real-space counterpart of `oversample`, see there. Default False.
+        real-space counterpart of `oversample`, see there. The FFT treats the
+        frame as periodic, which is harmless while its opposite edges look
+        alike and wrong when they do not. None (the default) therefore takes
+        the imaging path's own default, :meth:`pads`: off for a particle box
+        and for a micrograph of level, uniform ice, on for a tilt series
+        (whose two edges cross a tilted slab at different depths) and for a
+        micrograph whose ice profile varies across the field.
     rotate_mode : RotateMode
         How a volume is rotated into the beam frame: trilinear in real space
         or in Fourier space. Default ``"real"``.
@@ -162,7 +168,7 @@ class Propagation:
     ews_curvature_sign: EwaldSphereSign = "negative"
     klim: float | None = None
     oversample: int = 2
-    pad_fft: bool = False
+    pad_fft: bool | None = None
     rotate_mode: RotateMode = "real"
 
     def __post_init__(self) -> None:
@@ -199,6 +205,10 @@ class Propagation:
             )
         if not isinstance(self.oversample, int) or self.oversample < 1:
             raise ValueError(f"oversample={self.oversample!r} must be an integer >= 1")
+
+    def pads(self, default: bool) -> bool:
+        """`pad_fft`, or the imaging path's `default` when it is None."""
+        return default if self.pad_fft is None else self.pad_fft
 
 
 @dataclass(frozen=True)

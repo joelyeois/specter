@@ -603,3 +603,24 @@ def test_type_check_accepts_every_legitimate_spelling(tmp_path) -> None:
     ):
         path.write_text(body)
         validate_config(load_config(str(path), ParticleStackConfig))
+
+
+def test_an_unpadded_uneven_ice_profile_warns() -> None:
+    """
+    The FFT joins a micrograph's opposite edges, so ice that differs between
+    them needs pad_fft; level, uniform ice does not and stays quiet.
+    """
+    import warnings
+
+    for field, value in (("ice_profile", "wedge"), ("ice_tilt", 0.1)):
+        config = MicrographConfig(pdb_source="6bdf")
+        setattr(config, field, value)
+        with pytest.warns(UserWarning, match="pad_fft"):
+            validate_config(config)
+        config.pad_fft = True
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            validate_config(config)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        validate_config(MicrographConfig(pdb_source="6bdf", ice_profile="meniscus"))

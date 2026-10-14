@@ -308,4 +308,6 @@ def test_vacuum_does_not_absorb_without_ice(specimen_mfp):
     empty = make(torch.zeros(1, 16, 64, 64), angles=ANGLES, propagation=propagation)
     assert torch.count_nonzero(empty.absorption) == 0
     clean = waves(empty).abs().square()
-    torch.testing.assert_close(clean, torch.ones_like(clean), rtol=0, atol=1e-6)
+    # Exactly 1 in exact arithmetic; the padded canvas's float32 FFTs leave
+    # ~1e-5 over a 60 degree tilt's slices, which no absorption could be.
+    torch.testing.assert_close(clean, torch.ones_like(clean), rtol=0, atol=1e-4)

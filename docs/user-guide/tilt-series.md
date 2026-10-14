@@ -105,9 +105,11 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
 - **`coincidence_radius`**: effective coincidence-loss exclusion radius in
   pixels (exclusion area = πr²) for direct-detector modelling; matters most
   once `detector_model` is one of the `k3_*` presets.
-- **`pad_fft`**: pad the volume before FFT to avoid multislice
-  edge-wraparound artifacts under tilt. Off by default; turn on if you see
-  streaking artifacts near the image edges at large tilt angles.
+- **`pad_fft`**: give the multislice canvas a 32 px zero-filled margin so
+  the FFT cannot join the frame's opposite edges, which under tilt cross
+  the slab at different depths. On by default. Turning it off saves 5-9%
+  per tilt and darkens the edges of the high tilts: a uniform slab at 60°
+  images 16% off flat there.
 - **`micrograph_size`**: output tilt-image size in pixels (square).
   Defaults to the specimen volume's own XY extent; set explicitly to crop
   or pad the field of view independent of the specimen box.

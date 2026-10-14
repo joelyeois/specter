@@ -147,7 +147,7 @@ the two disagree:
 | Ice | `ice_model = "gd"`, `ice_thickness = 0` (the box's own depth) | None until `.solvate()` |
 | Amplitude contrast | `alpha = 0.1` | `alpha = 0.0` |
 | Spherical aberration | `cs = 2.0` mm | `cs = 2.7` mm |
-| FFT padding | `pad_fft = true` | `pad_fft = False` |
+| FFT padding | `pad_fft = true` | `pad_fft = None`: off for a particle box |
 | Ewald sphere sign | `ews_curvature_sign = "positive"` | `"negative"` |
 | Frames | `n_frames` = the dose in e⁻/Å², rounded down | None |
 | Output | Normalized, contrast inverted | Raw counts |

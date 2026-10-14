@@ -225,6 +225,8 @@ class TomogramReconstructor(_BaseReconstructor):
             oversample=propagation.oversample,
             crop=False,
             alpha=propagation.alpha,
+            # The same canvas `TiltSeries` propagates on, so the two agree.
+            pad_fft=propagation.pads(True),
         )
         # The image grid: the transfer function is applied and the intensity
         # formed on the propagation grid, then sampled to the pixel grid, as

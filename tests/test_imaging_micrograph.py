@@ -152,7 +152,8 @@ def test_an_ice_profile_matches_the_generator() -> None:
     _compare(
         "profile",
         ice=Ice(model="random", profile=profile),
-        propagation=Propagation(absorption_model="inelastic_mfp"),
+        # Unpadded, as the retired generator ran it; a wedge now pads by default.
+        propagation=Propagation(absorption_model="inelastic_mfp", pad_fft=False),
     )
 
 
@@ -208,6 +209,7 @@ def test_a_prepared_volume_matches_the_generator(case: str) -> None:
         propagation = Propagation(
             absorption_model="inelastic_mfp",
             inelastic_mfp_specimen=2460.0 if case == "absorb_field" else None,
+            pad_fft=False,  # as the retired generator ran it
         )
     if case == "absorb_field":
         optics = Optics(objective_aperture=12.0)

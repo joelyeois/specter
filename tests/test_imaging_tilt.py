@@ -6,9 +6,11 @@ The references under ``tests/test_data/imaging_tilt_*.pt`` are the retired
 `TiltSeriesGenerator`'s images and exit waves on these exact inputs and
 seeds, written once while both existed.
 
-Exact without ice. With ice, to float tolerance and without noise: the CPU
-ice blend is threaded and differs between two identical blends by ~1e-5 V,
-which Poisson counts would turn into different integers.
+Exact without ice. With ice, to float tolerance and without noise: the
+references were written while the CPU ice splat still accumulated in
+thread-scheduling order, so they carry ~1e-5 V of that noise, which Poisson
+counts would turn into different integers. The series run on the retired
+generator's 16 px FFT margin.
 """
 
 from __future__ import annotations
@@ -71,6 +73,7 @@ def _compare(
         seed=7,
         objective_aperture=optics.objective_aperture,
         propagation=propagation,
+        fft_pad_margin=16,
         log=False,
     )
     got, waves_got = [], []
@@ -141,7 +144,9 @@ def test_material_absorption_and_aperture_match() -> None:
         "absorb",
         ice=Ice(model="random"),
         propagation=Propagation(
-            absorption_model="inelastic_mfp", inelastic_mfp_specimen=2460.0
+            absorption_model="inelastic_mfp",
+            inelastic_mfp_specimen=2460.0,
+            pad_fft=False,  # the retired generator's default
         ),
         optics=Optics(objective_aperture=12.0),
         exact=False,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import types
+import warnings
 from dataclasses import fields
 from pathlib import Path
 from typing import (
@@ -324,6 +325,30 @@ def _require_bfactor_backend(config: Any) -> None:
         )
 
 
+def _warn_unpadded_uneven_ice(config: Any) -> None:
+    """
+    Warn when a micrograph's ice differs between opposite edges, unpadded.
+
+    The multislice FFT treats the field as periodic, which is harmless for
+    level, uniform ice, whose opposite edges look alike, and joins a thick
+    edge to a thin one otherwise: a 200-800 A wedge images 16% off within
+    200 px of its edges without ``pad_fft``, 0.6% with it.
+    """
+    profile = getattr(config, "ice_profile", None)
+    if profile is None or getattr(config, "pad_fft", True):
+        return
+    tilt = float(getattr(config, "ice_tilt", 0.0) or 0.0)
+    if profile == "wedge" or tilt != 0.0:
+        what = "ice_profile='wedge'" if profile == "wedge" else f"ice_tilt={tilt}"
+        warnings.warn(
+            f"{what} without pad_fft: the FFT joins the field's thick and thin "
+            "edges, and the image is off by up to ~16% near them; set "
+            "pad_fft = true",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
 def _require_solvent_exposure_consistent(config: Any) -> None:
     """
     Reject solvent motion alongside a dose envelope on the transfer function.
@@ -394,6 +419,7 @@ def validate_config(config: Any) -> None:
     _require_valid_cryosparc_ref(config)
     _require_bfactor_backend(config)
     _require_solvent_exposure_consistent(config)
+    _warn_unpadded_uneven_ice(config)
 
     # Grammar first, and here rather than in the pipeline: a device string is
     # otherwise parsed several stages into a run, so a typo surfaced either as

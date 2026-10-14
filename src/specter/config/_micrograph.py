@@ -470,7 +470,12 @@ class MicrographConfig:
         None, help="Isotropic B-factor envelope in Angstrom^2.", check="non_negative"
     )  # A^2
     pad_fft: bool = setting(
-        False, help="Pad the volume for FFT to avoid edge artifacts."
+        False,
+        help=(
+            "Pad the volume for FFT to avoid edge artifacts. Not needed for "
+            "level, uniform ice, whose opposite edges match; needed for a "
+            "'wedge' profile or a nonzero ice_tilt, which warn without it."
+        ),
     )
     crowd_chunk_size: int = setting(
         1,

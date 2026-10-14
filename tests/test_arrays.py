@@ -140,3 +140,34 @@ def test_blended_tiny_overlap_has_no_zero_weight_artifact() -> None:
     out = tile_volume_from_blocks_blended(blocks, (1, 32, 32, 32), overlap_frac=1 / 16)
     assert torch.isfinite(out).all()
     assert out.min() > 0
+
+
+def test_a_cpu_splat_adds_duplicates_in_a_fixed_order():
+    """
+    The deterministic splat must not depend on how torch threads it. Through
+    ``index_put_(accumulate=True)`` the CPU added duplicate indices across
+    threads in scheduling order, so the same coordinates gave a different
+    volume on every call, at any thread count above one.
+    """
+    from specter.arrays._voxelize import _scatter_splat
+
+    g = torch.Generator().manual_seed(0)
+    indices = torch.randint(0, 8, (200_000, 3), generator=g)
+    weights = torch.rand(200_000, generator=g)
+    threads = torch.get_num_threads()
+    volumes = []
+    try:
+        for n in (1, 8, 8):
+            torch.set_num_threads(n)
+            volume = torch.zeros(8, 8, 8)
+            _scatter_splat(volume, indices, weights)
+            volumes.append(volume)
+        # A non-contiguous target takes the same order.
+        torch.set_num_threads(8)
+        transposed = torch.zeros(8, 8, 8).transpose(0, 2)
+        _scatter_splat(transposed, indices[:, [2, 1, 0]], weights)
+    finally:
+        torch.set_num_threads(threads)
+    assert torch.equal(volumes[0], volumes[1])
+    assert torch.equal(volumes[1], volumes[2])
+    assert torch.equal(transposed.transpose(0, 2), volumes[0])

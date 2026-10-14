@@ -95,13 +95,17 @@ def _scatter_splat(
     periodic : bool, optional
         If True, wrap out-of-bounds indices instead of discarding them.
     deterministic : bool, optional
-        If True (default), accumulate through ``index_put_(accumulate=True)``,
-        which CUDA implements by sorting the indices so the summation order,
-        and therefore the result, is fixed. If False, accumulate with
-        ``index_add_``, whose atomic adds run in whichever order the hardware
-        schedules: a few ms instead of the sort, at the cost of float-order
-        noise between runs. Only worth turning off inside a loop that is
-        already non-deterministic, such as the ice optimiser's loss.
+        If True (default), the summation order, and therefore the result, is
+        fixed. On CUDA that is ``index_put_(accumulate=True)``, which sorts the
+        indices. On the CPU it is ``scatter_add_`` into a flat contiguous view,
+        which adds them in index order: the CPU ``index_put_`` adds duplicate
+        indices across threads in scheduling order, so the same seeded ice
+        canvas came out different on every call, by ~2e-7 relative. If False,
+        accumulate with ``index_add_``, whose atomic adds run in whichever
+        order the hardware schedules: a few ms instead of the sort, at the cost
+        of float-order noise between runs. Only worth turning off inside a
+        loop that is already non-deterministic, such as the ice optimiser's
+        loss.
     """
     grid_shape = torch.tensor(volume.shape, device=volume.device)
     if periodic:
@@ -112,13 +116,23 @@ def _scatter_splat(
         weights = weights[in_bounds]
 
     weights = weights.to(volume.dtype)
-    if deterministic:
+    if deterministic and volume.device.type != "cpu":
         idx_tuple = tuple(indices[..., i].reshape(-1) for i in range(indices.shape[-1]))
         volume.index_put_(idx_tuple, weights.reshape(-1), accumulate=True)
         return
-    strides = torch.tensor(volume.stride(), device=volume.device)
+    target = (
+        volume
+        if volume.is_contiguous()
+        else torch.zeros_like(volume, memory_format=torch.contiguous_format)
+    )
+    strides = torch.tensor(target.stride(), device=volume.device)
     flat = (indices * strides).sum(dim=-1).reshape(-1)
-    volume.view(-1).index_add_(0, flat, weights.reshape(-1))
+    if deterministic:
+        target.view(-1).scatter_add_(0, flat, weights.reshape(-1))
+    else:
+        target.view(-1).index_add_(0, flat, weights.reshape(-1))
+    if target is not volume:
+        volume.add_(target)
 
 
 def soft_voxelize_coordinates_into(

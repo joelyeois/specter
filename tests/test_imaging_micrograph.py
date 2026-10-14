@@ -5,9 +5,9 @@ generator they replaced.
 The references under ``tests/test_data/imaging_micrograph_*.pt`` are the
 retired `MicrographGenerator`'s outputs on these exact inputs and seeds,
 written once while both existed. Exact without ice. With ice, to float
-tolerance and without noise: the CPU ice blend is threaded, and the same
-specimen assembled twice under one seed differs by ~1e-5 V, which Poisson
-counts would turn into different integers.
+tolerance and without noise: the references were written while the CPU ice
+splat still accumulated in thread-scheduling order, so they carry ~1e-5 V of
+that noise, which Poisson counts would turn into different integers.
 """
 
 from __future__ import annotations

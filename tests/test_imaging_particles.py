@@ -127,6 +127,26 @@ def test_a_slice_of_the_stack_draws_what_the_stack_drew() -> None:
     assert torch.equal(part.array, whole.array[2:4])
 
 
+def test_seeded_ice_does_not_depend_on_the_batch() -> None:
+    """
+    A seeded specimen in ice is the same whether its images are built together
+    or one at a time, bit for bit on the CPU. The ice splat used to accumulate
+    across threads in scheduling order, which moved every canvas by ~1e-6 V.
+    """
+    torch.manual_seed(0)
+    template = torch.zeros(32, 32, 32)
+    template[12:20, 10:22, 12:20] = 5.0
+    poses = Poses.random(4)
+    specimen = Specimen(template, 2.0).solvate(model="random", thickness=200.0)
+    with torch.no_grad():
+        whole = specimen.materialize(poses, voltage=VOLTAGE, seed=3)
+        singles = [
+            specimen.materialize(poses[i : i + 1], voltage=VOLTAGE, seed=3)
+            for i in range(4)
+        ]
+    assert torch.equal(whole, torch.cat(singles))
+
+
 def test_scatter_propagates_what_materialize_returns() -> None:
     poses, ctf = _inputs()
     specimen = Specimen(_template(), PIXEL).crowd(min_distance=12.0)

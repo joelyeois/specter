@@ -1,0 +1,2 @@
+True
+TypeError: pass a Propagation or its fields as keywords, not both (got ['oversample'])

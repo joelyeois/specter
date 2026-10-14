@@ -1,0 +1,5 @@
+     0 Å requested:  256 slices, ice projection mean   1089 V·Å, std 179 V·Å
+   100 Å requested:  256 slices, ice projection mean   1089 V·Å, std 179 V·Å
+   500 Å requested:  500 slices, ice projection mean   2192 V·Å, std 230 V·Å
+  1000 Å requested: 1000 slices, ice projection mean   4467 V·Å, std 303 V·Å
+  2000 Å requested: 2000 slices, ice projection mean   9017 V·Å, std 411 V·Å

@@ -1,0 +1,2 @@
+mean deposited B-factor 17.9 Å²
+peak 135.7 V -> 107.4 V

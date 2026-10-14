@@ -1,0 +1,3 @@
+120 kV: largest phase shift 0.83 rad
+200 kV: largest phase shift 0.69 rad
+300 kV: largest phase shift 0.61 rad

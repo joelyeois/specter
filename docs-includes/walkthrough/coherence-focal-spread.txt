@@ -1,0 +1,2 @@
+coherent           mean 1.0000  std 0.1330
+Cc 2.7 mm, 0.7 eV  mean 1.0000  std 0.1297

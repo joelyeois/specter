@@ -162,3 +162,9 @@ addopts = "-n 32 --dist worksteal -m 'not network'"
 markers = [
     "network: needs internet access (fetches structures from RCSB)",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# A walkthrough script imports where its page first quotes the import, so
+# the code a reader sees on the page reads top to bottom, even when the
+# script's own plotting code imported the same module earlier.
+"docs-figures/walkthrough/*.py" = ["E402", "F811"]

@@ -1,0 +1,11 @@
+epoch 1: mean loss 88.14 counts²
+epoch 2: mean loss 82.15 counts²
+epoch 3: mean loss 80.37 counts²
+epoch 4: mean loss 79.35 counts²
+epoch 5: mean loss 78.68 counts²
+epoch 6: mean loss 78.20 counts²
+epoch 7: mean loss 77.84 counts²
+epoch 8: mean loss 77.55 counts²
+epoch 9: mean loss 77.32 counts²
+epoch 10: mean loss 77.12 counts²
+mean count per pixel: 80.00

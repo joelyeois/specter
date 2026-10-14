@@ -1,0 +1,11 @@
+─────────────────────── Building 3D scattering potential ───────────────────────
+────────────────── Sampling poses, defocus, and translations ───────────────────
+  batchsize='auto' -> 2 particle(s) per pass (~1.7 GiB estimated peak, 39.6 GiB 
+free on cuda)
+────────────────────────── Generating images on cuda ───────────────────────────
+─────────────────────────────── Post-processing ────────────────────────────────
+───────────────────────────── Saving .mrcs + .star ─────────────────────────────
+  ✓ particles/particles.mrcs
+  ✓ particles/particles.star
+
+Total time: 4s

@@ -1,0 +1,10 @@
+epoch 1: FSC = 0.5 against the model at 7.666 Å
+epoch 2: FSC = 0.5 against the model at 7.078 Å
+epoch 3: FSC = 0.5 against the model at 6.630 Å
+epoch 4: FSC = 0.5 against the model at 6.494 Å
+epoch 5: FSC = 0.5 against the model at 6.062 Å
+epoch 6: FSC = 0.5 against the model at 6.000 Å
+epoch 7: FSC = 0.5 against the model at 5.562 Å
+epoch 8: FSC = 0.5 against the model at 5.539 Å
+epoch 9: FSC = 0.5 against the model at 5.198 Å
+epoch 10: FSC = 0.5 against the model at 5.107 Å

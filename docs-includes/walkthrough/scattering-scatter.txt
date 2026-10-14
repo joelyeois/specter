@@ -1,0 +1,4 @@
+array    (1, 512, 512) torch.complex64
+pixels   (1, 256, 256)
+oversample 2, pixel size 1.0 Å
+defocus shift 128.0 Å

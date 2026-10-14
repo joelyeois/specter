@@ -1,0 +1,4 @@
+0.5 Å  box 512  peak  522.0 V  integral 4.7349e+06 V·Å³
+1.0 Å  box 256  peak  135.7 V  integral 4.7350e+06 V·Å³
+2.0 Å  box 128  peak   31.0 V  integral 4.7350e+06 V·Å³
+4.0 Å  box  64  peak   14.9 V  integral 4.7350e+06 V·Å³

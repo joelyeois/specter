@@ -1,0 +1,1 @@
+relative intensity: mean 1.0000, (1, 512, 512)

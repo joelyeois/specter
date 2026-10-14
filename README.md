@@ -198,9 +198,10 @@ takes its built-in default. See
 | | |
 |---|---|
 | [Installation](https://joelyeois.github.io/specter/installation/) | Set up SPECTER with `uv` and confirm the `specter` command is available. |
-| [Quickstart](https://joelyeois.github.io/specter/quickstart/) | Simulate a particle stack from a PDB code in one command. |
-| [User guide](https://joelyeois.github.io/specter/user-guide/particle-stack/) | Particle stacks, micrographs, tilt series, tomogram specimens, ice caches, configuration, and job management. |
-| [Concepts](https://joelyeois.github.io/specter/concepts/pipeline-overview/) | How potential, specimen, scattering, aberration and detector compose into one forward model. |
+| [Basic examples](https://joelyeois.github.io/specter/basic-examples/) | Complete templates for a particle stack, a micrograph, a tilt series and a reconstruction. |
+| [Walkthrough](https://joelyeois.github.io/specter/walkthrough/) | The forward model one stage per page, with code and figures, from an atomic model to a reconstructed map. |
+| [Tutorials](https://joelyeois.github.io/specter/user-guide/particle-stack/) | Command-line workflows: particle stacks, micrographs, tilt series, tomogram specimens, ice caches, configuration and job management. |
+| [Theory](https://joelyeois.github.io/specter/concepts/) | The derivations, conventions and validation behind each physical model. |
 | [Python API](https://joelyeois.github.io/specter/api/) | Generated from docstrings, one page per subpackage. |
 
 ---

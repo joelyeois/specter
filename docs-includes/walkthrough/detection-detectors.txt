@@ -1,0 +1,5 @@
+perfect          DQE(0) 1.00   MTF at Nyquist/2 0.90, at Nyquist 0.64
+k3_300kv         DQE(0) 1.00   MTF at Nyquist/2 0.89, at Nyquist 0.64
+k2_300kv         DQE(0) 0.80   MTF at Nyquist/2 0.86, at Nyquist 0.61
+falcon4i_300kv   DQE(0) 0.92   MTF at Nyquist/2 0.88, at Nyquist 0.74
+falcon3ec_300kv  DQE(0) 0.95   MTF at Nyquist/2 0.90, at Nyquist 0.59

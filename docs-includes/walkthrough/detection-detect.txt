@@ -1,0 +1,2 @@
+counts: (1, 256, 256), mean 20.01
+variance 21.72

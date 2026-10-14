@@ -1,9 +1,10 @@
-# Concepts
+# Theory
 
-This section lays out the physics and math behind SPECTER, one topic per
-page, the same role PyTorch's "Developer Notes" or NumPy's conceptual
-guide play for those projects. For task-oriented, CLI-driven how-tos, see
-the [User Guide](../user-guide/particle-stack.md).
+This section lays out the physics and mathematics behind SPECTER, one topic
+per page: the derivations, conventions and validation behind each model. The
+[walkthrough](../walkthrough/index.md) introduces the same models through code
+and links here for the detail. For complete CLI workflows, see the
+[Tutorials](../user-guide/particle-stack.md).
 
 - [Pipeline overview](pipeline-overview.md)
 - [Conventions](conventions.md)

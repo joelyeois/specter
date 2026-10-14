@@ -5,3 +5,17 @@
 .md-typeset table code {
   white-space: nowrap;
 }
+
+/* Printed output under a walkthrough code block: the same code font, set
+   apart from the code that produced it by a lighter ground and an accent
+   rule, the way a notebook separates a cell from its output. */
+.md-typeset .output pre > code {
+  background-color: transparent;
+}
+.md-typeset .output {
+  border-left: 0.2rem solid var(--md-accent-fg-color--transparent);
+  background-color: var(--md-default-fg-color--lightest);
+}
+.md-typeset .output .md-clipboard {
+  display: none;
+}

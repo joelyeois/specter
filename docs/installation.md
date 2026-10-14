@@ -231,4 +231,5 @@ pip install -e ".[docs]"      # build docs locally
 
 ## Next steps
 
-See [Quickstart](quickstart.md) for a complete example.
+See [Basic examples](basic-examples.md) for complete templates, or start the
+[walkthrough](walkthrough/index.md).

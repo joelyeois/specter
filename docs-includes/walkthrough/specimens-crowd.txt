@@ -1,0 +1,5 @@
+volumes (4, 256, 256, 256)
+image 0: neighbours add 35% to the template's potential
+image 1: neighbours add 25% to the template's potential
+image 2: neighbours add 34% to the template's potential
+image 3: neighbours add 26% to the template's potential

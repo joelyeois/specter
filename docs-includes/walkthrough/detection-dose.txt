@@ -1,0 +1,4 @@
+    5 e⁻/Å²   mean    5.0 counts/px   SNR 0.024
+   20 e⁻/Å²   mean   20.0 counts/px   SNR 0.095
+   60 e⁻/Å²   mean   60.0 counts/px   SNR 0.285
+  200 e⁻/Å²   mean  199.9 counts/px   SNR 0.955

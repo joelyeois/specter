@@ -1,0 +1,4 @@
+atoms:            92,176
+molecular mass:   661 kDa
+largest diameter: 192 Å
+first species:    ['N(HHHC)', 'C(HCCN)', 'C(CNO)', 'O(C)']

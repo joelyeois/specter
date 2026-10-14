@@ -1,0 +1,2 @@
+half-map FSC = 0.143:            5.050 Å
+full map against the model, 0.5: 5.107 Å

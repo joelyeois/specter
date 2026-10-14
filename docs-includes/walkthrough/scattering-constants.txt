@@ -1,0 +1,5 @@
+voltage   wavelength   sigma
+ 100 kV   3.7014 pm   9.244e-04 rad/(V·Å)
+ 120 kV   3.3492 pm   8.638e-04 rad/(V·Å)
+ 200 kV   2.5079 pm   7.288e-04 rad/(V·Å)
+ 300 kV   1.9687 pm   6.526e-04 rad/(V·Å)

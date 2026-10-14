@@ -1,0 +1,2 @@
+300 kV: sigma_f 26.8 Å, 16 defocus nodes
+120 kV: sigma_f 66.9 Å, 91 defocus nodes

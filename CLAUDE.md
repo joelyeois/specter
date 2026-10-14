@@ -381,6 +381,13 @@ docs-figures/                  # Tracked scripts that regenerate docs/assets/ima
                               # prose need a reachable script to re-measure them on new silicon. cli_reference.py is
                               # the third kind: it walks the live `click` objects and writes one docs-includes/
                               # cli-<group>.md per top-level command group, the tables docs/api/cli/ includes.
+                              # walkthrough/ is the fourth: one script per docs/walkthrough/ page (plus
+                              # basic_examples.py for docs/basic-examples.md). A page QUOTES its code from the
+                              # script via snippet sections (`# --8<-- [start:name]`), and `_common.Transcript`
+                              # writes what each section printed to docs-includes/walkthrough/<page>-<name>.txt,
+                              # so the code and output a reader sees are the run that made the figures. Plotting
+                              # stays outside quoted sections. Rerun a page's script after changing its
+                              # behaviour, then re-check the prose: numbers in the text are typed from the run.
 docs-includes/                 # Generated Markdown fragments that docs/ pulls in via pymdownx.snippets (base_path is
                               # the repo root). OUTSIDE docs/ on purpose: a .md file inside docs_dir is built as a
                               # page of its own, and a fragment is not a page. Nothing here is edited by hand —

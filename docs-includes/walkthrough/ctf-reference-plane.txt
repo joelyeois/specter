@@ -1,0 +1,2 @@
+box-depth ice: 256 slices, defocus_shift 128 Å
+2000 Å of ice: 2000 slices, defocus_shift 1000 Å

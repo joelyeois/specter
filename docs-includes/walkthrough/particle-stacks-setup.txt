@@ -1,0 +1,5 @@
+rotate the 256^3 template to the image's pose (real)
+pad to 500 x 256 x 256 voxels
+crowd: copies 192.0 A apart (3d placement)
+solvate: gd ice, 500 A
+scatter: multislice at 300 kV, oversample 2, alpha 0.0

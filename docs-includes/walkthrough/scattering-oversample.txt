@@ -1,0 +1,2 @@
+oversample 1: error 2.0e-02 of the contrast power
+oversample 2: error 4.2e-07 of the contrast power

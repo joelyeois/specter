@@ -1,0 +1,2 @@
+41 tilts, 123 e⁻/Å² in total
+pre-exposure of the last tilt (-60°): 120 e⁻/Å²

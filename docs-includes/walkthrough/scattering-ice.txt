@@ -1,0 +1,2 @@
+no ice     mean phase +0.047 rad, amplitude std 0.0152
+500 Å ice  mean phase +1.495 rad, amplitude std 0.0902

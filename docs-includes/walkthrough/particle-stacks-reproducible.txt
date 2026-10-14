@@ -1,0 +1,3 @@
+batch_size=1 vs 4      pixels that differ  31.2%   largest difference 7.0e-05 of the image std
+particles 8-11 alone   pixels that differ   0.0%   largest difference 0.0e+00 of the image std
+seed=1 vs seed=0       pixels that differ 100.0%   largest difference 7.6e+00 of the image std

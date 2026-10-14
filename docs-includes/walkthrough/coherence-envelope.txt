@@ -1,0 +1,2 @@
+300 kV: envelope mean intensity -0.37% against the sum
+120 kV: envelope mean intensity -5.19% against the sum

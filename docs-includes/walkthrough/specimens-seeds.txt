@@ -1,0 +1,4 @@
+same seed, same images:   True
+image 2 drawn on its own: True
+image 1 vs image 2:       False
+seed 0 vs seed 1:         False

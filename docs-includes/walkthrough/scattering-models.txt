@@ -1,0 +1,17 @@
+ice (Å)   model        mean I   std I   corr. with multislice
+   none   multislice    1.000   0.030    1.000
+   none   rytov         1.000   0.030    0.999
+   none   firstborn     1.012   0.037    0.582
+   none   projection    1.000   0.000     flat
+    500   multislice    1.000   0.180    1.000
+    500   rytov         1.017   0.185    0.997
+    500   firstborn     3.253   0.303    0.364
+    500   projection    1.000   0.000     flat
+   1000   multislice    1.000   0.250    1.000
+   1000   rytov         1.033   0.266    0.991
+   1000   firstborn     9.912   0.806    0.197
+   1000   projection    1.000   0.000     flat
+   2000   multislice    1.000   0.345    1.000
+   2000   rytov         1.067   0.392    0.979
+   2000   firstborn    36.458   2.206    0.102
+   2000   projection    1.000   0.000     flat

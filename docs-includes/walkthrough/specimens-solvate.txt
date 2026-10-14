@@ -1,0 +1,2 @@
+volume (500, 256, 256) (Z, Y, X)
+ice: mean 4.38 V over the box

@@ -1,0 +1,2 @@
+gd    : mean 4.55 V, std 7.20 V
+random: mean 4.53 V, std 8.29 V

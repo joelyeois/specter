@@ -1,0 +1,3 @@
+shtyrov   integral 4.7350e+06 V·Å³
+kirkland  integral 5.2546e+06 V·Å³
+lobato    integral 5.2825e+06 V·Å³

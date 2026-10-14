@@ -1,0 +1,4 @@
+for dose in 5 20 80; do
+    specter simulate particles --pdb_source 6bdf --n_particles 8 --seed 0 \
+        --dose "$dose" --output_dir "dose-$dose"
+done

@@ -1,0 +1,2 @@
+shape (256, 256, 256), torch.float32, on cuda:0
+peak 135.7 V, integral 4.735e+06 V·Å³

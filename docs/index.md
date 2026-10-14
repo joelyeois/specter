@@ -65,19 +65,32 @@ A simulated cryo-ET specimen
 
     [:octicons-arrow-right-24: Install](installation.md)
 
--   :material-rocket-launch:{ .lg .middle } **Quickstart**
+-   :material-information-outline:{ .lg .middle } **Overview**
 
-    Simulate a particle stack from a PDB code in one command.
+    What SPECTER simulates, which physics each stage models, and how these
+    docs are organised.
 
-    [:octicons-arrow-right-24: Get started](quickstart.md)
+    [:octicons-arrow-right-24: Overview](overview.md)
+
+-   :material-lightning-bolt:{ .lg .middle } **Basic examples**
+
+    Complete templates for a particle stack, a micrograph, a tilt series
+    and a reconstruction, to copy and modify.
+
+    [:octicons-arrow-right-24: Basic examples](basic-examples.md)
+
+-   :material-map-marker-path:{ .lg .middle } **Walkthrough**
+
+    The forward model one stage per page, with the code and figures for
+    each step.
+
+    [:octicons-arrow-right-24: Start the walkthrough](walkthrough/index.md)
 
 </div>
 
 ---
 
-## Guides
-
-### CLI
+## Tutorials
 
 Every workflow below is a `specter` subcommand driven by a TOML config.
 
@@ -142,7 +155,7 @@ structures you fetch by accession code and shares them across projects; see
 RELION, `specter convert cs2star` converts a CryoSPARC `.cs` file to a
 `.star` file; see [`specter convert`](api/cli/convert.md).
 
-### Concepts
+## Theory
 
 <div class="grid cards" markdown>
 
@@ -174,7 +187,7 @@ RELION, `specter convert cs2star` converts a CryoSPARC `.cs` file to a
 
 </div>
 
-### Python API
+## Python API
 
 <div class="grid cards" markdown>
 

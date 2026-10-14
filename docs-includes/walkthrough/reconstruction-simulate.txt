@@ -1,0 +1,1 @@
+(1000, 128, 128) images, mean 80.0 counts/pixel

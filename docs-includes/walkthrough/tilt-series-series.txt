@@ -1,0 +1,1 @@
+±60° needs 1028 px across (+8 px margin each side); the volume has 1056

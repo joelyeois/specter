@@ -1,0 +1,2 @@
+seed 0, index 0 twice: True
+seed 0, index 0 vs 1:  False

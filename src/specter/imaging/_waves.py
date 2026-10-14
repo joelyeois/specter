@@ -57,7 +57,12 @@ class ExitWave:
     nxy, pad_nxy : int
         The image, and the FFT-padded pixel grid it was propagated on.
     oversample : int
-        Image-grid points per pixel, per axis.
+        Image-grid points per pixel, per axis: the grid the image is formed
+        on. Multislice, Rytov and projection waves are already on it; first
+        Born and kinematic propagate on the pixel grid, and :meth:`apply_ctf`
+        interpolates them onto it, so until then their ``array`` is
+        ``oversample`` times coarser than this says. Read the array's own
+        grid from its shape.
     defocus_shift : float
         Angstrom from the exit face, where the wave was computed, to the
         plane the nominal defocus refers to (the specimen's scattering

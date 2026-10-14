@@ -152,9 +152,9 @@ read it with [`starfile`](https://github.com/teamtomo/starfile) /
 Output batches are copied into preallocated host stacks, and per-particle
 normalization runs in bounded chunks using the same background mask and
 statistics. This reduces host RAM for large stacks without changing batch
-size or simulation precision. Multi-GPU generation reads particle indices
-in each rank directly, collects batches without retaining Lightning's epoch
-predictions, and reassembles one rank shard at a time in particle order.
+size or simulation precision. Multi-GPU generation runs each device's range
+of particle indices in its own worker process and reassembles one shard at a
+time in particle order.
 See the [production comparison](../assets/particle-output-memory/README.md)
 for GPU/host memory, timings, and matched image/Fourier checks.
 
@@ -294,9 +294,13 @@ names particular hardware: `"cuda:0"` or `"0,1"` fails rather than running
 somewhere else.
 
 `device` accepts a comma-separated list of GPU indices (e.g. `"0,1,2,3"`) to
-split particle generation across multiple GPUs via Lightning's DDP
-launcher; a single index (`"cuda:0"`) or `"cpu"` runs on one device. With
-`batchsize = "auto"`, every rank builds the same-sized batch, sized to
+split particle generation across multiple GPUs; a single index (`"cuda:0"`)
+or `"cpu"` runs on one device. The stack is cut into one contiguous range of
+particle indices per device, and each range runs in its own spawned worker
+process, which writes `particle_shard_<k>.pt`; the shards are then read back
+and joined in particle order. Every particle draws from its own seed, so a
+seeded stack is the same on any number of devices. With
+`batchsize = "auto"`, every worker uses the same batch size, sized to
 whichever GPU in the pool has the least free memory.
 
 ## Using it from Python instead of the CLI

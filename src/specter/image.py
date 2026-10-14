@@ -15,15 +15,21 @@ def normalize_particles(
     eps: float = 1e-8,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Vectorized per-particle normalization of a 2D particle stack.
+    Normalize each particle by the statistics of its background.
+
+    The mean (or median) and the standard deviation are taken over the
+    pixels outside a centred circle, the background around the particle, as
+    RELION's background normalization does; every pixel is then shifted and
+    scaled by them.
 
     Parameters
     ----------
     particles : torch.Tensor, shape (N, H, W)
         Stack of N 2D particles.
     mask_diameter : float, optional
-        Diameter of circular mask in pixels to exclude from mean/std calculation.
-        If None, uses circular mask with diameter of image.
+        Diameter in pixels of the centred circle whose pixels are left out of
+        the statistics. If None, the circle inscribed in the image, so the
+        statistics come from its corners.
     mode : str
         'mean' or 'median' for centering. Default is 'mean'.
     eps : float

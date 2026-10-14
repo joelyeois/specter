@@ -71,13 +71,23 @@ Relative error in exit-wave intensity vs. multislice, as a function of ice thick
 Across this thickness range (up to 320 Å, spanning typical single-particle
 ice thickness), Rytov's error stays one to two orders of magnitude below
 `firstborn`, `kinematic`, and `projection`'s. The exponentiated form
-makes the difference: even though Rytov shares first Born's linear-in-slices
-structure, exponentiating the accumulated phase rather than adding \(1\)
-to it (as `firstborn` does) keeps the *amplitude* of \(\psi\) correctly
-normalized at every thickness, rather than only to first order. Rytov's
-own mean intensity stays pinned to 1.0 (energy-conserving) at every
-thickness tested, like `multislice`'s. `firstborn`/`kinematic`, by
-contrast, drift substantially at large thickness. `projection`'s
+makes the difference: Rytov shares first Born's linear-in-slices
+structure, but `firstborn` adds \(1\) to the accumulated phase \(\Theta\),
+so its intensity carries a spurious \(|\Theta|^2\) that grows with
+thickness, while Rytov exponentiates it, so \(|\psi|^2 = e^{-2\,\mathrm{Im}\,\Theta}\)
+stays close to 1.
+
+Close to 1 is not exactly 1. Propagating each slice to the exit plane gives
+its contribution an imaginary part, whose mean over the field is zero but
+whose fluctuation raises the mean of \(e^{-2\,\mathrm{Im}\,\Theta}\) above
+1, by an amount that grows with thickness. Over the 320 Å of the sweep
+above it is barely visible in the mean intensity
+([Other propagation modes](other-modes.md#accuracy-vs-thickness)). On a 6BDF particle in structured ice it is
+1.7% at 500 Å, 3.3% at 1000 Å and 6.7% at 2000 Å, while multislice's mean
+intensity stays at 1.000 and Rytov's intensity pattern still correlates
+with multislice's at 0.979 or better
+([Propagation models](../../walkthrough/scattering.md#propagation-models)).
+`firstborn`/`kinematic` drift far more at large thickness. `projection`'s
 placement on this plot has a separate explanation; see [Other propagation
 modes](other-modes.md#accuracy-vs-thickness).
 

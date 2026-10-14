@@ -3,8 +3,8 @@
 Once a [specimen](specimens.md) volume \(V(x,y,z)\) exists, however it
 was built, turning it into a simulated image is identical physics
 regardless of whether \(V\) came from the single-particle or cryo-ET path.
-Every `BaseImager` subclass (`ImageGenerator`, `MicrographGenerator`,
-`TiltSeriesGenerator`, ...) runs the same three stages:
+Every simulation, whether a particle `Specimen`, a micrograph's `Sample`
+or a `TiltSeries`, runs the same three stages:
 
 1. **[Scattering](scattering/index.md)**: propagate the electron wave
    through \(V\) (multislice, Rytov, first Born, or plain projection) to
@@ -14,18 +14,20 @@ Every `BaseImager` subclass (`ImageGenerator`, `MicrographGenerator`,
    it is derived per material from measured inelastic mean free paths.
 2. **[Aberrations](aberrations.md)**: apply the microscope's transfer
    function (defocus, spherical aberration, astigmatism, and the
-   associated envelopes) to the exit wave. A generator constructed with
-   `optics=None` skips this stage.
-3. **[Detector](detector.md)**: model the physical detector's MTF, noise,
-   and (for direct electron detectors) coincidence loss.
+   associated envelopes) to the exit wave, through `ExitWave.apply_ctf`.
+   An exit wave turned into an intensity without it skips this stage.
+3. **[Detector](detector.md)**: form the intensity (`ExitWave.intensity`)
+   and record it (`Image.detect`), modelling the physical detector's MTF,
+   noise, and (for direct electron detectors) coincidence loss.
 
-`TiltSeriesGenerator` runs this same chain once per tilt angle instead of
+A `TiltSeries` runs this same chain once per tilt angle instead of
 once per particle. The per-image physics stays fixed. Only the
 invocation count and geometry change.
 
 !!! info "Source"
-    `specter.imagegenerator._base.BaseImager` is the shared base class
-    all of the above inherit from.
+    `specter.imaging` holds the objects; each stage is a plain function in
+    `specter.imaging._stages` or an engine module (`Scattering`,
+    `Aberration`, `Detector`) that every object calls.
 
 ## References
 

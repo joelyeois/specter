@@ -320,22 +320,36 @@ def test_aberration_dose_envelope_false_is_unchanged():
     )
 
 
-def test_ctf_batch_includes_dose():
-    from specter.imagegenerator._base import BaseImager
+def test_the_transfer_function_envelope_reads_each_image_s_dose():
+    """`apply_ctf(dose_envelope=...)` hands the envelope one dose per image."""
+    from specter.imaging import CTF, ExitWave, Exposure
 
-    gen = BaseImager(
+    torch.manual_seed(0)
+    array = torch.randn(2, 16, 16, dtype=torch.complex64)
+    wave = ExitWave(
+        array=array,
         pixel_size=1.0,
         voltage=300.0,
-        dose_per_angstrom=torch.tensor([40.0, 60.0]),
         nxy=16,
-        nz=16,
-        ctf_params={"dfu": torch.tensor([5000.0, 6000.0])},
-        progressbars=False,
-        verbose=False,
+        pad_nxy=16,
+        oversample=1,
+        defocus_shift=0.0,
+        ids=torch.arange(2),
     )
-    batch = gen._ctf_batch(torch.tensor([0, 1]))
-    assert "dose" in batch
-    assert torch.allclose(batch["dose"], torch.tensor([40.0, 60.0]))
+    dfu = torch.tensor([5000.0, 6000.0])
+    dose = torch.tensor([40.0, 60.0])
+    got = wave.apply_ctf(CTF({"dfu": dfu}), dose_envelope=Exposure(dose)).array
+    ab = Aberration(
+        16,
+        pixel_size=1.0,
+        voltage=300.0,
+        aberration_model="nonlinear",
+        dose_envelope=True,
+        progressbars=False,
+    )
+    assert torch.equal(got, ab(array, {"dfu": dfu, "dose": dose}))
+    undamaged = wave.apply_ctf(CTF({"dfu": dfu})).array
+    assert not torch.allclose(got, undamaged)
 
 
 def test_cc_envelope_is_the_gaussian_defocus_average_of_a_fwhm_energy_spread():

@@ -2,12 +2,11 @@
 Where radiation damage acts, and what happens to the solvent under exposure.
 
 Raw EER movies show the 3.7 A water ring does not fade under exposure, so a
-particle generator can apply the dose envelope to the specimen's potential
-before solvation (``Envelopes(dose_envelope_target="specimen")``,
-`potential.apply_dose_damage`) instead of to the transfer function, which
-filters the ice as hard as the protein. The solvent then loses coherence
-between frames instead (``Ice(motion_variance=...)``). Both are opt-in; the
-default keeps the envelope on the transfer function.
+specimen can take the dose envelope on its potential before solvation
+(``Specimen.damage()``, `potential.apply_dose_damage`) instead of on the
+transfer function (``ExitWave.apply_ctf(dose_envelope=...)``), which filters
+the ice as hard as the protein. The solvent then loses coherence between
+frames instead (``Ice(motion_variance=...)``). Both are opt-in.
 """
 
 from __future__ import annotations
@@ -15,50 +14,48 @@ from __future__ import annotations
 import pytest
 import torch
 
-import specter
 from specter.aberrations import dose_envelope
 from specter.config import ParticleStackConfig
 from specter.config._validation import validate_config
-from specter.imagegenerator import ImageGenerator, MicrographGenerator
+from specter.ice import RandomIcemaker
+from specter.imaging import CTF, Exposure, Poses, Sample, Specimen
+from specter.imaging import _stages as stages
 from specter.potential import (
+    FULL_OCCUPANCY_POTENTIAL_V,
     apply_dose_damage,
     frame_damage_envelope,
     potential_occupancy,
 )
-from specter.settings import Camera, Envelopes, Ice, Propagation
 
 
-def _ctf_params() -> dict[str, torch.Tensor]:
-    return {
-        "dfu": torch.tensor([8000.0]),
-        "dfv": torch.tensor([8000.0]),
-        "dfang": torch.tensor([0.0]),
-        "cs": torch.tensor([2.7]),
-        "phaseshift": torch.tensor([0.0]),
-    }
+DOSE = 40.0
+LINEAR = dict(scattering_model="ctf", alpha=0.0)
 
 
-def _generator(
-    volume: torch.Tensor,
-    dose_envelope: bool,
-    ice: Ice,
-    target: str = "specimen",
-) -> ImageGenerator:
-    return ImageGenerator(
-        scattering_potential=volume,
-        pixel_size=2.0,
-        quaternions=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        translations=torch.tensor([[0.0, 0.0]]),
-        ctf_params=_ctf_params(),
-        voltage=300.0,
-        dose_per_angstrom=40.0,
-        verbose=False,
-        progressbars=False,
-        propagation=Propagation(scattering_model="ctf", alpha=0.0),
-        envelopes=Envelopes(dose_envelope=dose_envelope, dose_envelope_target=target),  # type: ignore[arg-type]
-        camera=Camera(noise_model=None),
-        ice=ice,
+def _ctf() -> CTF:
+    return CTF(
+        {
+            "dfu": torch.tensor([8000.0]),
+            "dfv": torch.tensor([8000.0]),
+            "dfang": torch.tensor([0.0]),
+            "cs": torch.tensor([2.7]),
+            "phaseshift": torch.tensor([0.0]),
+        }
     )
+
+
+def _pose() -> Poses:
+    return Poses(
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]), torch.zeros(1, 2), torch.arange(1)
+    )
+
+
+def _waves(specimen: Specimen, seed: int | None = None):
+    """The specimen's exit wave at one exposure, linear model, no absorption."""
+    with torch.no_grad():
+        return specimen.scatter(
+            _pose(), voltage=300.0, exposure=Exposure(DOSE), seed=seed, **LINEAR
+        )
 
 
 # --- the damage filter itself ----------------------------------------------
@@ -134,11 +131,8 @@ def test_potential_damage_equals_transfer_function_envelope_for_the_specimen(
     projection-slice theorem: the 3D radial envelope at kz = 0 is the 2D
     envelope on the projection.
     """
-    on = _generator(small_volume, True, Ice(model=None))
-    off = _generator(small_volume, False, Ice(model=None))
-    on(torch.tensor([0]))
-    off(torch.tensor([0]))
-    proj_on, proj_off = on.exitwaves, off.exitwaves
+    proj_on = _waves(Specimen(small_volume, 2.0).damage()).pixels()
+    proj_off = _waves(Specimen(small_volume, 2.0)).pixels()
     n = proj_off.shape[-1]
     k = torch.fft.fftfreq(n, d=2.0)
     kk = torch.sqrt(k[:, None] ** 2 + k[None, :] ** 2)
@@ -150,25 +144,23 @@ def test_potential_damage_equals_transfer_function_envelope_for_the_specimen(
 
 def test_solvent_is_not_damaged_on_the_specimen_path():
     """An empty specimen in ice images identically with the envelope on or off."""
-    empty = torch.zeros(32, 32, 32)
-    waves = []
-    for flag in (True, False):
-        specter.seed(3)
-        gen = _generator(empty, flag, Ice(model="random"))
-        gen(torch.tensor([0]))
-        waves.append(gen.exitwaves.clone())
-    assert waves[0].abs().max() > 0
-    assert torch.allclose(waves[0], waves[1])
+    solvated = Specimen(torch.zeros(32, 32, 32), 2.0).solvate(model="random")
+    on = _waves(solvated.damage(), seed=3).pixels()
+    off = _waves(solvated, seed=3).pixels()
+    assert on.abs().max() > 0
+    assert torch.allclose(on, off)
 
 
 def test_transfer_function_envelope_does_damage_the_solvent():
     """The default placement filters the ice with everything else."""
-    empty = torch.zeros(32, 32, 32)
-    images = []
-    for flag in (True, False):
-        specter.seed(3)
-        gen = _generator(empty, flag, Ice(model="random"), target="transfer_function")
-        images.append(gen(torch.tensor([0])).clone())
+    waves = _waves(Specimen(torch.zeros(32, 32, 32), 2.0).solvate(model="random"), 3)
+    images = [
+        waves.apply_ctf(_ctf(), dose_envelope=envelope)
+        .intensity()
+        .detect(Exposure(DOSE), noise=None)
+        .array
+        for envelope in (Exposure(DOSE), None)
+    ]
     assert not torch.allclose(images[0], images[1])
 
 
@@ -177,59 +169,47 @@ def test_free_fraction_path_matches_reading_occupancy_off_the_volume(small_volum
     With nothing damaged in between, weighting the ice by a precomputed free
     fraction must reproduce the in-line occupancy read to float16 precision.
     """
-    gen = _generator(small_volume, False, Ice(model="random"))
-    V = gen.V.clone().unsqueeze(0)
-    free = gen.free_fraction_field(V)
+    V = small_volume.clone().unsqueeze(0)
+    full = torch.full((1, 1, 1, 1), FULL_OCCUPANCY_POTENTIAL_V)
+    free = stages.free_fraction(V, 2.0, full)
     assert free.dtype == torch.float16
     assert float(free.min()) >= 0.0 and float(free.max()) <= 1.0
-    specter.seed(5)
-    inline = gen.solvate(V.clone())
-    specter.seed(5)
-    precomputed = gen.solvate(V.clone(), free=free)
+    icemaker = RandomIcemaker(2.0, 32, 32)
+    kwargs = dict(pixel_size=2.0, nxy=32, pad=0, full=full, seeds=[5])
+    inline = stages.solvate(V.clone(), icemaker, **kwargs)
+    precomputed = stages.solvate(V.clone(), icemaker, free=free, **kwargs)
     assert torch.allclose(precomputed, inline, atol=2e-3 * float(inline.abs().max()))
 
 
-def test_micrograph_generator_accepts_the_specimen_target(small_volume_4d):
+def test_a_prepared_volume_takes_the_dose_on_the_specimen(small_volume_4d):
     """
-    MicrographGenerator damages its specimen itself; the transfer function
-    then carries no dose envelope. See test_exposure_micrograph_tilt.
+    A pre-assembled volume prepared with ``damaged=True`` damages itself; the
+    transfer function then refuses a dose envelope. See
+    test_exposure_micrograph_tilt.
     """
-    gen = MicrographGenerator(
-        small_volume_4d,
-        micrograph_size=32,
-        pixel_size=2.0,
-        ctf_params=_ctf_params(),
-        voltage=300.0,
-        dose_per_angstrom=40.0,
-        envelopes=Envelopes(dose_envelope=True, dose_envelope_target="specimen"),
-        verbose=False,
-        progressbars=False,
+    sample = Sample.from_volume(small_volume_4d, 2.0).prepare(
+        voltage=300.0, damaged=True
     )
-    assert gen._specimen_spectrum is not None
-    assert not gen.aberration.dose_envelope
+    assert sample.series is not None
+    with torch.no_grad():
+        waves = sample.scatter(voltage=300.0, exposure=Exposure(DOSE))
+    assert waves.damaged
+    with pytest.raises(ValueError, match="twice"):
+        waves.apply_ctf(_ctf(), dose_envelope=Exposure(DOSE))
 
 
 # --- solvent exposure --------------------------------------------------------
 
 
 def test_solvent_motion_refuses_an_envelope_on_the_transfer_function(small_volume):
-    with pytest.raises(ValueError, match="dose_envelope_target='specimen'"):
-        _generator(
-            small_volume,
-            True,
-            Ice(model="random", motion_variance=0.38),
-            target="transfer_function",
-        )
+    moving = Specimen(small_volume, 2.0).solvate(model="random", motion_variance=0.38)
+    waves = _waves(moving)
+    assert waves.solvent_filtered
+    with pytest.raises(ValueError, match="twice"):
+        waves.apply_ctf(_ctf(), dose_envelope=Exposure(DOSE))
     # Fine without an envelope, and with it on the specimen.
-    _generator(
-        small_volume,
-        False,
-        Ice(model="random", motion_variance=0.38),
-        "transfer_function",
-    )
-    _generator(
-        small_volume, True, Ice(model="random", motion_variance=0.38), "specimen"
-    )
+    waves.apply_ctf(_ctf())
+    _waves(moving.damage()).apply_ctf(_ctf())
 
 
 def test_config_rejects_solvent_motion_with_a_transfer_function_envelope():
@@ -257,12 +237,13 @@ def test_solvent_motion_filters_the_fluctuation_and_keeps_the_mean():
     empty = torch.zeros(32, 32, 32)
     fields = []
     for mv in (None, 0.38):
-        gen = _generator(
-            empty, False, Ice(model="gd", motion_variance=mv), "transfer_function"
-        )
-        V = torch.zeros(1, gen.nz, 32, 32)
-        specter.seed(11)
-        fields.append(gen.solvate(V))
+        specimen = Specimen(empty, 2.0).solvate(model="gd", motion_variance=mv)
+        with torch.no_grad():
+            fields.append(
+                specimen.materialize(
+                    _pose(), voltage=300.0, exposure=Exposure(DOSE), seed=11
+                )
+            )
     frozen, exposed = fields
     assert float(frozen.std()) > 0
     assert float(exposed.mean()) == pytest.approx(float(frozen.mean()), rel=1e-4)

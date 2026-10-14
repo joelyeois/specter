@@ -16,14 +16,6 @@ from typing import Any
 
 from ._field import setting
 
-#: Why a tracked run under Lightning DDP needs its ``job_id`` pinned; matches
-#: the rule `validate_config` enforces for `_dispatches_via_ddp` configs.
-DDP_JOB_ID_NOTE = (
-    "Mandatory when combining tracking with multi-GPU device strings -- "
-    "auto-numbering needs one process to decide, but multi-GPU dispatch "
-    "re-runs this pipeline once per rank."
-)
-
 
 def output_dir_setting(writes: str, job_type: str) -> Any:
     """
@@ -86,8 +78,7 @@ def job_id_setting(note: str = "") -> Any:
     Parameters
     ----------
     note : str, optional
-        A command-specific sentence appended to the help, e.g.
-        `DDP_JOB_ID_NOTE` for a command that runs under multi-GPU dispatch.
+        A command-specific sentence appended to the help.
 
     Returns
     -------

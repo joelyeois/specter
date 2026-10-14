@@ -144,14 +144,14 @@ potential; `image = 1 + 2 \cdot \mathrm{CTF} \otimes \mathrm{potential}` is
 linear in it). `specimen_absorption=True` (default) assumes amplitude
 contrast is already baked into the exit wave upstream, via
 `potential.apply_amplitude_contrast`, so applying it again here would double
-count it. This is why `BaseImager._init_optics` sets
-`specimen_absorption=self.scattering_model != "ctf"` rather than a fixed
-value.
+count it. This is why `ExitWave.apply_ctf` sets
+`specimen_absorption` to whether the wave came from a model other than
+`"ctf"`, rather than to a fixed value.
 
 `aberration_model` is not an independent, user-facing setting: every
 caller above `Aberration`/`Detector`/`TransferFunction` themselves
-(`ImageGenerator`, `MicrographGenerator`, `TiltSeriesGenerator`,
-`Reconstructor`, `TomogramReconstructor`, and their config/CLI surface)
+(`ExitWave.apply_ctf`, `Reconstructor`, `TomogramReconstructor`, and
+their config/CLI surface)
 derives it from `scattering_model` via
 `aberrations.aberration_model_for_scattering` -- `"linear"` for
 `scattering_model="ctf"`, `"nonlinear"` for every other scattering model.
@@ -234,8 +234,8 @@ water ring per fraction is constant to within about 10 % across 40 to
 3.7 Å) would leave under 2 % of the ring amplitude by the final fraction. The
 solvent loses coherence between frames instead (see [Ice](ice.md)).
 
-`MicrographGenerator` damages the specimen while it is assembled. A
-`MicrographSpecimenGenerator` builds its specimen for the one exposure that
+A micrograph's specimen is damaged while it is assembled. `Field.draw`
+builds its specimen for the one exposure that
 images it, so a regenerated specimen is damaged for the dose of the next
 micrograph; the ice is blended into a copy of the undamaged specimen, and the
 difference, which is the weighted ice alone, is added once the specimen has
@@ -290,8 +290,8 @@ instrument with zero defocus and no aberrations.
 `bfactor` is the one term with a constructor-level convenience:
 `Aberration(..., bfactor=...)` overrides any `"bfactor"` key already in
 `ctf_params`, since it is usually a single calibration value shared
-across a whole batch rather than a per-particle quantity (the same
-convenience `dose_per_angstrom` gets one level up, on `BaseImager`).
+across a whole batch rather than a per-particle quantity
+(`ExitWave.apply_ctf(bfactor=...)` offers the same convenience).
 Every other `ctf_params` key listed above is per-image and therefore
 only ever set through the dict, never as a constructor argument.
 `Aberration.__init__` raises `TypeError` if you pass one by mistake.
@@ -363,7 +363,7 @@ volume.
     command uses `"legacy"`. This section describes where the work stands,
     not a choice you are being offered.
 
-`BaseImager.aberration_backend` selects which engine computes the
+`ExitWave.apply_ctf(backend=...)` selects which engine computes the
 transfer function above: `"legacy"` (the default, and the only setting
 SPECTER itself uses) is `Aberration` as described on this page;
 `"torch_ctf"` swaps in
@@ -407,7 +407,7 @@ per-particle quantity; `"legacy"` has no equivalent.
   a plausible image at the wrong transfer function. A zero-valued term is
   accepted, since it has no effect either way.
 - **`torch_ctf` never receives `alpha`, and reads `specimen_absorption`
-  differently.** `BaseImager._init_optics` passes neither to
+  differently.** `ExitWave.apply_ctf` passes neither to
   `LegacyAberrationAdapter`, so under that backend amplitude contrast is absent
   from the transfer function whatever the config sets. The two engines also
   disagree on what `specimen_absorption=False` means: `Aberration` adds

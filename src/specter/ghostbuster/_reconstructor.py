@@ -1,6 +1,6 @@
 """
 `Reconstructor`: reconstructs a 3-D volume from single-particle images with
-the same forward model as `ImageGenerator`, optionally refining poses,
+the same forward model as `imaging.Specimen`, optionally refining poses,
 shifts and defocus.
 """
 
@@ -10,6 +10,7 @@ from specter import logger
 
 import os
 from pathlib import Path
+from dataclasses import asdict
 from typing import Any
 
 import mrcfile
@@ -20,7 +21,8 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler
 
 from .. import rotations
-from ..imagegenerator import ImageGenerator
+from ..imaging import CTF, Exposure, Poses, Specimen
+from ..rotations import VolumeRotator
 from ..plots import (
     HALFMAP_FSC_THRESHOLD,
     MAP_TO_MODEL_FSC_THRESHOLD,
@@ -40,7 +42,7 @@ from ._losses import (
     nps_weighted_loss,
     update_sigma2,
 )
-from ..settings import Camera, Envelopes, Optics, Propagation
+from ..settings import Optics, Propagation
 from specter.options import RotateMode, Scheduler
 
 #: Largest table of projected 2D masks `Reconstructor` keeps on the device,
@@ -237,8 +239,7 @@ class Reconstructor(_BaseReconstructor):
         # imaging models
         self.propagation = propagation
         self.optics = optics
-        self._build_imagegenerator(bfactor)
-        self._bind_refined_parameters()
+        self._register_bfactor(bfactor, quaternions.shape[0])
 
     def _setup_optimization_state(
         self,
@@ -362,10 +363,9 @@ class Reconstructor(_BaseReconstructor):
             self.register_buffer(k, v_adjusted)
             self.ctf_params[k] = getattr(self, k)
             if k in ("dfu", "dfv"):
-                # The un-offset value, normalised the way BaseImager normalises
-                # its own CTF buffers, so :meth:`_bind_refined_parameters` can
-                # rebuild the effective defocus from the *current* offset rather
-                # than the one this model happened to be constructed with.
+                # The un-offset value, so :meth:`_ctf` can build the effective
+                # defocus from the *current* offset rather than the one this
+                # model happened to be constructed with.
                 base = torch.as_tensor(v)
                 if base.ndim == 0:
                     base = base.unsqueeze(0)
@@ -410,77 +410,45 @@ class Reconstructor(_BaseReconstructor):
             scale = torch.ones(n_particles)
         self.register_buffer("scale", scale)
 
-    def _build_imagegenerator(self, bfactor: float | torch.Tensor | None) -> None:
-        """Construct the underlying ImageGenerator from the registered parameters.
-
-        The forward model is noiseless and envelope-free: the inverse takes
-        no `Envelopes` and no `Camera`. The forward simulators' defaults are
-        not envelope-free (`Envelopes` turns the Cc focal spread on), so the
-        generator is handed envelopes with every term off rather than the
-        defaults; the information the data lost to them is absorbed into the
-        reconstructed volume, and assuming values here would inject a prior.
-        """
-        self.imagegenerator = ImageGenerator(
-            self.V,
-            self.voxel_size,
-            self.rotations,
-            self.translations,
-            self.ctf_params,
-            self.voltage,
-            self.dose_per_angstrom,
-            anisomag=self.anisomag,
-            propagation=self.propagation,
-            optics=self.optics,
-            envelopes=Envelopes(cc=None),
-            camera=Camera(noise_model=None),
-            bfactor=bfactor,
-        )
-
-    def _bind_refined_parameters(self) -> None:
-        """
-        Publish this module's refined parameters to the image generator.
-
-        `Reconstructor` owns the refined parameters; `ImageGenerator` renders
-        from them. Binding them by shared tensor identity is not durable:
-        `torch.nn.Module._apply` swaps a `Parameter`'s ``.data`` in place but
-        replaces a buffer with a fresh ``.to()`` copy, so a device move leaves
-        the generator holding a snapshot. Gradients still reach the parameter
-        through that copy, which is why the breakage is silent -- the optimiser
-        steps, and the forward model keeps rendering the values it was moved
-        with. On the CPU ``.to()`` is a no-op and identity survives, so this
-        only ever failed where training actually happens.
-
-        ``dfu``/``dfv`` are rebuilt rather than aliased, since the quantity the
-        generator needs is derived: the base defocus plus the current
-        ``defocus_offset``, less whatever midplane shift
-        :meth:`~specter.imagegenerator.BaseImager._apply_defocus_shift` applied.
-        Recomputing it here is what puts ``defocus_offset`` in the autograd
-        graph at all -- folded in once at construction, it is a constant.
-
-        Idempotent, and cheap enough to call every step.
-        """
-        gen = getattr(self, "imagegenerator", None)
-        if gen is None:
+    def _register_bfactor(
+        self, bfactor: float | torch.Tensor | None, n_particles: int
+    ) -> None:
+        """One B-factor per particle, overriding any in ``ctf_params``, or None."""
+        if bfactor is None:
+            self.bfactor_per_particle: torch.Tensor | None = None
             return
+        b = torch.as_tensor(bfactor, dtype=torch.float32).flatten()
+        if len(b) == 1:
+            b = b.expand(n_particles).clone()
+        self.register_buffer("bfactor_per_particle", b)
 
-        gen.V = self.V
-        gen.quaternions = self.rotations
-        gen.translations = self.translations
+    def _ctf(self, idx: torch.Tensor | int | slice) -> CTF:
+        """
+        The batch's transfer-function terms, with the current defocus offset.
 
-        shift = getattr(gen, "_defocus_shift_angstrom", 0.0) or 0.0
-        for name in getattr(self, "_defocus_names", []):
-            base = getattr(self, f"_{name}_base")
-            setattr(gen, name, base + self.defocus_offset - shift)
-
-    def _apply(self, *args: Any, **kwargs: Any) -> Any:
-        """Re-bind refined parameters after any device or dtype transform."""
-        module = super()._apply(*args, **kwargs)
-        module._bind_refined_parameters()
-        return module
+        Built from the refined parameters on every call, so an optimiser
+        step on ``defocus_offset`` reaches the forward model, through any
+        device move, with nothing to keep in sync.
+        """
+        offset: torch.Tensor = self.defocus_offset
+        if offset.ndim:
+            offset = offset[idx]
+        params = {}
+        for name in self.ctf_params:
+            if name in self._defocus_names:
+                params[name] = getattr(self, f"_{name}_base")[idx] + offset
+            else:
+                params[name] = getattr(self, name)[idx]
+        return CTF(params)
 
     def forward(self, idx: torch.Tensor | int | slice) -> torch.Tensor:
         """
         Simulate images for the given particle indices.
+
+        The simulators' chain (`specter.imaging`) run on this module's own
+        parameters: noiseless, with no Cc focal spread and no detector. The
+        inverse takes no `Envelopes` and no `Camera`; what the data lost to
+        them is absorbed into the reconstructed volume rather than assumed.
 
         Parameters
         ----------
@@ -492,7 +460,27 @@ class Reconstructor(_BaseReconstructor):
         torch.Tensor
             Simulated images, shape (B, H, W).
         """
-        return self.imagegenerator(idx)
+        quaternions = self.rotations[idx]
+        shifts = self.translations[idx]
+        if quaternions.ndim < 2:
+            quaternions, shifts = quaternions.unsqueeze(0), shifts.unsqueeze(0)
+        poses = Poses(quaternions, shifts, torch.arange(len(quaternions)))
+        waves = Specimen(self.V, self.voxel_size).scatter(
+            poses, voltage=self.voltage, **asdict(self.propagation)
+        )
+        bfactor = self.bfactor_per_particle
+        waves = waves.apply_ctf(
+            self._ctf(idx),
+            bfactor=None if bfactor is None else bfactor[idx],
+            backend=self.optics.aberration_backend,
+            lpp_params=self.optics.lpp_params,
+        )
+        anisomag = None if self.anisomag is None else self.anisomag[idx]
+        return (
+            waves.intensity(cc=None)
+            .detect(Exposure(self.dose_per_angstrom), noise=None, anisomag=anisomag)
+            .array
+        )
 
     def symmetrize(self) -> None:
         """Apply the configured point-group symmetry to the current volume in-place."""
@@ -696,10 +684,14 @@ class Reconstructor(_BaseReconstructor):
                 T = T.unsqueeze(0)
             R = roma.unitquat_to_rotmat(Q)
             T = rotations.translations_angstrom_to_torch(
-                T, self.imagegenerator.nxy, self.imagegenerator.pixel_size
+                T, self.V.shape[-1], self.voxel_size
             )
             theta = rotations.build_affine_matrix(R, T)
-            projected = self.imagegenerator.rotator(mask, theta).max(dim=1).values
+            nz, ny, nx = mask.shape
+            rotator = VolumeRotator(
+                nz, ny, nx, origin="relion", mode=self.propagation.rotate_mode
+            ).to(mask.device)
+            projected = rotator(mask, theta).max(dim=1).values
 
         if tuple(projected.shape) != tuple(image_shape):
             raise ValueError(
@@ -711,8 +703,6 @@ class Reconstructor(_BaseReconstructor):
     def _common_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        self._bind_refined_parameters()
-
         images, idx = batch
         out = self.forward(idx)
         loss = self._compute_loss(out, images, idx)

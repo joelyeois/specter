@@ -3,10 +3,11 @@ Generate the figures for docs/concepts/scattering/multislice.md,
 docs/concepts/scattering/rytov.md, and docs/concepts/scattering/other-modes.md.
 
 All figures are built from one real potential volume -- a `RandomIcemaker`
-vitreous-ice slab (the same class `ImageGenerator`/`MicrographGenerator` use
-for the fast/low-fidelity ice path) -- and call `specter.scattering.Scattering`
-directly with each `scattering_model`, so the numbers plotted are exactly
-what the real forward model produces, not a reimplementation.
+vitreous-ice slab (the same class `Specimen.solvate`/`Field.solvate` use for
+the fast/low-fidelity `model="random"` ice path) -- and call
+`specter.scattering.Scattering` directly with each `scattering_model`, so
+the numbers plotted are exactly what the real forward model produces, not a
+reimplementation.
 
 Two groups of figures:
 

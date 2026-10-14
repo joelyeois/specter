@@ -2,7 +2,7 @@
 Memory-aware batch sizing for the particle-stack forward model.
 
 `batchsize` controls how many particles are pushed through
-`ImageGenerator.forward` at once. It is purely a memory/throughput knob --
+`Specimen.scatter` at once. It is purely a memory/throughput knob --
 it changes nothing about the physics -- but picking it well needs three
 numbers a user has no reason to know: how many working copies of the padded
 volume the multislice pipeline holds at peak, how big the padded volume

@@ -12,9 +12,9 @@ from specter.arrays import compute_nz
 from specter.config import MicrographConfig, validate_config
 from specter.crowding import filter_by_local_z_density, filter_by_z_density
 from specter.ice import IceBank, IceProfile, blend_ice_into_volume
-from specter.imagegenerator import MicrographGenerator
+from specter.imaging import CTF, Exposure, Field
 from specter.pipelines._micrograph import build_ice_profile
-from specter.settings import Camera, Crowding, Ice
+from specter.settings import Ice
 from specter.specimen import MicrographSpecimenGenerator
 
 
@@ -390,81 +390,59 @@ def _blob_template(n: int = 16) -> torch.Tensor:
     return V
 
 
-def test_micrograph_generator_wires_the_profile_through():
+def _field(px: float, nxy: int, ice: Ice) -> Field:
+    return (
+        Field(_blob_template(), px, nxy)
+        .pack(min_distance=40.0, water_air_interface=True)
+        .solvate(ice)
+    )
+
+
+def test_a_field_wires_the_profile_through():
     torch.manual_seed(0)
     px, nxy = 4.0, 64
     prof = IceProfile(mode="wedge", thickness_range=(40.0, 160.0))
+    ice = Ice(model="random", profile=prof)
     template = _blob_template()
-    model = MicrographGenerator(
-        MicrographSpecimenGenerator(
-            template,
-            px,
-            nxy,
-            crowding=Crowding(min_distance=40.0, water_air_interface=True),
-            ice=Ice(model="random", profile=prof),
-            progressbars=False,
-        ),
-        nxy,
-        px,
-        {"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([10000.0])},
-        300.0,
-        torch.tensor([30.0]),
-        verbose=False,
-        progressbars=False,
-        camera=Camera(noise_model="poisson"),
-    )
+    with torch.no_grad():
+        sample = _field(px, nxy, ice).draw(voltage=300.0)
+        waves = sample.scatter(voltage=300.0)
 
     # Box sized by the thickest column, not by the mean.
-    assert model.nz == prof.required_nz(nxy, px, template.shape[0])
-    assert model.nz == 40
+    assert sample.nz == prof.required_nz(nxy, px, template.shape[0])
+    assert sample.nz == 40
     # ice_thickness reports the ice, not the box depth.
-    assert model.ice_thickness == pytest.approx(100.0)
+    engine = MicrographSpecimenGenerator(template, px, nxy, ice=ice)
+    assert engine.ice_thickness == pytest.approx(100.0)
     # Defocus references the specimen's entry face, not the box's.
-    assert model._defocus_shift_angstrom == pytest.approx(
-        prof.entry_face_shift(nxy, px)
-    )
-    assert model._defocus_shift_angstrom == pytest.approx(50.0)
-    assert model._defocus_shift_angstrom != pytest.approx(
-        defocus_midplane_shift(model.nz, px)
-    )
+    assert waves.defocus_shift == pytest.approx(prof.entry_face_shift(nxy, px))
+    assert waves.defocus_shift == pytest.approx(50.0)
+    assert waves.defocus_shift != pytest.approx(defocus_midplane_shift(sample.nz, px))
 
-    image = model(torch.tensor([0]))
+    ctf = CTF({"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([10000.0])})
+    with torch.no_grad():
+        image = waves.apply_ctf(ctf).intensity().detect(Exposure(30.0)).array
     assert image.shape == (1, nxy, nxy)
     assert bool(torch.isfinite(image).all())
 
     # The assembled volume really is wedge-shaped.
-    projected = model.volume[0].sum(dim=0)
+    projected = sample.volume[0].sum(dim=0)
     thin, thick = float(projected[:, :8].mean()), float(projected[:, -8:].mean())
     assert thick > 3 * thin
 
 
-def test_micrograph_generator_without_profile_is_unchanged():
+def test_a_field_without_profile_is_unchanged():
     """The no-profile path must still reference defocus to the box."""
     torch.manual_seed(0)
     px, nxy = 4.0, 64
-    model = MicrographGenerator(
-        MicrographSpecimenGenerator(
-            _blob_template(),
-            px,
-            nxy,
-            crowding=Crowding(min_distance=40.0, water_air_interface=True),
-            ice=Ice(model="random", thickness=160.0),
-            progressbars=False,
-        ),
-        nxy,
-        px,
-        {"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([10000.0])},
-        300.0,
-        torch.tensor([30.0]),
-        verbose=False,
-        progressbars=False,
-        camera=Camera(noise_model="poisson"),
-    )
-    assert model.nz == compute_nz(16, 160.0, px)
-    assert model.ice_thickness == pytest.approx(model.nz * px)
-    assert model._defocus_shift_angstrom == pytest.approx(
-        defocus_midplane_shift(model.nz, px)
-    )
+    ice = Ice(model="random", thickness=160.0)
+    with torch.no_grad():
+        sample = _field(px, nxy, ice).draw(voltage=300.0)
+        waves = sample.scatter(voltage=300.0)
+    assert sample.nz == compute_nz(16, 160.0, px)
+    engine = MicrographSpecimenGenerator(_blob_template(), px, nxy, ice=ice)
+    assert engine.ice_thickness == pytest.approx(sample.nz * px)
+    assert waves.defocus_shift == pytest.approx(defocus_midplane_shift(sample.nz, px))
 
 
 def test_profile_window_conserves_mean_density_against_no_profile():

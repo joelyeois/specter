@@ -1,6 +1,6 @@
 """
 Tilt-series geometry, shared by the forward model
-(:class:`~specter.imagegenerator.TiltSeriesGenerator`) and the inverse
+(:class:`~specter.imaging.TiltSeries`) and the inverse
 problem (:class:`~specter.ghostbuster.TomogramReconstructor`), plus AreTomo3
 tilt-geometry file I/O.
 
@@ -27,7 +27,6 @@ from ._geometry import (
     infer_max_tilt_from_inputs,
     nz_tilt_for_pose,
     pad_volume_xy_for_tilt,
-    shift_ctf_defocus_for_tilt,
 )
 
 __all__ = [
@@ -38,7 +37,6 @@ __all__ = [
     "infer_max_tilt_from_inputs",
     "nz_tilt_for_pose",
     "pad_volume_xy_for_tilt",
-    "shift_ctf_defocus_for_tilt",
     "read_aretomo3_aln",
     "read_aretomo3_global_shifts",
     "read_aretomo3_xf",

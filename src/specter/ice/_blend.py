@@ -6,7 +6,7 @@ proportion to the fraction of it not already occupied, read off the
 potential by :func:`~specter.potential.potential_occupancy`. Doing that a
 slab at a time bounds memory, and it has one subtlety, which is why the
 bookkeeping lives here rather than at each of its call sites
-(``ParticleGeneratorBase.solvate``, :func:`~specter.ice.blend_ice_into_volume`
+(``imaging._stages.solvate``, :func:`~specter.ice.blend_ice_into_volume`
 and its host-volume branch).
 
 The occupancy blur reads a halo of slices beyond its slab. On the low side
@@ -242,11 +242,10 @@ def resolve_icemaker(
     """
     Resolve the ``ice_model``/``icemaker``/``ice_cache_dir`` kwargs shared
     across :class:`~specter.specimen.MicrographSpecimenGenerator`,
-    :class:`~specter.imagegenerator.MicrographGenerator`,
-    :class:`~specter.imagegenerator.TiltSeriesGenerator`,
-    :class:`~specter.imagegenerator.ImageGenerator`, and
-    :class:`~specter.imagegenerator.ImageGeneratorFromCoordinates` into a
-    concrete icemaker instance (or ``None`` if ice is disabled).
+    :meth:`~specter.imaging.Specimen.solvate`,
+    :meth:`~specter.imaging.Sample.prepare` and
+    :meth:`~specter.imaging.Sample.tilt_series` into a concrete icemaker
+    instance (or ``None`` if ice is disabled).
 
     Parameters
     ----------
@@ -338,8 +337,7 @@ def blend_ice_into_volume(
     relax_steps : int, optional
         Forwarded to :meth:`IceBank.generate_big_ice` (ignored for
         ``RandomIcemaker``, which has no tile seams to relax). Default 0,
-        matching every higher-level caller (``ImageGenerator``,
-        ``MicrographGenerator``, ``TiltSeriesGenerator``, ...).
+        matching every higher-level caller (``Ice.relax_steps``).
     profile : IceProfile, optional
         Laterally varying thickness. Ice is still generated at ``V``'s full
         ``(nz, nxy, nxy)`` extent and then confined to the profile by

@@ -1,13 +1,13 @@
 """Compatibility bridge from specter's legacy, Å-based ctf_params
-dict convention (``aberrations.Aberration``, ``BaseImager._ctf_batch()``)
+dict convention (``aberrations.Aberration``, ``imaging.CTF.params``)
 to the new torch-ctf-backed :class:`~specter.ctf.CTFParameters`.
 
-This exists so ``BaseImager`` (and anything else holding a legacy
+This exists so ``ExitWave.apply_ctf`` (and anything else holding a legacy
 ``ctf_params`` dict) can opt into the torch-ctf backend without every call
 site needing to change: :class:`LegacyAberrationAdapter` has the exact same
 call signature as ``aberrations.Aberration`` (``forward(exitwave,
-ctf_params_dict)``), so ``self.aberration = LegacyAberrationAdapter(...)``
-is the only change needed anywhere.
+ctf_params_dict)``), so the two are interchangeable wherever one is built
+(``imaging._engines.aberration_engine``).
 
 ``lpp_params`` (laser phase plate) is deliberately *not* a ``ctf_params``
 dict key, unlike every other term here: it's always a single shared
@@ -99,7 +99,7 @@ def ctf_params_dict_to_parameters(
     lpp_params: dict[str, float] | None = None,
 ) -> CTFParameters:
     """Convert a legacy Å/radian-based ``ctf_params`` dict (the
-    ``aberrations.Aberration`` / ``BaseImager._ctf_batch()`` convention)
+    ``aberrations.Aberration`` / ``imaging.CTF.params`` convention)
     into a :class:`CTFParameters`.
 
     Parameters
@@ -107,7 +107,7 @@ def ctf_params_dict_to_parameters(
     ctf_params : dict[str, Any]
         Any subset of ``{"dfu", "dfv", "dfang", "cs", "phaseshift",
         "tiltx", "tilty", "trefoil1", "trefoil2", "dose"}``, matching
-        exactly what ``BaseImager._ctf_batch()`` produces (and what
+        exactly what ``imaging.CTF.params`` holds (and what
         ``aberrations.Aberration.transfer_function()`` accepts). Every key
         is optional -- an absent key means "no effect", the same as
         ``aberrations.Aberration``'s own ``ctf_params.get(key, self.zero)``
@@ -245,8 +245,8 @@ class LegacyAberrationAdapter(nn.Module):
         default; a caller building this class directly for
         ``aberration_model="linear"`` (e.g. matching
         ``scattering_model="ctf"``) needs to pass False explicitly, the
-        same way :meth:`BaseImager._init_optics` does for the ``"legacy"``
-        backend.
+        same way ``imaging._engines.aberration_engine`` does for the
+        ``"legacy"`` backend.
     lpp_params : dict[str, float], optional
         Laser-phase-plate config, in ``CTFParameters``-native units. A
         construction-time argument, like ``bfactor``/``convergence_angle``/

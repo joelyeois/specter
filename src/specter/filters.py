@@ -103,7 +103,7 @@ def gaussian_blur3d(
     other two axes being brought there by a transpose and a copy. A cuDNN
     ``conv3d`` with a ``(1, 1, 2r+1)``-shaped kernel computes the same thing
     but runs ~2x slower on the slabs `blend_ice_into_volume` and
-    `ParticleGeneratorBase.solvate` hand it (0.36 vs 0.64 ms per 1024^2
+    `imaging._stages.solvate` hand it (0.36 vs 0.64 ms per 1024^2
     slice on an L40), and the blur is the largest single cost of solvation
     at a 512-pixel box. The two agree to float rounding (~2e-6 on a 7 V
     field), since only the summation order differs.

@@ -58,16 +58,6 @@ def test_indices_are_empty_unless_every_entry_names_a_gpu() -> None:
     assert parse_device("cpu,0").indices == ()
 
 
-def test_ddp_dispatch() -> None:
-    """DDP wants bare GPU ids; anything else runs single-device."""
-    assert parse_device("cpu").ddp_dispatch() == ("single", "cpu")
-    assert parse_device("cuda").ddp_dispatch() == ("single", "cuda")
-    assert parse_device("cuda:0").ddp_dispatch() == ("single", "cuda:0")
-    assert parse_device("0").ddp_dispatch() == ("single", "cuda:0")
-    assert parse_device("0,1,2").ddp_dispatch() == ("multi", [0, 1, 2])
-    assert parse_device("cpu,cpu").ddp_dispatch() == ("single", "cpu")
-
-
 def test_primary_and_pool() -> None:
     assert parse_device("cuda:1").primary_and_pool() == ("cuda:1", None)
     assert parse_device("0,1,2").primary_and_pool() == (

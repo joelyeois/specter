@@ -13,7 +13,6 @@ from specter.aberrations._functions import (
     tetrafoil,
     trefoil,
 )
-from specter.settings import Camera, Ice, Propagation
 
 # Representative 300 kV imaging parameters, in specter's Angstrom-based units.
 WAVELENGTH = 0.0197
@@ -209,7 +208,7 @@ def test_defocus_increases_with_z():
     the sign of ``defocus_midplane_shift``, which is defined alongside these
     functions and whose docstring cites this test by name.
     """
-    from specter.imagegenerator import MicrographGenerator
+    from specter.imaging import CTF, Exposure, Sample
 
     nxy, nz, px = 64, 128, 2.0
     dfu, centre = 10000.0, nz // 2
@@ -220,21 +219,13 @@ def test_defocus_increases_with_z():
         V = torch.zeros(1, nz, nxy, nxy)
         c = nxy // 2
         V[0, k - 2 : k + 3, c - 4 : c + 5, c - 4 : c + 5] = 50.0
-        model = MicrographGenerator(
-            V,
-            nxy,
-            px,
-            {"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([defocus])},
-            300.0,
-            torch.tensor([100.0]),
-            verbose=False,
-            progressbars=False,
-            propagation=Propagation(scattering_model="multislice", alpha=0.1),
-            camera=Camera(noise_model=None),
-            ice=Ice(model=None),
-        )
+        ctf = CTF({"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([defocus])})
         with torch.no_grad():
-            return model(torch.tensor([0]))[0].detach()
+            waves = Sample(V, px).scatter(
+                voltage=300.0, scattering_model="multislice", alpha=0.1
+            )
+            image = waves.apply_ctf(ctf).intensity()
+            return image.detect(Exposure(100.0), noise=None).array[0]
 
     def rms(a: torch.Tensor, b: torch.Tensor) -> float:
         return float(((a - b) ** 2).mean().sqrt())

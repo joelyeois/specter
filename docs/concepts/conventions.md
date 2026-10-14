@@ -83,10 +83,10 @@ ordering. Translations are in Å.
 
 **A quaternion \(Q\) rotates the density by \(R(Q)^{-1}\).** Rotate a
 feature at \(+x\) by \(+90^\circ\) about \(z\) and it lands at \(-y\).
-The volume path (`ImageGenerator.rotate`, which passes \(R\) to
-`grid_sample`) and the coordinate path
-(`ImageGeneratorFromCoordinates.rotate`, which applies \(R^{\mathsf{T}}\)
-to atom positions) look like opposites in source but produce the same
+The volume path (`Specimen.scatter`'s `VolumeRotator`, which passes \(R\)
+to `grid_sample`) and the coordinate path (`Specimen.from_atoms`, which
+applies \(R^{\mathsf{T}}\) to atom positions) look like opposites in
+source but produce the same
 pose, because sampling a volume at \(R\mathbf{x}\) rotates its density by
 \(R^{-1}\). This is the interpretation under which CryoSPARC rotation
 vectors and RELION Euler angles map in without inversion.
@@ -128,8 +128,9 @@ Conversion into `specter`'s representation:
 
 You apply a pose to a volume by one of two interchangeable methods,
 selected by the `rotate_mode` field of the `Propagation` settings group,
-passed as `propagation=Propagation(rotate_mode=...)` to `ImageGenerator`,
-`Reconstructor` or `Ghostbuster`. In a TOML config or on the command line
+passed as `Specimen.scatter(..., rotate_mode=...)`, or as
+`propagation=Propagation(rotate_mode=...)` to `Reconstructor` or
+`Ghostbuster`. In a TOML config or on the command line
 it is the flat field `rotate_mode` of `ParticleStackConfig` and
 `ReconstructionConfig`. Both methods express the same
 convention, and both start from the same affine built above; they differ
@@ -231,7 +232,8 @@ Balakrishnan et al. established and used there to recover depth from a
 single shot.
 
 `specter` therefore subtracts \(n_z\Delta x/2\) from `dfu` and `dfv`
-before building a transfer function, automatically inside `BaseImager`,
+before building a transfer function, automatically (every `ExitWave`
+carries the shift as `defocus_shift`, which `ExitWave.apply_ctf` applies),
 for every propagating scattering model: `multislice`, `rytov`,
 `firstborn`, and `kinematic`. The `projection` and `ctf` models have no
 \(Z\) extent to offset from, so `specter` excludes them. If you drive

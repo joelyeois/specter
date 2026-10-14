@@ -1,8 +1,8 @@
 """End-to-end parity between aberration_backend="legacy" (aberrations.
 Aberration) and aberration_backend="torch_ctf" (ctf.LegacyAberrationAdapter),
 through Reconstructor and TomogramReconstructor -- the ghostbuster
-counterpart to test_imagegenerator_backend_parity.py, which covers the
-forward-model generators directly.
+counterpart to test_imaging_backend_parity.py, which covers the
+forward model's imaging objects directly.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ _LPP_PARAMS = dict(
 @pytest.fixture
 def realistic_ctf_params() -> dict[str, torch.Tensor]:
     """Every CTF term nonzero at once, matching
-    test_imagegenerator_backend_parity.py's fixture of the same name."""
+    test_imaging_backend_parity.py's fixture of the same name."""
     return {
         "dfu": torch.tensor([5200.0]),
         "dfv": torch.tensor([4900.0]),
@@ -68,8 +68,8 @@ def _build_reconstructor(tiny_volume, ctf_params, aberration_backend, lpp_params
 
 def test_reconstructor_matches_across_backends(tiny_volume, realistic_ctf_params):
     """Every CTF term nonzero at once, through Reconstructor's actual forward
-    pass (ImageGenerator built internally) -- not just the isolated
-    ImageGenerator parity already covered elsewhere."""
+    pass -- not just the isolated forward-model parity already covered
+    elsewhere."""
     legacy = _build_reconstructor(tiny_volume, realistic_ctf_params, "legacy")
     torch_ctf = _build_reconstructor(tiny_volume, realistic_ctf_params, "torch_ctf")
 
@@ -79,7 +79,7 @@ def test_reconstructor_matches_across_backends(tiny_volume, realistic_ctf_params
 
 def test_reconstructor_lpp_params_changes_output(tiny_volume):
     """lpp_params reaches the rendered image through Reconstructor, same as
-    it does through a bare ImageGenerator."""
+    it does through ExitWave.apply_ctf."""
     ctf_params = {"dfu": torch.tensor([5000.0]), "cs": torch.tensor([2.7])}
 
     without_lpp = _build_reconstructor(
@@ -95,7 +95,7 @@ def test_reconstructor_lpp_params_changes_output(tiny_volume):
 
 def test_reconstructor_lpp_params_with_legacy_backend_raises(tiny_volume):
     """lpp_params with the default aberration_backend='legacy' must raise at
-    construction time, same as it does for a bare ImageGenerator."""
+    construction time, as ExitWave.apply_ctf refuses it."""
     with pytest.raises(ValueError, match="lpp_params"):
         Reconstructor(
             V=tiny_volume,

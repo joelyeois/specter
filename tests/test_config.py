@@ -520,39 +520,39 @@ def test_tomogram_generator_carries_the_monomer_library_path():
 
 
 @pytest.mark.parametrize(
-    "config_cls,generator_name",
+    "config_cls,scatter",
     [
-        ("ParticleStackConfig", "ImageGenerator"),
-        ("MicrographConfig", "MicrographGenerator"),
-        ("TiltSeriesConfig", "TiltSeriesGenerator"),
+        ("ParticleStackConfig", "Specimen.scatter"),
+        ("MicrographConfig", "Sample.scatter"),
+        ("TiltSeriesConfig", "TiltSeries.__init__"),
     ],
 )
 def test_envelope_knobs_are_reachable_from_every_simulate_config(
-    config_cls: str, generator_name: str
+    config_cls: str, scatter: str
 ) -> None:
     """
     A knob one command exposes and another hides is drift, not design.
 
-    `bfactor` and `klim` were applied by all three generators but settable only
-    on the particle stack, because each pipeline forwards its config fields by
-    hand and these two were never added to the other two lists. Nothing failed:
-    the knob was simply inert.
+    `bfactor` and `klim` were applied by all three simulators but settable
+    only on the particle stack, because each pipeline forwards its config
+    fields by hand and these two were never added to the other two lists.
+    Nothing failed: the knob was simply inert.
     """
     import dataclasses
     import inspect
 
     import specter.config as config_mod
-    import specter.imagegenerator as gen_mod
+    import specter.imaging as imaging
     from specter.settings import Propagation
 
     cfg = getattr(config_mod, config_cls)
-    gen = getattr(gen_mod, generator_name)
+    owner, method = scatter.split(".")
     fields = {f.name for f in dataclasses.fields(cfg)}
-    params = set(inspect.signature(gen.__init__).parameters)
+    params = inspect.signature(getattr(getattr(imaging, owner), method)).parameters
     propagation_fields = {f.name for f in dataclasses.fields(Propagation)}
 
-    assert "bfactor" in params, f"{generator_name} no longer accepts bfactor"
-    assert "propagation" in params, f"{generator_name} no longer takes a Propagation"
+    assert "bfactor" in inspect.signature(imaging.ExitWave.apply_ctf).parameters
+    assert "propagation" in params, f"{scatter} no longer takes the Propagation fields"
     assert "klim" in propagation_fields
     assert "oversample" in propagation_fields
     for knob in ("bfactor", "klim", "oversample"):

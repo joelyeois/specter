@@ -2,8 +2,8 @@
 
 The frozen-plasmon model is an **opt-in Python API** for exposure-resolved
 zero-loss simulation, following Himes and Grigorieff (2021). It uses the same
-multislice, optics and detector code as the generators, which do not invoke it
-unless asked. The API requires explicit material and source data rather than
+multislice, optics and detector code as the rest of the forward model, which
+does not invoke it unless asked. The API requires explicit material and source data rather than
 inferring atom identities from a real-valued volume.
 
 ## Available components
@@ -25,8 +25,9 @@ inferring atom identities from a real-valued volume.
   dose envelope for the same damage.
 - `FrozenPlasmonForward`: multislice each frozen state, apply optics, sum
   dose-weighted **intensities**, then detect each physical frame once.
-- `BaseImager.simulate_frozen`: use an existing particle/micrograph/tilt imager's
-  optics and camera with an explicit state provider and exposure schedule.
+- `specter.imaging.simulate_frozen`: the same engine, set up from the keywords
+  `ExitWave.apply_ctf`, `ExitWave.intensity` and `Image.detect` take, with an
+  explicit state provider and exposure schedule.
 
 The new model is invoked through these Python objects. There is no automatic
 `absorption_model="frozen_plasmon"` TOML switch: a real-valued volume alone does
@@ -63,18 +64,27 @@ result = model(slab, [1.0, 1.0, 1.0], substeps=2, detector_seed=17)
 print(result.images.shape, result.intensities.mean(), result.metadata)
 ```
 
-For an existing imager:
+With the transfer function, focal spread and camera of the rest of the
+forward model:
 
 ```python
-result = imager.simulate_frozen(
-    specimen, plasmon_filter, [1.0, 1.0, 1.0],
-    idx=0, pose=0.0, substeps=4, detector_seed=17,
+from specter.imaging import CTF, simulate_frozen
+
+result = simulate_frozen(
+    slab,
+    filter,
+    [1.0, 1.0, 1.0],
+    voxel_size=dx,
+    voltage=voltage,
+    nxy=n,
+    ctf=CTF.from_values(10000.0, n=1),
+    substeps=2,
+    seed=17,
 )
 ```
 
-`specimen` owns all solvent, crowding, scaling and damage for this call. Cached
-imager volumes are not reused. `pose` is explicit; the convenience method uses
-one CTF entry for the entire movie. Use `FrozenPlasmonForward` with an optics
+The state provider owns all solvent, crowding, scaling and damage for this
+call. `pose` is explicit, and one CTF entry covers the entire movie. Use `FrozenPlasmonForward` with an optics
 callback for per-frame defocus/aperture parameters. For a tilt acquisition,
 pass one affine pose per physical frame in `poses` and perform the usual
 beam-entry defocus correction in that callback. Exposure advances through the

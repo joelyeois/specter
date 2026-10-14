@@ -244,31 +244,6 @@ def test_moving_water_rebuilds_both_fields_and_replays():
     torch.testing.assert_close(first.absorption_source, replay.absorption_source)
 
 
-def test_existing_imager_frozen_entrypoint():
-    from specter.imagegenerator import MicrographGenerator
-    from specter.settings import Camera, Ice, Propagation
-
-    v = torch.zeros(2, 12, 12)
-    imager = MicrographGenerator(
-        v[None],
-        12,
-        2.0,
-        None,
-        300.0,
-        4.0,
-        optics=None,
-        ice=Ice(model=None),
-        camera=Camera(noise_model=None, detector_model=None),
-        propagation=Propagation(alpha=0),
-        verbose=False,
-        progressbars=False,
-    )
-    state = PotentialState(v[None], torch.zeros_like(v[None]))
-    result = imager.simulate_frozen(lambda step: state, None, [1.0, 3.0], substeps=2)
-    assert result.images.shape == (2, 1, 12, 12)
-    torch.testing.assert_close(result.summed_image, imager.forward(torch.tensor([0])))
-
-
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
 def test_cpu_cuda_paired_forward():
     v = torch.rand(1, 3, 12, 12)
@@ -276,3 +251,31 @@ def test_cpu_cuda_paired_forward():
     cpu = propagator()(v, 20.0, absorption_source=a)
     gpu = propagator().cuda()(v.cuda(), 20.0, absorption_source=a.cuda())
     torch.testing.assert_close(cpu, gpu.cpu(), atol=2e-5, rtol=2e-5)
+
+
+def test_the_chain_s_frozen_entrypoint_matches_one_exposure():
+    """Elastic frozen states summed over the frames are the one exposure the
+    chain forms from the same volume, focal spread included."""
+    from specter.imaging import Exposure, Sample, simulate_frozen
+
+    v = torch.zeros(2, 12, 12)
+    v[:, 4:8, 5:9] = 3.0
+    state = PotentialState(v[None], torch.zeros_like(v[None]))
+    result = simulate_frozen(
+        lambda step: state,
+        None,
+        [1.0, 3.0],
+        voxel_size=2.0,
+        voltage=300.0,
+        nxy=12,
+        substeps=2,
+        noise=None,
+    )
+    assert result.images.shape == (2, 1, 12, 12)
+    one = (
+        Sample(v[None], 2.0)
+        .scatter(voltage=300.0)
+        .intensity()
+        .detect(Exposure(4.0), noise=None)
+    )
+    torch.testing.assert_close(result.summed_image, one.array)

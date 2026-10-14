@@ -34,9 +34,9 @@ class TomogramGhostbuster(_GhostbusterBase):
     The forward model is noiseless and predicts electron counts per pixel,
     ``dose_per_angstrom * voxel_size² * |CTF(exitwave)|²``, as the particle
     pipeline's does. ``image_units`` says what the tilt series holds: counts
-    (the default, and what a motion-corrected tilt series and
-    :class:`~specter.imagegenerator.TiltSeriesGenerator`'s detected images
-    are) are used as they are, and a normalised series is mapped back to
+    (the default, and what a motion-corrected tilt series and a simulated
+    one, detected by :meth:`~specter.imaging.Image.detect`, hold) are used
+    as they are, and a normalised series is mapped back to
     counts from the dose.
 
     Parameters

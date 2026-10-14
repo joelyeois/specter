@@ -186,9 +186,10 @@ RELION, `specter convert cs2star` converts a CryoSPARC `.cs` file to a
 
 -   :material-camera:{ .lg .middle } **Image generation**
 
-    `ImageGenerator`, `MicrographGenerator`, `TiltSeriesGenerator`.
+    `Specimen`, `Sample` and `TiltSeries`, scattered into an `ExitWave`
+    and recorded as an `Image`.
 
-    [:octicons-arrow-right-24: specter.imagegenerator](api/imagegenerator.md)
+    [:octicons-arrow-right-24: specter.imaging](api/imaging.md)
 
 -   :material-cube-scan:{ .lg .middle } **Specimens**
 

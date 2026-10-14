@@ -2,6 +2,25 @@
 
 Select the source checkout before importing SPECTER; GPU peak figures in
 measurement files come from the actual simulation, not the replay.
+
+Generation is the object-API loop `specter simulate particles` runs:
+`_ParticleRun.generate` (`Specimen.scatter`, `ExitWave.apply_ctf`,
+`.intensity` and `Image.detect` per batch, each batch copied into one host
+stack by `_HostStack`) on one device, and `_generate_sharded`, one spawned
+worker per device, on several. These replaced the generator-era
+`_generate_single` collector and the Lightning DDP ranks, and are timed and
+sampled in their place, so the measured quantities are unchanged:
+whole-CLI time, generation time, CUDA peaks, host RSS per phase, lifetime
+samples every 100 batches and, with several devices, the process tree's PSS.
+A multi-device run writes ``measurement-rank0.json`` (the name the DDP-era
+runs used, which `particle_output_memory_figures.py` reads) from the
+launching process, with each worker's own CUDA peaks under ``ranks``; the
+hooks are the object API's, so ``--checkout`` must have `specter.imaging`.
+
+``--paired-baseline`` replays the generated images, batch by batch, through
+the baseline checkout's collector (its `_generate_single` when it has one,
+else its `_HostStack`) and whole-stack normalization, and through the
+candidate's `_HostStack` and chunked normalization, and compares the two.
 """
 
 # ruff: noqa: E402
@@ -17,6 +36,59 @@ import resource
 import sys
 import threading
 import time
+
+
+def _measured_shard_worker(run, start, stop, device, batchsize, path, threads):
+    """
+    `_shard_worker`, with its device's CUDA peaks written beside its share.
+
+    Module-level so a spawned worker can unpickle it; the launching process
+    reads ``<share>.measurement.json`` back once every worker has exited.
+    """
+    import torch
+    from specter.pipelines._particles import _shard_worker
+
+    torch.set_num_threads(4)
+    cuda = device.startswith("cuda")
+    if cuda:
+        torch.cuda.set_device(device)
+        torch.cuda.reset_peak_memory_stats()
+    t0 = time.perf_counter()
+    _shard_worker(run, start, stop, device, batchsize, path, threads)
+    if cuda:
+        torch.cuda.synchronize()
+    Path(path + ".measurement.json").write_text(
+        json.dumps(
+            {
+                "device": device,
+                "start": start,
+                "stop": stop,
+                "seconds": time.perf_counter() - t0,
+                "peak_allocated_bytes": torch.cuda.max_memory_allocated()
+                if cuda
+                else 0,
+                "peak_reserved_bytes": torch.cuda.max_memory_reserved() if cuda else 0,
+            }
+        )
+    )
+
+
+def _collect(module, raw, n, batchsize, device):
+    """Replay `raw` through `module`'s batch collector, a batch at a time."""
+    import torch
+
+    if hasattr(module, "_generate_single"):
+        # A generator-era checkout: its collector calls a model per batch.
+        class Replay:
+            def __call__(self, idx):
+                return raw[idx].to(device)
+
+        return module._generate_single(Replay(), n, batchsize, lambda it, **_: it)[0]
+    stack = module._HostStack(n)
+    with torch.no_grad():
+        for lo in range(0, n, batchsize):
+            stack.append(raw[lo : lo + batchsize].to(device))
+    return stack.finish()
 
 
 def main() -> None:
@@ -35,13 +107,14 @@ def main() -> None:
     import torch
     import psutil
     from specter.cli._cli import cli
+    from specter.devices import parse_device
+    from specter.pipelines import _common
     from specter.pipelines import _particles as pipeline
 
     torch.set_num_threads(4)
-    gpu_ids = [int(v) for v in a.device.split(",")] if "," in a.device else None
-    torch.cuda.set_device(
-        gpu_ids[int(os.environ.get("LOCAL_RANK", 0))] if gpu_ids else a.device
-    )
+    devices = parse_device(a.device).devices
+    multi = len(devices) > 1
+    torch.cuda.set_device(devices[0])
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     out = Path(a.output)
@@ -51,26 +124,16 @@ def main() -> None:
     samples = []
     stop = threading.Event()
     process = psutil.Process()
-
-    def monitor():
-        while not stop.wait(0.05):
-            rss = process.memory_info().rss
-            peaks[phase[0]] = max(peaks[phase[0]], rss)
-            peaks["all"] = max(peaks["all"], rss)
-
     tree_stats = {"peak_processes": 1, "peak_aggregate_pss_bytes": 0}
-    old_monitor = monitor
 
     def monitor():
-        if not gpu_ids or "LOCAL_RANK" in os.environ:
-            return old_monitor()
         last_tree = 0.0
         while not stop.wait(0.05):
             rss = process.memory_info().rss
             peaks[phase[0]] = max(peaks[phase[0]], rss)
             peaks["all"] = max(peaks["all"], rss)
             now = time.perf_counter()
-            if now - last_tree >= 1:
+            if multi and now - last_tree >= 1:
                 last_tree = now
                 children = [process] + process.children(recursive=True)
                 pss = 0
@@ -88,53 +151,60 @@ def main() -> None:
 
     thread = threading.Thread(target=monitor, daemon=True)
     thread.start()
-    raw_gen = pipeline._generate_single
-    expected_source = Path(a.checkout) / "src/specter/pipelines/_common.py"
-    assert Path(inspect.getsourcefile(raw_gen)).resolve() == expected_source.resolve()
+    raw_generate = pipeline._ParticleRun.generate
+    raw_specimen = pipeline._ParticleRun.specimen
+    expected_source = Path(a.checkout) / "src/specter/pipelines/_particles.py"
+    assert (
+        Path(inspect.getsourcefile(raw_generate)).resolve() == expected_source.resolve()
+    )
     generation = {}
+    specimens = []
 
-    def measured(model, n, batchsize, track, **flags):
+    def specimen(self, device):
+        built = raw_specimen(self, device)
+        specimens.append(built)
+        return built
+
+    def measured(self, first, last, device, batchsize, progress):
         phase[0] = "generation"
-        model.progressbars = False
-        for module in model.modules():
-            if hasattr(module, "progressbars"):
-                module.progressbars = False
-        counter = [0]
-        t0 = time.perf_counter()
+        n = last - first
+        n_batches = (n + batchsize - 1) // batchsize
 
-        def progress(_module, _args, _result):
-            counter[0] += 1
-            if counter[0] == 1 or counter[0] % 100 == 0:
-                print(
-                    f"batch {counter[0]}/{(n + batchsize - 1) // batchsize}, elapsed {time.perf_counter() - t0:.1f}s",
-                    flush=True,
-                )
-            if counter[0] % 100 == 0:
-                samples.append(
-                    {
-                        "batch": counter[0],
-                        "rss_bytes": process.memory_info().rss,
-                        "gpu_allocated_bytes": torch.cuda.memory_allocated(),
-                    }
-                )
+        def counted(iterable, **_):
+            for k, lo in enumerate(iterable, 1):
+                yield lo
+                # Resumed once batch k has been made and collected.
+                if k == 1 or k % 100 == 0:
+                    print(
+                        f"batch {k}/{n_batches}, elapsed {time.perf_counter() - t0:.1f}s",
+                        flush=True,
+                    )
+                if k % 100 == 0:
+                    samples.append(
+                        {
+                            "batch": k,
+                            "rss_bytes": process.memory_info().rss,
+                            "gpu_allocated_bytes": torch.cuda.memory_allocated(),
+                        }
+                    )
 
-        hook = model.register_forward_hook(progress)
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        result = raw_gen(
-            model, n, batchsize, lambda iterable, **kwargs: iterable, **flags
-        )
+        result = raw_generate(self, first, last, device, batchsize, counted)
         torch.cuda.synchronize()
         elapsed = time.perf_counter() - t0
-        hook.remove()
+        built = specimens[-1]
         generation.update(
             {
                 "seconds": elapsed,
                 "n": n,
                 "batchsize": batchsize,
-                "pad_nxy": model.pad_nxy,
-                "nz": model.nz,
-                "collect_flags": flags,
+                "pad_nxy": built.pad_nxy(self.config.pad_fft),
+                "nz": built.nz,
+                "collect_flags": {
+                    "save_exitwaves": self.config.save_exitwaves,
+                    "save_clean_exitwaves": self.config.save_clean_exitwaves,
+                },
                 "shapes": [None if x is None else list(x.shape) for x in result],
             }
         )
@@ -143,43 +213,32 @@ def main() -> None:
         phase[0] = "saving"
         return result
 
-    pipeline._generate_single = measured
-    raw_multi = pipeline._generate_multi
+    pipeline._ParticleRun.specimen = specimen
+    pipeline._ParticleRun.generate = measured
+    raw_sharded = pipeline._generate_sharded
+    ranks = []
 
-    def measured_multi(*args, **kwargs):
+    def measured_sharded(run, devices, batchsize, output_dir):
         phase[0] = "generation"
         t0 = time.perf_counter()
-        result = raw_multi(*args, **kwargs)
+        result = raw_sharded(run, devices, batchsize, output_dir)
         torch.cuda.synchronize()
         generation.update(
             {
                 "seconds": time.perf_counter() - t0,
-                "n": args[1],
-                "batchsize": args[2],
-                "gpu_ids": args[3],
+                "n": len(run.poses),
+                "batchsize": batchsize,
+                "gpu_ids": list(devices),
             }
         )
+        for path in sorted(Path(output_dir).glob("particle_shard_*.measurement.json")):
+            ranks.append(json.loads(path.read_text()))
+            path.unlink()
         phase[0] = "saving"
         return result
 
-    pipeline._generate_multi = measured_multi
-    if gpu_ids:
-        import lightning as L
-
-        old_init = L.Trainer.__init__
-
-        def quiet_init(self, *args, **kwargs):
-            kwargs["enable_progress_bar"] = False
-            return old_init(self, *args, **kwargs)
-
-        L.Trainer.__init__ = quiet_init
-        old_model = pipeline.ImageGenerator.__init__
-
-        def quiet_model(self, *args, **kwargs):
-            kwargs["progressbars"] = False
-            old_model(self, *args, **kwargs)
-
-        pipeline.ImageGenerator.__init__ = quiet_model
+    pipeline._generate_sharded = measured_sharded
+    pipeline._shard_worker = _measured_shard_worker
 
     start = time.perf_counter()
     try:
@@ -223,7 +282,8 @@ def main() -> None:
         "host_rss_peaks_bytes": peaks,
         "lifetime_samples": samples,
         "process_tree": tree_stats,
-        "generator_source": inspect.getsourcefile(raw_gen),
+        "ranks": ranks,
+        "generator_source": inspect.getsourcefile(raw_generate),
         "source_sha256": {
             name: hashlib.sha256(
                 (Path(a.checkout) / "src/specter/pipelines" / name).read_bytes()
@@ -231,14 +291,9 @@ def main() -> None:
             for name in ["_common.py", "_particles.py"]
         },
     }
-    (
-        out
-        / (
-            "measurement-rank" + os.environ["LOCAL_RANK"] + ".json"
-            if "LOCAL_RANK" in os.environ
-            else "measurement.json"
-        )
-    ).write_text(json.dumps(result, indent=2) + "\n")
+    (out / ("measurement-rank0.json" if multi else "measurement.json")).write_text(
+        json.dumps(result, indent=2) + "\n"
+    )
     print(json.dumps(result, indent=2), flush=True)
 
     if a.paired_baseline:
@@ -254,10 +309,6 @@ def main() -> None:
         spec.loader.exec_module(old)
         raw = torch.load(out / "raw-images.pt", weights_only=True)
 
-        class Replay:
-            def __call__(self, idx):
-                return raw[idx].to(a.device)
-
         trials = []
         for pair in range(3):
             results = {}
@@ -267,8 +318,8 @@ def main() -> None:
                 gc.collect()
                 torch.cuda.synchronize()
                 t0 = time.perf_counter()
-                fn = old._generate_single if variant == "before" else raw_gen
-                images = fn(Replay(), a.n, 2, lambda iterable, **_: iterable)[0]
+                module = old if variant == "before" else _common
+                images = _collect(module, raw, a.n, 2, devices[0])
                 torch.cuda.synchronize()
                 collection_seconds = time.perf_counter() - t0
                 t0 = time.perf_counter()

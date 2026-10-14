@@ -152,7 +152,7 @@ asymmetry: summing a volume's slices is commutative regardless of order.
 
 ## `IterativeScattering` and tilted volumes
 
-`TiltSeriesGenerator` needs the exit wave along an arbitrary tilt axis,
+`TiltSeries` needs the exit wave along an arbitrary tilt axis,
 beyond the volume's own Z axis. `IterativeScattering.multislice`
 implements the identical recursion above, but fetches each Z-slice via
 `VolumeRotator.sample_rotated_slices` under the requested affine pose

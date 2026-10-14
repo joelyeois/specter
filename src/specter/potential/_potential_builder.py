@@ -533,8 +533,8 @@ class PotentialBuilder(L.LightningModule):
         keeps it invisible to ``nn.Module.to()``, so a builder first used on CPU
         and then moved to GPU would otherwise return CPU coefficients and fail
         mid-``forward`` with a device mismatch. Callers that rebuild the
-        potential every forward pass (``ImageGeneratorFromCoordinates``) hit this
-        on every GPU run.
+        potential every forward pass (``Specimen.from_atoms``) hit this on
+        every GPU run.
 
         Returns
         -------

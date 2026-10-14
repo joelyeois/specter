@@ -2,9 +2,9 @@
 One grammar for the ``device`` setting, parsed in one place.
 
 Every command takes a ``device`` string, and each dispatch style wants a
-different shape back: Lightning DDP wants a mode plus a target, a process pool
-wants one device string per worker, ``Ghostbuster.run`` wants GPU indices, and
-the tomogram renderer wants a primary device plus an optional pool. Parsing
+different shape back: a process pool wants one device string per worker,
+``Ghostbuster.run`` wants GPU indices, and the tomogram renderer wants a
+primary device plus an optional pool. Parsing
 is done once, here, into `DeviceSpec`, and each dispatch style is a method on
 it: a conversion cannot drift on grammar because it does not parse anything,
 whereas one parser per consumer lets the same word mean different things on
@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Literal
 
 #: Spellings the ``device`` setting accepts, for error messages.
 DEVICE_GRAMMAR = (
@@ -70,30 +69,6 @@ class DeviceSpec:
         if not all(d.startswith("cuda:") for d in self.devices):
             return ()
         return tuple(int(d[len("cuda:") :]) for d in self.devices)
-
-    def ddp_dispatch(self) -> tuple[Literal["single", "multi"], str | list[int]]:
-        """
-        The dispatch for a Lightning-driven pipeline: one device, or DDP.
-
-        DDP needs bare GPU indices, so a pool that is not all indexed GPUs
-        (``"cpu,cpu"``, a bare ``"cuda,cuda"``) has nothing to shard across
-        and runs single-device.
-
-        Returns
-        -------
-        mode : {"single", "multi"}
-        target : str or list of int
-            The device string for ``"single"``, the GPU ids for ``"multi"``.
-
-        Examples
-        --------
-        "cpu"     -> ("single", "cpu")
-        "cuda:0"  -> ("single", "cuda:0")
-        "0,1,2"   -> ("multi",  [0, 1, 2])
-        """
-        if self.is_multi and self.indices:
-            return "multi", list(self.indices)
-        return "single", self.primary
 
     def primary_and_pool(self) -> tuple[str, list[str] | None]:
         """

@@ -17,11 +17,27 @@ import pytest
 import roma
 import torch
 
-from specter.imagegenerator import TiltSeriesGenerator
-from specter.settings import Camera, Propagation
+from specter.imaging import Exposure, Poses, Sample
+from specter.settings import Propagation
 from specter.tilt._aretomo3 import read_aretomo3_aln, tilt_to_quaternions
 
 NZ, NXY, PX = 16, 128, 10.0
+
+
+def _projected_phase(
+    volume: torch.Tensor, quaternions: torch.Tensor, shifts: torch.Tensor
+) -> np.ndarray:
+    """The phase of one projected tilt, on the pixel grid."""
+    series = Sample.from_volume(volume, PX).tilt_series(
+        Poses(quaternions, shifts, torch.arange(1)),
+        Exposure.tilt_series(1.0, 1),
+        voltage=300.0,
+        micrograph_size=volume.shape[-1],
+        propagation=Propagation(scattering_model="projection"),
+        log=False,
+    )
+    with torch.no_grad():
+        return torch.angle(series.scatter(0).pixels()[0]).numpy()
 
 
 def _bead_image(rotvec: tuple[float, float, float], t_px: tuple[float, float]):
@@ -33,25 +49,11 @@ def _bead_image(rotvec: tuple[float, float, float], t_px: tuple[float, float]):
         indexing="ij",
     )
     volume = torch.exp(-((x - 3) ** 2 + (y + 2) ** 2 + (z - 4) ** 2) / (2 * 1.5**2))
-    generator = TiltSeriesGenerator(
-        volume=(2.0 * volume).reshape(1, NZ, NXY, NXY),
-        micrograph_size=NXY,
-        pixel_size=PX,
-        ctf_params=None,
-        voltage=300.0,
-        dose_per_angstrom=1.0,
-        quaternions=roma.rotvec_to_unitquat(
-            torch.tensor([rotvec], dtype=torch.float32)
-        ),
-        translations=torch.tensor([[t_px[0] * PX, t_px[1] * PX]], dtype=torch.float32),
-        propagation=Propagation(scattering_model="projection"),
-        optics=None,
-        camera=Camera(noise_model=None),
-        verbose=False,
-        progressbars=False,
+    image = _projected_phase(
+        (2.0 * volume).reshape(1, NZ, NXY, NXY),
+        roma.rotvec_to_unitquat(torch.tensor([rotvec], dtype=torch.float32)),
+        torch.tensor([[t_px[0] * PX, t_px[1] * PX]], dtype=torch.float32),
     )
-    _, exitwaves, _ = generator.generate_tilt_series(torch.tensor([0]))
-    image = torch.angle(exitwaves[0, 0]).numpy()
     # Search the centre only: at high tilt the reflect-padded periphery holds
     # mirrored copies of the bead.
     c = NXY // 2
@@ -131,22 +133,11 @@ def test_tilted_slices_are_not_magnified(tilt_deg: float) -> None:
     )
     volume = torch.exp(-((x - 40) ** 2 + y**2 + z**2) / (2 * 1.5**2))
     rotvec = torch.tensor([[np.deg2rad(tilt_deg), 0.0, 0.0]], dtype=torch.float32)
-    generator = TiltSeriesGenerator(
-        volume=(2.0 * volume).reshape(1, nz, n, n),
-        micrograph_size=n,
-        pixel_size=PX,
-        ctf_params=None,
-        voltage=300.0,
-        dose_per_angstrom=1.0,
-        quaternions=roma.rotvec_to_unitquat(rotvec),
-        propagation=Propagation(scattering_model="projection"),
-        optics=None,
-        camera=Camera(noise_model=None),
-        verbose=False,
-        progressbars=False,
+    image = _projected_phase(
+        (2.0 * volume).reshape(1, nz, n, n),
+        roma.rotvec_to_unitquat(rotvec),
+        torch.zeros(1, 2),
     )
-    _, exitwaves, _ = generator.generate_tilt_series(torch.tensor([0]))
-    image = torch.angle(exitwaves[0, 0]).numpy()
     band = image[n // 2 - 6 : n // 2 + 7, n // 2 + 30 : n // 2 + 51]
     profile = band.sum(axis=0)
     xs = np.arange(30, 51)

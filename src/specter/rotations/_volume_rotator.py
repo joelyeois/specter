@@ -585,9 +585,9 @@ class VolumeRotator(L.LightningModule):
             validated flat at ~25-30MB from a 66MB volume up to a 67GB one,
             vs. a whole-volume transfer's memory scaling linearly with `V`
             and eventually OOMing. Use this whenever `V` is deliberately kept off the
-            compute device -- e.g. `TiltSeriesGenerator` falls back to this
-            automatically (see its `_ensure_volume_placed`) when its volume
-            doesn't fit on the GPU alongside a `.to(device)` call.
+            compute device -- e.g. `imaging.TiltSeries` falls back to this
+            automatically (see its `place`) when its volume doesn't fit on
+            the GPU.
         window_margin : int, optional
             Only used when `device` triggers the windowed path above: extra
             padding (px) around the query's exact pixel-space bounding box,

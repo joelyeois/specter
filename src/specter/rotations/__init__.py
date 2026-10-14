@@ -21,8 +21,8 @@ a PEP 562 module `__getattr__`, so that importing this package for
 `rotate_volume` or a quaternion helper -- none of which need Lightning --
 does not pay for it. `from specter.rotations import VolumeRotator` still
 works and still returns the same object; it just loads the submodule on
-first access. Consumers that genuinely want the rotator (`scattering.py`,
-`imagegenerator/`) are `LightningModule`s themselves and so lose nothing.
+first access. Consumers that genuinely want the rotator (`scattering/`,
+`ghostbuster/`) are `LightningModule`s themselves and so lose nothing.
 Do not "simplify" this back to a plain top-level import.
 
 References

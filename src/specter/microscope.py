@@ -149,7 +149,7 @@ class Detector(L.LightningModule):
         self.progressbars = progressbars
         # The image is formed on the propagation grid, this many times finer
         # than the pixel grid, and sampled down here before the detector's
-        # own response; see `BaseImager._init_optics`.
+        # own response; see `imaging.ExitWave.apply_ctf`.
         self.oversample = oversample
         self.focal_spread = focal_spread
 

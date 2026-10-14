@@ -340,9 +340,9 @@ def test_rotation_template_is_cached_and_follows_a_swapped_buffer() -> None:
     """
     The crop is computed once per template, and re-computed when `V` changes.
 
-    `ImageGenerator._process_volume` aliases its own volume buffer onto the
-    crowd's after a device move, so a cache keyed on anything but the
-    buffer's identity would keep serving a crop of the old tensor.
+    A crowd whose `V` is replaced or moved to another device must re-crop,
+    so a cache keyed on anything but the buffer's identity would keep serving
+    a crop of the old tensor.
     """
     crowd = CrowdWithDuplicates(_centred_blob(48, 11.0), progressbars=False, **_GEOM)
     first = crowd._rotation_template()

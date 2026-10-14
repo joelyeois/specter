@@ -133,10 +133,10 @@ def nz_tilt_for_pose(volume_shape: tuple[int, ...], theta_matrix: torch.Tensor) 
     Number of Z slices needed to fully cover a volume once rotated by ``theta_matrix``.
 
     A pure function of ``volume_shape`` and the pose -- shared by
-    :class:`~specter.imagegenerator.TiltSeriesGenerator` (forward model) and
+    :class:`~specter.imaging.TiltSeries` (forward model) and
     :class:`~specter.ghostbuster.TomogramReconstructor` (inverse problem),
     both of which need it to compute the multislice propagation depth and
-    the resulting defocus shift (see :func:`shift_ctf_defocus_for_tilt`).
+    the resulting defocus shift (``imaging._tilt.tilt_defocus_shift``).
 
     Parameters
     ----------
@@ -176,47 +176,3 @@ def nz_tilt_for_pose(volume_shape: tuple[int, ...], theta_matrix: torch.Tensor) 
     z_max = rotated_corners[:, 2, :].max(dim=1).values
     nz_new = int(torch.ceil((z_max - z_min).max()).item())
     return max(1, nz_new)
-
-
-def shift_ctf_defocus_for_tilt(
-    ctf_params: dict[str, torch.Tensor],
-    volume_shape: tuple[int, ...],
-    theta_matrix: torch.Tensor,
-    nz: int,
-    pixel_size: float,
-) -> dict[str, torch.Tensor]:
-    """
-    Shift ``dfu``/``dfv`` to account for the extra Z depth multislice propagates
-    through at this tilt.
-
-    Multislice propagates ``nz_tilt_for_pose(volume_shape, theta_matrix)`` slices
-    instead of the untilted ``nz``, shifting the effective specimen centre by
-    ``(nz_new - nz) * pixel_size / 2``. Returns a new dict; ``ctf_params``
-    itself is left untouched.
-
-    Parameters
-    ----------
-    ctf_params : dict[str, torch.Tensor]
-        Per-tilt CTF parameters for this tilt (batch dimension already sliced).
-    volume_shape : tuple of int
-        Volume shape ``(B, Z, Y, X)`` passed to the propagator.
-    theta_matrix : torch.Tensor
-        Affine transformation matrix of shape (B, 3, 4) or (B, 4, 4).
-    nz : int
-        Untilted number of Z slices.
-    pixel_size : float
-        Pixel/voxel size in Å.
-
-    Returns
-    -------
-    dict[str, torch.Tensor]
-        ``ctf_params`` with ``dfu``/``dfv`` (if present) shifted.
-    """
-    nz_new = nz_tilt_for_pose(volume_shape, theta_matrix)
-    z_offset = (nz_new - nz) * pixel_size / 2.0
-    shifted = dict(ctf_params)
-    if "dfu" in shifted:
-        shifted["dfu"] = shifted["dfu"] - z_offset
-    if "dfv" in shifted:
-        shifted["dfv"] = shifted["dfv"] - z_offset
-    return shifted

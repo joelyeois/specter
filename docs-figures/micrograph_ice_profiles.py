@@ -1,9 +1,10 @@
 """
 Generate the ice-profile figure for docs/user-guide/micrograph.md.
 
-Calls `IceProfile.thickness` directly, the same method
-`build_ice_profile`/`MicrographGenerator` use, so the figure cannot drift
-from what the profile modes actually compute.
+Calls `IceProfile.thickness` directly, the same method that confines a
+micrograph's ice when `build_ice_profile`'s profile is given to
+`specter.imaging.Field.solvate`, so the figure cannot drift from what the
+profile modes actually compute.
 
 Run with: uv run python docs-figures/micrograph_ice_profiles.py
 Saves PNGs directly into docs/assets/images/.

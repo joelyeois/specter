@@ -100,9 +100,9 @@ def test_coordinate_rotation_matches_volume_rotation(angle_deg: float) -> None:
     closely. This makes the test sensitive to convention errors (wrong axis,
     wrong sign, wrong origin) while being robust to interpolation asymmetry.
 
-    Convention validated (matches imagegenerator.py):
+    Convention validated (matches specter.imaging):
       - Applying the inverse rotation R^T to coordinates (as
-        ImageGenerator.rotate() does via roma.unitquat_to_rotmat(...).transpose)
+        Specimen.from_atoms does via roma.unitquat_to_rotmat(...).transpose)
         matches rotate_volume with build_affine_matrix(R), which also moves
         content by R^T. Both paths apply the same transformation, so the two
         volumes must agree.
@@ -111,14 +111,14 @@ def test_coordinate_rotation_matches_volume_rotation(angle_deg: float) -> None:
     R_inv = roma.rotmat_inverse(R_matrix)
 
     # Method A: rotate atomic coordinates, then build Gaussian density map.
-    # Mirrors imagegenerator.py's rotate(): vectors @ R.T with R already the
+    # Mirrors Specimen._render_atoms: vectors @ R.T with R already the
     # inverse rotation matrix.
     coords_rot = _COORDS @ R_inv.T
     volume_A = _gaussian_volume(coords_rot, _GRID, _VOXEL_SIZE)
 
     # Method B: build Gaussian density map from original coordinates, then rotate.
-    # Mirrors imagegenerator.py line ~584: build_affine_matrix(R.as_matrix(), T)
-    # then self.rotator(V, theta). rotate_volume with M samples input at
+    # Mirrors Specimen.scatter's volume path: build_affine_matrix(R, T)
+    # then rotator(V, theta). rotate_volume with M samples input at
     # (p-center) @ M^T + center, so content moves by M^T; passing R directly
     # moves content by R^T, consistent with Method A.
     volume_orig = _gaussian_volume(_COORDS, _GRID, _VOXEL_SIZE)

@@ -192,6 +192,35 @@ in seconds rather than after a multi-hour run. See
 [Reconstruct a volume](user-guide/reconstruction.md) for the gold-standard
 workflow and the full flag reference.
 
+## Simulate from Python
+
+The same forward model is available as Python objects in
+[`specter.imaging`](api/imaging.md). A `Specimen` is scattered into an
+`ExitWave`, the lens turns the wave into an `Image`, and the camera records
+it. Each call takes the parameters of its own stage:
+
+```python
+from specter.imaging import CTF, Exposure, Poses, Structure
+
+specimen = Structure.from_pdb("6bdf").render(voxel_size=1.0, box=256)
+specimen = specimen.crowd(min_distance=360.0)
+specimen = specimen.solvate(model="gd", thickness=500.0)
+
+poses = Poses.random(16, shift=2.0)
+ctf = CTF.sample(16, defocus=[5000.0, 15000.0])
+exposure = Exposure(dose=40.0)
+
+waves = specimen.scatter(poses, voltage=300.0, exposure=exposure, seed=0)
+waves = waves.apply_ctf(ctf)
+image = waves.intensity()
+image = image.detect(exposure, seed=0)
+images = image.array  # (16, 256, 256)
+```
+
+Every image is seeded on its index, so the same `seed` gives the same stack
+however it is batched. Micrographs and tilt series use `Field`, `Sample`
+and `TiltSeries` in the same way; the demo notebooks below cover each.
+
 ## Job management
 
 You can record generation and reconstruction runs under a project name in
@@ -214,5 +243,5 @@ See `demo-notebooks/` for interactive worked examples, including
 micrograph and tilt-series generation (`create_micrograph/`,
 `create_tilt_series/`). For an example of composing the forward model's
 individual modules by hand (e.g. to swap in a custom aberration model)
-instead of going through `ImageGenerator`, see
+instead of going through `specter.imaging`'s objects, see
 `create_particle_stack_modular/` and `create_tilt_series_modular/`.

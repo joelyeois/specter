@@ -93,8 +93,8 @@ def test_minimal_ctf_params_dict_with_envelopes_matches_old_aberration(
     bfactor is a LegacyAberrationAdapter *construction-time* argument
     (matching TransferFunction), not read per-call from the dict -- in
     practice ctf_params["bfactor"] is always the same constant value
-    across every particle anyway (BaseImager expands a scalar bfactor to
-    all n particles identically), so this is a no-op difference."""
+    across every particle anyway (ExitWave.apply_ctf expands a scalar
+    bfactor to all n particles identically), so this is a no-op difference."""
     exitwave = _exitwave(2, seed=seed)
     ctf_params = {
         "dfu": torch.tensor([15000.0, 16000.0]),
@@ -123,8 +123,8 @@ def test_minimal_ctf_params_dict_with_envelopes_matches_old_aberration(
 
 
 def test_empty_ctf_params_dict_matches_old_aberration():
-    """No CTF terms at all -- matches BaseImager's ctf_params=None path
-    (chi stays identically 0)."""
+    """No CTF terms at all -- an empty ctf_params dict (chi stays
+    identically 0)."""
     exitwave = _exitwave(2, seed=2)
     old = Aberration(N_PIXELS, PIXEL_SIZE, VOLTAGE, aberration_model="nonlinear")
     old_out = old(exitwave, {})

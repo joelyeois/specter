@@ -7,59 +7,68 @@ import starfile
 import numpy as np
 import torch
 
-from specter.imagegenerator import ImageGenerator
-from specter.io import (
-    create_particle_starfile_from_model,
-    extract_parameters_from_starfile,
-)
-from specter.settings import Camera, Propagation
+from specter.imaging import CTF, Exposure, Poses, Specimen
+from specter.io import create_particle_starfile, extract_parameters_from_starfile
 
 # Effective coincidence exclusion radius; see tests/test_generators.py::_CR.
 _CR = 1.8 / math.sqrt(2 * math.pi)
 
 
-def test_create_particle_starfile_from_model_matches_model_params(tmp_path) -> None:
+def test_a_stack_from_the_chain_records_its_own_parameters(tmp_path) -> None:
+    """The STAR file a simulated stack is written with carries the settings the
+    chain imaged it with, and the defocus measured from the entry face: the
+    midplane shift lives on the exit wave, never on the CTF the file reads."""
     volume = torch.zeros(16, 16, 16)
     volume[6:10, 6:10, 6:10] = 50.0
-    ctf_params = {
-        "dfu": torch.tensor([5000.0]),
-        "dfv": torch.tensor([5000.0]),
-        "dfang": torch.tensor([0.0]),
-        "cs": torch.tensor([2.7]),
-        "phaseshift": torch.tensor([0.0]),
-    }
+    ctf = CTF(
+        {
+            "dfu": torch.tensor([5000.0]),
+            "dfv": torch.tensor([5000.0]),
+            "dfang": torch.tensor([0.0]),
+            "cs": torch.tensor([2.7]),
+            "phaseshift": torch.tensor([0.0]),
+        }
+    )
+    poses = Poses(
+        torch.tensor([[0.7071, 0.0, 0.7071, 0.0]]),
+        torch.tensor([[1.0, -1.0]]),
+        torch.arange(1),
+    )
+    exposure = Exposure(2.0)
+    with torch.no_grad():
+        waves = Specimen(volume, 2.0).scatter(
+            poses, voltage=300.0, alpha=0.1, potential_scale=0.75
+        )
+        assert waves.defocus_shift != 0.0
+        particles = (
+            waves.apply_ctf(ctf, bfactor=42.0)
+            .intensity()
+            .detect(exposure, noise=None, coincidence_radius=_CR)
+            .array
+        )
 
-    torch.manual_seed(0)
-    model = ImageGenerator(
-        scattering_potential=volume,
-        pixel_size=2.0,
-        quaternions=torch.tensor([[0.7071, 0.0, 0.7071, 0.0]]),
-        translations=torch.tensor([[1.0, -1.0]]),
-        ctf_params=ctf_params,
+    create_particle_starfile(
+        particles,
+        rotations=poses.quaternions,
+        translations=poses.shifts,
+        ctf_params=ctf.params,
+        dx=2.0,
         voltage=300.0,
-        dose_per_angstrom=2.0,
+        alpha=0.1,
+        dose_per_angstrom=exposure.dose,
         coincidence_radius=_CR,
         potential_scale=0.75,
         bfactor=42.0,
-        verbose=False,
-        progressbars=False,
-        propagation=Propagation(scattering_model="multislice", alpha=0.1),
-        camera=Camera(noise_model=None),
-    )
-    particles = model(torch.tensor([0]))
-
-    create_particle_starfile_from_model(
-        particles, model, output_dir=str(tmp_path), filename="particles"
+        output_dir=str(tmp_path),
+        filename="particles",
     )
 
     df = starfile.read(tmp_path / "particles.star")
+    df = df["particles"] if isinstance(df, dict) else df
     assert (df["specterBfactor"] == 42.0).all()
     assert (df["specterPotentialScale"] == 0.75).all()
     assert df["specterCoincidenceRadius"].to_numpy() == pytest.approx(_CR)
     assert (df["specterDosePerAngstrom"] == 2.0).all()
-    # Multislice internally shifts dfu/dfv to the volume's midplane (see
-    # _apply_defocus_shift); the saved STAR file must have the original,
-    # externally-meaningful defocus, not the internally-shifted one.
     assert (df["rlnDefocusU"] == 5000.0).all()
     assert (df["rlnImagePixelSize"] == 2.0).all()
 

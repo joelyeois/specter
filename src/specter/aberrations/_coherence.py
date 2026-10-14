@@ -16,6 +16,7 @@ over a Gauss-Hermite quadrature of the focal spread.
 
 from __future__ import annotations
 
+import functools
 import math
 
 import numpy as np
@@ -29,6 +30,7 @@ from ._envelopes import focal_spread_sigma
 _MAX_NODES = 300
 
 
+@functools.lru_cache(maxsize=64)
 def _gauss_hermite_nodes(a_max: float, tol: float) -> tuple[np.ndarray, np.ndarray]:
     """
     The smallest Gauss-Hermite rule that averages ``exp(i a x)`` over
@@ -37,7 +39,9 @@ def _gauss_hermite_nodes(a_max: float, tol: float) -> tuple[np.ndarray, np.ndarr
     Returns standard-normal abscissae and probability weights (summing to 1).
     The error is checked on a dense grid of ``a`` rather than assumed from
     the rule's polynomial degree, since an oscillatory integrand is what the
-    rule handles worst.
+    rule handles worst. Memoised: the search is ~20 ms for the 16 nodes of a
+    300 kV image, against ~1 ms for building any other stage, and every
+    caller only reads the arrays.
     """
     a = np.linspace(0.0, max(a_max, 1e-12), 4096)
     for n in range(1, _MAX_NODES + 1):

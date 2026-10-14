@@ -89,7 +89,8 @@ class IterativeScattering(L.LightningModule):
             single spatial frequency). ``'reflection'`` or ``'border'`` avoid the value
             discontinuity (at the cost of a gradient kink, ~1/k^2, a much gentler
             artifact) by mirroring or clamping the real content instead. See
-            ``TiltSeriesGenerator``'s ``pad_fft`` for where this matters in practice.
+            ``imaging.TiltSeries``' ``fft_pad_margin`` for where this matters in
+            practice.
         pad_fft : bool, optional
             For ``scattering_model="multislice"`` only: give the per-slice FFT-based
             Fresnel propagation extra canvas headroom for the whole ``nz_new``-step
@@ -367,8 +368,8 @@ class IterativeScattering(L.LightningModule):
         slice_indices = slice_positions.float() - (nz_new - 1) / 2
         # device= lets sample_rotated_slices interpolate directly on `device`
         # via a small windowed transfer when V lives elsewhere -- e.g. when
-        # TiltSeriesGenerator's volume didn't fit on the compute device and
-        # stayed on CPU (see its `_ensure_volume_placed`). See its docstring.
+        # a TiltSeries' volume didn't fit on the compute device and stayed on
+        # CPU (see `TiltSeries.place`).
         # When V and device already match, this is exactly the original
         # direct grid_sample, unchanged.
         return rotator.sample_rotated_slices(

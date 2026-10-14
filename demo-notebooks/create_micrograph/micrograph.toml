@@ -44,7 +44,8 @@ device = "cuda:0"  # adjust to an available device on your machine, e.g. "cuda:0
 # --------------------------------------------------------------------------
 [advanced]
 n_frames = 50      # frames, usually ~1-2 e⁻/Å²/frame
-coincidence_radius = 1.8      # pixels
+coincidence_radius = 0.426    # pixels: a Falcon 4i (2.0 physical px at 320 Hz, 4 e/px/s)
+                              # carried to 50 frames of 0.83 A pixels at equal occupancy
 ice_model = "gd"              # tiled from a pre-baked cache: scales to large micrographs at
                                # near-constant memory (unlike "random", which builds one
                                # single ice cube the full size of the micrograph -- fine for

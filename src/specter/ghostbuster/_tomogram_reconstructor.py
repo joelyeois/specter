@@ -1,6 +1,6 @@
 """
 `TomogramReconstructor`: reconstructs a volume from a tilt series with the
-same forward model as `TiltSeriesGenerator`, one tilt per training step.
+same forward model as `imaging.TiltSeries`, one tilt per training step.
 """
 
 from __future__ import annotations
@@ -17,13 +17,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LRScheduler
 
-from .. import rotations
 from .. import tilt as tilt_geometry
-from ..aberrations import Aberration, aberration_model_for_scattering
-from ..aberrations._functions import shift_defocus_to_midplane
-from ..ctf import LegacyAberrationAdapter
+from ..aberrations._functions import defocus_midplane_shift
+from ..imaging import CTF, ExitWave
+from ..imaging._tilt import tilt_defocus_shift, tilt_theta
 from ..scattering import IterativeScattering
-from ..scattering._kernels import fourier_crop_xy, fourier_upsample_xy
 from ._base_reconstructor import _BaseReconstructor
 from ..settings import Optics, Propagation, TiltGeometry
 from specter.options import Scheduler
@@ -35,7 +33,7 @@ class TomogramReconstructor(_BaseReconstructor):
 
     Reconstructs a 3D electrostatic potential volume from tilt-series images
     by minimising the discrepancy between simulated and observed images, using
-    the same forward model as :class:`~specter.imagegenerator.TiltSeriesGenerator`.
+    the same forward model as :class:`~specter.imaging.TiltSeries`.
 
     One tilt per training step (``batch_size=1`` in the dataloader) keeps GPU
     memory bounded regardless of tomogram size.  Larger batch sizes accumulate
@@ -60,13 +58,13 @@ class TomogramReconstructor(_BaseReconstructor):
     dose_per_angstrom : float or torch.Tensor
         Electron dose (fluence) per tilt image in e⁻/Å². Scalar, or a 1-D
         tensor of length ``N_tilts`` giving a separate dose for each tilt, as
-        `TiltSeriesGenerator` takes it. The forward model predicts electron
+        `Exposure.tilt_series` holds it. The forward model predicts electron
         counts per pixel, ``dose_per_angstrom * voxel_size**2 * |CTF(psi)|²``,
         and the loss divides each tilt's squared residual by that tilt's
         expected counts per pixel, its Poisson variance.
     tilt : TiltGeometry, optional
-        Tilt axis and edge tapers -- the same object the `TiltSeriesGenerator`
-        that produced the data was built with. The axis decides which image
+        Tilt axis and edge tapers -- the same object the `TiltSeries` that
+        produced the data was built with. The axis decides which image
         dimension shrinks at high tilt for FOV masking; the tapers are applied
         to V before each forward pass. Default ``TiltGeometry()``.
     lr : float, optional
@@ -79,8 +77,8 @@ class TomogramReconstructor(_BaseReconstructor):
         contributions from reflected boundary content.  Default ``True``.
     propagation : Propagation, optional
         How the forward model computes the exit wave (model, amplitude
-        contrast, bandlimit). The same object the `TiltSeriesGenerator` that
-        produced the data was built with, when it was simulated. Default
+        contrast, bandlimit). The same object the `TiltSeries` that produced
+        the data was scattered with, when it was simulated. Default
         ``Propagation()``.
     optics : Optics, optional
         The aberration engine and phase plate. Default ``Optics()``. No
@@ -135,8 +133,7 @@ class TomogramReconstructor(_BaseReconstructor):
             raise ValueError(
                 "TomogramReconstructor does not support absorption_model='inelastic_mfp': "
                 "its iterative volume path requires explicit material/solvent "
-                "information to construct the absorption field. Use 'alpha' "
-                "or the particle ImageGenerator with the MFP model."
+                "information to construct the absorption field. Use 'alpha'."
             )
         scattering_model = propagation.scattering_model
         self.save_hyperparameters(
@@ -149,6 +146,7 @@ class TomogramReconstructor(_BaseReconstructor):
         self.nxy = V.shape[-1]
         self.nz = V.shape[0]
         self.voxel_size = voxel_size
+        self.voltage = voltage
         self.tilt = tilt
         self.tilt_axis = tilt.tilt_axis
 
@@ -202,24 +200,15 @@ class TomogramReconstructor(_BaseReconstructor):
 
         # Multislice evaluates the exit wave's phase at the volume's midplane,
         # but dfu/dfv follow the CryoSPARC/RELION convention of being measured
-        # from the entry face. `TiltSeriesGenerator` gets this correction from
-        # `BaseImager._apply_defocus_shift`; this class does not inherit
-        # `BaseImager`, so without it the inverse images the specimen at a
-        # different defocus than the simulator that produced the data --
-        # nz * voxel_size / 2 Angstrom out, which is 750 A on a 300-slice
-        # tomogram at 5 A/voxel. Skipped for the models with no Z extent to
-        # offset from, matching `_apply_defocus_shift`'s own `shift_required`.
-        # Both call the one `shift_defocus_to_midplane`.
-        self._defocus_shift_angstrom = shift_defocus_to_midplane(
-            self,
-            self.nz,
-            voxel_size,
-            shift_required=scattering_model not in ("projection", "ctf"),
+        # from the entry face. The simulators' chain applies this through
+        # `ExitWave.defocus_shift`, which `_forward_tilt` builds the same way
+        # `TiltSeries.scatter` does (`imaging._tilt.tilt_defocus_shift`), so
+        # the two cannot drift apart. Recorded for the parity test.
+        self._defocus_shift_angstrom = (
+            0.0
+            if scattering_model in ("projection", "ctf")
+            else defocus_midplane_shift(self.nz, voxel_size)
         )
-        if self._defocus_shift_angstrom:
-            for name in ("dfu", "dfv"):
-                if hasattr(self, name):
-                    self.ctf_params[name] = getattr(self, name)
 
         # Fourier-space mask applied after each gradient step
         self.register_buffer("kmask", kmask)
@@ -237,39 +226,12 @@ class TomogramReconstructor(_BaseReconstructor):
             crop=False,
             alpha=propagation.alpha,
         )
-        # The image grid, as in BaseImager: the transfer function and the
-        # intensity on the propagation grid, sampled to the pixel grid in
-        # `_forward_tilt`. Same convention as TiltSeriesGenerator, which the
-        # parity test holds this class to.
+        # The image grid: the transfer function is applied and the intensity
+        # formed on the propagation grid, then sampled to the pixel grid, as
+        # in every simulator.
         self._image_oversample = (
             propagation.oversample if scattering_model != "ctf" else 1
         )
-        image_nxy = self.nxy * self._image_oversample
-        image_voxel = voxel_size / self._image_oversample
-        # Derived from scattering_model, not user-configurable independently
-        # -- see aberrations.aberration_model_for_scattering.
-        aberration_model = aberration_model_for_scattering(scattering_model)
-        self.aberration: Aberration | LegacyAberrationAdapter
-        if optics.aberration_backend == "torch_ctf":
-            self.aberration = LegacyAberrationAdapter(
-                image_nxy,
-                image_voxel,
-                voltage,
-                aberration_model=aberration_model,
-                lpp_params=optics.lpp_params,
-            )
-        else:
-            self.aberration = Aberration(
-                image_nxy,
-                image_voxel,
-                voltage,
-                aberration_model=aberration_model,
-                alpha=propagation.alpha if aberration_model == "linear" else None,
-                # Same derivation as `BaseImager._init_optics`. Left at the
-                # default the amplitude-contrast term is applied on one side of
-                # the forward/inverse pair and not the other.
-                specimen_absorption=scattering_model != "ctf",
-            )
 
     # ------------------------------------------------------------------ #
     # Forward helpers                                                      #
@@ -358,19 +320,16 @@ class TomogramReconstructor(_BaseReconstructor):
         -------
         torch.Tensor
             Noiseless expected electron counts per pixel, shape ``(H, W)``:
-            ``TiltSeriesGenerator.generate_tilt_series``' ``clean_images``
-            times the tilt's dose per pixel.
+            the intensity a `TiltSeries` forms for the tilt without noise
+            (``ExitWave.intensity(cc=None).pixels()``), times the tilt's dose
+            per pixel.
         """
-        Q = self.quaternions[tilt_idx : tilt_idx + 1]  # (1, 4)
-        T = self.translations[tilt_idx : tilt_idx + 1]  # (1, 2)
-        R_mat = roma.unitquat_to_rotmat(Q)
-        if R_mat.ndim == 2:
-            R_mat = R_mat.unsqueeze(0)
-        T_torch = rotations.translations_angstrom_to_torch(
-            T, V_prepared.shape[-1], self.voxel_size
+        theta_matrix = tilt_theta(
+            self.quaternions[tilt_idx : tilt_idx + 1],
+            self.translations[tilt_idx : tilt_idx + 1],
+            V_prepared.shape[-1],
+            self.voxel_size,
         )
-        theta_matrix = rotations.build_affine_matrix(R_mat, T_torch)
-
         V_batched = V_prepared.unsqueeze(0)  # (1, Z, Y', X')
         exitwave = self.iterative_scattering(
             V_batched,
@@ -378,32 +337,33 @@ class TomogramReconstructor(_BaseReconstructor):
             slice_batchsize=self.slice_batchsize,
             checkpoint_chunks=self.checkpoint_chunks,
         )
-
-        # Defocus correction: multislice propagates nz_new slices instead of
-        # self.nz, shifting the effective specimen centre by z_offset.
-        # Use getattr rather than self.ctf_params[k] so we always get the
-        # live buffer (Lightning replaces buffer tensors on .to(device) but
-        # dict entries stored at __init__ time would point to the old CPU tensor).
-        ctf_batch = {
-            k: getattr(self, k)[tilt_idx : tilt_idx + 1] for k in self.ctf_params
-        }
-        if self.iterative_scattering.scattering_model not in ("projection", "ctf"):
-            ctf_batch = tilt_geometry.shift_ctf_defocus_for_tilt(
-                ctf_batch,
-                tuple(V_batched.shape),
-                theta_matrix,
-                self.nz,
-                self.voxel_size,
-            )
-
-        s = self._image_oversample
-        if s > 1 and exitwave.shape[-1] == self.nxy:
-            exitwave = fourier_upsample_xy(exitwave, s)
-        detector_waves = self.aberration(exitwave, ctf_batch)
-        intensity = torch.abs(detector_waves[0]) ** 2
-        if s > 1:
-            intensity = fourier_crop_xy(intensity, self.nxy)
-        return self.dose_per_pixel[tilt_idx] * intensity
+        model = self.propagation.scattering_model
+        waves = ExitWave(
+            array=exitwave,
+            pixel_size=self.voxel_size,
+            voltage=self.voltage,
+            nxy=self.nxy,
+            pad_nxy=self.nxy,
+            oversample=self._image_oversample,
+            defocus_shift=tilt_defocus_shift(
+                tuple(V_batched.shape), theta_matrix, self.voxel_size, model
+            ),
+            ids=torch.zeros(1, dtype=torch.long),
+            tilt=tilt_idx,
+            linear=model == "ctf",
+            alpha=self.propagation.alpha,
+        )
+        # getattr, not the dict built at __init__: Lightning replaces buffer
+        # tensors on .to(device), and the dict would keep the old ones.
+        ctf = CTF(
+            {k: getattr(self, k)[tilt_idx : tilt_idx + 1] for k in self.ctf_params}
+        )
+        image = waves.apply_ctf(
+            ctf,
+            backend=self.optics.aberration_backend,
+            lpp_params=self.optics.lpp_params,
+        ).intensity(cc=None)
+        return self.dose_per_pixel[tilt_idx] * image.pixels()[0]
 
     def forward(self, tilt_idx: int) -> torch.Tensor:
         """Simulate tilt image ``tilt_idx`` using the current volume."""

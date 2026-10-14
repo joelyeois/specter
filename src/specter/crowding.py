@@ -858,9 +858,8 @@ class CrowdWithDuplicates(L.LightningModule):
         :func:`rotation_safe_crop`.
 
         Cached, since one template is rotated once per duplicate and the
-        whole stack shares it. The key is the buffer's identity, so a caller
-        that swaps `V` (``ImageGenerator._process_volume`` aliases its own
-        onto the crowd's) or moves it to another device re-crops.
+        whole stack shares it. The key is the buffer's identity, so a `V`
+        that is replaced or moved to another device re-crops.
         """
         key = (self.V.data_ptr(), tuple(self.V.shape), self.V.dtype)
         cached = getattr(self, "_rotation_template_cache", None)

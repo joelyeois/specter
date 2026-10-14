@@ -329,7 +329,7 @@ def _run_both_halfsets(
     given. With only one device, runs them sequentially instead of spawning
     both onto it at once -- concurrent training memory on a single GPU isn't
     calibrated the way `specter.memory`'s forward-pass estimate is (that
-    model covers `ImageGenerator`'s batched generation, not `Reconstructor`'s
+    model covers `Specimen.scatter`'s batched generation, not `Reconstructor`'s
     training footprint of gradients + optimizer state), so contending for one
     GPU's memory risks an OOM crash partway through a multi-hour run. Extra
     devices beyond the first two are unused -- there are only two halfsets.

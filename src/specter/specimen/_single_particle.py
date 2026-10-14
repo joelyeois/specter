@@ -347,12 +347,15 @@ class MicrographSpecimenGenerator(L.LightningModule):
         if V is None:
             V = torch.zeros(shape, device=assembly_device)
 
-        # Hold the pre-ice volume for the clean exit wave. This DOES cost a
-        # whole canvas: the blend below writes in place precisely to avoid
-        # allocating one, so there is no new tensor to keep instead.
-        keep_clean = self.save_clean_exitwaves and self.icemaker is not None
-        if keep_clean:
-            self.clean_V = V.clone()
+        # Hold the pre-ice, undamaged volume for the clean exit wave. This
+        # DOES cost a whole canvas: the blend and the damage below write in
+        # place precisely to avoid allocating one, so there is no new tensor
+        # to keep instead. With neither, the volume is its own clean form.
+        if self.save_clean_exitwaves:
+            if self.icemaker is not None or damage is not None:
+                self.clean_V = V.clone()
+            else:
+                self.clean_V = V
 
         field: torch.Tensor | None = None
         target: AbsorptionTarget | None = None

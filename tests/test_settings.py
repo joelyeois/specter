@@ -1,5 +1,5 @@
-"""The settings groups: validation, config binding, and how the micrograph
-imager and its specimen generator divide them."""
+"""The settings groups: validation, config binding, and how a micrograph
+field and its specimen generator divide them."""
 
 from __future__ import annotations
 
@@ -8,13 +8,9 @@ from dataclasses import dataclass
 import pytest
 import torch
 
-from specter.imagegenerator import MicrographGenerator
-from specter.settings import Crowding, Ice, Packing, bundle_from_config
+from specter.imaging import Field, Specimen
+from specter.settings import Crowding, Ice, Packing, Propagation, bundle_from_config
 from specter.specimen import MicrographSpecimenGenerator
-
-
-def _ctf_params():
-    return {"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([10000.0])}
 
 
 def test_crowding_rejects_nonpositive_min_distance_and_chunk_size():
@@ -85,59 +81,29 @@ def test_specimen_generator_builds_its_crowd_from_the_bundles(small_volume):
     assert gen.crowd.water_air_interface is False
 
 
-def test_micrograph_generator_takes_the_specimen_generators_ice(small_volume):
-    specimen = MicrographSpecimenGenerator(
-        small_volume, 2.0, 32, ice=Ice(model="random"), progressbars=False
+def test_a_field_carries_its_ice_into_every_draw(small_volume):
+    """The ice library is resolved once, by `solvate`, and every draw blends
+    from it into a box the specimen generator sizes."""
+    field = Field(small_volume, 2.0, 32).solvate(model="random")
+    assert field.icemaker is not None and field.icemaker.method == "random"
+    sample = field.draw(voltage=300.0)
+    engine = MicrographSpecimenGenerator(small_volume, 2.0, 32, progressbars=False)
+    assert sample.nz == engine.nz
+    with pytest.raises(ValueError, match="ice model"):
+        Field(small_volume, 2.0, 32).solvate()
+
+
+def test_a_verb_takes_its_settings_group_or_its_fields_never_both() -> None:
+    """Every verb reads its group from an object or from keywords alike."""
+    specimen = Specimen(torch.zeros(8, 8, 8), 1.0)
+    assert (
+        specimen.crowd(Crowding(min_distance=4.0)).crowding
+        == specimen.crowd(min_distance=4.0).crowding
     )
-    gen = MicrographGenerator(
-        specimen, 32, 2.0, _ctf_params(), 300.0, 2.0, verbose=False, progressbars=False
+    assert specimen.plan(propagation=Propagation(oversample=1)) == specimen.plan(
+        oversample=1
     )
-    assert gen.specimen_gen is specimen
-    assert gen.ice_model == "random"
-    assert gen.nz == specimen.nz
-
-
-def test_micrograph_generator_rejects_ice_alongside_a_specimen_generator(
-    small_volume,
-):
-    specimen = MicrographSpecimenGenerator(small_volume, 2.0, 32, progressbars=False)
-    with pytest.raises(ValueError, match="own ice"):
-        MicrographGenerator(
-            specimen,
-            32,
-            2.0,
-            _ctf_params(),
-            300.0,
-            2.0,
-            ice=Ice(model="random"),
-            verbose=False,
-            progressbars=False,
-        )
-
-
-def test_micrograph_generator_rejects_a_mismatched_specimen(small_volume):
-    specimen = MicrographSpecimenGenerator(small_volume, 2.0, 32, progressbars=False)
-    with pytest.raises(ValueError, match="micrograph is 64 px"):
-        MicrographGenerator(specimen, 64, 2.0, _ctf_params(), 300.0, 2.0, verbose=False)
-
-
-def test_micrograph_generator_rejects_a_bare_template(small_volume):
-    with pytest.raises(ValueError, match="MicrographSpecimenGenerator"):
-        MicrographGenerator(
-            small_volume, 32, 2.0, _ctf_params(), 300.0, 2.0, verbose=False
-        )
-    with pytest.raises(TypeError, match="specimen"):
-        MicrographGenerator(
-            "volume.mrc", 32, 2.0, _ctf_params(), 300.0, 2.0, verbose=False
-        )
-    with pytest.raises(RuntimeError, match="regenerate_specimen"):
-        MicrographGenerator(
-            small_volume.unsqueeze(0),
-            32,
-            2.0,
-            _ctf_params(),
-            300.0,
-            2.0,
-            verbose=False,
-            progressbars=False,
-        ).regenerate_specimen()
+    with pytest.raises(TypeError, match="not both"):
+        specimen.crowd(Crowding(min_distance=4.0), max_distance_z=2.0)
+    with pytest.raises(TypeError, match="not both"):
+        specimen.plan(propagation=Propagation(), oversample=1)

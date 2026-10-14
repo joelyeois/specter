@@ -93,7 +93,7 @@ specter simulate particles [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--device` | `TEXT` | `cuda` | Device to use: cpu \| cuda \| cuda:0 \| 0,1,2,3. Comma-separated integers trigger multi-GPU Lightning DDP. |
+| `--device` | `TEXT` | `cuda` | Device to use: cpu \| cuda \| cuda:0 \| 0,1,2,3. A comma-separated list splits the stack across the devices, one worker each; the stack is the one a single device makes. |
 | `--batchsize` | `INTEGER` | `auto` | Number of particles per forward pass. Unset (or 'auto' in a TOML config, which is the default) takes the smaller of what fits in the memory free on --device at run time and what is worth batching -- past the point where one forward pass already saturates the device, a bigger batch costs memory without going faster. See specter.memory.recommend_batchsize. |
 
 **Output & job tracking**{ #specter-simulate-particles-output-job-tracking }
@@ -103,7 +103,7 @@ specter simulate particles [OPTIONS]
 | `--output_dir` | `TEXT` | _none_ | Directory to save .mrcs and .star files when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to particles/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
 | `--filename` | `TEXT` | `particles` | Base name for output files (no extension). |
 | `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs. Not required for tracking -- job_id alone also triggers it. The run lands in &lt;output_dir&gt;/[&lt;project&gt;/]particles/J00N/ with a job.json recording every parameter, the git commit and the run's status. |
-| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. Mandatory when combining tracking with multi-GPU device strings -- auto-numbering needs one process to decide, but multi-GPU dispatch re-runs this pipeline once per rank. |
+| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. |
 
 **Advanced**{ #specter-simulate-particles-advanced }
 

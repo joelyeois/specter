@@ -239,12 +239,12 @@ def test_pipeline_drops_a_dataset_alpha_under_the_mfp_model() -> None:
     assert alpha == 0.1
 
 
-def test_generator_transmission_matches_the_mean_free_path() -> None:
+def test_simulated_transmission_matches_the_mean_free_path() -> None:
     """
-    A full generator run transmits ``exp(-t/Lambda)`` through its ice.
+    A full simulated image transmits ``exp(-t/Lambda)`` through its ice.
 
     The end-to-end version of the mean-free-path test: not the potential in
-    isolation but the image a generator produces, ice and aberrations
+    isolation but the image the chain produces, ice and aberrations
     included. Pins the wiring -- that the absorption field is read off the
     specimen before solvation and reaches `Scattering` as a complex volume.
 
@@ -258,43 +258,36 @@ def test_generator_transmission_matches_the_mean_free_path() -> None:
     import math
 
     import specter
-    from specter.imagegenerator import ImageGenerator
-    from specter.settings import Camera, Crowding, Envelopes, Ice, Optics, Propagation
+    from specter.imaging import CTF, Exposure, Poses, Specimen
 
     n, dx, thickness, dose = 48, 2.0, 400.0, 40.0
     volume = torch.zeros(n, n, n)
     volume[20:28, 20:28, 20:28] = 7.0
-    ctf_params = {
-        "dfu": torch.tensor([10000.0]),
-        "dfv": torch.tensor([10000.0]),
-        "dfang": torch.tensor([0.0]),
-        "cs": torch.tensor([2.7e7]),
-        "phaseshift": torch.tensor([0.0]),
-    }
+    ctf = CTF(
+        {
+            "dfu": torch.tensor([10000.0]),
+            "dfv": torch.tensor([10000.0]),
+            "dfang": torch.tensor([0.0]),
+            "cs": torch.tensor([2.7e7]),
+            "phaseshift": torch.tensor([0.0]),
+        }
+    )
+    poses = Poses(
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]), torch.zeros(1, 2), torch.arange(1)
+    )
 
     def transmission(specimen_mfp: float | None) -> float:
         specter.seed(3)
-        generator = ImageGenerator(
-            volume,
-            dx,
-            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-            torch.zeros(1, 2),
-            ctf_params,
-            VOLTAGE,
-            dose_per_angstrom=dose,
-            propagation=Propagation(
-                absorption_model="inelastic_mfp", inelastic_mfp_specimen=specimen_mfp
-            ),
-            ice=Ice(model="gd", thickness=thickness),
-            crowding=Crowding(n_points=0),
-            camera=Camera(noise_model="none", detector_model="none"),
-            envelopes=Envelopes(),
-            optics=Optics(),
-            progressbars=False,
-        )
+        specimen = Specimen(volume, dx).solvate(model="gd", thickness=thickness)
         with torch.no_grad():
-            image = generator(torch.tensor([0]))
-        return float(image.mean()) / (dose * dx**2)
+            waves = specimen.scatter(
+                poses,
+                voltage=VOLTAGE,
+                absorption_model="inelastic_mfp",
+                inelastic_mfp_specimen=specimen_mfp,
+            )
+            image = waves.apply_ctf(ctf).intensity().detect(Exposure(dose), noise=None)
+        return float(image.array.mean()) / (dose * dx**2)
 
     expected = math.exp(-thickness / INELASTIC_MFP_ICE_A)
     ice_only = transmission(None)
@@ -533,7 +526,7 @@ def test_ctf_rejects_uniform_absorption():
         scattering(torch.zeros(1, 4, 8, 8))
 
 
-# TiltSeriesGenerator and MicrographGenerator build the field themselves; see
+# Tilt series and micrographs build the field themselves; see
 # test_tilt_explicit_absorption and test_micrograph_absorption.
 @pytest.mark.parametrize("kind", ["tomogram", "reconstructor"])
 @pytest.mark.parametrize("specimen_mfp", [None, INELASTIC_MFP_PROTEIN_A])
@@ -631,62 +624,54 @@ def test_aperture_lowpass_removes_only_what_lies_beyond_the_aperture() -> None:
 
 def test_objective_aperture_requires_the_mfp_model() -> None:
     """Under 'alpha' the fitted constant already stands in for aperture loss."""
-    from specter.imagegenerator import ImageGenerator
-    from specter.settings import Optics, Propagation
+    from specter.imaging import Poses, Specimen
 
+    poses = Poses(
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]), torch.zeros(1, 2), torch.arange(1)
+    )
     with pytest.raises(ValueError, match="objective_aperture"):
-        ImageGenerator(
-            torch.zeros(8, 8, 8),
-            1.0,
-            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-            torch.zeros(1, 2),
-            {"dfu": torch.tensor([1e4]), "dfv": torch.tensor([1e4])},
-            VOLTAGE,
-            dose_per_angstrom=40.0,
-            propagation=Propagation(alpha=0.1),
-            optics=Optics(objective_aperture=12.0),
-            progressbars=False,
+        Specimen(torch.zeros(8, 8, 8), 1.0).scatter(
+            poses, voltage=VOLTAGE, alpha=0.1, objective_aperture=12.0
         )
 
 
-def test_generator_charges_aperture_loss_through_the_ice() -> None:
+def test_the_chain_charges_aperture_loss_through_the_ice() -> None:
     """
     Same seed, same ice, with and without a 12 mrad aperture: the image's
     mean falls by exactly ``exp(-t / Lambda_ap)``. At 2 A/px the aperture lies
     beyond Nyquist, so the low-pass is a no-op and the loss is all analytic.
     """
     import specter
-    from specter.imagegenerator import ImageGenerator
+    from specter.imaging import CTF, Exposure, Poses, Specimen
     from specter.potential import aperture_mfp_ice
-    from specter.settings import Camera, Crowding, Ice, Optics, Propagation
 
     n, dx, thickness, dose = 32, 2.0, 400.0, 40.0
-    ctf_params = {
-        "dfu": torch.tensor([10000.0]),
-        "dfv": torch.tensor([10000.0]),
-        "dfang": torch.tensor([0.0]),
-        "cs": torch.tensor([2.7e7]),
-    }
+    ctf = CTF(
+        {
+            "dfu": torch.tensor([10000.0]),
+            "dfv": torch.tensor([10000.0]),
+            "dfang": torch.tensor([0.0]),
+            "cs": torch.tensor([2.7e7]),
+        }
+    )
+    poses = Poses(
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]), torch.zeros(1, 2), torch.arange(1)
+    )
 
     def mean_intensity(aperture: float | None) -> float:
         specter.seed(3)
-        generator = ImageGenerator(
-            torch.zeros(n, n, n),
-            dx,
-            torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-            torch.zeros(1, 2),
-            ctf_params,
-            VOLTAGE,
-            dose_per_angstrom=dose,
-            propagation=Propagation(absorption_model="inelastic_mfp"),
-            ice=Ice(model="gd", thickness=thickness),
-            crowding=Crowding(n_points=0),
-            camera=Camera(noise_model="none", detector_model="none"),
-            optics=Optics(objective_aperture=aperture),
-            progressbars=False,
+        specimen = Specimen(torch.zeros(n, n, n), dx).solvate(
+            model="gd", thickness=thickness
         )
         with torch.no_grad():
-            return float(generator(torch.tensor([0])).mean())
+            waves = specimen.scatter(
+                poses,
+                voltage=VOLTAGE,
+                absorption_model="inelastic_mfp",
+                objective_aperture=aperture,
+            )
+            image = waves.apply_ctf(ctf).intensity().detect(Exposure(dose), noise=None)
+        return float(image.array.mean())
 
     ratio = mean_intensity(12.0) / mean_intensity(None)
     expected = math.exp(-thickness / aperture_mfp_ice(12.0, VOLTAGE))
@@ -733,53 +718,40 @@ def test_ice_mfp_estimate_passes_through_both_measurements() -> None:
             assert above / below == pytest.approx(1.0, abs=1e-2)
 
 
-def _mfp_generator(voltage: float, solvent_mfp: float | None):
-    from specter.imagegenerator import ImageGenerator
-    from specter.settings import Camera, Crowding, Ice, Optics, Propagation
+def _solvent_mfp(voltage: float, solvent_mfp: float | None) -> float:
+    """The solvent's removal mean free path every image path resolves."""
+    from specter.imaging._stages import resolve_removal_mfps
+    from specter.settings import Optics, Propagation
 
-    ctf_params = {
-        "dfu": torch.tensor([10000.0]),
-        "dfv": torch.tensor([10000.0]),
-        "dfang": torch.tensor([0.0]),
-        "cs": torch.tensor([2.7e7]),
-    }
-    return ImageGenerator(
-        torch.zeros(16, 16, 16),
-        2.0,
-        torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-        torch.zeros(1, 2),
-        ctf_params,
-        voltage,
-        dose_per_angstrom=40.0,
-        propagation=Propagation(
+    rates = resolve_removal_mfps(
+        Propagation(
             absorption_model="inelastic_mfp", inelastic_mfp_solvent=solvent_mfp
         ),
-        ice=Ice(model="gd", thickness=100.0),
-        crowding=Crowding(n_points=0),
-        camera=Camera(noise_model="none", detector_model="none"),
-        optics=Optics(),
-        progressbars=False,
+        Optics(),
+        voltage,
     )
+    assert rates is not None
+    return rates.removal("solvent")
 
 
 @pytest.mark.parametrize(("voltage", "expected"), [(300.0, 3950.0), (120.0, 2030.0)])
-def test_generator_takes_the_measured_ice_mfp_for_its_voltage(
+def test_the_measured_ice_mfp_is_taken_for_its_voltage(
     voltage: float, expected: float
 ) -> None:
     """Left unset, the solvent mean free path is the one measured at this voltage."""
-    assert _mfp_generator(voltage, None)._removal_mfp("solvent") == expected
+    assert _solvent_mfp(voltage, None) == expected
 
 
-def test_generator_estimates_an_unmeasured_voltage_with_a_warning() -> None:
+def test_an_unmeasured_voltage_is_estimated_with_a_warning() -> None:
     """
-    200 kV has no measured ice value: the generator builds with the estimate
-    and warns at construction, and an explicit value is honoured silently.
+    200 kV has no measured ice value: the estimate is used and the caller
+    warned, and an explicit value is honoured silently.
     """
     import warnings
 
     with pytest.warns(UserWarning, match="200 kV"):
-        generator = _mfp_generator(200.0, None)
-    assert generator._removal_mfp("solvent") == pytest.approx(3039.0, abs=5.0)
+        estimated = _solvent_mfp(200.0, None)
+    assert estimated == pytest.approx(3039.0, abs=5.0)
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
-        assert _mfp_generator(200.0, 3300.0)._removal_mfp("solvent") == 3300.0
+        assert _solvent_mfp(200.0, 3300.0) == 3300.0

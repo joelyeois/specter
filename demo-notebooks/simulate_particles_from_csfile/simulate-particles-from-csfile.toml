@@ -1,7 +1,7 @@
 # Config for demo-notebooks/simulate-particles-from-csfile.ipynb, loaded via
 # specter.config.load_config("simulate-particles-from-csfile.toml").
 #
-# This notebook drives ImageGenerator from a CryoSPARC .cs file, so unlike
+# This notebook simulates particles from a CryoSPARC .cs file, so unlike
 # configs/particle.toml, it does NOT need pixel_size, voltage, cs, alpha,
 # defocus, or shift -- extract_parameters_from_csfile() reads all of those
 # straight from the .cs file at run time and overrides the (unused)
@@ -66,7 +66,8 @@ deltaI_I = 0.01e-6               # unitless (ΔI/I)
 dose_envelope = false
 # dose_envelope_target = "specimen"  # damage the specimen, not its ice (default transfer_function)
 bfactor = 200.0                 # Å²
-coincidence_radius = 2.0         # pixels
+coincidence_radius = 0.195       # pixels: EMPIAR-10025's K2 (2.54 physical px at 400 Hz,
+                                 # ~3 e/px/s) carried to 53 frames of 1.13 A pixels
 
 # --- Ice and crowding ---
 ice_model = "gd"                 # gd | random | none

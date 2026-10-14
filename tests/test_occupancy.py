@@ -164,38 +164,46 @@ class TestTemplateOccupancyReference:
             float(atom_mass(heavy).sum()) / 0.932
         )
 
-    def test_generator_solves_its_reference_only_when_it_knows_the_mass(self):
-        from specter.imagegenerator import ImageGenerator
+    def test_specimen_solves_its_reference_only_when_it_knows_the_mass(
+        self, monkeypatch
+    ):
+        """
+        A bare volume does not say how much molecule it holds, so it is read
+        against the fixed reference; a mass makes the specimen displace
+        exactly its own volume of ice. The chain hands its specimen's mass to
+        the one solver every path uses.
+        """
+        import specter.imaging._specimen as specimen_module
+        from specter.imaging import Poses, Specimen
         from specter.potential import (
             FULL_OCCUPANCY_POTENTIAL_V,
             PROTEIN_VOLUME_PER_DALTON_A3,
             full_occupancy_potential,
+            template_occupancy_reference,
         )
-        from specter.settings import Camera
 
         v, _ = self._template()
-
-        def build(mass):
-            return ImageGenerator(
-                v,
-                1.0,
-                torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
-                torch.zeros(1, 2),
-                None,
-                300.0,
-                torch.tensor([40.0]),
-                optics=None,
-                camera=Camera(noise_model="none"),
-                progressbars=False,
-                verbose=False,
-                molecular_mass=mass,
-            )
-
-        assert build(None)._occupancy_reference() == FULL_OCCUPANCY_POTENTIAL_V
+        assert template_occupancy_reference(v, 1.0, None) == FULL_OCCUPANCY_POTENTIAL_V
         mass = 4000.0 / PROTEIN_VOLUME_PER_DALTON_A3
-        assert build(mass)._occupancy_reference() == pytest.approx(
+        assert template_occupancy_reference(v, 1.0, mass) == pytest.approx(
             full_occupancy_potential(v, 1.0, 4000.0)
         )
+
+        seen: list[float | None] = []
+
+        def spy(template, voxel_size, molecular_mass):
+            seen.append(molecular_mass)
+            return template_occupancy_reference(template, voxel_size, molecular_mass)
+
+        monkeypatch.setattr(specimen_module, "template_occupancy_reference", spy)
+        poses = Poses(
+            torch.tensor([[1.0, 0.0, 0.0, 0.0]]), torch.zeros(1, 2), torch.arange(1)
+        )
+        for m in (None, mass):
+            specimen = Specimen(v, 1.0, molecular_mass=m).solvate(model="random")
+            with torch.no_grad():
+                specimen.scatter(poses, voltage=300.0, scattering_model="projection")
+        assert seen == [None, mass]
 
     def test_micrograph_specimen_blends_against_its_own_reference(self, monkeypatch):
         """

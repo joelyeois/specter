@@ -783,7 +783,7 @@ def coincidence_radius_for_simulation(
         Pixel size of the simulated image in Å.
     sim_n_frames : int
         Number of frames the simulation splits the dose into
-        (``ImageGenerator(n_frames=...)``).
+        (``Exposure(n_frames=...)``).
 
     Returns
     -------

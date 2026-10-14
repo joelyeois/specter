@@ -125,7 +125,7 @@ nav:
       - specter.ctf: api/ctf.md
       - specter.ghostbuster: api/ghostbuster.md
       - specter.ice: api/ice.md
-      - specter.imagegenerator: api/imagegenerator.md
+      - specter.imaging: api/imaging.md
       - specter.inelastic: api/inelastic.md
       - specter.io: api/io.md
       - specter.jobs: api/jobs.md

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._common_fields import (
-    DDP_JOB_ID_NOTE,
     absorption_model_setting,
     dose_envelope_target_setting,
     ice_motion_variance_setting,
@@ -166,8 +165,9 @@ class ParticleStackConfig:
     device: str = setting(
         "cuda",
         help=(
-            "Device to use: cpu | cuda | cuda:0 | 0,1,2,3. "
-            "Comma-separated integers trigger multi-GPU Lightning DDP."
+            "Device to use: cpu | cuda | cuda:0 | 0,1,2,3. A comma-separated "
+            "list splits the stack across the devices, one worker each; the "
+            "stack is the one a single device makes."
         ),
     )  # falls back to CPU when none is available
     # "auto" (the default) sizes the batch to the memory free on `device` at
@@ -210,7 +210,7 @@ class ParticleStackConfig:
     # tracked, this command runs far more often and more casually (quick
     # sanity checks, notebooks, CI), so tracking stays opt-in here.
     project: str | None = project_setting("particles")
-    job_id: str | None = job_id_setting(DDP_JOB_ID_NOTE)
+    job_id: str | None = job_id_setting()
 
     # --- Advanced ---
     # Relative to the current working directory, like any other CLI path

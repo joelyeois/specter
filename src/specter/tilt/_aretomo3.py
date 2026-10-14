@@ -1,6 +1,6 @@
 """
 Parsers for AreTomo3's tilt-geometry output formats (``.aln``, global-shift
-CSV, ``.xf``) into quaternions and shifts for ``TiltSeriesGenerator``.
+CSV, ``.xf``) into quaternions and shifts for :class:`~specter.imaging.Poses`.
 
 References
 ----------
@@ -31,9 +31,9 @@ def tilt_to_quaternions(
     AreTomo3 parameterises the tilt geometry with a per-series tilt-axis
     angle (the ``ROT`` column in the ``.aln`` file) and per-tilt tilt angles
     (the ``TILT`` column).  This function converts that representation to
-    unit quaternions suitable for ``TiltSeriesGenerator(quaternions=...)``.
+    unit quaternions suitable for :class:`~specter.imaging.Poses`.
 
-    Using quaternions (rather than ``TiltSeriesGenerator(angles=...)``) is
+    Using quaternions (rather than ``Poses.tilt_series(angles)``) is
     necessary when the tilt axis is not exactly horizontal (``'x'``) or
     vertical (``'y'``), which is typical for real data.
 
@@ -53,13 +53,13 @@ def tilt_to_quaternions(
     -------
     quaternions : torch.Tensor, shape (N, 4)
         Unit quaternions in ``[x, y, z, w]`` order, one per tilt.  Pass
-        directly as the ``quaternions`` argument of ``TiltSeriesGenerator``.
+        directly as the ``quaternions`` of :class:`~specter.imaging.Poses`.
 
     Notes
     -----
     The tilt angle enters with its own sign about that axis. Verified
-    against AreTomo3 2.2.2 itself: a bead phantom projected by
-    `TiltSeriesGenerator` with these quaternions and reconstructed by
+    against AreTomo3 2.2.2 itself: a bead phantom projected by SPECTER's
+    tilt-series forward model with these quaternions and reconstructed by
     AreTomo3 (``-Cmd 2``) from the same ``.aln`` returns the beads at their
     positions in SPECTER's frame, without a mirror.
 
@@ -97,17 +97,17 @@ def read_aretomo3_aln(
     quaternions : torch.Tensor, shape (N_tilts, 4)
         Per-tilt rotation quaternions ``[x, y, z, w]`` encoding the tilt
         angle and tilt-axis direction (``ROT`` column).  Pass directly as
-        ``TiltSeriesGenerator(quaternions=...)``.
+        the ``quaternions`` of :class:`~specter.imaging.Poses`.
     translations : torch.Tensor, shape (N_tilts, 2)
         Per-tilt XY translations in Å, ordered ``[tx, ty]``.  Pass
-        directly as ``TiltSeriesGenerator(translations=...)``.
+        directly as the ``shifts`` of :class:`~specter.imaging.Poses`.
 
     Notes
     -----
     Shifts are stored in the ``.aln`` file in full-resolution pixels.
     AreTomo3 aligns a raw image by sampling it at ``R(ROT) u + (TX, TY)``
     (``GCorrPatchShift``), so the raw image holds its content displaced by
-    ``+(TX, TY)``. `TiltSeriesGenerator` displaces content by ``-t``, so the
+    ``+(TX, TY)``. SPECTER displaces content by ``-t``, so the
     translations are ``-(TX, TY) * pixel_size``. The tilt-axis angle
     (``ROT`` column, constant per series) is used to build the quaternions
     via :func:`tilt_to_quaternions`.
@@ -115,11 +115,9 @@ def read_aretomo3_aln(
     Examples
     --------
     >>> quats, translations = read_aretomo3_aln("TS_001.aln", pixel_size=1.35)
-    >>> tsg = TiltSeriesGenerator(
-    ...     volume=volume,
-    ...     quaternions=quats,
-    ...     translations=translations,
-    ...     ...
+    >>> poses = Poses(quats, translations, ids=torch.arange(len(quats)))
+    >>> series = Sample.from_volume(volume, 1.35).tilt_series(
+    ...     poses, exposure, voltage=300.0, micrograph_size=512
     ... )
     """
     global_rows: list[list[float]] = []
@@ -158,8 +156,8 @@ def read_aretomo3_global_shifts(
     Read per-tilt alignment shifts from an AreTomo3 global alignment CSV.
 
     Parses the ``*_AT_GL.csv`` file written by AreTomo3 into
-    ``<outdir>/<prefix>_Log/``.  Returns the shifts as a
-    ``TiltSeriesGenerator``-compatible ``translations`` tensor in Å.
+    ``<outdir>/<prefix>_Log/``.  Returns the shifts as a ``translations``
+    tensor in Å, in the convention of :class:`~specter.imaging.Poses`.
 
     Parameters
     ----------
@@ -175,8 +173,7 @@ def read_aretomo3_global_shifts(
 
     ``translations`` : torch.Tensor, shape (N_tilts, 2)
         Per-tilt XY translations in Å, ordered ``[tx, ty]``, ready for
-        direct use as the ``translations`` argument of
-        ``TiltSeriesGenerator``.
+        direct use as the ``shifts`` of :class:`~specter.imaging.Poses`.
     ``tilt_angles`` : torch.Tensor, shape (N_tilts,)
         Tilt angles in degrees (in the order written by AreTomo3,
         typically acquisition order).
@@ -196,7 +193,7 @@ def read_aretomo3_global_shifts(
 
     **Sign convention**: the shifts are the ones AreTomo3 *corrects* with,
     ``g(u) = f(u + s)``, so the raw image holds its content displaced by
-    ``+s``. `TiltSeriesGenerator` displaces content by ``-t``, so
+    ``+s``. SPECTER displaces content by ``-t``, so
     reproducing the raw image takes the opposite sign (see
     :func:`read_aretomo3_aln`, which was checked against AreTomo3 itself):
 
@@ -219,11 +216,8 @@ def read_aretomo3_global_shifts(
     Examples
     --------
     >>> result = read_aretomo3_global_shifts("TS_001_AT_GL.csv")
-    >>> tsg = TiltSeriesGenerator(
-    ...     volume=volume,
-    ...     angles=result["tilt_angles"],
-    ...     translations=result["translations"],
-    ...     ...
+    >>> poses = Poses.tilt_series(
+    ...     result["tilt_angles"], shifts=result["translations"]
     ... )
     """
     data = np.loadtxt(csv_path, comments="#")
@@ -256,7 +250,7 @@ def read_aretomo3_xf(
     The ``.xf`` format stores a 2-D affine transform per tilt that
     combines tilt-axis de-rotation with the image-plane shift.  This
     function inverts the rotation to recover the raw image-plane shifts
-    and returns them in a ``TiltSeriesGenerator``-compatible form.
+    and returns them in the convention of :class:`~specter.imaging.Poses`.
 
     Parameters
     ----------
@@ -271,8 +265,7 @@ def read_aretomo3_xf(
 
     ``translations`` : torch.Tensor, shape (N_tilts, 2)
         Per-tilt XY translations in Å, ordered ``[tx, ty]``, ready for
-        direct use as the ``translations`` argument of
-        ``TiltSeriesGenerator``.
+        direct use as the ``shifts`` of :class:`~specter.imaging.Poses`.
     ``shift_pixels`` : torch.Tensor, shape (N_tilts, 2)
         Raw image-plane shifts ``[sx, sy]`` in full-resolution pixels,
         recovered by undoing the tilt-axis rotation embedded in the

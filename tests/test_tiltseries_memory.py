@@ -9,9 +9,8 @@ import torch
 import specter
 from specter.cli._cli import cli
 from specter.cpu_threads import limited_cpu_threads
-from specter.imagegenerator import TiltSeriesGenerator
-from specter.settings import Camera, Envelopes, Ice
-
+from specter.imaging import Exposure, Poses, Sample
+from specter.settings import Ice
 
 DEVICES = [
     "cpu",
@@ -19,55 +18,69 @@ DEVICES = [
         "cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA")
     ),
 ]
+EXPOSURE = Exposure.tilt_series(torch.tensor([2.0, 4.0, 6.0]), 3)
 
 
-def make(device, *, exposure="static", scale=1.0):
+def make(exposure="static"):
     specter.seed(3)
     volume = torch.zeros(1, 12, 32, 32)
     volume[:, 3:9, 12:20, 10:22] = 7.0 + torch.rand(6, 8, 12)
+    moving = exposure in ("motion", "both")
     with limited_cpu_threads(1):
-        return TiltSeriesGenerator(
-            volume,
-            24,
-            2.0,
-            None,
-            300.0,
-            torch.tensor([2.0, 4.0, 6.0]),
-            angles=[-40.0, 0.0, 40.0],
-            optics=None,
-            envelopes=Envelopes(
-                dose_envelope=exposure in ("damage", "both"),
-                dose_envelope_target="specimen",
-            ),
+        return Sample.from_volume(volume, 2.0).tilt_series(
+            Poses.tilt_series([-40.0, 0.0, 40.0]),
+            EXPOSURE,
+            voltage=300.0,
+            micrograph_size=24,
             ice=Ice(
-                model="random" if exposure in ("motion", "both") else None,
-                motion_variance=0.38 if exposure in ("motion", "both") else None,
+                model="random" if moving else None,
+                motion_variance=0.38 if moving else None,
             ),
-            camera=Camera(noise_model="poisson", detector_model=None),
-            potential_scale=scale,
-            verbose=False,
-            progressbars=False,
-        ).to(device)
+            damaged=exposure in ("damage", "both"),
+            log=False,
+        )
 
 
-def run(model, **kwargs):
+def run(series, device, scale=1.0, exitwaves=False, clean=False):
+    """
+    Image every tilt from the global stream at seed 11, collecting the exit
+    waves and clean images only when asked. Returns the images, the
+    diagnostics, and the stream's state afterwards.
+    """
     specter.seed(11)
+    images, waves_out, clean_out = [], [], []
     with torch.no_grad(), limited_cpu_threads(1):
-        result = model.generate_tilt_series(torch.tensor([0]), **kwargs)
+        for i in range(len(series)):
+            waves = series.scatter(i, potential_scale=scale, device=device)
+            if exitwaves:
+                waves_out.append(waves.pixels())
+            intensity = waves.intensity()
+            if clean:
+                clean_out.append(intensity.pixels())
+            images.append(intensity.detect(EXPOSURE[i : i + 1]).array)
     state = torch.get_rng_state()
-    cuda_state = torch.cuda.get_rng_state() if model.device.type == "cuda" else None
-    return result, state, cuda_state
+    cuda_state = torch.cuda.get_rng_state(device) if device == "cuda" else None
+    diagnostics = (
+        torch.cat(waves_out) if exitwaves else None,
+        torch.cat(clean_out) if clean else None,
+    )
+    return torch.cat(images), diagnostics, state, cuda_state
 
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("exposure", ["static", "damage", "motion", "both"])
 @pytest.mark.parametrize("scale", [1.0, 1.5])
 def test_volume_guard_preserves_scaled_and_per_tilt_physics(device, exposure, scale):
-    reference = make(device, exposure=exposure, scale=scale)
-    # Force the original unconditional multiply to compare the actual physics.
-    reference._potential_scale_is_unity = False
-    expected, _, _ = run(reference)
-    model = make(device, exposure=exposure, scale=scale)
+    reference = make(exposure)
+
+    def multiply(_module, args):
+        # The unconditional multiply the guard skips at unity.
+        return (args[0] * scale, *args[1:])
+
+    handle = reference.scattering.register_forward_pre_hook(multiply)
+    expected, _, _, _ = run(reference, device)
+    handle.remove()
+    model = make(exposure)
     seen = []
 
     def check_volume(_module, args):
@@ -79,12 +92,11 @@ def test_volume_guard_preserves_scaled_and_per_tilt_physics(device, exposure, sc
             torch.testing.assert_close(source, model.volume * scale, rtol=0, atol=0)
         seen.append(float(source.sum()))
 
-    handle = model.iterative_scattering.register_forward_pre_hook(check_volume)
-    actual, _, _ = run(model)
+    handle = model.scattering.register_forward_pre_hook(check_volume)
+    actual, _, _, _ = run(model, device, scale)
     handle.remove()
     assert len(seen) == 3
-    for before, after in zip(expected, actual, strict=True):
-        torch.testing.assert_close(after, before, rtol=0, atol=0)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("device", DEVICES)
@@ -92,18 +104,22 @@ def test_volume_guard_preserves_scaled_and_per_tilt_physics(device, exposure, sc
 def test_optional_diagnostics_preserve_images_and_random_stream(
     device, exitwaves, clean
 ):
-    expected, rng, cuda_rng = run(make(device, exposure="both"))
-    actual, actual_rng, actual_cuda_rng = run(
-        make(device, exposure="both"),
-        collect_exitwaves=exitwaves,
-        collect_clean_images=clean,
+    expected, _, rng, cuda_rng = run(make("both"), device)
+    actual, (waves, intensity), actual_rng, actual_cuda_rng = run(
+        make("both"), device, exitwaves=exitwaves, clean=clean
     )
-    torch.testing.assert_close(actual[0], expected[0], rtol=0, atol=0)
-    for index, collected in ((1, exitwaves), (2, clean)):
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    _, (all_waves, all_intensity), _, _ = run(
+        make("both"), device, exitwaves=True, clean=True
+    )
+    for collected, got, want in (
+        (exitwaves, waves, all_waves),
+        (clean, intensity, all_intensity),
+    ):
         if collected:
-            torch.testing.assert_close(actual[index], expected[index], rtol=0, atol=0)
+            torch.testing.assert_close(got, want, rtol=0, atol=0)
         else:
-            assert actual[index] is None
+            assert got is None
     assert torch.equal(actual_rng, rng)
     if cuda_rng is not None:
         assert torch.equal(actual_cuda_rng, cuda_rng)

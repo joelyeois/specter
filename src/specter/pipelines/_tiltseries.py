@@ -22,7 +22,8 @@ from specter.config import (
     TomogramConfig,
     validate_config,
 )
-from specter.imagegenerator import TiltSeriesGenerator
+from specter.imaging import CTF, Exposure, Poses, Sample
+from specter.imaging._stages import read_dose_weights
 from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
 
@@ -31,12 +32,11 @@ from specter.settings import (
     Camera,
     Envelopes,
     Ice,
-    Optics,
     Propagation,
     TiltGeometry,
     bundle_from_config,
 )
-from specter.progress import console, section
+from specter.progress import console, section, track
 from ._common import (
     _mm_to_angstrom,
     _normalize_images,
@@ -146,15 +146,14 @@ def run_tilt_series(
     validate_config(config)
 
     specter.set_verbosity(logging.INFO)
-    mode, device_target = parse_device(
-        resolve_available_device(config.device)
-    ).ddp_dispatch()
-    if mode == "multi":
+    devices = parse_device(resolve_available_device(config.device))
+    if devices.is_multi:
         raise ValueError(
-            "run_tilt_series: multi-GPU device strings (e.g. '0,1,2') aren't "
+            "run_tilt_series: multi-device strings (e.g. '0,1,2') aren't "
             "supported -- a tilt series is generated as a single volume, not "
             "batched across particles. Pass a single device, e.g. 'cuda:0'."
         )
+    device_target = devices.primary
 
     t_start = time.perf_counter()
 
@@ -165,8 +164,8 @@ def run_tilt_series(
     volume = load_specimen_volume(config.volume_path)
     console.print(f"  Volume shape: {tuple(volume.shape)}  (Z, Y, X)")
 
-    # --- Building TiltSeriesGenerator ---
-    section("Building TiltSeriesGenerator")
+    # --- Preparing the series ---
+    section("Preparing the tilt series")
     dx = config.voxel_size
     micrograph_size = (
         config.micrograph_size
@@ -185,7 +184,6 @@ def run_tilt_series(
     # The mean-free-path model replaces the amplitude-contrast ratio as the
     # source of the imaginary potential; keeping both would absorb twice.
     alpha = 0.0 if config.absorption_model == "inelastic_mfp" else config.alpha
-    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc else None
 
     ctf_params = {
         "cs": torch.tensor([cs_angstrom]),
@@ -195,34 +193,72 @@ def run_tilt_series(
     ice = bundle_from_config(
         Ice, config, prefix="ice_", parameterization=config.bulk_scattering_factors
     )
-    model = TiltSeriesGenerator(
-        volume.unsqueeze(0),  # add batch dim: (1, Z, Y, X)
-        micrograph_size,
-        dx,
-        ctf_params,
-        config.voltage,
+    # Envelopes.cc is in Angstrom and the config's in mm; cc is read from the config.
+    envelopes = bundle_from_config(Envelopes, config, cc=None)
+    damage_on_lens = (
+        envelopes.dose_envelope
+        and envelopes.dose_envelope_target == "transfer_function"
+    )
+    camera = bundle_from_config(Camera, config)
+    weights, weights_max_frequency = read_dose_weights(camera)
+    exposure = Exposure.tilt_series(
         config.dose_per_tilt,
-        angles=angles,
-        propagation=bundle_from_config(Propagation, config, alpha=alpha),
-        optics=bundle_from_config(Optics, config),
-        envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
-        camera=bundle_from_config(Camera, config),
+        config.n_tilts,
+        n_frames=camera.n_frames,
+        weights=weights,
+        weights_max_frequency=weights_max_frequency,
+    )
+    tilt = bundle_from_config(TiltGeometry, config)
+    series = Sample.from_volume(volume, dx).tilt_series(
+        Poses.tilt_series(angles, axis=tilt.tilt_axis),
+        exposure,
+        voltage=config.voltage,
+        micrograph_size=micrograph_size,
         ice=ice,
-        bfactor=config.bfactor,
-        tilt=bundle_from_config(TiltGeometry, config),
-        coincidence_radius=config.coincidence_radius,
+        damaged=envelopes.dose_envelope and not damage_on_lens,
+        tilt=tilt,
         seed=run_seed,
-    ).to(device_target)
+        objective_aperture=config.objective_aperture,
+        propagation=bundle_from_config(Propagation, config, alpha=alpha),
+    )
+    ctf = CTF(ctf_params)
 
     # --- Generating ---
     section(f"Generating tilt series on {device_target}")
+    images_list: list[torch.Tensor] = []
+    exitwaves_list: list[torch.Tensor] = []
     with torch.no_grad():
-        images, exitwaves, _clean = model.generate_tilt_series(
-            torch.tensor([0]),
-            collect_exitwaves=config.save_exitwaves,
-            collect_clean_images=False,
-        )
-    images = images[0].cpu()  # (n_tilts, H, W)
+        for i in track(range(config.n_tilts), description="Generating tilt series"):
+            one = slice(i, i + 1)
+            waves = series.scatter(i, device=device_target)
+            if config.save_exitwaves:
+                exitwaves_list.append(waves.pixels().cpu())
+            image = (
+                waves.apply_ctf(
+                    ctf,
+                    bfactor=config.bfactor,
+                    convergence_angle=envelopes.convergence_angle,
+                    dose_envelope=exposure[one] if damage_on_lens else None,
+                )
+                .intensity(
+                    cc=config.cc or None,
+                    energy_spread=envelopes.energy_spread,
+                    deltaV_V=envelopes.deltaV_V,
+                    deltaI_I=envelopes.deltaI_I,
+                    temporal_coherence=envelopes.temporal_coherence,
+                )
+                .detect(
+                    exposure[one],
+                    detector=camera.detector_model,
+                    noise=camera.noise_model,
+                    coincidence_radius=config.coincidence_radius,
+                    detector_pixel_size=camera.detector_pixel_size,
+                    seed=run_seed,
+                )
+            )
+            images_list.append(image.array.cpu())
+    images = torch.cat(images_list)  # (n_tilts, H, W)
+    exitwaves = torch.cat(exitwaves_list) if config.save_exitwaves else None
 
     # --- Post-processing ---
     if config.normalize_tilt_series:
@@ -258,12 +294,7 @@ def run_tilt_series(
             tilt_angles=angles,
         )
 
-        if config.save_exitwaves:
-            assert exitwaves is not None
-            exitwaves = exitwaves[0].cpu()  # (n_tilts, H, W) complex
-            # From the settings this run built, not `model.ice`: the
-            # MicrographGenerator base resets that attribute, so it always
-            # read as no ice and every exit wave was named "clean".
+        if exitwaves is not None:
             ew_prefix = "exitwave" if ice.model is not None else "clean_exitwave"
             section(f"Saving {ew_prefix.replace('_', ' ')}")
             _save_exitwave_pair(

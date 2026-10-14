@@ -5,7 +5,7 @@ Once a [specimen](../specimens.md) potential volume \(V(x,y,z)\) exists,
 electron plane wave through it to obtain a complex-valued 2D exit wave
 \(\psi(x,y)\) at the specimen's far face. `Scattering` (eager,
 whole-volume) and `IterativeScattering` (on-the-fly slice sampling under
-rotation, used by `TiltSeriesGenerator`) both implement this as one of
+rotation, used by `TiltSeries` and `Sample`) both implement this as one of
 several propagation models, selected by `scattering_model`:
 `"multislice"` (default, most accurate), `"rytov"`, `"firstborn"`,
 `"kinematic"`, and `"projection"`, in roughly decreasing order of physical
@@ -96,7 +96,7 @@ through the whole propagation.
 whole recursion eagerly. `IterativeScattering` instead samples Z-slices
 on the fly from a volume under an arbitrary affine pose
 (`VolumeRotator.sample_rotated_slices`), which is what
-`TiltSeriesGenerator` uses: at large tilt angles the traversed slice count
+`TiltSeries` uses: at large tilt angles the traversed slice count
 `nz_new` exceeds the volume's own Z-extent, and resampling per-slice
 avoids ever materializing a second full-size rotated copy of the volume.
 Both classes implement the same five models with the same formulas; only
@@ -147,10 +147,10 @@ kinematic retain their respective linear and single-scattering
 approximations; they do not become exact Beer–Lambert propagators for thick
 absorbing specimens. The `ctf` model rejects uniform absorption.
 
-`TiltSeriesGenerator` applies the same model to a tilt series. The absorption
+`TiltSeries` applies the same model to a tilt series. The absorption
 field is computed from the dry specimen volume before ice is blended into it,
-with the occupancy that weights the ice, and with the mean free paths the
-particle generators resolve: the solvent value or its voltage-dependent
+with the occupancy that weights the ice, and with the mean free paths a
+particle `Specimen` resolves: the solvent value or its voltage-dependent
 default, the optional specimen value, and the objective-aperture rate
 described below. The solvent term is present only when ice is blended. The
 field receives the same tilt padding and edge taper as the elastic volume, and
@@ -161,16 +161,16 @@ constant over the volume rather than applied as a scalar. A tilted slice
 extends past the rotated slab into vacuum, so a scalar would absorb where the
 beam crosses no material; the field is zero there, and a slab of thickness
 \(t\) attenuates as \(\exp(-t/(\Lambda\cos\theta))\) at tilt \(\theta\). An
-explicit `absorption_potential` supplied to the constructor takes precedence
+explicit `absorption` field passed to `Sample.tilt_series` takes precedence
 over the mean-free-path settings. The field is a second volume of the padded
 size, which doubles the resident memory of the specimen.
 
-`MicrographGenerator` applies the model to a micrograph. The dry specimen
+A micrograph's `Sample` applies the model too. The dry specimen
 exists without its ice only while the ice is being blended into it, so the
 field is written by the blend itself, one z-slab at a time, from the occupancy
-read that also weights the ice. For a `MicrographSpecimenGenerator` this takes
-place in its `assemble` method, once per specimen; for a pre-assembled volume,
-at construction. The field is therefore computed on the same device as the
+read that also weights the ice. For a `Field` this takes place in
+`Field.draw`, once per specimen; for a pre-assembled volume, in
+`Sample.prepare`. The field is therefore computed on the same device as the
 ice, a slab at a time, and costs one additional canvas and no additional
 occupancy pass. It is propagated alongside the potential by
 `IterativeScattering.multislice_absorptive`, which requires
@@ -220,10 +220,10 @@ interference) and for the standard protein composition
 rate adds to the inelastic one, and where the aperture lies inside the grid's
 Nyquist frequency the potential is low-passed at the aperture
 (`potential.aperture_lowpass`) so that the scattering the grid does carry is
-not also counted. `MicrographGenerator` applies the same per-slice filter to
+not also counted. A micrograph's `Sample` applies the same per-slice filter to
 its untilted specimen volume. A tilt series cannot use that filter, because it acts on
 transverse frequencies of the beam frame and the beam direction changes from
-tilt to tilt. `TiltSeriesGenerator` instead removes all 3D frequencies beyond
+tilt to tilt. `TiltSeries` instead removes all 3D frequencies beyond
 the aperture (`potential.aperture_lowpass_isotropic`), a spherical filter that
 commutes with rotation. On the Ewald sphere the two filters coincide to within
 \(\theta^2/8\) relative at scattering angle \(\theta\), so they keep and remove

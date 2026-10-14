@@ -779,11 +779,12 @@ def test_compute_loss_nps_weight_branch_differs_from_mse(
 # ---------------------------------------------------------------------------
 # Refined-parameter binding
 #
-# `Reconstructor` owns the refined parameters; `ImageGenerator` renders from
-# them. The handoff used to rely on the two holding the same tensor object,
-# which `torch.nn.Module._apply` is free to break: it swaps a Parameter's
-# `.data` in place but replaces a buffer with a fresh `.to()` copy. On a GPU
-# that left the generator rendering values frozen at device-move time.
+# `Reconstructor` owns the refined parameters and renders from them. The
+# handoff used to rely on the renderer and the reconstructor holding the same
+# tensor object, which `torch.nn.Module._apply` is free to break: it swaps a
+# Parameter's `.data` in place but replaces a buffer with a fresh `.to()`
+# copy. On a GPU that left the renderer using values frozen at device-move
+# time.
 # ---------------------------------------------------------------------------
 
 
@@ -816,22 +817,25 @@ def _binding_kwargs(tiny_volume: torch.Tensor, ctf: dict) -> dict:
         ),
     ],
 )
-def test_refined_parameters_are_live_in_the_generator(
+def test_refined_parameters_are_live_in_the_forward_model(
     tiny_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor], device: str
 ) -> None:
-    """An optimiser step on a refined parameter is visible to the forward model."""
+    """An in-place step on each refined parameter, after a device move, changes
+    the rendered image: the forward model reads the module's own parameters."""
     gb = Reconstructor(**_binding_kwargs(tiny_volume, full_ctf_params)).to(device)
-    gen = gb.imagegenerator
-
-    with torch.no_grad():
-        gb.translations.add_(torch.tensor([[5.0, 5.0]], device=device))
-        gb.rotations.add_(torch.tensor([[0.0, 0.1, 0.0, 0.0]], device=device))
-        gb.V.add_(1.0)
-    gb._bind_refined_parameters()
-
-    assert torch.equal(gen.translations.detach(), gb.translations.detach())
-    assert torch.equal(gen.quaternions.detach(), gb.rotations.detach())
-    assert torch.equal(gen.V.detach(), gb.V.detach())
+    idx = torch.tensor([0], device=device)
+    steps = {
+        "translations": torch.tensor([[5.0, 5.0]], device=device),
+        "rotations": torch.tensor([[0.0, 0.1, 0.0, 0.0]], device=device),
+        "V": torch.tensor(1.0, device=device),
+        "defocus_offset": torch.tensor(500.0, device=device),
+    }
+    for name, step in steps.items():
+        with torch.no_grad():
+            before = gb(idx)
+            getattr(gb, name).add_(step)
+            after = gb(idx)
+        assert not torch.allclose(before, after), f"{name} did not reach the image"
 
 
 @pytest.mark.parametrize(
@@ -892,25 +896,20 @@ def test_defocus_offset_changes_the_rendered_image(
     before = gb.forward(idx)
     with torch.no_grad():
         gb.defocus_offset.add_(5000.0)
-    gb._bind_refined_parameters()
     torch.manual_seed(0)
     after = gb.forward(idx)
 
     assert not torch.allclose(before, after)
 
 
-def test_binding_leaves_the_constructed_defocus_unchanged(
+def test_a_zero_offset_reproduces_the_constructed_defocus(
     tiny_volume: torch.Tensor, full_ctf_params: dict[str, torch.Tensor]
 ) -> None:
-    """Re-binding an untouched model reproduces the defocus it was built with."""
+    """The batch's CTF carries the defocus the model was built with."""
     gb = Reconstructor(**_binding_kwargs(tiny_volume, full_ctf_params))
-    dfu = gb.imagegenerator.dfu.detach().clone()
-    dfv = gb.imagegenerator.dfv.detach().clone()
-
-    gb._bind_refined_parameters()
-
-    assert torch.allclose(gb.imagegenerator.dfu.detach(), dfu)
-    assert torch.allclose(gb.imagegenerator.dfv.detach(), dfv)
+    ctf = gb._ctf(torch.tensor([0]))
+    for name in ("dfu", "dfv"):
+        assert torch.equal(ctf.params[name], full_ctf_params[name][[0]])
 
 
 # ---------------------------------------------------------------------------

@@ -446,7 +446,7 @@ def test_bfactor_envelope_matches_old_aberration_via_forward():
 
 # ---------------------------------------------------------------------------
 # Parity: multi-particle batching (every test above used an implicit batch
-# of 1 -- Reconstructor/ImageGenerator always pass per-particle tensors of
+# of 1 -- Reconstructor/ExitWave.apply_ctf always pass per-particle tensors of
 # shape (N,), N>1, so this is the actually-used code path, not tested
 # anywhere else in this file).
 # ---------------------------------------------------------------------------

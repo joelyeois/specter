@@ -51,7 +51,7 @@ from images.
 - **Structured ice.** Ice comes from configurations optimised against a measured structure factor and a coarse-grained water potential, not from water molecules placed at random to the right bulk density.
 - **Per-electron detector.** Individual electrons are placed and merged when they land too close together, reproducing the low-frequency suppression that real counting detectors show.
 - **Validated against experiment.** Simulated particles pooled with real EMPIAR-11377 particles and run through a single CryoSPARC 2D classification job sort into the same classes, in roughly the same proportion, across nearly all 50 classes — see the [particle-stack guide](https://joelyeois.github.io/specter/user-guide/particle-stack/#example-matching-empiar-11377).
-- **One model, both directions.** The forward model that generates images (`ImageGenerator`/`MicrographGenerator`/`TiltSeriesGenerator`) is the same model that drives reconstruction (`Ghostbuster`/`TomogramGhostbuster`), so a change to the physics applies in both directions rather than to a simulator alone.
+- **One model, both directions.** The forward model that generates images (`specter.imaging`'s `Specimen`, `Sample` and `TiltSeries`) is the same model that drives reconstruction (`Ghostbuster`/`TomogramGhostbuster`), so a change to the physics applies in both directions rather than to a simulator alone.
 - **GPU-accelerated.** Volume rotation, potential calculation, and wave propagation all run on PyTorch, with multi-GPU support for particle stacks, ice cache generation, and the two gold-standard reconstruction halves.
 - **Tracked runs.** Every reconstruction, and any simulation run with `--project` or `--job_id`, is recorded as a numbered job (`specter jobs list/show/diff`), so parameters and provenance are kept between experiments.
 
@@ -209,7 +209,7 @@ takes its built-in default. See
 
 ```
 src/specter/        # main package: physics simulator + Ghostbuster reconstruction
-  imagegenerator/    # ImageGenerator, MicrographGenerator, TiltSeriesGenerator
+  imaging/           # Specimen, Field/Sample, TiltSeries, ExitWave, Image
   ghostbuster/       # Reconstructor, Ghostbuster, tomogram reconstruction
   specimen/          # membranes, filaments, microtubules, tomogram specimen assembly
   ice/               # amorphous ice generation and the IceBank library

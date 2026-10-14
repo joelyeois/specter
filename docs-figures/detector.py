@@ -3,8 +3,9 @@ Generate the figures for docs/concepts/detector.md.
 
 Calls `specter.detectors`' bundled MTF/DQE(0) functions and
 `specter.microscope.Detector`'s coincidence-loss machinery directly, so
-the curves plotted are exactly what `BaseImager._init_detector_mtf` and
-`Detector.apply_coincidence` produce for a real imaging run.
+the curves plotted are exactly what `specter.imaging.Image.detect` (via
+`specter.detectors.detector_mtf`) and `Detector.apply_coincidence` produce
+for a real imaging run.
 
 Run with: uv run python docs-figures/detector.py
 Saves PNGs directly into docs/assets/images/.

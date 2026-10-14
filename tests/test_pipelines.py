@@ -225,14 +225,22 @@ def test_run_particle_stack_auto_batchsize(tmp_path: Path) -> None:
 
 def test_run_particle_stack_seed_reproduces_across_batch_sizes(tmp_path: Path) -> None:
     """
-    The same seed gives the same stack at batchsize 1 and 3, with every
-    stochastic stage on (random ice, crowding, Poisson noise): per-particle
-    draws are derived from (seed, particle index), so batching -- including
-    the "auto" batchsize a seeded run used to be refused with -- cannot
-    change which draw reaches which particle.
+    The same seed gives the same stack at batchsize 1 and 3, and split over
+    two worker processes, with every stochastic stage on (random ice,
+    crowding, Poisson noise): per-particle draws are derived from (seed,
+    particle index), so batching -- including the "auto" batchsize a seeded
+    run used to be refused with -- and sharding cannot change which draw
+    reaches which particle.
     """
     stacks = []
-    for batchsize, name in ((1, "one"), (3, "three"), ("auto", "auto")):
+    for batchsize, name, device in (
+        (1, "one", "cpu"),
+        (3, "three", "cpu"),
+        ("auto", "auto", "cpu"),
+        # Two workers, two particles and one: each share is drawn from the
+        # same per-particle seeds, so the stitched stack is the same stack.
+        (1, "shared", "cpu,cpu"),
+    ):
         config = ParticleStackConfig(
             pdb_source=_PDB_FIXTURE,
             n_pixels=32,
@@ -244,7 +252,7 @@ def test_run_particle_stack_seed_reproduces_across_batch_sizes(tmp_path: Path) -
             ice_model="random",
             noise_model="poisson",
             detector_model="none",
-            device="cpu",
+            device=device,
             output_dir=str(tmp_path),
             filename=name,
         )
@@ -253,6 +261,7 @@ def test_run_particle_stack_seed_reproduces_across_batch_sizes(tmp_path: Path) -
             stacks.append(mrc.data.copy())
     assert np.array_equal(stacks[0], stacks[1])
     assert np.array_equal(stacks[0], stacks[2])
+    assert np.array_equal(stacks[0], stacks[3])
 
 
 def _minimal_tomogram_config(**overrides) -> TomogramConfig:
@@ -512,17 +521,6 @@ class _Captured(Exception):
     """Raised by a stub generator once it has recorded its arguments."""
 
 
-def _capture(monkeypatch: pytest.MonkeyPatch, module: object, name: str) -> dict:
-    seen: dict = {}
-
-    def stub(*args: object, **kwargs: object) -> None:
-        seen.update(kwargs)
-        raise _Captured
-
-    monkeypatch.setattr(module, name, stub)
-    return seen
-
-
 _EXPOSURE_FIELDS = dict(
     absorption_model="inelastic_mfp",
     inelastic_mfp_solvent=3000.0,
@@ -534,28 +532,19 @@ _EXPOSURE_FIELDS = dict(
 )
 
 
-def _assert_exposure_bundles(seen: dict) -> None:
-    propagation = seen["propagation"]
-    assert propagation.absorption_model == "inelastic_mfp"
-    assert propagation.alpha == 0.0  # the config's 0.1 is dropped, not doubled
-    assert propagation.inelastic_mfp_solvent == 3000.0
-    assert propagation.inelastic_mfp_specimen == 2460.0
-    assert seen["optics"].objective_aperture == 12.0
-    assert seen["envelopes"].dose_envelope_target == "specimen"
-
-
 def test_run_micrograph_forwards_absorption_and_exposure_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import specter.pipelines._micrograph as pipeline
+    """Every absorption and exposure setting reaches the specimen draw."""
+    from specter.imaging import Field
 
-    seen = _capture(monkeypatch, pipeline, "MicrographGenerator")
-    specimen: dict = {}
-    monkeypatch.setattr(
-        pipeline,
-        "MicrographSpecimenGenerator",
-        lambda *a, **k: specimen.update(k) or object(),
-    )
+    seen: dict = {}
+
+    def draw(self: Field, **kwargs: object) -> None:
+        seen.update(kwargs, field=self)
+        raise _Captured
+
+    monkeypatch.setattr(Field, "draw", draw)
     config = MicrographConfig(
         pdb_source="6bdf",
         n_pixels=32,
@@ -568,24 +557,39 @@ def test_run_micrograph_forwards_absorption_and_exposure_settings(
     )
     with pytest.raises(_Captured):
         run_micrograph(config)
-    _assert_exposure_bundles(seen)
-    assert specimen["ice"].motion_variance == 0.38
-    assert specimen["icemaker"].parameterization == "lobato"
+    assert seen["absorption_model"] == "inelastic_mfp"
+    assert seen["alpha"] == 0.0  # the config's 0.1 is dropped, not doubled
+    assert seen["inelastic_mfp_solvent"] == 3000.0
+    assert seen["inelastic_mfp_specimen"] == 2460.0
+    assert seen["objective_aperture"] == 12.0
+    field = seen["field"]
+    assert field.damaged  # dose_envelope_target="specimen"
+    assert field.ice.motion_variance == 0.38
+    assert field.icemaker.parameterization == "lobato"
     from specter.ice._kernels import build_water_kernel
 
     torch.testing.assert_close(
-        specimen["icemaker"].ice_kernel, build_water_kernel(config.pixel_size, "lobato")
+        field.icemaker.ice_kernel, build_water_kernel(config.pixel_size, "lobato")
     )
 
 
 def test_run_tilt_series_forwards_absorption_and_exposure_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Every absorption and exposure setting reaches the series' preparation."""
     import torch
 
-    import specter.pipelines._tiltseries as pipeline
+    from specter.imaging import Sample
 
-    seen = _capture(monkeypatch, pipeline, "TiltSeriesGenerator")
+    seen: dict = {}
+
+    def tilt_series(
+        self: Sample, poses: object, exposure: object, **kwargs: object
+    ) -> None:
+        seen.update(kwargs, exposure=exposure)
+        raise _Captured
+
+    monkeypatch.setattr(Sample, "tilt_series", tilt_series)
     volume_path = tmp_path / "volume.pt"
     torch.save(torch.rand(16, 32, 32) * 0.01, volume_path)
     config = TiltSeriesConfig(
@@ -599,8 +603,15 @@ def test_run_tilt_series_forwards_absorption_and_exposure_settings(
     )
     with pytest.raises(_Captured):
         run_tilt_series(config)
-    _assert_exposure_bundles(seen)
+    propagation = seen["propagation"]
+    assert propagation.absorption_model == "inelastic_mfp"
+    assert propagation.alpha == 0.0  # the config's 0.1 is dropped, not doubled
+    assert propagation.inelastic_mfp_solvent == 3000.0
+    assert propagation.inelastic_mfp_specimen == 2460.0
+    assert seen["objective_aperture"] == 12.0
+    assert seen["damaged"]  # dose_envelope_target="specimen"
     assert seen["ice"].motion_variance == 0.38
+    assert not seen["exposure"].weighted  # a tilt is a plain sum
 
 
 @pytest.mark.parametrize(
@@ -612,8 +623,8 @@ def test_tilt_series_exitwaves_are_named_by_whether_ice_was_added(
     """
     Exit waves with ice are ``exitwave``, without it ``clean_exitwave``.
 
-    The pipeline used to read ``model.ice``, which the MicrographGenerator base
-    resets, so a run with ice also labelled its exit waves "clean".
+    The pipeline once read the ice setting off a model that reset it, so a
+    run with ice also labelled its exit waves "clean".
     """
     volume_path = tmp_path / "volume.pt"
     torch.save(torch.rand(8, 24, 24) * 0.01, volume_path)
@@ -632,3 +643,29 @@ def test_tilt_series_exitwaves_are_named_by_whether_ice_was_added(
     out = tmp_path / "out"
     assert (out / f"ts_{suffix}_magnitude.mrcs").exists()
     assert (out / f"ts_{suffix}_phase.mrcs").exists()
+
+
+def test_run_micrograph_writes_clean_exit_waves_without_ice(tmp_path: Path) -> None:
+    """With no ice the specimen is its own clean form; asking for its clean
+    exit waves used to raise AttributeError, since none had been kept."""
+    config = MicrographConfig(
+        pdb_source=_PDB_FIXTURE,
+        n_pixels=24,
+        micrograph_size=48,
+        pixel_size=3.0,
+        n_micrographs=1,
+        ice_model="none",
+        noise_model="none",
+        save_exitwaves=True,
+        save_clean_exitwaves=True,
+        seed=1,
+        device="cpu",
+        output_dir=str(tmp_path),
+    )
+    run_micrograph(config)
+    for part in ("magnitude", "phase"):
+        with mrcfile.open(tmp_path / f"micrographs_exitwave_{part}.mrcs") as m:
+            wave = m.data.copy()
+        with mrcfile.open(tmp_path / f"micrographs_clean_exitwave_{part}.mrcs") as m:
+            clean = m.data.copy()
+        assert np.array_equal(wave, clean)

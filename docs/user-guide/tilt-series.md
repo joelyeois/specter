@@ -123,13 +123,12 @@ writes the complex exit wave as two separate `.mrcs` files:
 zero-means and unit-normalizes each tilt image independently before saving.
 
 The CLI collects exit waves only when `save_exitwaves=true` and does not
-retain the additional noiseless image stack. In the Python API,
-`TiltSeriesGenerator.generate_tilt_series` still returns all three stacks
-by default. Pass `collect_exitwaves=False` or `collect_clean_images=False`
-to skip a diagnostic; its position in the returned tuple will be `None`.
-These options preserve the detected images and their random-number stream.
-At a potential scale of exactly 1, generation also reuses the padded
-volume rather than allocating a scaled copy.
+retain the additional noiseless image stack. In the Python API the three
+stacks are successive steps of one chain: `TiltSeries.scatter(i)` returns
+tilt `i`'s exit wave, `ExitWave.intensity` its noiseless image, and
+`Image.detect` the detected one, so a caller keeps only what it needs. At a
+potential scale of exactly 1, `TiltSeries.scatter` reuses the padded volume
+rather than allocating a scaled copy.
 See the [production comparison](../assets/tiltseries-memory/README.md)
 for measured GPU memory, timings, and matching image/Fourier figures.
 
@@ -189,10 +188,24 @@ arbitrary angle and (after alignment) per-tilt shifts. `specter.tilt`
 `tilt_to_quaternions`) parses [AreTomo3](https://github.com/czimaginginstitute/AreTomo3)'s
 `.aln`/`.xf`/global-shifts output
 into quaternions/translations for exactly this case. This is a Python-API
-feature only: `TiltSeriesGenerator` accepts `quaternions=` as an
-alternative to `angles=`, but `TiltSeriesConfig`/the CLI does not currently
-expose it, so matching a real tilt series' geometry means calling
-`TiltSeriesGenerator` directly rather than `specter simulate tiltseries`.
+feature only: `Poses` takes arbitrary quaternions and shifts, as an
+alternative to `Poses.tilt_series(angles)`, but `TiltSeriesConfig`/the CLI
+does not currently expose them, so matching a real tilt series' geometry
+means calling `Sample.tilt_series` directly rather than
+`specter simulate tiltseries`:
+
+```python
+import torch
+from specter.imaging import Exposure, Poses, Sample
+from specter.tilt import read_aretomo3_aln
+
+quaternions, shifts = read_aretomo3_aln("TS_001.aln", pixel_size=1.35)
+poses = Poses(quaternions, shifts, ids=torch.arange(len(quaternions)))
+exposure = Exposure.tilt_series(3.0, len(poses))
+series = Sample.from_volume(volume, 1.35).tilt_series(
+    poses, exposure, voltage=300.0, micrograph_size=512
+)
+```
 
 The readers follow AreTomo3's own conventions, which were checked by
 reconstructing a SPECTER-projected bead phantom with AreTomo3 (`-Cmd 2`)
@@ -208,9 +221,10 @@ by `+(TX, TY)`, and the returned translations are `-(TX, TY)` in Å.
 CLI calls. Build a `TiltSeriesConfig` directly in Python (or load one with
 `specter.config.load_config`) instead of going through the command line.
 For anything the config/CLI doesn't expose (quaternion-based tilt geometry,
-per-tilt CTF variation, etc.), drive `TiltSeriesGenerator`
-(`specter.imagegenerator`) directly instead; `run_tilt_series` is a thin
-wrapper around it.
+per-tilt CTF variation, etc.), use `Sample.tilt_series` and `TiltSeries`
+(`specter.imaging`) directly instead; `run_tilt_series` is a thin wrapper
+around them, and `demo-notebooks/create_tilt_series/` steps through the
+same calls.
 
 ## See also
 

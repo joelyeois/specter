@@ -19,8 +19,7 @@ import torch
 from specter import rotations
 from specter.aberrations import FocalSpread, cc_envelope, focal_spread_sigma
 from specter.constants import energy_to_wavelength
-from specter.imagegenerator import ImageGenerator
-from specter.settings import Camera, Envelopes, Propagation
+from specter.imaging import CTF, ExitWave, Exposure, Poses, Specimen
 
 WAVELENGTH = energy_to_wavelength(300.0)
 
@@ -133,47 +132,45 @@ def test_zero_focal_spread_is_the_coherent_image():
     )
 
 
-def _generator(cc: float | None, mode: str, scattering_model: str = "multislice"):
+def _aberrated(scattering_model: str = "multislice") -> ExitWave:
     n = 24
     torch.manual_seed(0)
     z, y, x = torch.meshgrid(*[torch.arange(n) - n / 2] * 3, indexing="ij")
     V = 30.0 * torch.exp(-(x**2 + y**2 + z**2) / 10.0)
-    ctf = {
-        "dfu": torch.tensor([8000.0]),
-        "dfv": torch.tensor([8000.0]),
-        "cs": torch.tensor([2.7e7]),
-    }
-    gen = ImageGenerator(
-        V,
-        1.0,
-        rotations.random_quaternion(1).reshape(1, 4),
-        torch.zeros(1, 2),
-        ctf,
-        300.0,
-        40.0,
-        propagation=Propagation(scattering_model=scattering_model, oversample=2),
-        envelopes=Envelopes(cc=cc, energy_spread=3.0, temporal_coherence=mode),
-        camera=Camera(noise_model="none"),
-        progressbars=False,
-        verbose=False,
+    ctf = CTF(
+        {
+            "dfu": torch.tensor([8000.0]),
+            "dfv": torch.tensor([8000.0]),
+            "cs": torch.tensor([2.7e7]),
+        }
     )
-    gen.eval()
-    return gen
+    poses = Poses(
+        rotations.random_quaternion(1).reshape(1, 4), torch.zeros(1, 2), torch.arange(1)
+    )
+    with torch.no_grad():
+        waves = Specimen(V, 1.0).scatter(
+            poses, voltage=300.0, scattering_model=scattering_model, oversample=2
+        )
+        return waves.apply_ctf(ctf)
+
+
+def _image(waves: ExitWave, cc: float | None, mode: str) -> torch.Tensor:
+    with torch.no_grad():
+        image = waves.intensity(cc=cc, energy_spread=3.0, temporal_coherence=mode)
+        return image.detect(Exposure(40.0), noise="none").array
 
 
 def test_imager_integrates_instead_of_applying_the_envelope():
-    integrated = _generator(2.7e7, "integrated")
-    envelope = _generator(2.7e7, "envelope")
-    coherent = _generator(None, "integrated")
-    assert integrated.aberration.cc is None
-    assert integrated.detector.focal_spread is not None
-    assert envelope.aberration.cc == 2.7e7
-    assert envelope.detector.focal_spread is None
-    assert coherent.detector.focal_spread is None
+    """The default image is the focal-spread sum over the aberrated wave, which
+    carries no Cc envelope of its own (`apply_ctf` takes none)."""
+    waves = _aberrated()
+    a = _image(waves, 2.7, "integrated")
+    b = _image(waves, 2.7, "envelope")
+    c = _image(waves, None, "integrated")
+    focal = FocalSpread.from_instrument(2.7e7, 3e5, 3.0, 0.06e-6, 0.01e-6, WAVELENGTH)
     with torch.no_grad():
-        a = integrated(torch.tensor([0]))
-        b = envelope(torch.tensor([0]))
-        c = coherent(torch.tensor([0]))
+        summed = focal.intensity(waves.array, 0.5, 2)
+    assert torch.equal(waves.intensity(cc=2.7, energy_spread=3.0).array, summed)
     assert not torch.equal(a, b)
     # The sum conserves the electrons the coherent image has; the envelope
     # removes some.
@@ -182,10 +179,12 @@ def test_imager_integrates_instead_of_applying_the_envelope():
 
 
 def test_linear_model_keeps_the_envelope():
-    """scattering_model='ctf' images linearly, where the envelope is exact."""
-    gen = _generator(2.7e7, "integrated", scattering_model="ctf")
-    assert gen.aberration.cc == 2.7e7
-    assert gen.detector.focal_spread is None
+    """scattering_model='ctf' images linearly, where the envelope is exact, so
+    it takes the envelope whichever route is asked for."""
+    waves = _aberrated("ctf")
+    integrated = _image(waves, 2.7, "integrated")
+    assert torch.equal(integrated, _image(waves, 2.7, "envelope"))
+    assert not torch.equal(integrated, _image(waves, None, "integrated"))
 
 
 def test_envelope_and_focal_spread_share_one_sigma():

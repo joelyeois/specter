@@ -20,8 +20,8 @@ from specter.options import AberrationModel
 # Keys read out of the per-batch `ctf_params` dict passed to `forward()` --
 # see `Aberration.transfer_function`. Never constructor arguments -- `bfactor`
 # is the one exception, accepted as a constructor kwarg (see `__init__`) for
-# consistency with `ImageGenerator`/`BaseImager`/`Reconstructor`, which all
-# offer the same convenience with the same override-wins precedence.
+# consistency with `ExitWave.apply_ctf` and `Reconstructor`, which offer the
+# same convenience with the same override-wins precedence.
 _CTF_PARAM_NAMES = frozenset(
     {
         "dfu",
@@ -109,7 +109,7 @@ class Aberration(L.LightningModule):
         particles) or per-particle tensor. If given, overrides any
         ``"bfactor"`` entry already present in the ``ctf_params`` passed to
         :meth:`forward` -- the same convenience and precedence offered by
-        ``ImageGenerator``/``BaseImager``/``Reconstructor``. None or 0.0
+        ``ExitWave.apply_ctf`` and ``Reconstructor``. None or 0.0
         means no envelope. Default None.
 
     Notes

@@ -5,13 +5,10 @@ importable function instead of being trapped inside a script's ``main()`` --
 callable from `specter.cli`, from plain Python, or from a notebook, with
 identical behavior.
 
-Single-device only (unlike `run_particle_stack`/`run_tilt_series`, no
-multi-GPU DDP dispatch): each micrograph needs its own freshly regenerated
-specimen (ice/crowding) between forward passes
-(`MicrographGenerator.regenerate_specimen`), and a single micrograph is
-already the unit of GPU-memory-bound work at `micrograph_size` resolution,
-so there's no batching (and hence no DDP sharding) to speed up the way
-particle stacks batch many small boxes together.
+Single-device only (unlike `run_particle_stack`): each micrograph is its own
+specimen draw (`Field.draw`), and a single micrograph is already the unit of
+GPU-memory-bound work at `micrograph_size` resolution, so there is no
+batching to shard the way particle stacks batch many small boxes together.
 """
 
 from __future__ import annotations
@@ -19,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from dataclasses import asdict
 
 import torch
 
@@ -26,8 +24,8 @@ import specter
 from specter.arrays import compute_nz
 from specter.config import MicrographConfig, parse_scalar_or_range, validate_config
 from specter.ice import IceProfile, resolve_icemaker
-from specter.imagegenerator import MicrographGenerator
-from specter.specimen import MicrographSpecimenGenerator
+from specter.imaging import CTF, Exposure, Field
+from specter.imaging._stages import read_dose_weights
 from specter.io import create_micrograph_starfile
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder, molecular_mass_from_atoms
@@ -37,7 +35,6 @@ from specter.settings import (
     Crowding,
     Envelopes,
     Ice,
-    Optics,
     Packing,
     Propagation,
     bundle_from_config,
@@ -185,6 +182,13 @@ def run_micrograph(config: MicrographConfig) -> None:
     # support (unlike IceBank), so its own fixed (n, nz) must exactly match
     # the micrograph volume it gets blended into.
     ice_profile = build_ice_profile(config)
+    ice = bundle_from_config(
+        Ice,
+        config,
+        prefix="ice_",
+        profile=ice_profile,
+        parameterization=config.bulk_scattering_factors,
+    )
     ice_nz = (
         ice_profile.required_nz(config.micrograph_size, config.pixel_size, V.shape[0])
         if ice_profile is not None
@@ -201,14 +205,15 @@ def run_micrograph(config: MicrographConfig) -> None:
     if icemaker is not None:
         icemaker = icemaker.to(device)
 
-    # Build once -- the first forward pass generates the first specimen.
-    section("Building specimen and image generator")
-    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc else None
-    specimen = MicrographSpecimenGenerator(
+    section("Building the specimen")
+    field = Field(
         V,
         config.pixel_size,
         config.micrograph_size,
-        crowding=bundle_from_config(
+        molecular_mass=molecular_mass_from_atoms(pdb.atomic_numbers),
+        ice=ice,
+    ).pack(
+        bundle_from_config(
             Crowding,
             config,
             prefix="crowd_",
@@ -226,41 +231,31 @@ def run_micrograph(config: MicrographConfig) -> None:
             n_candidates=config.n_candidates,
         ),
         atom_coordinates=pdb.coordinates,
-        ice=bundle_from_config(
-            Ice,
-            config,
-            prefix="ice_",
-            profile=ice_profile,
-            parameterization=config.bulk_scattering_factors,
-        ),
-        icemaker=icemaker,
-        molecular_mass=molecular_mass_from_atoms(pdb.atomic_numbers),
-        progressbars=False,
-        save_clean_exitwaves=config.save_clean_exitwaves,
     )
-    model = MicrographGenerator(
-        specimen,
-        config.micrograph_size,
-        config.pixel_size,
-        ctf_params,
-        config.voltage,
+    if icemaker is not None:
+        field = field.solvate(ice, icemaker=icemaker)
+    # Envelopes.cc is in Angstrom and the config's in mm; cc is read from the config.
+    envelopes = bundle_from_config(Envelopes, config, cc=None)
+    if envelopes.dose_envelope and envelopes.dose_envelope_target == "specimen":
+        field = field.damage()
+    damage_on_lens = (
+        envelopes.dose_envelope
+        and envelopes.dose_envelope_target == "transfer_function"
+    )
+    camera = bundle_from_config(Camera, config, n_frames=n_frames)
+    weights, weights_max_frequency = read_dose_weights(camera)
+    exposure = Exposure(
         dose,
-        propagation=bundle_from_config(Propagation, config, alpha=alpha),
-        optics=bundle_from_config(Optics, config),
-        envelopes=bundle_from_config(Envelopes, config, cc=cc_angstrom),
-        camera=bundle_from_config(Camera, config, n_frames=n_frames),
-        bfactor=config.bfactor,
-        verbose=False,
-        progressbars=False,
-        coincidence_radius=coincidence_radius,
-        potential_scale=potential_scale,
-        save_clean_exitwaves=config.save_clean_exitwaves,
-        seed=run_seed,
-    ).to(device)
+        n_frames=n_frames,
+        weights=weights,
+        weights_max_frequency=weights_max_frequency,
+    )
+    propagation = asdict(bundle_from_config(Propagation, config, alpha=alpha))
+    ctf = CTF(ctf_params)
 
     # --- Generating images ---
-    # Regenerate a fresh specimen (ice/crowding) for every micrograph after
-    # the first, then apply the i-th CTF.
+    # A fresh specimen (ice/crowding) for every micrograph, each drawn from
+    # its own seed, then the i-th CTF.
     section(f"Generating {n} micrograph(s) on {device}")
     images: list[torch.Tensor] = []
     exitwaves: list[torch.Tensor] | None = [] if config.save_exitwaves else None
@@ -269,15 +264,56 @@ def run_micrograph(config: MicrographConfig) -> None:
     )
 
     for i in track(range(n), description="Generating micrographs"):
-        if i > 0:
-            model.regenerate_specimen()
+        one = slice(i, i + 1)
         with torch.no_grad():
-            img = model(torch.tensor([i]))
-        images.append(img.detach().cpu())
-        if exitwaves is not None:
-            exitwaves.append(model.exitwaves.detach().cpu())
-        if clean_exitwaves is not None:
-            clean_exitwaves.append(model.clean_exitwaves.detach().cpu())
+            sample = field.draw(
+                voltage=config.voltage,
+                exposure=exposure[one],
+                seed=run_seed,
+                index=i,
+                keep_dry=config.save_clean_exitwaves,
+                objective_aperture=config.objective_aperture,
+                device=device,
+                **propagation,
+            )
+            beam = dict(
+                voltage=config.voltage,
+                ids=torch.tensor([i]),
+                exposure=exposure[one],
+                potential_scale=potential_scale[one],
+                device=device,
+                **propagation,
+            )
+            waves = sample.scatter(**beam)
+            if exitwaves is not None:
+                exitwaves.append(waves.pixels().cpu())
+            if clean_exitwaves is not None:
+                clean_exitwaves.append(sample.clean().scatter(**beam).pixels().cpu())
+            image = (
+                waves.apply_ctf(
+                    ctf[one],
+                    bfactor=config.bfactor,
+                    convergence_angle=envelopes.convergence_angle,
+                    dose_envelope=exposure[one] if damage_on_lens else None,
+                )
+                .intensity(
+                    cc=config.cc or None,
+                    energy_spread=envelopes.energy_spread,
+                    deltaV_V=envelopes.deltaV_V,
+                    deltaI_I=envelopes.deltaI_I,
+                    temporal_coherence=envelopes.temporal_coherence,
+                )
+                .detect(
+                    exposure[one],
+                    detector=camera.detector_model,
+                    noise=camera.noise_model,
+                    coincidence_radius=coincidence_radius[one],
+                    detector_pixel_size=camera.detector_pixel_size,
+                    seed=run_seed,
+                )
+            )
+            del sample, waves
+        images.append(image.array.cpu())
 
     images_t = torch.concat(images, dim=0)
     exitwaves_t = torch.concat(exitwaves, dim=0) if exitwaves is not None else None

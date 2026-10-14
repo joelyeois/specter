@@ -16,7 +16,6 @@ from typing import (
     get_type_hints,
 )
 
-from ._particle import ParticleStackConfig
 from ._reconstruction import ReconstructionConfig, parse_cryosparc_ref
 from ..devices import parse_device
 from ._scalar_range import parse_scalar_or_range
@@ -42,13 +41,11 @@ def _dispatches_via_ddp(config: Any) -> bool:
     Whether a multi-GPU ``device`` makes this config's pipeline run under
     Lightning DDP, which re-executes it once per rank.
 
-    Particle stacks always do. A reconstruction does for a single halfset or
-    ``"all"``; ``"gold"`` instead opens its `Job` once and hands each halfset
-    worker a single device. Every other pipeline either shards independent
-    work units over a worker pool itself or is single-device.
+    Only a reconstruction of a single halfset or ``"all"`` does; ``"gold"``
+    instead opens its `Job` once and hands each halfset worker a single
+    device. Every other pipeline, particle stacks included, either shards
+    independent work units over a worker pool itself or is single-device.
     """
-    if isinstance(config, ParticleStackConfig):
-        return True
     if isinstance(config, ReconstructionConfig):
         return config.halfset != "gold"
     return False

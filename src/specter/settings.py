@@ -19,7 +19,7 @@ image formation, and which of them a class accepts says what it models:
   is absorbed into the reconstructed volume.
 - `Camera`: the detector chain, likewise forward-only.
 - `TiltGeometry`: the tilt axis and edge tapers a tilt series is imaged
-  with, shared by `TiltSeriesGenerator` and `TomogramReconstructor`.
+  with, shared by `imaging.TiltSeries` and `TomogramReconstructor`.
 - `Ice`: the amorphous ice a specimen is embedded in, forward-only.
 - `Crowding` and `Packing`: how duplicates of a particle template are
   placed around it, and which collision test decides where they fit.
@@ -98,8 +98,8 @@ class Propagation:
         measured mean free path instead -- see
         :func:`~specter.potential.inelastic_absorption_potential`, which also
         records why a fitted `alpha` is the wrong quantity for this job.
-        Supported by the particle generators, MicrographGenerator and
-        TiltSeriesGenerator. TomogramReconstructor rejects this model until
+        Supported by every forward simulation (particles, micrographs and
+        tilt series). TomogramReconstructor rejects this model until
         its iterative path carries explicit material information.
     inelastic_mfp_solvent : float or None
         Inelastic mean free path of the embedding medium, in Angstrom. Used
@@ -180,8 +180,8 @@ class Propagation:
                     "alpha, so it has to be zeroed at the source)."
                 )
             # scattering_model="ctf" has a real projection for an exit wave and
-            # applies amplitude contrast at the lens instead (see BaseImager's
-            # specimen_absorption), so a complex potential has nowhere to go.
+            # applies amplitude contrast at the lens instead (see
+            # `ExitWave.apply_ctf`), so a complex potential has nowhere to go.
             if self.scattering_model == "ctf":
                 raise ValueError(
                     "absorption_model='inelastic_mfp' is not available with "
@@ -294,7 +294,7 @@ class Envelopes:
         own 3D potential before the ice is added, so the solvent keeps its
         structure: its water ring does not fade under exposure, and it loses
         coherence between frames instead (``Ice.motion_variance``). Supported
-        by every generator; a micrograph or tilt series damages its specimen
+        by every forward simulation; a micrograph or tilt series damages its specimen
         before, or apart from, the ice blended into it.
     temporal_coherence : TemporalCoherence
         How the focal spread `cc` causes is applied, when `cc` is set.

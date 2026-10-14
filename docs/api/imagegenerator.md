@@ -1,3 +1,0 @@
-# specter.imagegenerator
-
-::: specter.imagegenerator

@@ -190,8 +190,8 @@ def _run_micrograph_cli(
         # non-negative) approximation, unlike multislice's |exitwave|^2 --
         # combined with unseeded random defocus sampling, some draws produce
         # local negative "intensity" that crashes torch.poisson. Not a bug
-        # introduced by this CLI (same MicrographGenerator/Detector path the
-        # old demo-script exercised); noise isn't needed for a shape-only
+        # introduced by this CLI (the same Sample/Detector path the Python
+        # API exercises); noise isn't needed for a shape-only
         # smoke test, so disable it here rather than flaking on rare draws.
         "--noise_model",
         "none",

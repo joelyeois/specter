@@ -14,23 +14,23 @@ mimic local particle crowding.
 
 ## Pose
 
-Each image gets its own rotation quaternion and in-plane translation;
-`ImageGenerator`/`ImageGeneratorFromCoordinates` draws each once per
-instance and stores them as `(B, 4)` and `(B, 2)` tensors. Every other
+Each image gets its own rotation quaternion and in-plane translation,
+held by `Poses` as `(B, 4)` and `(B, 2)` tensors (`Poses.random` draws them
+uniformly). Every other
 pipeline in SPECTER uses the same representation, sign conventions, and
 real-space/Fourier-space application choice;
 [Conventions](conventions.md#poses) describes them once, and this page
 does not repeat them.
 
-The two particle-generator classes differ in *where* the pose acts.
-`ImageGenerator` rotates the pre-built volume itself.
-`ImageGeneratorFromCoordinates` instead rotates the atomic coordinates
+The two kinds of particle `Specimen` differ in *where* the pose acts.
+A specimen with a pre-built volume rotates the volume itself. One built
+with `Specimen.from_atoms` instead rotates the atomic coordinates
 before voxelization, using the inverse rotation matrix
 (`roma.unitquat_to_rotmat(Q).transpose(-2, -1)`) and applying an Å-space
 translation directly to the coordinates, rather than through the
 `[-1, 1]`-normalized grid `grid_sample` uses. Both reach the same
 convention; see
-[Pipeline overview](pipeline-overview.md#how-the-generator-classes-use-it)
+[Pipeline overview](pipeline-overview.md#how-the-objects-use-it)
 for why the two paths differ in cost and in whether pose gradients reach
 per-atom coordinates.
 
@@ -56,15 +56,15 @@ ice, so every later stage in the chain sees the final, padded extent.
 
 ## Crowding
 
-`CrowdWithDuplicates`, attached to a generator whose `Crowding` settings
-group sets `min_distance`, adds rigid-transformed copies of the *same* template volume
+`CrowdWithDuplicates`, recorded on a specimen by
+`Specimen.crowd(min_distance=...)`, adds rigid-transformed copies of the *same* template volume
 around the primary instance, each independently rotated and placed by
 Poisson-disk sampling (2D, in the image plane only, or 3D, throughout the
 volume). This models local particle crowding within one particle's box,
-a different mechanism from `MicrographGenerator`'s field-of-view
-assembly, which places independent particle species, usually different
-from each other, across a whole micrograph; see
-[Pipeline overview](pipeline-overview.md#how-the-generator-classes-use-it).
+a different mechanism from a micrograph's `Field`, which packs copies of
+its template across a whole field of view with a `Packing` collision
+backend; see
+[Pipeline overview](pipeline-overview.md#how-the-objects-use-it).
 
 `Crowding.min_distance` (the Poisson-disk minimum separation) controls
 sampling density; `max_distance_z` and `max_distance_xy` bound the region

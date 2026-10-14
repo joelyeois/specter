@@ -1,9 +1,27 @@
-"""Measure the shipped CLI and optionally retain/replay its full specimen."""
+"""Measure the shipped CLI and optionally retain/replay its full specimen.
+
+Runs ``specter simulate micrograph`` on the checkout's ``configs/micrograph.toml``
+and times each stage of the object API it drives (`specter.imaging`):
+assembly (`Field.draw`), placement (`Sample.placed`), propagation
+(`IterativeScattering.forward`, inside `Sample.scatter`) and detection
+(`ExitWave.intensity` plus `Image.detect`, which together are what the
+generator-era `Detector.forward` did). The CUDA peaks, the pixel-grid exit
+wave (`exitwave.pt`) and the noiseless intensity ``|aberrated wave|^2`` on the
+image grid (`clean.pt`) are the same quantities the generator-era runs
+recorded, so ``measurement.json`` keeps its keys; ``intensity_seconds`` and
+``detect_seconds`` split ``detector_seconds`` in two.
+
+``--replay-from`` swaps the assembled volume for a captured ``volume.pt``
+(without its absorption field, as before) and draws the detector noise from
+seed 193, so two replays image one specimen with one noise realisation. The
+hooks are the object API's, so ``--checkout`` must have `specter.imaging`.
+"""
 
 import argparse
 import json
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -19,9 +37,11 @@ def main() -> None:
     a = p.parse_args()
     sys.path.insert(0, a.checkout + "/src")
     import torch  # noqa: E402
-    import specter  # noqa: E402
     from specter.cli._cli import cli  # noqa: E402
-    from specter.imagegenerator import MicrographGenerator  # noqa: E402
+    from specter.imaging import ExitWave, Field, Image, Sample  # noqa: E402
+    from specter.imaging import _field  # noqa: E402
+    from specter.scattering import IterativeScattering  # noqa: E402
+    from specter.settings import Propagation  # noqa: E402
 
     torch.set_num_threads(4)
     torch.cuda.set_device(a.device)
@@ -34,77 +54,122 @@ def main() -> None:
         "torch": torch.__version__,
         "stages": {},
     }
-    models = []
-    generate = MicrographGenerator._generate_volume
-    place = MicrographGenerator._ensure_volume_placed
-    forward = MicrographGenerator.forward
+    draw = Field.draw
+    placed = Sample.placed
+    propagate = IterativeScattering.forward
+    apply_ctf = ExitWave.apply_ctf
+    intensity = ExitWave.intensity
+    detect = Image.detect
 
-    def make(self, *args, **kwargs):
+    def timed(name, fn, *args, **kwargs):
+        torch.cuda.synchronize()
+        t = time.perf_counter()
+        result = fn(*args, **kwargs)
+        torch.cuda.synchronize()
+        stats["stages"][name] = time.perf_counter() - t
+        return result
+
+    def make(
+        self,
+        *,
+        voltage,
+        exposure=None,
+        seed=None,
+        index=0,
+        keep_dry=False,
+        objective_aperture=None,
+        device="cpu",
+        **propagation,
+    ):
         nonlocal capture_seconds
         torch.cuda.synchronize()
         t = time.perf_counter()
         if a.replay_from:
-            self.volume = torch.load(
+            volume = torch.load(
                 Path(a.replay_from) / "volume.pt", map_location="cpu", weights_only=True
             )
-            self.absorption_potential = None
+            # No absorption field, as the generator-era replay; a uniform
+            # absorption is a property of the settings, not of the draw.
+            _, uniform = _field._absorption(
+                Propagation(**propagation),
+                objective_aperture,
+                voltage,
+                self.icemaker is not None,
+                self.ice,
+            )
+            sample = Sample(
+                volume,
+                self.voxel_size,
+                uniform_absorption=uniform,
+                profile=self.ice.profile,
+                damaged=self.damaged,
+            )
         else:
-            generate(self, *args, **kwargs)
+            sample = draw(
+                self,
+                voltage=voltage,
+                exposure=exposure,
+                seed=seed,
+                index=index,
+                keep_dry=keep_dry,
+                objective_aperture=objective_aperture,
+                device=device,
+                **propagation,
+            )
         torch.cuda.synchronize()
         stats["stages"]["assembly_seconds"] = time.perf_counter() - t
-        print("ASSEMBLED", stats["stages"], tuple(self.volume.shape), flush=True)
+        print("ASSEMBLED", stats["stages"], tuple(sample.volume.shape), flush=True)
         if a.capture_volume:
             t = time.perf_counter()
-            torch.save(self.volume, out / "volume.pt")
+            torch.save(sample.volume, out / "volume.pt")
             capture_seconds += time.perf_counter() - t
-        stats["volume_shape"] = list(self.volume.shape)
+        stats["volume_shape"] = list(sample.volume.shape)
+        return sample
 
-    def placement(self):
-        torch.cuda.synchronize()
-        t = time.perf_counter()
-        place(self)
-        torch.cuda.synchronize()
-        stats["stages"]["placement_seconds"] = time.perf_counter() - t
-        stats["volume_device"] = str(self.volume.device)
+    def placement(self, device):
+        result = timed("placement_seconds", placed, self, device)
+        stats["volume_device"] = str(result.volume.device)
         print("PLACED", stats["volume_device"], flush=True)
-
-    def run(self, *args, **kwargs):
-        old_scatter = self.iterative_scattering.forward
-        old_detect = self.detector.forward
-
-        def scatter(*sa, **sk):
-            torch.cuda.synchronize()
-            t = time.perf_counter()
-            result = old_scatter(*sa, **sk)
-            torch.cuda.synchronize()
-            stats["stages"]["propagation_seconds"] = time.perf_counter() - t
-            return result
-
-        def detect(*da, **dk):
-            if a.replay_from:
-                specter.seed(193)
-            torch.cuda.synchronize()
-            t = time.perf_counter()
-            result = old_detect(*da, **dk)
-            torch.cuda.synchronize()
-            stats["stages"]["detector_seconds"] = time.perf_counter() - t
-            return result
-
-        self.iterative_scattering.forward = scatter
-        self.detector.forward = detect
-        result = forward(self, *args, **kwargs)
-        stats["peak_allocated_bytes"] = torch.cuda.max_memory_allocated()
-        stats["peak_reserved_bytes"] = torch.cuda.max_memory_reserved()
-        torch.save(self.exitwaves.detach().cpu(), out / "exitwave.pt")
-        torch.save(self.detector_waves.detach().abs().square().cpu(), out / "clean.pt")
-        self.iterative_scattering.forward = old_scatter
-        self.detector.forward = old_detect
-        models.append(self)
         return result
 
-    MicrographGenerator._generate_volume = make
-    MicrographGenerator._ensure_volume_placed = placement
-    MicrographGenerator.forward = run
+    def scatter(self, *args, **kwargs):
+        return timed("propagation_seconds", propagate, self, *args, **kwargs)
+
+    def keep(name, fn):
+        # On the host, so the diagnostics add nothing to the CUDA peaks.
+        t = time.perf_counter()
+        torch.save(fn(), out / name)
+        stats["diagnostics_seconds"] = (
+            stats.get("diagnostics_seconds", 0.0) + time.perf_counter() - t
+        )
+
+    def lens(self, *args, **kwargs):
+        host = replace(self, array=self.array.detach().cpu())
+        keep("exitwave.pt", host.pixels)
+        return apply_ctf(self, *args, **kwargs)
+
+    def form(self, *args, **kwargs):
+        keep("clean.pt", lambda: self.array.detach().cpu().abs().square())
+        return timed("intensity_seconds", intensity, self, *args, **kwargs)
+
+    def record(self, *args, **kwargs):
+        if a.replay_from:
+            kwargs["seed"] = 193
+        result = timed("detect_seconds", detect, self, *args, **kwargs)
+        stages = stats["stages"]
+        stages["detector_seconds"] = (
+            stages["intensity_seconds"] + stages["detect_seconds"]
+        )
+        stats["peak_allocated_bytes"] = torch.cuda.max_memory_allocated()
+        stats["peak_reserved_bytes"] = torch.cuda.max_memory_reserved()
+        return result
+
+    Field.draw = make
+    Sample.placed = placement
+    IterativeScattering.forward = scatter
+    ExitWave.apply_ctf = lens
+    ExitWave.intensity = form
+    Image.detect = record
     torch.cuda.reset_peak_memory_stats()
     t = time.perf_counter()
     cli(

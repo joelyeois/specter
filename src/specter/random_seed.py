@@ -1,6 +1,6 @@
 """
 Global seed control, exported as `specter.seed`, and the per-unit seeding
-(`derive_seed`, `seeded_rng`) the particle generators build on.
+(`derive_seed`, `seeded_rng`) that `specter.imaging` builds on.
 """
 
 from __future__ import annotations

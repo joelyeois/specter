@@ -1100,7 +1100,7 @@ def test_analytic_coefs_cache_follows_device():
     `nn.Module.to()` cannot migrate it. Without an explicit device check the
     second call returns CPU coefficients and dies inside `forward`. Anything
     that rebuilds the potential every forward pass -- notably
-    `ImageGeneratorFromCoordinates` -- hits this on every GPU run.
+    `Specimen.from_atoms` -- hits this on every GPU run.
     """
     torch.manual_seed(0)
     coords = torch.randn(50, 3) * 5.0

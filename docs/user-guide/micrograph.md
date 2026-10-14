@@ -183,7 +183,7 @@ the way `specter simulate particles` does; `specter simulate tiltseries` is
 single-device for the same reason.
 Each micrograph needs its own freshly regenerated ice and crowding
 specimen between forward passes
-(`MicrographGenerator.regenerate_specimen`), and a single micrograph at
+(`Field.draw`), and a single micrograph at
 `micrograph_size` resolution is already the GPU-memory-bound unit of work,
 so there is no batch to shard across multiple devices the way many small
 particle boxes can be. Generating several micrographs faster means running

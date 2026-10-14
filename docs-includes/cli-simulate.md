@@ -115,10 +115,11 @@ specter simulate particles [OPTIONS]
 | `--use_deposited_bfactors` | `True` \| `False` | `False` | Damp each atom by the B-factor its structure deposits, instead of rendering the model statically. Only a PER-ATOM B adds anything an envelope cannot: a uniform one is the same exp(-B k^2/4) as --bfactor, so setting both double-counts. A deposited column is refinement output rather than a measured displacement, and cryo-EM entries often carry a constant or zero one. Requires scattering_factors='shtyrov' and potential_method='analytic'. |
 | `--n_frames` | `INTEGER` | _none_ | Number of movie frames. Defaults to int(dose) if not set. Only affects the image when coincidence_radius &gt; 0, which is what splits the dose into frames; ignored otherwise. |
 | `--convergence_angle` | `FLOAT` | _none_ | Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. |
-| `--cc` | `FLOAT` | _none_ | Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. |
+| `--cc` | `FLOAT` | `2.7` | Chromatic aberration coefficient in mm, for the temporal coherence loss from the beam's energy spread. Default 2.7, the Titan Krios objective; 0 disables it. On by default since every real image carries it, filtered or not. |
 | `--energy_spread` | `FLOAT` | `0.7` | FWHM of the beam energy spread in eV, used by the Cc envelope. |
 | `--deltaV_V` | `FLOAT` | `6e-08` | Relative high-voltage instability, used by the Cc envelope. |
 | `--deltaI_I` | `FLOAT` | `1e-08` | Relative objective-lens current instability, used by the Cc envelope. |
+| `--temporal_coherence` | `integrated` \| `envelope` | `integrated` | How the Cc focal spread is applied when cc is set: 'integrated' sums the image incoherently over the defocus spread (exact), 'envelope' multiplies the transfer function by the Cc envelope (exact only for the part linear in the scattered wave; 0.4% low in mean intensity in 2000 A of ice at 300 kV, 5% at 120 kV). |
 | `--dose_envelope` | `True` \| `False` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope. |
 | `--dose_envelope_target` | `transfer_function` \| `specimen` | `transfer_function` | Where the dose envelope acts. 'transfer_function' filters the whole image, solvent included. 'specimen' damages the particle's own potential before the ice is added, with occupancy read from the undamaged particle, so the water keeps its 3.7 A ring (raw movies show it does not fade with dose); required for ice_motion_variance. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2. |
@@ -252,10 +253,11 @@ specter simulate micrograph [OPTIONS]
 | `--use_deposited_bfactors` | `True` \| `False` | `False` | Damp each atom by the B-factor its structure deposits, instead of rendering the model statically. Only a PER-ATOM B adds anything an envelope cannot: a uniform one is the same exp(-B k^2/4) as --bfactor, so setting both double-counts. A deposited column is refinement output rather than a measured displacement, and cryo-EM entries often carry a constant or zero one. Requires scattering_factors='shtyrov'. |
 | `--n_frames` | `INTEGER` | _none_ | Number of movie frames. Defaults to int(dose) if not set. Only affects the image when coincidence_radius &gt; 0, which is what splits the dose into frames; ignored otherwise. |
 | `--convergence_angle` | `FLOAT` | _none_ | Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. |
-| `--cc` | `FLOAT` | _none_ | Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. |
+| `--cc` | `FLOAT` | `2.7` | Chromatic aberration coefficient in mm, for the temporal coherence loss from the beam's energy spread. Default 2.7, the Titan Krios objective; 0 disables it. On by default since every real image carries it, filtered or not. |
 | `--energy_spread` | `FLOAT` | `0.7` | FWHM of the beam energy spread in eV, used by the Cc envelope. |
 | `--deltaV_V` | `FLOAT` | `6e-08` | Relative high-voltage instability, used by the Cc envelope. |
 | `--deltaI_I` | `FLOAT` | `1e-08` | Relative objective-lens current instability, used by the Cc envelope. |
+| `--temporal_coherence` | `integrated` \| `envelope` | `integrated` | How the Cc focal spread is applied when cc is set: 'integrated' sums the image incoherently over the defocus spread (exact), 'envelope' multiplies the transfer function by the Cc envelope (exact only for the part linear in the scattered wave; 0.4% low in mean intensity in 2000 A of ice at 300 kV, 5% at 120 kV). |
 | `--dose_envelope` | `True` \| `False` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope. |
 | `--dose_envelope_target` | `transfer_function` \| `specimen` | `transfer_function` | Where the dose envelope acts. 'transfer_function' filters the whole image, solvent included. 'specimen' damages the specimen's own potential before the ice is added, with occupancy read from the undamaged specimen, so the water keeps its 3.7 A ring (raw movies show it does not fade with dose); required for ice_motion_variance. Each micrograph's specimen is built for its own dose. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2. |
@@ -385,10 +387,11 @@ specter simulate tiltseries [OPTIONS]
 | --- | --- | --- | --- |
 | `--micrograph_size` | `INTEGER` | _none_ | Output tilt-image size in pixels (square). Defaults to the XY dimension of the specimen volume. |
 | `--convergence_angle` | `FLOAT` | _none_ | Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. |
-| `--cc` | `FLOAT` | _none_ | Chromatic aberration coefficient in mm, for the Cc (temporal coherence) envelope. |
+| `--cc` | `FLOAT` | `2.7` | Chromatic aberration coefficient in mm, for the temporal coherence loss from the beam's energy spread. Default 2.7, the Titan Krios objective; 0 disables it. On by default since every real image carries it, filtered or not. |
 | `--energy_spread` | `FLOAT` | `0.7` | FWHM of the beam energy spread in eV, used by the Cc envelope. |
 | `--deltaV_V` | `FLOAT` | `6e-08` | Relative high-voltage instability, used by the Cc envelope. |
 | `--deltaI_I` | `FLOAT` | `1e-08` | Relative objective-lens current instability, used by the Cc envelope. |
+| `--temporal_coherence` | `integrated` \| `envelope` | `integrated` | How the Cc focal spread is applied when cc is set: 'integrated' sums the image incoherently over the defocus spread (exact), 'envelope' multiplies the transfer function by the Cc envelope (exact only for the part linear in the scattered wave; 0.4% low in mean intensity in 2000 A of ice at 300 kV, 5% at 120 kV). |
 | `--dose_envelope` | `True` \| `False` | `False` | Apply the Grant & Grigorieff (2015) cumulative-dose envelope. |
 | `--dose_envelope_target` | `transfer_function` \| `specimen` | `transfer_function` | Where the dose envelope acts. 'transfer_function' filters the whole image, solvent included. 'specimen' damages the specimen's own potential before the ice is added, with occupancy read from the undamaged specimen, so the water keeps its 3.7 A ring (raw movies show it does not fade with dose); required for ice_motion_variance. Each tilt is damaged by its own dose after the pre-exposure of the tilts before it. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2. |

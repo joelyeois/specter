@@ -263,6 +263,36 @@ def water_ring_excess(stack: torch.Tensor, pixel_size: float) -> float:
     return _band_mean(lp, kk, (0.26, 0.28)) - base
 
 
+def annulus_std_per_particle(
+    stack: torch.Tensor, radii_px: tuple[int, ...] = (20, 40, 60, 80, 100, 128)
+) -> torch.Tensor:
+    """
+    Per-particle standard deviation of the low-passed, z-scored image inside
+    concentric annuli (0-20, 20-40, ... px) plus the corners beyond the last
+    radius.
+
+    Returns
+    -------
+    torch.Tensor
+        ``(n_particles, len(radii_px) + 1)``, NaN in an annulus the box does
+        not reach.
+    """
+    n = stack.shape[-1]
+    yy, xx = np.mgrid[:n, :n]
+    rr = torch.as_tensor(np.hypot(yy - n // 2, xx - n // 2)).float()
+    a = _zscore(torch.as_tensor(butter(stack.float())))
+    columns, lo = [], 0.0
+    for hi in (*radii_px, None):
+        sel = (rr >= lo) if hi is None else (rr >= lo) & (rr < hi)
+        columns.append(
+            a[:, sel].std(dim=1)
+            if bool(sel.any())
+            else torch.full((a.shape[0],), float("nan"))
+        )
+        lo = float(hi) if hi is not None else lo
+    return torch.stack(columns, dim=1)
+
+
 def annulus_std_profile(
     stack: torch.Tensor, radii_px: tuple[int, ...] = (20, 40, 60, 80, 100, 128)
 ) -> list[float]:
@@ -276,20 +306,133 @@ def annulus_std_profile(
     neighbour spacing, and what exposes a close-packed monolayer (CCMV)
     the simulator cannot reproduce.
     """
-    n = stack.shape[-1]
-    yy, xx = np.mgrid[:n, :n]
-    rr = torch.as_tensor(np.hypot(yy - n // 2, xx - n // 2)).float()
-    a = _zscore(torch.as_tensor(butter(stack.float())))
-    out, lo = [], 0.0
-    for hi in radii_px:
-        sel = (rr >= lo) & (rr < hi)
-        out.append(
-            float(a[:, sel].std(dim=1).mean()) if bool(sel.any()) else float("nan")
+    return [float(v) for v in annulus_std_per_particle(stack, radii_px).mean(dim=0)]
+
+
+def _profile_rms(a: np.ndarray, b: np.ndarray) -> float:
+    ok = ~(np.isnan(a) | np.isnan(b))
+    return float(np.sqrt(np.mean((a[ok] - b[ok]) ** 2))) if ok.any() else float("nan")
+
+
+@dataclass(frozen=True)
+class ProbeChoice:
+    """
+    The outcome of choosing one setting from a probe's candidates.
+
+    Attributes
+    ----------
+    value : float
+        The chosen candidate.
+    best : float
+        The candidate with the lowest score.
+    distinguished : bool
+        Whether the data separate the best candidate from the fallback (the
+        first candidate): False when the fallback was kept because it is
+        not significantly worse than the best.
+    scores : list of float
+        Each candidate's score, in candidate order.
+    errors : list of float
+        Each score's bootstrap standard error.
+    p_fallback_not_worse : float
+        Fraction of bootstrap replicates in which the fallback scored at
+        least as well as the best candidate.
+    """
+
+    value: float
+    best: float
+    distinguished: bool
+    scores: list[float]
+    errors: list[float]
+    p_fallback_not_worse: float
+
+
+def choose_probe(
+    candidates: list[float],
+    sim_stacks: list[torch.Tensor],
+    exp: torch.Tensor,
+    first_bin: int,
+    n_boot: int = 400,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> ProbeChoice:
+    """
+    Choose a probe setting, keeping the first candidate unless the data
+    reject it.
+
+    Each candidate is scored by the RMS difference between its low-passed
+    annulus-std profile outside the particle and the experiment's. The
+    score's noise is estimated by a paired bootstrap over particles (one
+    index draw per replicate, shared by every candidate, since candidate
+    stacks are the same particles at the same poses, and an independent
+    draw over the experimental particles). The best-scoring candidate
+    replaces the first one only if it beats it in at least ``1 - alpha`` of
+    the replicates.
+
+    The rule exists because the scores are noisy at the default probe size:
+    on EMPIAR-11377 one setting scored 0.083 and 0.097 on two runs with the
+    same seed and device, while the candidates differed by at most 0.03, so
+    a plain minimum chose a different ice thickness on every run.
+
+    Parameters
+    ----------
+    candidates : list of float
+        The settings, fallback first.
+    sim_stacks : list of torch.Tensor
+        One ``(n, Y, X)`` probe stack per candidate, the same particles in
+        the same order.
+    exp : torch.Tensor
+        The experimental probe stack.
+    first_bin : int
+        First annulus outside the particle.
+    n_boot : int, optional
+        Bootstrap replicates. Default 400.
+    alpha : float, optional
+        Required confidence that the best beats the fallback. Default 0.05.
+    seed : int, optional
+        Seed of the bootstrap draws. Default 0.
+
+    Returns
+    -------
+    ProbeChoice
+    """
+    exp_f = annulus_std_per_particle(exp)[:, first_bin:].double().numpy()
+    sims = [
+        annulus_std_per_particle(s)[:, first_bin:].double().numpy() for s in sim_stacks
+    ]
+    exp_profile = exp_f.mean(axis=0)
+    scores = [_profile_rms(s.mean(axis=0), exp_profile) for s in sims]
+    rng = np.random.default_rng(seed)
+    n_sim, n_exp = sims[0].shape[0], exp_f.shape[0]
+    boot = np.empty((n_boot, len(sims)))
+    for r in range(n_boot):
+        i = rng.integers(0, n_sim, n_sim)
+        e = exp_f[rng.integers(0, n_exp, n_exp)].mean(axis=0)
+        for c, s in enumerate(sims):
+            boot[r, c] = _profile_rms(s[i].mean(axis=0), e)
+    errors = [float(v) for v in boot.std(axis=0, ddof=1)]
+    if len(candidates) == 1 or all(np.isnan(scores)):
+        # Nothing to choose between, or nothing to score with (no annulus
+        # lies outside the particle in this box): the fallback stands, and
+        # with more than one candidate it is not a measurement.
+        return ProbeChoice(
+            value=float(candidates[0]),
+            best=float(candidates[0]),
+            distinguished=len(candidates) == 1,
+            scores=[float(v) for v in scores],
+            errors=errors,
+            p_fallback_not_worse=1.0,
         )
-        lo = float(hi)
-    sel = rr >= lo
-    out.append(float(a[:, sel].std(dim=1).mean()) if bool(sel.any()) else float("nan"))
-    return out
+    best = int(np.nanargmin(scores))
+    p = float(np.mean(boot[:, 0] <= boot[:, best])) if best != 0 else 1.0
+    keep_fallback = best == 0 or p >= alpha
+    return ProbeChoice(
+        value=float(candidates[0] if keep_fallback else candidates[best]),
+        best=float(candidates[best]),
+        distinguished=best == 0 or not keep_fallback,
+        scores=[float(v) for v in scores],
+        errors=errors,
+        p_fallback_not_worse=p,
+    )
 
 
 #: Fit window for the residual envelope, in 1/Angstrom (10-4 A).

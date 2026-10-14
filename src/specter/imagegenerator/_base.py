@@ -22,9 +22,10 @@ import torch
 
 from specter.detectors import detector_mtf, dqe0_for_detector
 
-from ..aberrations import Aberration, aberration_model_for_scattering
+from ..aberrations import Aberration, FocalSpread, aberration_model_for_scattering
 from ..aberrations._functions import shift_defocus_to_midplane
 from ..arrays import compute_nz, pad_volume
+from ..constants import energy_to_wavelength
 from ..ctf import LegacyAberrationAdapter
 from ..microscope import Detector
 from ..potential import (
@@ -797,6 +798,29 @@ class BaseImager(L.LightningModule):
         """
         self.aberration_model = aberration_model_for_scattering(self.scattering_model)
         env = self.envelopes
+        # Partial temporal coherence. "integrated" forms the image as the
+        # incoherent sum over the focal spread at the detector, so the
+        # transfer function then carries no Cc envelope; the linear model is
+        # linear in the transfer function, where the envelope IS that sum,
+        # and keeps it. See aberrations.FocalSpread for the measurement.
+        # None and 0 both mean no focal spread.
+        cc = env.cc or None
+        self.focal_spread: FocalSpread | None = None
+        if (
+            cc is not None
+            and env.temporal_coherence == "integrated"
+            and self.aberration_model == "nonlinear"
+        ):
+            self.focal_spread = FocalSpread.from_instrument(
+                cc,
+                self.voltage * 1e3,
+                env.energy_spread,
+                env.deltaV_V,
+                env.deltaI_I,
+                energy_to_wavelength(self.voltage),
+            )
+        integrate_cc = self.focal_spread is not None
+        cc_envelope_value = None if integrate_cc else cc
         self.aberration: Aberration | LegacyAberrationAdapter | None
         if self.optics is None:
             self.aberration = None
@@ -811,7 +835,7 @@ class BaseImager(L.LightningModule):
                 specimen_absorption=self.scattering_model != "ctf",
                 bfactor=getattr(self, "bfactor", None),
                 convergence_angle=env.convergence_angle,
-                cc=env.cc,
+                cc=cc_envelope_value,
                 energy_spread=env.energy_spread,
                 deltaV_V=env.deltaV_V,
                 deltaI_I=env.deltaI_I,
@@ -836,7 +860,7 @@ class BaseImager(L.LightningModule):
                 # folded into the transfer function itself.
                 specimen_absorption=self.scattering_model != "ctf",
                 convergence_angle=env.convergence_angle,
-                cc=env.cc,
+                cc=cc_envelope_value,
                 energy_spread=env.energy_spread,
                 deltaV_V=env.deltaV_V,
                 deltaI_I=env.deltaI_I,
@@ -856,6 +880,7 @@ class BaseImager(L.LightningModule):
             dose_weights_max_frequency=self._dose_weights_max_frequency,
             progressbars=self.progressbars,
             oversample=self._image_oversample,
+            focal_spread=self.focal_spread,
         )
 
     def _load_dose_weights(self) -> torch.Tensor | None:
@@ -1030,6 +1055,7 @@ class BaseImager(L.LightningModule):
             mtf=self.detector_mtf,
             dqe0=self.detector.dqe0,
             oversample=self._image_oversample,
+            focal_spread=self.focal_spread,
             n_frames=1,
             progressbars=self.progressbars,
         ).to(self.device)

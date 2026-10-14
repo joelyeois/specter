@@ -13,7 +13,10 @@ from ._click_options import CONTEXT_SETTINGS, build_config_command, load_cli_con
 # acquisition card no file carries, then how much to probe, then output.
 _MATCH_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Inputs", ["metadata_path", "images_path", "pdb_source", "assembly"]),
-    ("Acquisition", ["detector_model", "dose", "dose_rate", "energy_filter"]),
+    (
+        "Acquisition",
+        ["detector_model", "dose", "dose_rate", "energy_filter", "cc", "energy_spread"],
+    ),
     (
         "Absorption",
         [

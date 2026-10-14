@@ -185,7 +185,7 @@ def run_tilt_series(
     # The mean-free-path model replaces the amplitude-contrast ratio as the
     # source of the imaginary potential; keeping both would absorb twice.
     alpha = 0.0 if config.absorption_model == "inelastic_mfp" else config.alpha
-    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc is not None else None
+    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc else None
 
     ctf_params = {
         "cs": torch.tensor([cs_angstrom]),

@@ -43,6 +43,8 @@ specter match particles [OPTIONS]
 | `--dose` | `FLOAT` | _none_ | Total electron dose per movie in e-/Angstrom^2, from the methods section or the EMDB record. Drives the radiation-damage envelope. |
 | `--dose_rate` | `FLOAT` | _none_ | Incident dose rate in electrons per physical pixel per second, from the acquisition notes. Sets the coincidence-loss occupancy. Unset falls back to the detector's typical operating rate, and the report says so. |
 | `--energy_filter` | `True` \| `False` | _none_ | Whether an energy filter (slit) was used. Recorded in the report: the forward model removes inelastically scattered electrons without adding their image back, so unfiltered data are expected to leave a residual. |
+| `--cc` | `FLOAT` | `2.7` | Chromatic aberration coefficient of the objective lens, in mm (2.7 for a Titan Krios). With energy_spread it sets the temporal coherence loss every probe carries. No particle file records it; 0 disables it. |
+| `--energy_spread` | `FLOAT` | `0.7` | FWHM of the source's energy spread, in eV: 0.7 for an X-FEG, about 0.3 for a cold FEG. The zero-loss peak width in the filter's EELS spectrum is an upper bound (it includes spectrometer resolution). |
 
 **Absorption**{ #specter-match-particles-absorption }
 

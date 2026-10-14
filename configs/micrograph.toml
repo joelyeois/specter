@@ -70,10 +70,12 @@ scattering_factors = "shtyrov"   # shtyrov | kirkland | lobato
 # --- Envelopes and dose fractionation ---
 # n_frames = 20                # frames, uncomment to override default (int(dose) if None)
 # convergence_angle = 1.0      # mrad, uncomment to enable the Cs envelope
-# cc = 2.0                     # mm, uncomment to enable the Cc envelope
+cc = 2.7                       # mm, Titan Krios objective; 0 disables the Cc focal spread
 energy_spread = 0.7            # eV (FWHM)
 deltaV_V = 0.06e-6             # unitless (ΔV/V)
 deltaI_I = 0.01e-6             # unitless (ΔI/I)
+# temporal_coherence = "envelope"  # Cc as an envelope on the CTF; default "integrated" sums
+                                   # the image over the focal spread (exact)
 dose_envelope = false
 # dose_envelope_target = "specimen"  # damage the specimen, not its ice (default transfer_function)
 # bfactor = 50.0               # Å², uncomment to enable a B-factor envelope

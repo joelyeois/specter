@@ -76,6 +76,10 @@ class MatchReport:
     snr: MatchedPoseSNR | None = None
     twin: TwinResult | None = None
     probe_scores: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
+    #: Bootstrap standard error of each probe score, in candidate order.
+    probe_errors: dict[str, list[float]] = field(default_factory=dict)
+    #: One line per probe on whether the data chose it or the fallback stood.
+    probe_notes: dict[str, str] = field(default_factory=dict)
     n_battery: int = 0
     pixel_size: float = float("nan")
 
@@ -109,6 +113,8 @@ class MatchReport:
             "annulus_std": {"sim": self.annulus_sim, "exp": self.annulus_exp},
             "water_ring_excess": {"sim": self.ring_sim, "exp": self.ring_exp},
             "probe_scores": self.probe_scores,
+            "probe_errors": self.probe_errors,
+            "probe_notes": self.probe_notes,
         }
         if self.snr is not None:
             out["matched_pose_snr"] = {
@@ -211,8 +217,14 @@ def render_markdown(report: MatchReport, toml_name: str = "matched.toml") -> str
     if report.probe_scores:
         lines += ["## Probes", ""]
         for name, scores in report.probe_scores.items():
+            errors = report.probe_errors.get(name, [])
+            cells = [
+                f"{v:g} -> {s:.3f}" + (f" ± {errors[i]:.3f}" if i < len(errors) else "")
+                for i, (v, s) in enumerate(scores)
+            ]
+            note = report.probe_notes.get(name)
             lines.append(
-                f"- {name}: " + ", ".join(f"{v:g} -> {s:.3f}" for v, s in scores)
+                f"- {name}: " + ", ".join(cells) + (f". {note}" if note else "")
             )
         lines.append("")
     return "\n".join(lines)

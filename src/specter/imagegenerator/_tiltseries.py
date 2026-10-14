@@ -1206,7 +1206,9 @@ class TiltSeriesGenerator(MicrographGenerator):
             # rather than a complex one, and the CPU does no elementwise work.
             if clean_images is not None:
                 clean_images.append(
-                    self._pixel_intensity(detector_waves.detach().abs() ** 2).cpu()
+                    self._pixel_intensity(
+                        self.detector.intensity(detector_waves.detach())
+                    ).cpu()
                 )
 
         return (

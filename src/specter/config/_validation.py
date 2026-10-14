@@ -427,6 +427,20 @@ def validate_config(config: Any) -> None:
                 "re-runs this pipeline once per rank independently",
             )
 
+    # A matched config always has neighbours: real particles sit in crowded
+    # ice, and a no-neighbour candidate scores within noise of a sparse one,
+    # which made the choice flip between identical runs.
+    crowd = getattr(config, "crowd_candidates", None)
+    if crowd is not None:
+        if not crowd:
+            _fail("crowd_candidates", crowd, "must name at least one spacing")
+        if any(float(m) <= 0 for m in crowd):
+            _fail(
+                "crowd_candidates",
+                crowd,
+                "every spacing must be a positive multiple of the structure's "
+                "diameter; the matched config always has neighbours",
+            )
     min_tilt = getattr(config, "min_tilt_angle", None)
     max_tilt = getattr(config, "max_tilt_angle", None)
     if min_tilt is not None and max_tilt is not None and min_tilt >= max_tilt:

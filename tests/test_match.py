@@ -315,7 +315,7 @@ def _write_csfile_with_random_poses(
 
 def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
     """A stack specter simulated itself is matched by the recipe: the pose check
-    passes, the neighbour-free experiment picks the neighbour-free candidate,
+    passes, the matched config is crowded at a candidate spacing,
     and matched.toml loads back as a ParticleStackConfig."""
     from specter.config import load_config
     from specter.pipelines import run_match, run_particle_stack
@@ -323,7 +323,8 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
     n, box, px = 16, 48, 2.5
     cs_path = tmp_path / "poses.cs"
     _write_csfile_with_random_poses(cs_path, n, px)
-    # The 'experiment': the same forward model, no neighbours, box-minimum ice.
+    # The 'experiment': the same forward model, neighbours one diameter apart
+    # (the simulator's default), box-minimum ice.
     run_particle_stack(
         ParticleStackConfig(
             pdb_source="6bdf",
@@ -332,7 +333,6 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
             n_particles=n,
             dose=30.0,
             ice_model="gd",
-            crowd_min_distance=0,
             detector_model="none",
             dose_envelope=True,
             device="cpu",
@@ -354,7 +354,7 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
         n_probe=n,
         n_battery=n,
         ice_candidates=[0.0],
-        crowd_candidates=[0.0, 1.0],
+        crowd_candidates=[1.0],
         device="cpu",
         probe_workers=2,  # the spawned-worker path: warm-up, per-job logs, results by file
         write_stack=4,  # and the in-process path for the final stack
@@ -368,7 +368,8 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
     with mrcfile.open(out / "matched_particles.mrcs") as m:
         assert m.data.shape == (4, box, box)
     derived = {d.name: d.value for d in report.derived}
-    assert derived["crowd_min_distance"] == 0
+    # Always crowded: the one candidate, one diameter apart.
+    assert derived["crowd_min_distance"] > 0
     assert derived["detector_model"] == "none"
     assert any("unknown" in w for w in report.warnings)
     assert (out / "match_report.md").exists() and (out / "match_report.png").exists()
@@ -444,3 +445,84 @@ def test_recorded_pixel_size_is_read_from_the_metadata(tmp_path: Path) -> None:
         0.514, abs=1e-6
     )
     assert _recorded_pixel_size(str(tmp_path / "without.cs")) is None
+
+
+@pytest.mark.parametrize("candidates", [[0.0, 1.0, 1.3], [-1.0], []])
+def test_match_rejects_crowd_candidates_without_neighbours(
+    candidates, tmp_path: Path
+) -> None:
+    """A matched config always has neighbours: a no-neighbour (or empty)
+    candidate grid is refused at load, before any simulation runs."""
+    from specter.config import validate_config
+
+    metadata = tmp_path / "particles.cs"
+    metadata.touch()
+    cfg = MatchConfig(
+        metadata_path=str(metadata),
+        pdb_source="6bdf",
+        dose=30.0,
+        crowd_candidates=candidates,
+        device="cpu",
+    )
+    with pytest.raises(ValueError, match="crowd_candidates"):
+        validate_config(cfg)
+
+
+def test_match_default_candidates_are_all_crowded() -> None:
+    assert MatchConfig(
+        metadata_path="x.cs", pdb_source="6bdf", dose=30.0
+    ).crowd_candidates
+    assert all(
+        m > 0
+        for m in MatchConfig(
+            metadata_path="x.cs", pdb_source="6bdf", dose=30.0
+        ).crowd_candidates
+    )
+
+
+def _background_stack(n: int, box: int, amplitude: float, seed: int) -> torch.Tensor:
+    """Images whose structure outside a central disc scales with `amplitude`."""
+    g = torch.Generator().manual_seed(seed)
+    yy, xx = torch.meshgrid(
+        torch.arange(box) - box / 2, torch.arange(box) - box / 2, indexing="ij"
+    )
+    outside = (yy**2 + xx**2).sqrt() > box / 6
+    smooth = torch.nn.functional.avg_pool2d(
+        torch.randn(n, 1, box, box, generator=g), 9, stride=1, padding=4
+    )[:, 0]
+    disc = 3.0 * (~outside).float()
+    return (
+        disc
+        + amplitude * smooth * outside
+        + 0.05 * torch.randn(n, box, box, generator=g)
+    )
+
+
+def test_choose_probe_keeps_the_fallback_when_candidates_tie():
+    """Two candidates drawn from the same distribution as each other: the data
+    cannot separate them, so the first one stands and is marked unresolved
+    unless the best happens to be it."""
+    from specter.match import choose_probe
+
+    exp = _background_stack(48, 64, 1.0, seed=0)
+    a = _background_stack(48, 64, 1.5, seed=1)
+    b = _background_stack(48, 64, 1.5, seed=2)
+    choice = choose_probe([1.0, 1.3], [a, b], exp, first_bin=0, seed=3)
+    assert choice.value == 1.0
+    assert choice.best == 1.0 or not choice.distinguished
+    assert all(e > 0 for e in choice.errors)
+
+
+def test_choose_probe_takes_the_best_when_the_data_decide():
+    """A candidate whose background matches the experiment beats a clearly
+    wrong first candidate in essentially every replicate, and is taken."""
+    from specter.match import choose_probe
+
+    exp = _background_stack(48, 64, 1.0, seed=0)
+    wrong = _background_stack(48, 64, 4.0, seed=1)
+    right = _background_stack(48, 64, 1.0, seed=2)
+    choice = choose_probe([0.0, 400.0], [wrong, right], exp, first_bin=0, seed=3)
+    assert choice.value == 400.0 and choice.best == 400.0
+    assert choice.distinguished
+    assert choice.p_fallback_not_worse < 0.05
+    assert choice.scores[1] < choice.scores[0]

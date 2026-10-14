@@ -31,6 +31,7 @@ import torch
 import torch.nn.functional as F
 import lightning as L
 
+from .aberrations import FocalSpread
 from .fft import fft2, ifft2
 from .scattering._kernels import fourier_crop_xy
 from .progress import track
@@ -79,6 +80,15 @@ class Detector(L.LightningModule):
         Number of frames for dose-fractionated noise.
     progressbars : bool, optional
         Whether to show progress bars. Default True.
+    oversample : int, optional
+        How many times finer than the pixels the arriving wave's grid is; the
+        intensity is formed there and Fourier-cropped to the pixel grid.
+        Default 1.
+    focal_spread : FocalSpread, optional
+        Form the intensity as the incoherent sum over a Gaussian spread of
+        defocus (partial temporal coherence) instead of ``|psi|^2`` at the
+        nominal defocus; see :class:`~specter.aberrations.FocalSpread`. The
+        arriving wave must then carry no Cc envelope. Default None.
 
     Notes
     -----
@@ -100,6 +110,7 @@ class Detector(L.LightningModule):
         dose_weights_max_frequency: float | None = None,
         progressbars: bool = True,
         oversample: int = 1,
+        focal_spread: FocalSpread | None = None,
     ):
         super().__init__()
         if not 0.0 < dqe0 <= 1.0:
@@ -140,6 +151,7 @@ class Detector(L.LightningModule):
         # than the pixel grid, and sampled down here before the detector's
         # own response; see `BaseImager._init_optics`.
         self.oversample = oversample
+        self.focal_spread = focal_spread
 
     def image(
         self, aberrated_exitwave: torch.Tensor, dose: torch.Tensor
@@ -173,10 +185,35 @@ class Detector(L.LightningModule):
         """
         dose_per_pixel = dose * self.pixel_size**2 * self.dqe0  # (B,)
         if self.aberration_model == "nonlinear":
-            images = dose_per_pixel[:, None, None] * torch.abs(aberrated_exitwave) ** 2
+            images = dose_per_pixel[:, None, None] * self.intensity(aberrated_exitwave)
         elif self.aberration_model == "linear":
             images = dose_per_pixel[:, None, None] * (aberrated_exitwave + 1)
         return images
+
+    def intensity(self, aberrated_exitwave: torch.Tensor) -> torch.Tensor:
+        """
+        The intensity an aberrated wave deposits, on the wave's own grid.
+
+        ``|psi|^2``, or with a :class:`~specter.aberrations.FocalSpread` the
+        incoherent sum of ``|psi|^2`` over the beam's spread of defocus. The
+        one place a wave becomes an intensity, so every image path (and the
+        frozen-exposure path, which sums intensities itself) agrees on it.
+
+        Parameters
+        ----------
+        aberrated_exitwave : torch.Tensor
+            Complex ``(..., Y, X)`` wave after the transfer function.
+
+        Returns
+        -------
+        torch.Tensor
+            Real ``(..., Y, X)``.
+        """
+        if self.focal_spread is None:
+            return aberrated_exitwave.abs().square()
+        return self.focal_spread.intensity(
+            aberrated_exitwave, self.pixel_size / self.oversample, self.oversample
+        )
 
     def anisomagnify(
         self, images: torch.Tensor, anisomag: torch.Tensor

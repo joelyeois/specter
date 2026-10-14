@@ -115,6 +115,25 @@ class MatchConfig:
             "expected to leave a residual."
         ),
     )  # None = not stated
+    cc: float = setting(
+        2.7,
+        help=(
+            "Chromatic aberration coefficient of the objective lens, in mm (2.7 "
+            "for a Titan Krios). With energy_spread it sets the temporal "
+            "coherence loss every probe carries. No particle file records it; "
+            "0 disables it."
+        ),
+        check="non_negative",
+    )  # mm
+    energy_spread: float = setting(
+        0.7,
+        help=(
+            "FWHM of the source's energy spread, in eV: 0.7 for an X-FEG, about "
+            "0.3 for a cold FEG. The zero-loss peak width in the filter's EELS "
+            "spectrum is an upper bound (it includes spectrometer resolution)."
+        ),
+        check="non_negative",
+    )  # eV FWHM
     absorption_model: AbsorptionModel = setting(
         "inelastic_mfp",
         help=(
@@ -193,9 +212,19 @@ class MatchConfig:
     )
     # Candidate grids, config-only (a flag cannot carry a list). Ice thickness
     # in Angstrom (0 = the box minimum); neighbour spacing as a multiple of the
-    # structure's maximum diameter (0 = no neighbours).
+    # structure's maximum diameter, every one positive. A particle in a real
+    # stack has neighbours in its ice, so "none" is not a candidate: it was,
+    # until 2026-10-14, and on EMPIAR-11377 it scored within noise of 1.3x
+    # (0.050 against 0.052), so two identical runs chose opposite answers.
+    # The FIRST entry of each list is the fallback: the probe keeps it unless
+    # the best-scoring candidate beats it in 95% of bootstrap replicates
+    # (match.choose_probe). The scores are noisy at the default n_probe: the
+    # same setting, seed and GPU scored 0.083 and 0.097 on two runs, against
+    # differences between candidates of 0.000-0.030, and a plain minimum chose
+    # a different ice thickness on each of three identical runs. Box-depth ice
+    # and one diameter's spacing (the simulator's own default) lead the lists.
     ice_candidates: list[float] = setting(factory=lambda: [0.0, 400.0, 800.0, 1200.0])
-    crowd_candidates: list[float] = setting(factory=lambda: [0.0, 1.0, 1.3])
+    crowd_candidates: list[float] = setting(factory=lambda: [1.0, 1.3])
     # Number of particles to simulate with the matched config after the
     # report, e.g. for a CryoSPARC mixed classification. 0 skips it.
     write_stack: int = setting(

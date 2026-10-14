@@ -184,12 +184,15 @@ below.
 \[
 E_B = e^{-B k^2/4}, \qquad
 E_{C_s} = \exp\!\Big[-\big(\tfrac{\pi\,\alpha_c}{\lambda}\big)^2\big(C_s\lambda^3 k^3 + \lambda\, \bar{d}\, k\big)^2\Big], \qquad
-E_{C_c} = \exp\!\Big[-\tfrac12\big(\pi\lambda\, \Delta f\, k^2\big)^2\Big]
+E_{C_c} = \exp\!\Big[-\tfrac12\big(\pi\lambda\, \sigma_f\, k^2\big)^2\Big]
 \]
 
 where \(\alpha_c\) is the convergence semi-angle, \(\bar d\) the mean
-defocus, and \(\Delta f = C_c\sqrt{(\Delta E/U)^2 + (\Delta V/V)^2 + (2\Delta I/I)^2}\)
-the effective focus spread from energy spread and HT/lens instabilities.
+defocus, and \(\sigma_f = C_c\sqrt{(\sigma_E/U)^2 + (\Delta V/V)^2 + (2\Delta I/I)^2}\)
+the standard deviation of the focal spread from energy spread and HT/lens
+instabilities. `energy_spread` is the FWHM a source is quoted with; it
+enters as \(\sigma_E = \mathrm{FWHM}/2\sqrt{2\ln 2}\), and \(\Delta V/V\),
+\(\Delta I/I\) are rms values.
 The dose envelope follows Grant & Grigorieff's empirically fitted critical
 exposure \(N_e(k) = a k^b + c\), the exposure after which the diffracted
 intensity at frequency \(k\) has fallen to \(1/e\). A frame recorded at
@@ -293,6 +296,63 @@ Every other `ctf_params` key listed above is per-image and therefore
 only ever set through the dict, never as a constructor argument.
 `Aberration.__init__` raises `TypeError` if you pass one by mistake.
 
+### Temporal coherence is integrated, not enveloped
+
+A spread of beam energies is, through chromatic aberration, a spread of
+defocus, and the detector records the sum of the intensities formed at
+each defocus. \(E_{C_c}\) is the Gaussian average of the defocus phase
+itself, so applying it to the wave is exact for the part of the image that
+is linear in the scattered wave. It is not exact for the part that is
+quadratic. Two scattered beams at \(\mathbf k_1\) and \(\mathbf k_2\)
+interfere into intensity at \(\mathbf k_1 - \mathbf k_2\), and averaging
+that term over a Gaussian focal spread damps it by
+
+\[
+T(\mathbf k_1, \mathbf k_2) = \exp\!\Big[-\tfrac12\big(\pi\lambda\sigma_f\big)^2\big(k_1^2 - k_2^2\big)^2\Big],
+\]
+
+the transmission cross-coefficient (Ishizuka 1980), where the envelope on
+the wave damps it by \(E_{C_c}(k_1)E_{C_c}(k_2)\). The two differ most for
+beams at the same \(|\mathbf k|\), whose interference no focal spread can
+damp and the envelope suppresses. The envelope also does not conserve
+electrons: the intensity it removes from the high-frequency scattering is
+absent from the image rather than redistributed.
+
+When `cc` is set, the imagers therefore form the image as the sum it is,
+\(\sum_i w_i \lvert \psi \ast h(\Delta f + \delta_i) \rvert^2\), over a
+Gauss-Hermite quadrature of the focal spread
+(`aberrations.FocalSpread`, applied by `Detector.intensity`), and the
+transfer function carries no \(E_{C_c}\). The node count is chosen from the
+largest phase a frequency pair on the grid can accumulate: 16 at 300 kV
+and 1 Å/px with `oversample = 2`, 91 at 120 kV. Each node costs one
+inverse FFT of the wave. `Envelopes(temporal_coherence="envelope")`
+(config `temporal_coherence`) restores the envelope. The linear model,
+`scattering_model = "ctf"`, is linear in the transfer function, so the
+envelope is that sum, and it keeps the envelope either way.
+
+Measured on 6bdf at 1 Å/px against the integrated image, with
+\(C_c = 2.7\) mm and a 0.7 eV source: in 2000 Å of ice at 300 kV the
+envelope is 0.4% low in mean intensity and 0.7% low in image power below
+10 Å; in box-depth ice both differences are below 0.05%; at 120 kV the
+envelope is 5.1% low in mean intensity and 4-14% off in image power across
+the band. The integration agrees with abTEM's own weighted ensemble over a
+Gaussian defocus distribution to \(8\times10^{-10}\) of the image contrast.
+
+The forward simulators therefore apply it by default: `cc` is 2.7 mm (the
+Titan Krios objective) in `Envelopes` and in every simulation config, with
+`energy_spread` 0.7 eV, and `cc = 0` disables it. An image formed at a
+single defocus with no temporal coherence loss carries, at 300 kV, 1 Å/px
+and those values, 15% more power than the integrated one in the shell
+nearest Nyquist and 3% more at 3.3 Å; at 120 kV, 8.7 times more at Nyquist.
+An energy filter does not remove the focal spread. The source's 0.3-0.7 eV
+spread lies inside any zero-loss slit, and the objective lens has already
+focused each electron by its energy before the filter selects it; the
+filter removes the inelastically scattered electrons, a separate population
+(see Limitations of the absorption model). The inverse problem
+(`Reconstructor`) takes no `Envelopes` and runs without the focal spread:
+the information the data lost to it is absorbed into the reconstructed
+volume.
+
 ## `aberration_backend`: `"legacy"` vs. `"torch_ctf"`
 
 !!! note "Not a configurable option"
@@ -366,6 +426,9 @@ per-particle quantity; `"legacy"` has no equivalent.
 
 - Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*,
   2nd Edition. Springer.
+- Ishizuka, K. (1980). Contrast transfer of crystal images in TEM.
+  *Ultramicroscopy*, 5, 55-65.
+  [doi:10.1016/0304-3991(80)90011-X](https://doi.org/10.1016/0304-3991(80)90011-X)
 - Penczek, P. A. (2010). Image Restoration in Cryo-Electron Microscopy.
   *Methods in Enzymology*, 482, 35-72.
 - Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image

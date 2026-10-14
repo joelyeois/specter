@@ -23,7 +23,7 @@ from specter.imagegenerator import ImageGenerator
 from specter.microscope import Detector
 from specter.rotations import VolumeRotator
 from specter.scattering import Scattering
-from specter.settings import Camera, Ice, Propagation
+from specter.settings import Camera, Envelopes, Ice, Propagation
 
 
 def test_modular_pipeline_matches_image_generator():
@@ -110,8 +110,25 @@ def test_modular_pipeline_matches_image_generator():
     with torch.no_grad():
         detector_waves = aberration(exitwaves, manual_ctf_params)
 
+    # The Cc focal spread, on by default: summed over at the detector from
+    # the same instrument constants `Envelopes()` carries.
+    from specter.aberrations import FocalSpread
+    from specter.constants import energy_to_wavelength
+
+    env = Envelopes()
     detector = Detector(
-        pixel_size, aberration_model="nonlinear", noise_model=None, oversample=s
+        pixel_size,
+        aberration_model="nonlinear",
+        noise_model=None,
+        oversample=s,
+        focal_spread=FocalSpread.from_instrument(
+            env.cc,
+            voltage * 1e3,
+            env.energy_spread,
+            env.deltaV_V,
+            env.deltaI_I,
+            energy_to_wavelength(voltage),
+        ),
     )
     dose_batch = torch.full((2,), dose)
     coincidence_radius = torch.zeros(2)

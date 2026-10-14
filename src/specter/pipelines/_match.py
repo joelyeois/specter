@@ -49,6 +49,7 @@ import numpy as np
 import torch
 
 import specter
+from specter.aberrations import focal_spread_sigma
 from specter.arrays import fourier_crop
 from specter.config import MatchConfig, ParticleStackConfig, validate_config
 from specter.cpu_threads import SMALL_OP_THREADS
@@ -63,7 +64,9 @@ from specter.detectors import (
 from specter.io import extract_parameters_from_csfile, extract_parameters_from_starfile
 from specter.match import (
     MatchReport,
+    ProbeChoice,
     annulus_std_profile,
+    choose_probe,
     band_power_ratio,
     dumps_toml,
     edge_band_means,
@@ -300,12 +303,43 @@ def _bin_images(
     return cropped.contiguous(), new_px
 
 
-def _profile_distance(sim: torch.Tensor, exp: torch.Tensor, first_bin: int) -> float:
-    """RMS difference of the low-passed annulus std profiles outside the particle."""
-    a = np.array(annulus_std_profile(sim))[first_bin:]
-    b = np.array(annulus_std_profile(exp))[first_bin:]
-    ok = ~(np.isnan(a) | np.isnan(b))
-    return float(np.sqrt(np.mean((a[ok] - b[ok]) ** 2))) if ok.any() else float("nan")
+def _record_probe(
+    report: MatchReport,
+    name: str,
+    candidates: list[float],
+    choice: ProbeChoice,
+    unit: str,
+) -> None:
+    """Scores, their errors and a one-line verdict for the report."""
+    report.probe_scores[name] = list(
+        zip([float(c) for c in candidates], choice.scores, strict=True)
+    )
+    report.probe_errors[name] = choice.errors
+    first = float(candidates[0])
+    if len(candidates) > 1 and all(math.isnan(v) for v in choice.scores):
+        note = (
+            f"no annulus lies outside the particle in this box, so nothing was "
+            f"scored; the first candidate ({first:g} {unit}) is kept"
+        )
+    elif choice.best == first:
+        note = f"the first candidate ({first:g} {unit}) scored best"
+    elif choice.distinguished:
+        note = (
+            f"{choice.best:g} {unit} beats the first candidate in "
+            f"{100 * (1 - choice.p_fallback_not_worse):.0f}% of bootstrap replicates"
+        )
+    else:
+        note = (
+            f"not resolved: {choice.best:g} {unit} scored lowest but the first "
+            f"candidate ({first:g} {unit}) is as good in "
+            f"{100 * choice.p_fallback_not_worse:.0f}% of bootstrap replicates, so it is kept"
+        )
+        report.warnings.append(
+            f"{name} is not determined by the probes: the candidates score within "
+            f"their noise, so the first candidate ({first:g} {unit}) is used. A larger "
+            "n_probe narrows the noise."
+        )
+    report.probe_notes[name] = note
 
 
 def run_match(config: MatchConfig) -> MatchReport:
@@ -588,6 +622,11 @@ def _base_settings(
         inelastic_mfp_specimen=config.inelastic_mfp_specimen,
         dose_weights_path=config.dose_weights_path,
         dose_weights_max_frequency=config.dose_weights_max_frequency,
+        # An instrument property, like the detector: no particle file carries
+        # it, so it comes from the acquisition card and every probe carries
+        # it. The focal spread acts on the elastic image, filtered or not.
+        cc=config.cc,
+        energy_spread=config.energy_spread,
         **meta,
     )
 
@@ -754,6 +793,23 @@ def _derive_detector_settings(
             "McMullan et al. 2015, A^2 per e/A^2",
         )
     )
+    report.derived.append(
+        DerivedValue(
+            "cc",
+            config.cc,
+            "acquisition card",
+            f"mm; with a {config.energy_spread:g} eV FWHM source, a "
+            f"{focal_spread_sigma(config.cc * 1e7, voltage * 1e3, config.energy_spread, 0.06e-6, 0.01e-6):.0f} A "
+            "focal spread, integrated over at the detector"
+            if config.cc
+            else "focal spread off",
+        )
+    )
+    report.derived.append(
+        DerivedValue(
+            "energy_spread", config.energy_spread, "acquisition card", "eV FWHM"
+        )
+    )
     if not (config.monomer_library_path or os.environ.get("CLIBD_MON")):
         report.warnings.append(
             "No Monomer Library (monomer_library_path or $CLIBD_MON): the model is rendered "
@@ -815,6 +871,11 @@ def _probe_ice_and_crowding(
     Score small probe stacks on the background variance outside the
     particle to pick the ice thickness and the neighbour spacing, writing
     both into ``base`` and the report.
+
+    Each choice keeps the first candidate of its list unless the best
+    scorer beats it in 95% of bootstrap replicates (`match.choose_probe`):
+    the scores are noisy at the default probe size, and a plain minimum
+    chose a different ice thickness on each of three identical runs.
     """
     section("Probing ice thickness and neighbour spacing against the images")
     radius_px = 0.5 * diameter / pixel_size_p
@@ -832,12 +893,11 @@ def _probe_ice_and_crowding(
             for ice in config.ice_candidates
         ]
     )
-    scores: list[tuple[float, float]] = [
-        (float(ice), _profile_distance(stack, exp_probe, first_bin))
-        for ice, stack in zip(config.ice_candidates, stacks, strict=True)
-    ]
-    report.probe_scores["ice_thickness"] = scores
-    ice_best = min(scores, key=lambda t: t[1])[0]
+    choice = choose_probe(
+        list(config.ice_candidates), list(stacks), exp_probe, first_bin, seed=seed
+    )
+    _record_probe(report, "ice_thickness", config.ice_candidates, choice, "Å")
+    ice_best = choice.value
     base.update(ice_thickness=ice_best)
     probe_base.update(ice_thickness=ice_best)
     report.derived.append(
@@ -845,7 +905,8 @@ def _probe_ice_and_crowding(
             "ice_thickness",
             ice_best,
             "probe",
-            "background variance outside the particle",
+            "background variance outside the particle"
+            + ("" if choice.distinguished else "; not resolved, first candidate kept"),
         )
     )
 
@@ -857,18 +918,18 @@ def _probe_ice_and_crowding(
                 f"probe_crowd{mult:g}",
                 config.n_probe,
                 seed,
-                crowd_min_distance=0 if mult == 0 else mult * diameter,
+                crowd_min_distance=mult * diameter,
             )
             for mult in config.crowd_candidates
         ]
     )
-    scores = [
-        (float(mult), _profile_distance(stack, exp_probe, first_bin))
-        for mult, stack in zip(config.crowd_candidates, stacks, strict=True)
-    ]
-    report.probe_scores["crowd_multiple"] = scores
-    crowd_best = min(scores, key=lambda t: t[1])[0]
-    crowd_min_distance = 0 if crowd_best == 0 else crowd_best * diameter
+    choice = choose_probe(
+        list(config.crowd_candidates), list(stacks), exp_probe, first_bin, seed=seed
+    )
+    _record_probe(report, "crowd_multiple", config.crowd_candidates, choice, "x")
+    # Always crowded: validate_config rejects a non-positive candidate.
+    crowd_best = choice.value
+    crowd_min_distance = crowd_best * diameter
     base.update(crowd_min_distance=crowd_min_distance)
     report.derived.append(
         DerivedValue(
@@ -876,8 +937,7 @@ def _probe_ice_and_crowding(
             round(crowd_min_distance, 1),
             "probe",
             f"{crowd_best:g} x the structure's {diameter:.0f} Å diameter"
-            if crowd_best
-            else "no neighbours",
+            + ("" if choice.distinguished else "; not resolved, first candidate kept"),
         )
     )
 
@@ -1016,6 +1076,8 @@ def _write_matched_toml(
                 "detector_pixel_size",
                 "dose_envelope",
                 "dose_envelope_target",
+                "cc",
+                "energy_spread",
                 "bfactor",
             )
             if k in values

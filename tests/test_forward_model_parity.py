@@ -24,7 +24,7 @@ import torch
 from specter.arrays import ball3d
 from specter.ghostbuster import Reconstructor
 from specter.imagegenerator import ImageGenerator
-from specter.settings import Camera, Ice, Propagation, TiltGeometry
+from specter.settings import Camera, Envelopes, Ice, Propagation, TiltGeometry
 
 SCATTERING_MODELS = ["multislice", "projection", "firstborn", "rytov"]
 
@@ -54,7 +54,13 @@ def _inputs(n_particles: int = 4, box: int = 16):
 
 
 def _simulator(inputs: dict, scattering_model: str) -> ImageGenerator:
-    """The forward model as `specter simulate` builds it."""
+    """
+    The forward model as `specter simulate` builds it, envelopes off.
+
+    Parity is about conventions the two sides must share. The envelopes are
+    the one thing they deliberately do not: the simulator applies the Cc
+    focal spread by default and the inverse takes no `Envelopes` at all.
+    """
     return ImageGenerator(
         inputs["volume"],
         inputs["voxel_size"],
@@ -68,6 +74,7 @@ def _simulator(inputs: dict, scattering_model: str) -> ImageGenerator:
         propagation=Propagation(
             scattering_model=scattering_model, alpha=inputs["alpha"]
         ),
+        envelopes=Envelopes(cc=None),
         camera=Camera(noise_model=None),
         ice=Ice(model=None),
     )
@@ -251,6 +258,8 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
         verbose=False,
         progressbars=False,
         propagation=Propagation(scattering_model=scattering_model, alpha=0.1),
+        # Envelopes off: the inverse has none by design (see _simulator).
+        envelopes=Envelopes(cc=None),
         camera=Camera(noise_model=None),
         tilt=TiltGeometry(tilt_axis="y"),
     )

@@ -84,6 +84,10 @@ AbsorptionModel = Literal["alpha", "inelastic_mfp"]
 #: `potential.apply_dose_damage`).
 DoseEnvelopeTarget = Literal["transfer_function", "specimen"]
 
+#: How partial temporal coherence (Cc) is modelled: as the incoherent sum
+#: over the focal spread, or as an envelope on the transfer function.
+TemporalCoherence = Literal["integrated", "envelope"]
+
 #: Whether a volume is rotated in real or Fourier space.
 RotateMode = Literal["real", "fourier"]
 
@@ -120,6 +124,7 @@ __all__ = [
     "AberrationModel",
     "AbsorptionModel",
     "DoseEnvelopeTarget",
+    "TemporalCoherence",
     "CarbonEdgeSide",
     "ConvBackend",
     "ConvBoundary",

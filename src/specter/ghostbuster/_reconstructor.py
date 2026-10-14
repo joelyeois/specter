@@ -40,7 +40,7 @@ from ._losses import (
     nps_weighted_loss,
     update_sigma2,
 )
-from ..settings import Camera, Optics, Propagation
+from ..settings import Camera, Envelopes, Optics, Propagation
 from specter.options import RotateMode, Scheduler
 
 #: Largest table of projected 2D masks `Reconstructor` keeps on the device,
@@ -414,8 +414,11 @@ class Reconstructor(_BaseReconstructor):
         """Construct the underlying ImageGenerator from the registered parameters.
 
         The forward model is noiseless and envelope-free: the inverse takes
-        no `Envelopes` and no `Camera`, so the generator gets their defaults
-        with the noise switched off.
+        no `Envelopes` and no `Camera`. The forward simulators' defaults are
+        not envelope-free (`Envelopes` turns the Cc focal spread on), so the
+        generator is handed envelopes with every term off rather than the
+        defaults; the information the data lost to them is absorbed into the
+        reconstructed volume, and assuming values here would inject a prior.
         """
         self.imagegenerator = ImageGenerator(
             self.V,
@@ -428,6 +431,7 @@ class Reconstructor(_BaseReconstructor):
             anisomag=self.anisomag,
             propagation=self.propagation,
             optics=self.optics,
+            envelopes=Envelopes(cc=None),
             camera=Camera(noise_model=None),
             bfactor=bfactor,
         )

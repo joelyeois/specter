@@ -17,6 +17,7 @@ are the four an acquisition record carries and no particle file does.
 | total dose per movie, e⁻/Å² | `--dose` | methods section, EMDB record, import settings |
 | dose rate, e⁻/physical px/s | `--dose_rate` | methods section; unset falls back to the detector's typical rate and the report says so |
 | energy filter | `--energy_filter` | methods section; recorded in the report |
+| objective lens and source (optional) | `--cc`, `--energy_spread` | the microscope model: default 2.7 mm and 0.7 eV FWHM (Titan Krios, X-FEG), about 0.3 eV for a cold FEG; set the chromatic focal spread every probe carries, and are written to `matched.toml`. They apply to energy-filtered data too: the source's spread passes any zero-loss slit |
 | exposure-filter weights (optional) | `--dose_weights_path`, `--dose_weights_max_frequency` | the per-frame weights the motion correction applied, e.g. CryoSPARC's `refm_empirical_dw.npy`, carried into every probe and the matched config; unset `--dose_weights_max_frequency` is derived from the motion-correction job's own files |
 | absorption (optional) | `--absorption_model`, `--inelastic_mfp_solvent`, `--inelastic_mfp_specimen` | default `inelastic_mfp`, which ignores the dataset's amplitude contrast; unset mean free paths take the measured ice value for the voltage, and give the specimen the ice's value |
 
@@ -156,6 +157,19 @@ report the mismatch it cannot close.
   MTF get one.
 - Ice thickness and neighbour spacing are chosen from the candidate lists
   in the config (`ice_candidates`, `crowd_candidates`), not fitted
-  continuously.
+  continuously. The matched config always has neighbours: every
+  `crowd_candidates` entry must be a positive multiple of the structure's
+  diameter (default 1.0 and 1.3). A real particle sits in crowded ice, and a
+  no-neighbour candidate scored within noise of a sparse one, so the choice
+  between them changed from run to run.
+- The probe scores carry run-to-run noise comparable to the differences
+  between candidates: on EMPIAR-11377 at the default `n_probe`, one setting
+  scored 0.083 and 0.097 on two runs with the same seed and device, while
+  the candidates differed by at most 0.03. Each probe therefore keeps the
+  first entry of its candidate list (box-depth ice, one diameter's spacing)
+  unless the best-scoring candidate beats it in 95% of bootstrap replicates
+  over the probe particles. The report gives every score with its bootstrap
+  error, says which way each probe went, and warns when a value is the
+  fallback rather than a measurement; a larger `n_probe` narrows the noise.
 - One spacing and one thickness serve the whole stack; the simulator has no
   per-micrograph variation.

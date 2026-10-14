@@ -127,7 +127,7 @@ class FrozenPlasmonForward(nn.Module):
             )
             if self.optics is not None:
                 wave = self.optics(wave, step)
-            contribution = wave.abs().square() * step.dose
+            contribution = self.detector.intensity(wave) * step.dose
             integrated = (
                 contribution if integrated is None else integrated + contribution
             )

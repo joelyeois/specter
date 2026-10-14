@@ -228,7 +228,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     n_frames = (
         config.n_frames if config.n_frames is not None else int(dose.mean().item())
     )
-    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc is not None else None
+    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc else None
 
     # --- Ice ---
     # resolve_icemaker derives (n, nz) for a fresh RandomIcemaker itself, so it

@@ -203,7 +203,7 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # Build once -- the first forward pass generates the first specimen.
     section("Building specimen and image generator")
-    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc is not None else None
+    cc_angstrom = _mm_to_angstrom(config.cc) if config.cc else None
     specimen = MicrographSpecimenGenerator(
         V,
         config.pixel_size,

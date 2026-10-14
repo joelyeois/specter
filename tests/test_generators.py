@@ -498,7 +498,12 @@ def _envelope_tilt_series_generator(small_volume, small_coords, ctf_params, **kw
 def test_generator_plumbs_envelope_params(
     make_generator, small_volume, small_coords, ctf_params
 ):
-    """Every generator forwards Cs/Cc/dose envelope params to its Aberration submodule."""
+    """Every generator forwards the Cs/dose envelope params to its Aberration
+    submodule, and the Cc params to wherever temporal coherence is applied:
+    the detector's focal-spread integration by default, the transfer
+    function's envelope under temporal_coherence="envelope"."""
+    from specter.aberrations import focal_spread_sigma
+
     gen = make_generator(
         small_volume,
         small_coords,
@@ -508,11 +513,25 @@ def test_generator_plumbs_envelope_params(
         camera=Camera(noise_model=None),
     )
     assert gen.aberration.convergence_angle == 0.02
-    assert gen.aberration.cc == 2.7e7
-    assert gen.aberration.energy_spread == 0.8
-    assert gen.aberration.deltaV_V == 0.05e-6
-    assert gen.aberration.deltaI_I == 0.02e-6
     assert gen.aberration.dose_envelope is True
+    assert gen.aberration.cc is None
+    assert gen.detector.focal_spread.sigma_f == pytest.approx(
+        focal_spread_sigma(2.7e7, 300e3, 0.8, 0.05e-6, 0.02e-6)
+    )
+
+    enveloped = make_generator(
+        small_volume,
+        small_coords,
+        ctf_params,
+        propagation=Propagation(scattering_model="projection"),
+        envelopes=Envelopes(**_ENVELOPES, temporal_coherence="envelope"),
+        camera=Camera(noise_model=None),
+    )
+    assert enveloped.detector.focal_spread is None
+    assert enveloped.aberration.cc == 2.7e7
+    assert enveloped.aberration.energy_spread == 0.8
+    assert enveloped.aberration.deltaV_V == 0.05e-6
+    assert enveloped.aberration.deltaI_I == 0.02e-6
 
 
 def test_image_generator_dose_envelope_changes_output(small_volume, ctf_params):

@@ -142,11 +142,45 @@ def cc_envelope(
     ``tests/test_aberrations_envelopes.py`` pins this against an explicit
     weighted integration over defocus.
     """
-    sigma_e = energy_spread / FWHM_TO_SIGMA
-    focus_spread = cc * (
-        ((sigma_e / voltage) ** 2 + deltaV_V**2 + (2 * deltaI_I) ** 2) ** 0.5
-    )
+    focus_spread = focal_spread_sigma(cc, voltage, energy_spread, deltaV_V, deltaI_I)
     return torch.exp(-0.5 * (torch.pi * wavelength * focus_spread * k2) ** 2)
+
+
+def focal_spread_sigma(
+    cc: float,
+    voltage: float,
+    energy_spread: float,
+    deltaV_V: float,
+    deltaI_I: float,
+) -> float:
+    """
+    Standard deviation of the defocus spread chromatic aberration causes.
+
+    ``sigma_f = Cc sqrt((sigma_E / E)^2 + (dV/V)^2 + (2 dI/I)^2)``, with the
+    quoted FWHM energy spread converted to its standard deviation. The one
+    definition both the Cc envelope and the explicit focal-spread
+    integration (:class:`~specter.aberrations.FocalSpread`) use.
+
+    Parameters
+    ----------
+    cc : float
+        Chromatic aberration coefficient, in Angstrom.
+    voltage : float
+        Accelerating voltage, in volts.
+    energy_spread : float
+        FWHM of the beam energy spread, in eV.
+    deltaV_V : float
+        Relative high-voltage instability, rms.
+    deltaI_I : float
+        Relative objective-lens current instability, rms.
+
+    Returns
+    -------
+    float
+        ``sigma_f`` in Angstrom.
+    """
+    sigma_e = energy_spread / FWHM_TO_SIGMA
+    return cc * ((sigma_e / voltage) ** 2 + deltaV_V**2 + (2 * deltaI_I) ** 2) ** 0.5
 
 
 def critical_exposure(

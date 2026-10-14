@@ -182,12 +182,12 @@ def tilt_defocus_shift(
     scattering_model: str,
 ) -> float:
     """
-    Angstrom from the specimen's entry face to the plane a tilt's wave is
-    referenced to.
+    Angstrom from a tilt's exit face to the plane its nominal defocus
+    refers to.
 
     Multislice propagates the tilted column's depth rather than the
-    volume's, which moves the specimen's centre by half the difference from
-    the volume's midplane. Zero for the models with no depth.
+    volume's, so the wave leaves half the tilted depth below the specimen's
+    centre rather than half the volume's. Zero for the models with no depth.
     """
     if scattering_model in ("projection", "ctf"):
         return 0.0

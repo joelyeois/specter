@@ -59,9 +59,10 @@ class ExitWave:
     oversample : int
         Image-grid points per pixel, per axis.
     defocus_shift : float
-        Angstrom from the specimen's entry face to the plane the wave is
-        referenced to (the volume's midplane), subtracted from the defocus by
-        :meth:`apply_ctf`.
+        Angstrom from the exit face, where the wave was computed, to the
+        plane the nominal defocus refers to (the specimen's scattering
+        centroid, normally the volume's midplane); subtracted from the
+        defocus by :meth:`apply_ctf`.
     ids : torch.Tensor
         The images' indices in their stack; for a tilt, the series'.
     tilt : int, optional
@@ -113,7 +114,8 @@ class ExitWave:
         Parameters
         ----------
         ctf : CTF
-            One set of terms per image, defocus from the entry face.
+            One set of terms per image, the defocus that of the specimen's
+            midplane.
         bfactor : float or torch.Tensor, optional
             Isotropic B-factor envelope, in A^2, one value or one per image.
         convergence_angle : float, optional

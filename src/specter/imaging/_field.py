@@ -110,8 +110,9 @@ class Sample:
         A spatially constant absorption potential in volts, applied as one
         factor on the exit wave instead of a field. Default 0.
     profile : IceProfile, optional
-        The ice's lateral profile; the defocus is measured from its entry
-        face rather than the box's.
+        The ice's lateral profile; the defocus refers to its scattering
+        centroid, which differs from the box's midplane only when the ice's
+        mid-plane is not level.
     dry : torch.Tensor, optional
         The same volume before its ice was added, for the clean reference.
     dose : float, optional
@@ -472,11 +473,13 @@ class Sample:
             wave = wave.expand(n, -1, -1).contiguous()
         linear = p.scattering_model == "ctf"
         has_depth = p.scattering_model not in ("projection", "ctf")
-        shift = (
-            self.profile.entry_face_shift(nxy, self.voxel_size)
-            if self.profile is not None
-            else defocus_midplane_shift(nz, self.voxel_size)
-        )
+        shift = defocus_midplane_shift(nz, self.voxel_size)
+        if self.profile is not None:
+            # The defocus refers to the ice's scattering centroid, and the
+            # wave leaves the exit face: the low-z face when the beam enters
+            # at +z (negative Ewald sign, the default), the high one otherwise.
+            toward_entry = 1.0 if p.ews_curvature_sign == "negative" else -1.0
+            shift += toward_entry * self.profile.centroid(nxy, self.voxel_size)
         return ExitWave(
             array=wave,
             pixel_size=self.voxel_size,

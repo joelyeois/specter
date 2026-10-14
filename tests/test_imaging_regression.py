@@ -591,13 +591,12 @@ def test_a_unit_potential_scale_skips_the_extra_volume_copy(small_volume, ctf_pa
 # ---------------------------------------------------------------------------
 
 
-def test_the_ctf_keeps_the_entry_face_convention(small_volume, ctf_params):
+def test_the_ctf_keeps_the_nominal_defocus(small_volume, ctf_params):
     """
-    Multislice evaluates the transfer function at the volume's midplane,
-    half its Z extent from the entry face the CryoSPARC/RELION defocus is
-    measured from. The wave carries that shift and `apply_ctf` subtracts it,
-    so the `CTF` a caller holds, and writes back out, stays in the entry-face
-    convention.
+    Multislice returns the wave at the volume's exit face, half its Z extent
+    from the midplane whose defocus the CryoSPARC/RELION value is. The wave
+    carries that shift and `apply_ctf` subtracts it, so the `CTF` a caller
+    holds, and writes back out, stays the nominal, midplane defocus.
     """
     original = ctf_params["dfu"].clone()
     ctf = CTF(ctf_params)

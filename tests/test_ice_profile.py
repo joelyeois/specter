@@ -111,36 +111,36 @@ def test_required_nz_is_set_by_the_thickest_column():
     assert prof.required_nz(128, 2.0) == 400  # 800 Å / 2 Å
 
 
-def test_entry_face_shift_matches_the_box_shift_for_a_flat_profile():
+def test_centroid_is_zero_for_a_level_midplane():
     """
-    A flat slab fills its box, so the specimen's entry face *is* the box's and
-    the profile-aware shift must reproduce ``defocus_midplane_shift`` exactly.
+    The nominal defocus refers to the ice's scattering centroid. A level
+    mid-plane puts it at the box's midplane however the thickness varies, so
+    the vacuum a wedge leaves in its box does not move the defocus.
     """
-    for thickness, px in [(500.0, 2.0), (500.0, 1.0), (330.0, 1.5)]:
-        prof = IceProfile(mode="flat", mean_thickness=thickness)
-        nz = prof.required_nz(64, px)
-        assert prof.entry_face_shift(64, px) == pytest.approx(
-            defocus_midplane_shift(nz, px), abs=px
-        )
+    assert IceProfile(mode="flat", mean_thickness=500.0).centroid(64, 2.0) == 0.0
+    wedge = IceProfile(mode="wedge", thickness_range=(250.0, 900.0))
+    assert wedge.centroid(128, 2.0) == pytest.approx(0.0, abs=1e-6)
+    level_tilt = IceProfile(mode="flat", mean_thickness=400.0, tilt=0.1)
+    assert level_tilt.centroid(64, 2.0) == pytest.approx(0.0, abs=1e-3)
 
 
-def test_entry_face_shift_ignores_box_padding():
+def test_centroid_weights_a_tilted_film_by_its_thickness():
     """
-    The whole point: a wedge's box is sized by its thickest column, so the box
-    shift picks up vacuum the specimen shift does not.
+    A tilted film that is also thicker on its raised side scatters more from
+    that side, so its centroid rises; thicker on the lowered side, it falls.
     """
-    prof = IceProfile(mode="wedge", thickness_range=(250.0, 900.0))
-    nz = prof.required_nz(128, 2.0)
-    specimen = prof.entry_face_shift(128, 2.0)
-    box = defocus_midplane_shift(nz, 2.0)
-    assert specimen == pytest.approx(575.0 / 2, rel=1e-3)  # mean thickness / 2
-    assert box - specimen == pytest.approx(162.5, rel=1e-2)
-
-
-def test_entry_face_shift_follows_a_tilted_midplane():
-    tilted = IceProfile(mode="flat", mean_thickness=400.0, tilt=0.1)
-    # A symmetric tilt has zero mean, so the entry face is still t / 2.
-    assert tilted.entry_face_shift(64, 2.0) == pytest.approx(200.0, abs=1e-3)
+    nxy, px, slope = 64, 2.0, 0.1
+    raised = IceProfile(
+        mode="wedge", thickness_range=(200.0, 800.0), tilt=slope, angle=0.0
+    )
+    lowered = IceProfile(
+        mode="wedge", thickness_range=(800.0, 200.0), tilt=slope, angle=0.0
+    )
+    t, c = raised.thickness(nxy, px), raised.center(nxy, px)
+    expected = float((t * c).sum() / t.sum())
+    assert raised.centroid(nxy, px) == pytest.approx(expected)
+    assert raised.centroid(nxy, px) > 0
+    assert lowered.centroid(nxy, px) == pytest.approx(-raised.centroid(nxy, px))
 
 
 # ----------------------------------------------------------------------
@@ -414,10 +414,9 @@ def test_a_field_wires_the_profile_through():
     # ice_thickness reports the ice, not the box depth.
     engine = MicrographSpecimenGenerator(template, px, nxy, ice=ice)
     assert engine.ice_thickness == pytest.approx(100.0)
-    # Defocus references the specimen's entry face, not the box's.
-    assert waves.defocus_shift == pytest.approx(prof.entry_face_shift(nxy, px))
-    assert waves.defocus_shift == pytest.approx(50.0)
-    assert waves.defocus_shift != pytest.approx(defocus_midplane_shift(sample.nz, px))
+    # A level wedge's centroid is the box's midplane, whatever vacuum the
+    # box holds above and below the film.
+    assert waves.defocus_shift == pytest.approx(defocus_midplane_shift(sample.nz, px))
 
     ctf = CTF({"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([10000.0])})
     with torch.no_grad():

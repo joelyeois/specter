@@ -198,9 +198,9 @@ class TomogramReconstructor(_BaseReconstructor):
             self.register_buffer(k, torch.as_tensor(v, dtype=torch.float32))
             self.ctf_params[k] = getattr(self, k)
 
-        # Multislice evaluates the exit wave's phase at the volume's midplane,
-        # but dfu/dfv follow the CryoSPARC/RELION convention of being measured
-        # from the entry face. The simulators' chain applies this through
+        # Multislice returns the wave at the volume's exit face, while dfu/dfv
+        # are the specimen midplane's defocus, the plane a CTF fit reports.
+        # The simulators' chain applies the offset through
         # `ExitWave.defocus_shift`, which `_forward_tilt` builds the same way
         # `TiltSeries.scatter` does (`imaging._tilt.tilt_defocus_shift`), so
         # the two cannot drift apart. Recorded for the parity test.

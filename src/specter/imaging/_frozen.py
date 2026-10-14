@@ -98,8 +98,8 @@ def simulate_frozen(
     voxel_size, voltage, nxy
         Sampling (Angstrom), beam (kV) and image size (pixels).
     ctf : CTF, optional
-        One set of terms for the whole movie, defocus from the specimen's
-        entry face. None images with no objective lens.
+        One set of terms for the whole movie, the defocus that of the
+        specimen's midplane. None images with no objective lens.
     pose, poses
         One pose for the movie, or one per physical frame for a tilt
         acquisition.

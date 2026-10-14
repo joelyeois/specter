@@ -241,24 +241,27 @@ def phaseshift(
 
 def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     """
-    Å shift between a volume's entry face and its midplane.
+    Å between a volume's exit face and its midplane.
 
-    Multislice evaluates the exit wave's phase at the centre of the
-    volume's Z extent, but defocus values follow the CryoSPARC/RELION
-    convention of being measured from the specimen's entry face. Subtract
-    this shift from ``dfu``/``dfv`` before building a transfer function for
-    a multislice-propagated exit wave; add it back to recover the original
-    entry-face convention (e.g. before exporting to a STAR/`.cs` file).
-    Not needed for the ``'projection'``/``'ctf'`` scattering models, which
-    have no Z extent to offset from.
+    A propagating scattering model returns the wave where it leaves the
+    volume, at the exit face, while a defocus value refers to the specimen's
+    scattering centroid: the plane whose defocus a CTF fit of the image
+    reports, which for a particle centred in its box, or a slab of uniform
+    ice, is the box's midplane. Subtracting this shift from ``dfu``/``dfv``
+    before building a transfer function for the exit wave makes the nominal
+    defocus the midplane's. It is the defocus a CryoSPARC/RELION file
+    records, so nothing is added back on export. Not needed for the
+    ``'projection'``/``'ctf'`` scattering models, which have no Z extent.
+    Pinned by
+    ``tests/test_aberrations_functions.py::test_nominal_defocus_is_the_midplane_defocus``.
 
     The sign follows from which end of the volume the beam enters. Defocus
     *increases* with z, so for a particle at centred coordinate ``z_i`` (the
     convention :func:`specter.crowding.insert_particles_into_micrograph`
     uses) the effective defocus is ``df_ref + z_i``, where ``df_ref`` is the
-    defocus at ``z = 0``. Equivalently, the entry face at ``+nz *
-    pixel_size / 2`` is the high-defocus end, which is why this shift is
-    *subtracted* to reach the midplane. Measured, not assumed: a scatterer
+    nominal defocus, at ``z = 0``. Equivalently, the entry face at ``+nz *
+    pixel_size / 2`` is the high-defocus end and the exit face the low one,
+    which is why this shift is *subtracted*. Measured, not assumed: a scatterer
     placed 96 A below the midplane produces an image matching the same
     scatterer at the midplane imaged at ``dfu - 96`` to within an RMS of
     5.9e-4, against 1.6 for the unshifted comparison and 3.1 for the

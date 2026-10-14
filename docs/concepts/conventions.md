@@ -224,22 +224,34 @@ amplitude contrast (`alpha`), both under
 
 ## The defocus reference plane
 
-`.cs` and `.star` files measure defocus values from the specimen's entry
-face. A propagated exit wave does not carry that reference. For a
-specimen of thickness \(T\), the effective defocus centres on the
-specimen's centre of scattering mass at \(z = T/2\), a result
-Balakrishnan et al. established and used there to recover depth from a
-single shot.
+A thick specimen has no single defocus: each plane at height \(z\) is imaged
+at its own, and the defocus increases by one ångström for every ångström
+towards the entry face. The defocus a CTF fit reports is that of the
+specimen's centre of scattering mass, which Balakrishnan et al. established
+and used to recover depth from a single shot. For a particle centred in its
+box, or a uniform slab of ice, that is the box's midplane, and it is the value
+a `.cs` or `.star` file records.
 
-`specter` therefore subtracts \(n_z\Delta x/2\) from `dfu` and `dfv`
-before building a transfer function, automatically (every `ExitWave`
-carries the shift as `defocus_shift`, which `ExitWave.apply_ctf` applies),
-for every propagating scattering model: `multislice`, `rytov`,
-`firstborn`, and `kinematic`. The `projection` and `ctf` models have no
+A propagating scattering model returns the wave where it leaves the volume,
+at the exit face, half the box depth \(n_z\Delta x/2\) below the midplane.
+`specter` therefore subtracts \(n_z\Delta x/2\) from `dfu` and `dfv` before
+building a transfer function, automatically (every `ExitWave` carries the
+shift as `defocus_shift`, which `ExitWave.apply_ctf` applies), for every
+propagating scattering model: `multislice`, `rytov`, `firstborn`, and
+`kinematic`. The nominal defocus is then the midplane's, and is written to
+a STAR or `.cs` file unchanged. The `projection` and `ctf` models have no
 \(Z\) extent to offset from, so `specter` excludes them. If you drive
-`Scattering` and `Aberration` directly, apply the correction yourself via
-`aberrations.defocus_midplane_shift`, and add it back before exporting
-defocus values to a STAR or `.cs` file.
+`Scattering` and `Aberration` directly, apply the shift yourself via
+`aberrations.defocus_midplane_shift`.
+
+A scatterer at the midplane images exactly as the same scatterer with no
+depth at the nominal defocus, while one at either face images as it would
+\(n_z\Delta x/2\) off it;
+`tests/test_aberrations_functions.py::test_nominal_defocus_is_the_midplane_defocus`
+pins this. A tilt measures the shift over its own tilted column
+(`imaging._tilt.tilt_defocus_shift`), and an ice profile adds the height of the
+ice's thickness-weighted centroid above the midplane
+(`IceProfile.centroid`), which is zero for any film whose mid-plane is level.
 
 The correction uses the volume's geometric midplane, which equals the
 centre of scattering mass only when scattering density distributes

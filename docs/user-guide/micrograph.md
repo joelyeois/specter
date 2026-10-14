@@ -87,13 +87,12 @@ Enabling a profile costs you three things:
   per slice regardless of what that slice contains, so a 250-900 Å wedge
   costs the same as a uniform 900 Å slab over the whole field, not the
   250-900 Å average.
-- **SPECTER measures defocus from the specimen's entry face, and that face
-  moves.** Under a profile the box contains vacuum above and below the
-  film everywhere except its thickest column, so the two surfaces separate
-  from the box boundary. `IceProfile` handles this automatically through
-  its `entry_face_shift`, so you don't need to correct for it. But it means
-  a nominal `defocus` value doesn't land at the box's geometric centre the
-  way it does for a flat slab.
+- **The nominal defocus refers to the ice's scattering centroid.** That
+  is the thickness-weighted mean height of the film, the plane a CTF fit of
+  the micrograph reports. The vacuum a profile leaves in the box does not
+  move it: for a level film it is the box's midplane, as for a flat slab.
+  Only a film that is tilted (`ice_tilt`) and thicker on one side moves it,
+  and `IceProfile.centroid` accounts for that automatically.
 - **A `wedge` needs `pad_fft = true`.** Multislice propagates by FFT, so
   the field is implicitly periodic and the wave leaving one edge re-enters
   at the opposite one. A flat slab tiles seamlessly, because ice at one

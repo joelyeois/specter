@@ -115,9 +115,9 @@ detector act on it as on any other wave:
 --8<-- "docs-includes/walkthrough/tilt-series-scatter.txt"
 ```
 
-Each wave carries the defocus reference plane of its own tilted column, so
-the defocus in the `CTF` stays the nominal value measured from the specimen's
-entry face at every tilt
+Each wave carries the offset from its own tilted column's exit face to the
+specimen's midplane, so the defocus in the `CTF` stays the nominal,
+midplane value at every tilt
 ([The defocus reference plane](../concepts/conventions.md#the-defocus-reference-plane)).
 The noise of tilt \(i\) is drawn from the run seed, the series and \(i\), so
 any one tilt can be regenerated alone.

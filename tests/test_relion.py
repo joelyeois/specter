@@ -16,8 +16,9 @@ _CR = 1.8 / math.sqrt(2 * math.pi)
 
 def test_a_stack_from_the_chain_records_its_own_parameters(tmp_path) -> None:
     """The STAR file a simulated stack is written with carries the settings the
-    chain imaged it with, and the defocus measured from the entry face: the
-    midplane shift lives on the exit wave, never on the CTF the file reads."""
+    chain imaged it with, and the nominal defocus, that of the specimen's
+    midplane: the shift to the exit face lives on the exit wave, never on the
+    CTF the file reads."""
     volume = torch.zeros(16, 16, 16)
     volume[6:10, 6:10, 6:10] = 50.0
     ctf = CTF(

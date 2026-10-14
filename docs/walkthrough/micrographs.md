@@ -81,9 +81,10 @@ previous pages:
 The wave is formed on a grid twice as fine as the pixels, and the detector
 samples it down to the 1536 px image
 ([Grid aliasing](../concepts/scattering/multislice.md#grid-aliasing-oversample-and-klim)).
-The defocus a `CTF` carries is measured from the specimen's entry face, the
-convention of CryoSPARC and RELION; the `ExitWave` records where its own
-reference plane lies and `apply_ctf` accounts for the difference
+The defocus a `CTF` carries is that of the specimen's midplane, the value a
+CTF fit reports and CryoSPARC and RELION record; the `ExitWave` records how
+far its exit face lies from that plane and `apply_ctf` accounts for the
+difference
 ([The defocus reference plane](../concepts/conventions.md#the-defocus-reference-plane)).
 
 ![The detected micrograph at full field, low-passed to 15 Å, and a zoomed region.](../assets/images/walkthrough/micrographs-image.png){ width="900" style="display:block;margin:1.2em auto;" }
@@ -182,9 +183,10 @@ carries less ice texture around its particles.
 
 The box is as deep as the thickest column, 800 Å here, so a wedge costs what
 a uniform slab of its maximum thickness costs. Particles are placed within
-each column's own slab of ice. The defocus stays referenced to the specimen's entry face,
-which under a profile no longer coincides with the top of the box, and the
-profile supplies that correction itself. A wedge also needs `pad_fft=True`:
+each column's own slab of ice. The defocus refers to the ice's scattering
+centroid, the thickness-weighted mean height of the film, which for a level
+wedge is the box's midplane however much vacuum the box holds. A wedge also
+needs `pad_fft=True`:
 the field is periodic under the FFT, and without padding the thick edge's
 signal wraps into the thin edge. [Ice thickness profiles](../user-guide/micrograph.md#ice-thickness-profiles)
 covers the meniscus profile, a tilted slab and the size of the wrap-around

@@ -40,6 +40,25 @@ def _ctf() -> CTF:
     return CTF.from_values(torch.tensor([9000.0, 13000.0]), cs=2.7)
 
 
+def _retired_ctf(ctf: CTF, waves: object, profile: IceProfile | None) -> CTF:
+    """
+    `ctf` with the defocus the retired generator would have imaged at.
+
+    It referenced a profile's defocus to the ice's mean top surface rather
+    than to its scattering centroid, the plane a nominal defocus now refers
+    to. Moving the defocus by the difference between the two shifts makes the
+    comparison one of everything else, which is unchanged.
+    """
+    if profile is None:
+        return ctf
+    _, z_top = profile.surfaces(NXY, PIXEL)
+    offset = waves.defocus_shift - float(z_top.mean())
+    params = dict(ctf.params)
+    for name in ("dfu", "dfv"):
+        params[name] = params[name] + offset
+    return CTF(params, ctf.ids)
+
+
 def _reference(name: str) -> object:
     """The retired generator's output for this case."""
     return torch.load(REFERENCES / f"imaging_micrograph_{name}.pt", weights_only=True)
@@ -84,7 +103,8 @@ def _compare(
                 got_clean.append(
                     sample.clean().scatter(voltage=VOLTAGE, ids=ids, **beam).pixels()
                 )
-            image = waves.apply_ctf(_ctf()[i : i + 1]).intensity(
+            ctf = _retired_ctf(_ctf()[i : i + 1], waves, ice.profile)
+            image = waves.apply_ctf(ctf).intensity(
                 temporal_coherence=envelopes.temporal_coherence
             )
             got.append(image.detect(exposure, noise=noise, seed=7).array)
@@ -214,7 +234,7 @@ def test_a_prepared_volume_matches_the_generator(case: str) -> None:
                 **asdict_propagation(propagation),
             )
             got = (
-                waves.apply_ctf(_ctf()[i : i + 1])
+                waves.apply_ctf(_retired_ctf(_ctf()[i : i + 1], waves, ice.profile))
                 .intensity()
                 .detect(exposure, noise=None)
             )

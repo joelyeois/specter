@@ -133,7 +133,12 @@ class Poses:
 @dataclass(frozen=True)
 class CTF:
     """
-    Per-image transfer-function terms, referenced to the specimen's entry face.
+    Per-image transfer-function terms, the defocus that of the specimen's midplane.
+
+    The defocus refers to the specimen's scattering centroid, the plane a CTF
+    fit reports and a CryoSPARC/RELION file records: the box's midplane, or a
+    tilt's or an ice profile's own centroid. The exit wave carries the offset
+    from where it was computed (:attr:`~specter.imaging.ExitWave.defocus_shift`).
 
     Held as the ``ctf_params`` dict the aberration engines take, in
     CryoSPARC's units: ``dfu``, ``dfv`` and ``cs`` in Angstrom, ``dfang`` in

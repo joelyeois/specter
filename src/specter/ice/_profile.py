@@ -32,17 +32,13 @@ of whether that slice contains anything, so a 250-900 A wedge costs what a
 uniform 900 A slab costs. Padding is not free; :meth:`IceProfile.required_nz`
 therefore adds no headroom beyond the profile's own extent.
 
-**The defocus reference plane stops coinciding with the box.** Defocus values
-follow the CryoSPARC/RELION convention of being measured from the specimen's
-entry face, and
-:func:`~specter.aberrations.defocus_midplane_shift`'s ``nz * pixel_size / 2``
-implements that exactly as long as ice fills the box -- the box's entry face
-*is* the specimen's. Under a profile the box contains vacuum everywhere except
-the thickest column, the two faces separate, and the shift must come from
-:meth:`IceProfile.entry_face_shift` instead. The discrepancy is the mean
-padding above the ice, which is profile-dependent: for a 250-900 A wedge in a
-916 A box it is 170 A, so two profiles given the same nominal defocus would
-otherwise be imaged at different ones.
+**The defocus refers to the ice's scattering centroid.** A nominal defocus is
+the defocus a CTF fit of the field reports: that of the plane at the
+thickness-weighted mean height of the ice, :meth:`IceProfile.centroid`. The
+vacuum a profile leaves in the box does not move it. A level mid-plane, which
+every profile without a ``tilt`` has, puts the centroid at the box's midplane,
+where :func:`~specter.aberrations.defocus_midplane_shift` already places the
+nominal defocus; a tilted, unevenly thick film moves it off that plane.
 """
 
 from __future__ import annotations
@@ -291,11 +287,9 @@ class IceProfile:
         """
         Number of Z slices needed to hold the whole profile.
 
-        No headroom is added beyond the profile's own extent. Padding is paid
-        for twice -- multislice runs a full-plane FFT per slice whether or not
-        the slice contains anything, and every Å of vacuum above the ice is an
-        Å the defocus reference has to be corrected for (see
-        :meth:`entry_face_shift`). The consequence is that :meth:`window`'s
+        No headroom is added beyond the profile's own extent, since
+        multislice runs a full-plane FFT per slice whether or not the slice
+        contains anything. The consequence is that :meth:`window`'s
         taper is clipped at the thickest column's own surfaces, which costs
         about ``softness`` Å of projected thickness there.
 
@@ -319,14 +313,16 @@ class IceProfile:
         extent = float(z_top.max() - z_bot.min())
         return compute_nz(base_nz, extent, pixel_size)
 
-    def entry_face_shift(self, nxy: int, pixel_size: float) -> float:
+    def centroid(self, nxy: int, pixel_size: float) -> float:
         """
-        Å between the volume's midplane and the *specimen's* entry face.
+        Height of the ice's scattering centroid above the volume's centre.
 
-        The profile-aware replacement for
-        :func:`~specter.aberrations.defocus_midplane_shift`, which measures to
-        the *box's* entry face instead. The two agree exactly when ice fills
-        the box, and diverge by the mean vacuum padding once it does not.
+        The thickness-weighted mean of the mid-plane: a column of ice scatters
+        in proportion to its thickness, so this is the plane whose defocus a
+        CTF fit of the whole field reports, and the one a nominal defocus
+        refers to. Zero for any profile whose mid-plane is level, whatever its
+        thickness does; under a ``tilt`` it is non-zero only when the film is
+        also thicker on one side.
 
         Parameters
         ----------
@@ -338,11 +334,11 @@ class IceProfile:
         Returns
         -------
         float
-            Shift in Å, to be subtracted from ``dfu``/``dfv`` before building
-            a transfer function for a multislice-propagated exit wave.
+            Height in Å, positive towards ``+z``.
         """
-        z_bot, z_top = self.surfaces(nxy, pixel_size)
-        return float(z_top.mean())
+        t = self.thickness(nxy, pixel_size)
+        c = self.center(nxy, pixel_size)
+        return float((t * c).sum() / t.sum())
 
     def window(
         self,

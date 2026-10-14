@@ -237,3 +237,45 @@ def test_defocus_increases_with_z():
 
     assert matched < 0.05 * unshifted
     assert matched < 0.05 * wrong_sign
+
+
+def test_nominal_defocus_is_the_midplane_defocus():
+    """
+    Pins what a nominal defocus refers to, which the relative test above
+    cannot: the specimen's midplane, the plane a CTF fit of a centred
+    particle or a uniform slab reports and a CryoSPARC/RELION file records.
+
+    Multislice returns the wave at the exit face and ``apply_ctf`` subtracts
+    ``defocus_midplane_shift``, so a scatterer at the midplane of a 256 A box
+    must image as the same scatterer with no depth at all (the projection
+    model) imaged at the same nominal defocus, and not as it would at either
+    face, 128 A away.
+    """
+    from specter.imaging import CTF, Exposure, Sample
+
+    nxy, nz, px = 64, 128, 2.0
+    dfu, centre = 10000.0, nz // 2
+
+    def image(model: str, defocus: float) -> torch.Tensor:
+        V = torch.zeros(1, nz, nxy, nxy)
+        c = nxy // 2
+        V[0, centre - 2 : centre + 3, c - 4 : c + 5, c - 4 : c + 5] = 50.0
+        ctf = CTF({"cs": torch.tensor([2.7e7]), "dfu": torch.tensor([defocus])})
+        with torch.no_grad():
+            waves = Sample(V, px).scatter(
+                voltage=300.0, scattering_model=model, alpha=0.1
+            )
+            image = waves.apply_ctf(ctf).intensity(cc=None)
+            return image.detect(Exposure(100.0), noise=None).array[0]
+
+    def rms(a: torch.Tensor, b: torch.Tensor) -> float:
+        return float(((a - b) ** 2).mean().sqrt())
+
+    propagated = image("multislice", dfu)
+    half_depth = nz * px / 2
+    at_midplane = rms(propagated, image("projection", dfu))
+    at_exit_face = rms(propagated, image("projection", dfu - half_depth))
+    at_entry_face = rms(propagated, image("projection", dfu + half_depth))
+
+    assert at_midplane < 0.05 * at_exit_face
+    assert at_midplane < 0.05 * at_entry_face

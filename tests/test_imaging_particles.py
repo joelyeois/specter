@@ -330,3 +330,27 @@ def test_the_image_is_differentiable_in_the_atoms() -> None:
     image.array.square().sum().backward()
     assert coordinates.grad is not None
     assert torch.isfinite(coordinates.grad).all() and coordinates.grad.abs().sum() > 0
+
+
+def test_poses_and_ctf_draw_from_their_own_seed() -> None:
+    """
+    A seed makes the poses and the transfer-function terms repeat without
+    touching the global generator, so a seeded stack needs no specter.seed()
+    to fix what it images; different seeds draw differently.
+    """
+    torch.manual_seed(1)
+    expected = torch.rand(1)
+    torch.manual_seed(1)
+    first = Poses.random(4, shift=3.0, seed=0)
+    again = Poses.random(4, shift=3.0, seed=0)
+    assert torch.equal(torch.rand(1), expected)
+    assert torch.equal(first.quaternions, again.quaternions)
+    assert torch.equal(first.shifts, again.shifts)
+    other = Poses.random(4, shift=3.0, seed=1)
+    assert not torch.equal(first.quaternions, other.quaternions)
+
+    ctf = CTF.sample(4, defocus=[10000.0, 20000.0], astigmatism=[0, 500], seed=0)
+    same = CTF.sample(4, defocus=[10000.0, 20000.0], astigmatism=[0, 500], seed=0)
+    assert all(torch.equal(ctf.params[k], same.params[k]) for k in ctf.params)
+    differs = CTF.sample(4, defocus=[10000.0, 20000.0], seed=1)
+    assert not torch.equal(ctf.params["dfu"], differs.params["dfu"])

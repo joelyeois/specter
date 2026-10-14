@@ -235,7 +235,8 @@ image 2 drew in the full stack. The seed is an argument to each call, not
 state on the specimen, so batches and worker processes need nothing shared to
 agree. Without a `seed`, the draws come from the global random number
 generator and depend on how the images were batched. `specter.seed(0)` in the
-setup fixes that generator, and with it the poses `Poses.random` draws; see
+setup fixes that generator, and with it the poses `Poses.random` draws;
+`Poses.random(n, seed=...)` fixes the poses alone. See
 [Reproducibility](../concepts/conventions.md#reproducibility).
 
 ## Radiation damage

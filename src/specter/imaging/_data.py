@@ -11,6 +11,7 @@ them.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, replace
 from typing import Any, TypeVar
 
@@ -58,6 +59,22 @@ def sample_uniform(value: ScalarOrRange, n: int) -> torch.Tensor:
     return torch.rand(n) * (high - low) + low
 
 
+#: Keys for the seeds of the per-image draws made here, distinct from the
+#: imaging stages' (``imaging._stages.SEED_STAGE_*``, which take an image id
+#: as well) so that a run's poses and its specimens never share a stream.
+_SEED_POSES = 100
+_SEED_CTF = 101
+
+
+def _drawn(seed: int | None, key: int) -> contextlib.AbstractContextManager[object]:
+    """The global CPU generator seeded from ``(seed, key)``, or left alone."""
+    if seed is None:
+        return contextlib.nullcontext()
+    from ..random_seed import derive_seed, seeded_rng
+
+    return seeded_rng(derive_seed(seed, key))
+
+
 @dataclass(frozen=True)
 class Poses:
     """
@@ -78,7 +95,7 @@ class Poses:
     ids: torch.Tensor
 
     @classmethod
-    def random(cls, n: int, shift: float = 0.0) -> Poses:
+    def random(cls, n: int, shift: float = 0.0, *, seed: int | None = None) -> Poses:
         """
         `n` uniformly random orientations, numbered from 0.
 
@@ -89,9 +106,13 @@ class Poses:
         shift : float, optional
             Largest in-plane shift along each axis, in Angstrom; each image
             is shifted uniformly within ``[-shift, shift]``. Default 0.
+        seed : int, optional
+            Draw from this seed rather than the global generator, which is
+            left untouched. Default None.
         """
-        quaternions = rotations.random_quaternion(n).reshape(n, 4)
-        shifts = 2 * (torch.rand(n, 2) - 0.5) * shift
+        with _drawn(seed, _SEED_POSES):
+            quaternions = rotations.random_quaternion(n).reshape(n, 4)
+            shifts = 2 * (torch.rand(n, 2) - 0.5) * shift
         return cls(quaternions, shifts, torch.arange(n))
 
     @classmethod
@@ -208,19 +229,22 @@ class CTF:
         astigmatism_angle: ScalarOrRange = 0.0,
         cs: float = 2.7,
         phase_shift: ScalarOrRange = 0.0,
+        seed: int | None = None,
     ) -> CTF:
         """
         Draw `n` sets of terms, each a scalar or a ``[low, high]`` range
-        sampled uniformly per image; units as :meth:`from_values`.
+        sampled uniformly per image; units as :meth:`from_values`. Draws from
+        `seed` when given, else from the global generator.
         """
-        return cls.from_values(
-            sample_uniform(defocus, n),
-            n=n,
-            astigmatism=sample_uniform(astigmatism, n),
-            astigmatism_angle=sample_uniform(astigmatism_angle, n),
-            cs=cs,
-            phase_shift=sample_uniform(phase_shift, n),
-        )
+        with _drawn(seed, _SEED_CTF):
+            return cls.from_values(
+                sample_uniform(defocus, n),
+                n=n,
+                astigmatism=sample_uniform(astigmatism, n),
+                astigmatism_angle=sample_uniform(astigmatism_angle, n),
+                cs=cs,
+                phase_shift=sample_uniform(phase_shift, n),
+            )
 
     def __len__(self) -> int:
         return len(next(iter(self.params.values())))

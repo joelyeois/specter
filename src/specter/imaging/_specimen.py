@@ -338,7 +338,7 @@ class Specimen:
         steps.append(f"pad to {nz} x {pad} x {pad} voxels")
         if self.crowding is not None:
             steps.append(
-                f"crowd: copies {self.crowding.min_distance} A apart "
+                f"crowd: copies {self.crowding.min_distance:.1f} A apart "
                 f"({self.crowding.method} placement)"
             )
         if p.absorption_model == "inelastic_mfp":

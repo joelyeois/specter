@@ -78,9 +78,11 @@ dictionaries is cut to each batch along with the images, so any per-image
 setting can vary across the stack. Each object can be indexed like a tensor:
 `poses[8:12]` is the poses of particles 8 to 11, with their original indices.
 
-`Poses.random` and `CTF.sample` draw from PyTorch's global generator, which is
-why the example calls `specter.seed(0)` before them. To repeat a stack
-exactly, seed before drawing them or keep the objects.
+`Poses.random` and `CTF.sample` draw from PyTorch's global generator unless
+you pass them a `seed` of their own, as in `Poses.random(16, seed=0)`, which
+leaves the global generator untouched. The example calls `specter.seed(0)`
+before them instead, which fixes both. To repeat a stack exactly, seed them
+either way, or keep the objects.
 
 ## Noiseless counterparts
 

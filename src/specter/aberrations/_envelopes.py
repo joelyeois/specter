@@ -80,14 +80,16 @@ def cs_envelope(
     Notes
     -----
     The Gaussian average of ``exp(i grad(chi) . theta)`` over source angles
-    of standard deviation ``sigma`` is ``exp(-sigma^2 |grad chi|^2 / 2)``
-    with ``grad chi = 2 pi (Cs lambda^3 k^3 + df lambda k)``; writing
-    ``alpha = sqrt(2) sigma`` gives the form below.
+    of standard deviation ``sigma`` is ``exp(-sigma^2 |grad chi|^2 / 2)``.
+    With ``chi = -pi lambda df k^2 + (pi / 2) Cs lambda^3 k^4`` (defocus
+    positive for underfocus, as in `_functions`), ``grad chi = 2 pi (Cs
+    lambda^3 k^3 - df lambda k)``: for underfocus the two terms partly
+    cancel. Writing ``alpha = sqrt(2) sigma`` gives the form below.
     """
     half_angle = convergence_angle / 1000  # mrad -> rad
     return torch.exp(
         -((torch.pi * half_angle / wavelength) ** 2)
-        * (cs * wavelength**3 * k**3 + wavelength * defocus * k) ** 2
+        * (cs * wavelength**3 * k**3 - wavelength * defocus * k) ** 2
     )
 
 

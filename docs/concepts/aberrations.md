@@ -183,12 +183,13 @@ below.
 
 \[
 E_B = e^{-B k^2/4}, \qquad
-E_{C_s} = \exp\!\Big[-\big(\tfrac{\pi\,\alpha_c}{\lambda}\big)^2\big(C_s\lambda^3 k^3 + \lambda\, \bar{d}\, k\big)^2\Big], \qquad
+E_{C_s} = \exp\!\Big[-\big(\tfrac{\pi\,\alpha_c}{\lambda}\big)^2\big(C_s\lambda^3 k^3 - \lambda\, \bar{d}\, k\big)^2\Big], \qquad
 E_{C_c} = \exp\!\Big[-\tfrac12\big(\pi\lambda\, \sigma_f\, k^2\big)^2\Big]
 \]
 
 where \(\alpha_c\) is the convergence semi-angle, \(\bar d\) the mean
-defocus, and \(\sigma_f = C_c\sqrt{(\sigma_E/U)^2 + (\Delta V/V)^2 + (2\Delta I/I)^2}\)
+defocus (positive for underfocus, so the two terms of the spatial envelope
+partly cancel), and \(\sigma_f = C_c\sqrt{(\sigma_E/U)^2 + (\Delta V/V)^2 + (2\Delta I/I)^2}\)
 the standard deviation of the focal spread from energy spread and HT/lens
 instabilities. `energy_spread` is the FWHM a source is quoted with; it
 enters as \(\sigma_E = \mathrm{FWHM}/2\sqrt{2\ln 2}\), and \(\Delta V/V\),

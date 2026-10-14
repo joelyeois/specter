@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 import torch
 
@@ -36,8 +37,10 @@ def test_static_envelopes_match_their_closed_forms():
         atol=1e-4,
     )
 
-    # exp(-(pi alpha / lambda)^2 (Cs lambda^3 k^3 + dz lambda k)^2), with the
-    # semi-angle in radians: 0.1 mrad -> 1e-4.
+    # exp(-(pi alpha / lambda)^2 (Cs lambda^3 k^3 - dz lambda k)^2), with the
+    # semi-angle in radians: 0.1 mrad -> 1e-4. Underfocus dz is positive, so
+    # the two terms partly cancel; until 2026-10-15 they were added, which
+    # gave 0.9041, 0.3452, 0.0197 here.
     assert torch.allclose(
         cs_envelope(
             k,
@@ -46,7 +49,7 @@ def test_static_envelopes_match_their_closed_forms():
             defocus=torch.tensor(10000.0),
             convergence_angle=0.1,
         ),
-        torch.tensor([0.9041, 0.3452, 0.0197]),
+        torch.tensor([0.9079, 0.4826, 0.2608]),
         atol=1e-4,
     )
 
@@ -72,6 +75,53 @@ def test_static_envelopes_match_their_closed_forms():
         torch.tensor([0.9992, 0.9346, 0.5934]),
         atol=1e-4,
     )
+
+
+@pytest.mark.parametrize("defocus", [5000.0, 15000.0])
+def test_spatial_envelope_is_the_transfer_function_averaged_over_source_angles(
+    defocus: float,
+) -> None:
+    """
+    The spatial-coherence envelope against its definition, not its formula.
+
+    The transfer function's own phase, from the `_functions` terms, averaged
+    over a Gaussian spread of illumination angles (1/e half-angle alpha, so a
+    per-axis standard deviation alpha / sqrt(2)) by a 2D Gauss-Hermite
+    quadrature. A tilt q shifts the wave's frequency, so the averaged phase is
+    chi(k + q) - chi(q) - chi(k); the linear part is an image shift, which the
+    subtraction of chi(q) removes. This is the check that a sign error between
+    the Cs and defocus terms cannot pass, since it uses only the phase that
+    images the specimen.
+    """
+    from specter.aberrations import _functions as fn
+    from specter.constants import energy_to_wavelength
+
+    wavelength = energy_to_wavelength(300.0)
+    cs = torch.tensor(2.7e7, dtype=torch.float64)
+    df = torch.tensor(defocus, dtype=torch.float64)
+    alpha_mrad = 0.02
+    k = torch.linspace(0.02, 0.5, 13, dtype=torch.float64)
+
+    def chi(kx: torch.Tensor, ky: torch.Tensor) -> torch.Tensor:
+        k2 = kx**2 + ky**2
+        zero = torch.zeros_like(k2)
+        return fn.defocus(k2, zero, wavelength, df, df, torch.tensor(0.0)) + fn.cs(
+            torch.sqrt(k2), wavelength, cs
+        )
+
+    nodes, weights = np.polynomial.hermite.hermgauss(24)
+    # exp(-t^2) nodes -> theta = alpha * t for exp(-(theta/alpha)^2).
+    t = torch.as_tensor(nodes, dtype=torch.float64) * alpha_mrad * 1e-3
+    w = torch.as_tensor(weights, dtype=torch.float64) / math.sqrt(math.pi)
+    qx = (t[:, None] / wavelength).expand(len(t), len(t)).reshape(-1, 1)
+    qy = (t[None, :] / wavelength).expand(len(t), len(t)).reshape(-1, 1)
+    wq = (w[:, None] * w[None, :]).reshape(-1, 1)
+    kx = k[None]
+    shifted = chi(kx + qx, qy) - chi(qx, qy) - chi(kx, torch.zeros_like(kx))
+    averaged = (wq * torch.exp(-1j * shifted)).sum(0).abs()
+
+    envelope = cs_envelope(k, wavelength, cs, df, alpha_mrad)
+    assert torch.allclose(envelope, averaged, rtol=1e-3)
 
 
 def test_dose_envelope_dc_is_one():
@@ -249,7 +299,7 @@ def test_aberration_convergence_angle_matches_closed_form():
         pixel_size=pixel_size,
         voltage=300.0,
         aberration_model="nonlinear",
-        convergence_angle=0.1,
+        convergence_angle=0.2,
     )
     assert ab.wavelength == pytest.approx(0.019687, abs=1e-6)  # 1.969 pm at 300 kV
     ctf_params = {
@@ -260,10 +310,10 @@ def test_aberration_convergence_angle_matches_closed_form():
 
     freq = torch.fft.fftfreq(n_pixels, pixel_size)
     k = torch.sqrt(freq[:, None] ** 2 + freq[None, :] ** 2)
-    lam, half_angle, defocus = ab.wavelength, 0.1e-3, 10000.0
+    lam, half_angle, defocus = ab.wavelength, 0.2e-3, 10000.0
     expected = torch.exp(
         -((torch.pi * half_angle / lam) ** 2)
-        * (2.7e7 * lam**3 * k**3 + lam * defocus * k) ** 2
+        * (2.7e7 * lam**3 * k**3 - lam * defocus * k) ** 2
     )
     got = torch.abs(ab.transfer_function(ctf_params)).squeeze(0)
     assert torch.allclose(got, expected, atol=1e-6)

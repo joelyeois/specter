@@ -228,7 +228,12 @@ def test_the_linear_model_matches_the_generator() -> None:
 
 def test_per_image_settings_match_the_generator() -> None:
     """Potential scale, B-factor, spatial coherence, anisomag and the
-    coincidence radius, each one value per image."""
+    coincidence radius, each one value per image.
+
+    The reference is the generator's output with the spatial-coherence
+    envelope's sign corrected (2026-10-15); with the old sign restored, the
+    current code reproduces the generator's file exactly.
+    """
     scale = torch.tensor([0.8, 1.0, 1.2, 1.5])
     radius = torch.tensor([0.0, 0.5, 1.0, 1.5])
     anisomag = torch.tensor([[1.01, 0.002], [0.0, 0.99]]).expand(N, 2, 2).clone()

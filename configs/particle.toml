@@ -92,7 +92,7 @@ periodic = false                 # wrap atom density across the box faces when v
 
 # --- Envelopes and dose fractionation ---
 # n_frames = 20                # frames, uncomment to override default (int(dose) if None)
-# convergence_angle = 1.0      # mrad, uncomment to enable the Cs envelope
+# convergence_angle = 0.01     # mrad, illumination 1/e half-angle; enables the spatial-coherence envelope
 cc = 2.7                       # mm, Titan Krios objective; 0 disables the Cc focal spread
 energy_spread = 0.7            # eV (FWHM)
 deltaV_V = 0.06e-6             # unitless (ΔV/V)

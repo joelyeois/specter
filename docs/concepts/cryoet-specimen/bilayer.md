@@ -11,6 +11,9 @@ and a rendered volume: the 1D potential profile \(\psi(d)\) that turns
 distance-from-the-mid-plane into volts, the anti-aliased resampling onto
 the output grid, and how proteins embed in the resulting bilayer.
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.specimen.membrane._profile`, `._raster`, `._placement`.
     `docs-figures/cryoet_specimen_bilayer.py` produces the figures.

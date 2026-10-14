@@ -120,7 +120,9 @@ class Transcript:
         text = self.buffer.getvalue()
         if self.name is not None and text.strip():
             TEXT_DIR.mkdir(parents=True, exist_ok=True)
-            (TEXT_DIR / f"{self.page}-{self.name}.txt").write_text(text)
+            (TEXT_DIR / f"{self.page}-{self.name}.txt").write_text(
+                text, encoding="utf-8"
+            )
         self.name = None
         self.buffer = io.StringIO()
 

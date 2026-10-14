@@ -1,0 +1,7 @@
+48 atoms more than 0.2 Å from their own site:
+  15 on the site of another atom of the same element
+  33 on the site of an atom of another element
+  0 elsewhere
+  cross-element swaps: C on O 13, O on C 12, C on N 3, N on C 4, O on N 1
+  their two sites are 1.22 to 2.38 Å apart
+mean starting error: stuck 1.14 Å, recovered 0.77 Å

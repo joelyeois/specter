@@ -15,6 +15,9 @@ The generator builds each bead from **real fcc gold atoms**: randomly
 oriented, Debye-Waller jittered, and splatted through the atomic
 potential kernel, inside an irregular, volume-matched boundary.
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.specimen._grid` (`BeadGenerator`, `_BeadShape`), placed by
     `TomogramSpecimenGenerator._stamp_beads`.

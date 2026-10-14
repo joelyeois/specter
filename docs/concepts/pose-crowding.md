@@ -6,6 +6,9 @@ differently: a pose sampled independently per image, and, optionally,
 duplicates of the same template scattered around the primary instance to
 mimic local particle crowding.
 
+!!! example "In code"
+    This page is the theory behind [Specimens: crowding and ice](../walkthrough/specimens.md#crowding) and [Scattering](../walkthrough/scattering.md#orienting-the-particle), which show it step by step with code and figures.
+
 !!! info "Source"
     `specter.rotations` (pose representation and application),
     `specter.arrays._padding` (Z/XY padding), `specter.crowding`

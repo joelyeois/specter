@@ -81,6 +81,15 @@ nav:
           - Reconstruction: walkthrough/reconstruction.md
           - From Python to the command line: walkthrough/command-line.md
       - Tutorials:
+          - tutorials/index.md
+          - Simulating a real dataset: tutorials/real-dataset.md
+          - Cellular specimens for cryo-ET: tutorials/cellular-specimens.md
+          - Radiation damage and the solvent: tutorials/dose-damage.md
+          - Inelastic scattering and energy filtering: tutorials/inelastic.md
+          - Gradients through the forward model: tutorials/differentiable.md
+          - Composing a forward model by hand: tutorials/custom-forward-model.md
+          - Building an ice library: tutorials/ice-library.md
+      - Command-line guides:
           - Simulate:
               - Generate a particle stack: user-guide/particle-stack.md
               - Generate a micrograph: user-guide/micrograph.md
@@ -95,6 +104,7 @@ nav:
               - Configure a run: user-guide/configuration.md
               - Manage jobs: user-guide/jobs.md
               - Manage the PDB cache: user-guide/cache.md
+      - Example gallery: gallery.md
   - Theory:
       - Overview: concepts/index.md
       - Pipeline overview: concepts/pipeline-overview.md

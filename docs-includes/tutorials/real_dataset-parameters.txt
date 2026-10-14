@@ -1,0 +1,7 @@
+64 particles at 300 kV, 2.924 Å/px
+amplitude contrast 0.1
+defocus 5372 to 15606 Å
+Cs 2.7 mm, terms: ['cs', 'dfang', 'dfu', 'dfv', 'phaseshift', 'tetrafoil1', 'tetrafoil2', 'tetrafoil3', 'tetrafoil4', 'tiltx', 'tilty', 'trefoil1', 'trefoil2']
+anisotropic magnification of particle 0:
+tensor([[1.0014e+00, 1.7024e-04],
+        [2.9256e-04, 9.9866e-01]])

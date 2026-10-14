@@ -9,6 +9,9 @@ through the math behind SPECTER's three parameterizations (Kirkland,
 Lobato, Shtyrov), and checks the Kirkland ones against the worked
 examples in Kirkland's *Advanced Computing in Electron Microscopy*.
 
+!!! example "In code"
+    This page is the theory behind [Structures and potentials](../walkthrough/potentials.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     Walks through `specter.atom` and
     `specter.potential`. Figures are produced by

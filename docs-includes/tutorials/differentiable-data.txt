@@ -1,0 +1,1 @@
+data: (16, 128, 128), 80.0 counts per pixel

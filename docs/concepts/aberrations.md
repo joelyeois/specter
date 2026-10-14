@@ -8,6 +8,9 @@ that set a practical information limit. `Aberration` builds the total
 wavefront aberration phase \(\chi(k)\) term by term from a per-image
 `ctf_params` dict, following the conventions of Kirkland and Penczek.
 
+!!! example "In code"
+    This page is the theory behind [Contrast transfer function](../walkthrough/ctf.md) and [Partial coherence](../walkthrough/coherence.md), which show it step by step with code and figures.
+
 !!! info "Source"
     `specter.aberrations._functions` (per-term \(\chi(k)\) contributions),
     `_aberration.Aberration` (composes them into a transfer function), and

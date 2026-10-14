@@ -6,6 +6,9 @@ multislice, optics and detector code as the rest of the forward model, which
 does not invoke it unless asked. The API requires explicit material and source data rather than
 inferring atom identities from a real-valued volume.
 
+!!! example "In code"
+    This page is the theory behind [Inelastic scattering and energy filtering](../../tutorials/inelastic.md), which shows it step by step with code and figures.
+
 ## Available components
 
 - `specter.inelastic.PlasmonFilter`: integrate a supplied single-scattering EELS

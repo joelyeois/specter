@@ -1,0 +1,3 @@
+relax_steps=  0: 0.080 eV per molecule
+relax_steps= 50: -0.329 eV per molecule
+relax_steps=200: -0.357 eV per molecule

@@ -1,0 +1,5 @@
+water-ring power relative to the undamaged image (0.255-0.285 1/Å):
+  10 e/Å²  transfer function 0.431  specimen 0.969  E² 0.431
+  20 e/Å²  transfer function 0.244  specimen 0.958  E² 0.244
+  40 e/Å²  transfer function 0.124  specimen 0.952  E² 0.124
+  80 e/Å²  transfer function 0.062  specimen 0.948  E² 0.062

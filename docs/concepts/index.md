@@ -1,10 +1,12 @@
 # Theory
 
-This section lays out the physics and mathematics behind SPECTER, one topic
-per page: the derivations, conventions and validation behind each model. The
-[walkthrough](../walkthrough/index.md) introduces the same models through code
-and links here for the detail. For complete CLI workflows, see the
-[Tutorials](../user-guide/particle-stack.md).
+This section is the appendix to the user guide: the physics and mathematics
+behind SPECTER, one topic per page, with the derivations, conventions and
+validation behind each model. The [walkthrough](../walkthrough/index.md) and
+the [tutorials](../tutorials/index.md) introduce the same models through code
+and link here for the detail, and every page here links back to where its
+topic appears in code. For complete command-line workflows, see the
+[Command-line guides](../user-guide/particle-stack.md).
 
 - [Pipeline overview](pipeline-overview.md)
 - [Conventions](conventions.md)

@@ -10,6 +10,9 @@ practical cache/sampling side (choosing `ice_model`, building a
 replacement cache at a different pixel size), see
 [Using the ice cache](../user-guide/ice-cache.md).
 
+!!! example "In code"
+    This page is the theory behind [Specimens: crowding and ice](../walkthrough/specimens.md#ice), [Building an ice library](../tutorials/ice-library.md) and [Radiation damage and the solvent](../tutorials/dose-damage.md), which show it step by step with code and figures.
+
 !!! info "Source"
     `specter.ice._gradient.GradientSKIcemaker`, `specter.ice._energy.MLBOP`,
     `specter.ice._kernels`. `specter.ice._bank.IceBank` is the caching

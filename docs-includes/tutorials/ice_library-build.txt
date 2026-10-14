@@ -1,0 +1,4 @@
+wrote config_1000.pt: a 64 Å periodic cell
+250 L-BFGS steps in 104 s
+S(k) loss 3.19e-06
+ML-BOP energy -0.366 eV per molecule

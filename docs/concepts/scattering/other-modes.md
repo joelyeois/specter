@@ -5,6 +5,9 @@ than [Rytov](rytov.md): `firstborn` and `kinematic` linearize or
 simplify the per-slice scattering, and `projection` discards
 slice-to-slice propagation entirely.
 
+!!! example "In code"
+    This page is the theory behind [Scattering](../../walkthrough/scattering.md#propagation-models), which shows it step by step with code and figures.
+
 !!! info "Source"
     `Scattering.firstborn` / `.kinematic` / `.projection` / `.ctf` and
     their `IterativeScattering` counterparts.

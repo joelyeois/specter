@@ -14,6 +14,9 @@ shell. The second is Random Sequential Addition, obstacle- and
 region-aware, colliding each molecule's real rotated footprint against a
 running occupancy grid.
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.specimen.tomogram._regions`, `specter.specimen.packing`,
     `specter.specimen`.

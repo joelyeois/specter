@@ -10,6 +10,9 @@ an ellipsoid with a random spherical-harmonic expansion
 (`shape_backend="spherical_harmonics"`, the default). This page explains
 how `MembraneGenerator` builds that shape.
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     Walks through `specter.specimen.membrane._field_spherical_harmonics`.
     Figures are produced by `docs-figures/membrane_shape_spherical_harmonics.py`, which calls

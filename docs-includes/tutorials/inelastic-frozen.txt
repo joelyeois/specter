@@ -1,0 +1,5 @@
+elastic only mean zero-loss intensity 1.0000
+local        mean zero-loss intensity 0.8797
+delocalised  mean zero-loss intensity 0.8797
+local        absorption: particle 0.8735, ice 0.8811 (-0.87%), pixel std 0.0027
+delocalised  absorption: particle 0.8783, ice 0.8803 (-0.23%), pixel std 0.0008

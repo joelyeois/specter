@@ -98,10 +98,24 @@ a time and ends with [the command line](walkthrough/command-line.md).
 
 -   :material-school:{ .lg .middle } **Tutorials**
 
-    Complete workflows: cellular specimens, matching a real dataset, custom
-    ice libraries, reconstruction runs and job tracking.
+    Advanced topics once the walkthrough is done: real datasets, cellular
+    specimens, radiation damage, inelastic scattering, gradients, custom
+    forward models and ice libraries.
 
-    [:octicons-arrow-right-24: Tutorials](user-guide/particle-stack.md)
+    [:octicons-arrow-right-24: Tutorials](tutorials/index.md)
+
+-   :material-console:{ .lg .middle } **Command-line guides**
+
+    Every `specter` workflow from a TOML config: particle stacks,
+    micrographs, tilt series, tomograms, matching, reconstruction and jobs.
+
+    [:octicons-arrow-right-24: Command-line guides](user-guide/particle-stack.md)
+
+-   :material-view-grid:{ .lg .middle } **Example gallery**
+
+    Every example in these docs at a glance, by its figure.
+
+    [:octicons-arrow-right-24: Gallery](gallery.md)
 
 -   :material-function-variant:{ .lg .middle } **Theory**
 

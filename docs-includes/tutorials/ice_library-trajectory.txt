@@ -1,0 +1,3 @@
+8237 water molecules in the cell
+ML-BOP energy 17.20 -> -0.366 eV per molecule
+S(k) loss 1.58e+00 -> 7.03e-07

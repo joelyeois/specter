@@ -1,118 +1,39 @@
 """
-Generate the EMPIAR-11377 comparison figures for
-docs/user-guide/particle-stack.md, showing that `specter simulate particles`
-driven from a real CryoSPARC .cs file (``cs_path``) produces images that
-resemble real experimental data both qualitatively (raw images side by side)
-and quantitatively (CryoSPARC 2D classification of a mixed real+simulated
-stack).
+Generate the EMPIAR-11377 2D-classification figure for
+docs/user-guide/particle-stack.md: CryoSPARC's 2D classification of a mixed
+stack of 2000 real and 2000 SPECTER-simulated EMPIAR-11377 particles.
 
-Reads three fixtures, all under docs-figures/data/ -- none of these are
-pytest fixtures (the pipeline's cs_path *code path* is covered separately,
-against a fabricated minimal .cs, by
-tests/test_pipelines.py::test_run_particle_stack_from_csfile; this script's
-job is a real-data demonstration, not test coverage):
+Reads docs-figures/data/empiar-11377-mixed-2dclasses.csv, the per-particle
+2D-class assignment from that CryoSPARC job. It is not reproducible by this
+script alone, since it requires running CryoSPARC; the simulated half was
+generated at the refinement's poses in the 8B0X frame (J205). If simulated
+particles are physically realistic, CryoSPARC's own 2D classification should
+sort them into the same classes as the real particles, in similar
+proportion.
 
-- empiar-11377-passthrough-5particles.cs
-    First 5 rows of the real CryoSPARC passthrough .cs from EMPIAR-11377
-    (https://www.ebi.ac.uk/empiar/EMPIAR-11377/), job J214 -- supplies real
-    pose/CTF/pixel_size/voltage/alpha for 5 particles of PDB 8b0x (a
-    translating 70S ribosome), read via `extract_parameters_from_csfile`.
-- empiar-11377-real-5particles.mrcs
-    The 5 real experimental particle images those poses/CTF came from
-    (restacked, same row order as the .cs file above).
-- empiar-11377-mixed-2dclasses.csv
-    Per-particle 2D-class assignment from a CryoSPARC 2D Classification job
-    run on a *mixed* stack of 2000 real EMPIAR-11377 particles + 2000
-    SPECTER-simulated particles (same pdb_source/physics params as this
-    script, generated in bulk offline). This one isn't reproducible by
-    this script alone -- it requires actually running CryoSPARC -- but
-    it's the stronger evidence: if simulated particles are physically
-    realistic, CryoSPARC's own 2D classification should sort them into the
-    same classes as the real particles they're mixed with, roughly in
-    proportion to each class's real/simulated split.
+The side-by-side comparison of individual real and simulated particles lives
+in docs/tutorials/real-dataset.md (docs-figures/tutorials/real_dataset.py),
+which uses the refinement's poses in the model's frame.
 
 Run with: uv run python docs-figures/particle_stack_empiar_11377.py
-Saves PNGs directly into docs/assets/images/ (consumed by
-docs/user-guide/particle-stack.md). Needs a GPU with a few GB free for the
-512^3 multislice potential/propagation; falls back to CPU (slow) otherwise.
 """
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import mrcfile
 import numpy as np
 import pandas as pd
-import torch
 
-from specter.config import ParticleStackConfig
-from specter.image import normalize_particles
-from specter.pipelines import run_particle_stack
 from specter.plots import _deep_palette
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(__file__).resolve().parent / "data"
 OUT_DIR = REPO_ROOT / "docs" / "assets" / "images"
-
-PDB_CODE = "8b0x"  # translating 70S ribosome -- EMPIAR-11377's particle
-NUM_PIXELS = 512
-DOSE = "40"  # e-/A^2, from EMDB's Experiment tab for this deposition
-COINCIDENCE_RADIUS = "2"  # pixels, matches the contrast of the real data
-POTENTIAL_SCALE = "0.5"  # approximates a thicker ice layer than the box
-
-
-def _generate_specter_particles(device: str) -> torch.Tensor:
-    with tempfile.TemporaryDirectory() as tmp:
-        config = ParticleStackConfig(
-            pdb_source=PDB_CODE,
-            n_pixels=NUM_PIXELS,
-            cs_path=str(DATA_DIR / "empiar-11377-passthrough-5particles.cs"),
-            n_particles=5,
-            dose=DOSE,
-            scattering_model="multislice",
-            noise_model="poisson",
-            ice_model="gd",
-            coincidence_radius=COINCIDENCE_RADIUS,
-            potential_scale=POTENTIAL_SCALE,
-            detector_model="none",
-            normalize_particles=True,
-            device=device,
-            batchsize=1,
-            output_dir=tmp,
-            filename="empiar_11377_sim",
-        )
-        run_particle_stack(config)
-        with mrcfile.open(Path(tmp) / "empiar_11377_sim.mrcs") as mrc:
-            return torch.as_tensor(np.asarray(mrc.data).copy())
-
-
-def _load_real_particles() -> torch.Tensor:
-    with mrcfile.open(DATA_DIR / "empiar-11377-real-5particles.mrcs") as mrc:
-        images = torch.as_tensor(np.asarray(mrc.data).copy())
-    particles, _means, _stds = normalize_particles(images)
-    return particles
-
-
-def _figure_comparison(sim: torch.Tensor, real: torch.Tensor) -> None:
-    n = sim.shape[0]
-    fig, axes = plt.subplots(2, n, dpi=200, constrained_layout=True, figsize=(2 * n, 4))
-    for ax in axes.ravel():
-        ax.set(xticks=[], yticks=[])
-    for i in range(n):
-        axes[0, i].imshow(sim[i], cmap="gray")
-        axes[1, i].imshow(real[i], cmap="gray")
-    axes[0, 0].set_ylabel("SPECTER")
-    axes[1, 0].set_ylabel("EMPIAR-11377")
-    path = OUT_DIR / "particle-stack-empiar-11377-comparison.png"
-    fig.savefig(path, dpi=200)
-    plt.close(fig)
-    print(f"wrote {path}")
 
 
 def _figure_2d_classes() -> None:
@@ -157,10 +78,6 @@ def _figure_2d_classes() -> None:
 
 
 def main() -> None:
-    device = "cuda:3" if torch.cuda.is_available() else "cpu"
-    sim = _generate_specter_particles(device)
-    real = _load_real_particles()
-    _figure_comparison(sim, real)
     _figure_2d_classes()
 
 

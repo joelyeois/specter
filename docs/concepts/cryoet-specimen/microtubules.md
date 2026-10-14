@@ -19,6 +19,9 @@ rigid copies of a single tubulin dimer, the same machinery
 `PROTOFILAMENT_SPEC` is different: it gives you a **single**
 protofilament, one strand, no tube, no lumen, no seam.
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.specimen.filament` (`_lattice`, `_frames`, `_tube`, `_tubulin`),
     stamped by `TomogramSpecimenGenerator._stamp_microtubules`.

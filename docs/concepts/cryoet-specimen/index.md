@@ -14,6 +14,9 @@ that describe it.
 Every component is optional. A run needs at least one of them; any
 combination is valid.
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md) and [Tilt series](../../walkthrough/tilt-series.md), which show it step by step with code and figures.
+
 !!! info "Source"
     `specter.specimen.tomogram`, plus the per-component modules
     linked below. `docs-figures/cryoet_specimen_overview.py` produces the

@@ -1,0 +1,3 @@
+ice at 300 kV:     3950 Å
+ice at 120 kV:     2030 Å
+protein at 300 kV: 2460 Å

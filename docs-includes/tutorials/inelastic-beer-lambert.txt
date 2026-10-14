@@ -1,0 +1,10 @@
+300 kV     256 Å  zero-loss 0.9373  exp(-t/λ) 0.9372
+300 kV     500 Å  zero-loss 0.8811  exp(-t/λ) 0.8811
+300 kV    1000 Å  zero-loss 0.7764  exp(-t/λ) 0.7763
+300 kV    1500 Å  zero-loss 0.6841  exp(-t/λ) 0.6840
+300 kV    2000 Å  zero-loss 0.6028  exp(-t/λ) 0.6027
+120 kV     256 Å  zero-loss 0.8815  exp(-t/λ) 0.8815
+120 kV     500 Å  zero-loss 0.7817  exp(-t/λ) 0.7817
+120 kV    1000 Å  zero-loss 0.6111  exp(-t/λ) 0.6110
+120 kV    1500 Å  zero-loss 0.4777  exp(-t/λ) 0.4776
+120 kV    2000 Å  zero-loss 0.3734  exp(-t/λ) 0.3734

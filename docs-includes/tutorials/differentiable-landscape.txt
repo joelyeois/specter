@@ -1,0 +1,2 @@
+loss minimum on a 50 Å grid at 15000 Å (true 15000 Å)
+falls towards the minimum from both ends of the scan: False

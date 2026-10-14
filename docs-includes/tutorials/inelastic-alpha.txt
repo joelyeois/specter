@@ -1,0 +1,5 @@
+alpha = 0.1     256 Å  mean intensity 0.8590  as a mean free path 1685 Å
+alpha = 0.1     500 Å  mean intensity 0.7431  as a mean free path 1684 Å
+alpha = 0.1    1000 Å  mean intensity 0.5522  as a mean free path 1684 Å
+alpha = 0.1    1500 Å  mean intensity 0.4103  as a mean free path 1684 Å
+alpha = 0.1    2000 Å  mean intensity 0.3049  as a mean free path 1684 Å

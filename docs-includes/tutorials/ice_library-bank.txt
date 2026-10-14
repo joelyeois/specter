@@ -1,0 +1,3 @@
+ours: 1 configuration, bundled: 20 configurations
+ours     crop (64, 64, 64), mean 4.55 V
+bundled  crop (64, 64, 64), mean 4.51 V

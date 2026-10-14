@@ -6,6 +6,9 @@ It is `Ghostbuster`'s default propagation model for single-particle
 reconstruction, while `TomogramReconstructor` and every generation
 pipeline default to [`multislice`](multislice.md).
 
+!!! example "In code"
+    This page is the theory behind [Scattering](../../walkthrough/scattering.md#propagation-models) and [Reconstruction](../../walkthrough/reconstruction.md), which show it step by step with code and figures.
+
 !!! info "Source"
     `Scattering.rytov` / `IterativeScattering.rytov` /
     `IterativeScattering.parallel_rytov`.

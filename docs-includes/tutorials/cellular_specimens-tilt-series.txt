@@ -1,0 +1,2 @@
+7 tilts of (176, 176) px
+coverage: 49.5° max for this field

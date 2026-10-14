@@ -1,0 +1,3 @@
+0.05-0.10 1/Å at 40 e/Å²: particle alone 0.456 (E² 0.463); in ice, specimen route 0.599, transfer-function route 0.446
+0.10-0.20 1/Å at 40 e/Å²: particle alone 0.220 (E² 0.223); in ice, specimen route 0.703, transfer-function route 0.218
+0.20-0.30 1/Å at 40 e/Å²: particle alone 0.133 (E² 0.134); in ice, specimen route 0.892, transfer-function route 0.133

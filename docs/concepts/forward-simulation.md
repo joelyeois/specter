@@ -24,6 +24,9 @@ A `TiltSeries` runs this same chain once per tilt angle instead of
 once per particle. The per-image physics stays fixed. Only the
 invocation count and geometry change.
 
+!!! example "In code"
+    This page is the theory behind [the walkthrough](../walkthrough/index.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.imaging` holds the objects; each stage is a plain function in
     `specter.imaging._stages` or an engine module (`Scattering`,

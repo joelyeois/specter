@@ -15,6 +15,9 @@ cloud instead of an analytic boundary. That gives the rim a shape that
 differs from z-slice to z-slice, with islands and overhangs, rather
 than a swept 2D outline.
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.specimen._carbon` (`CarbonFilmGenerator`, `edge_hole_center`),
     a from-scratch replication of CryoTomoSim's `gen_carbon.m`/

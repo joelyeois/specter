@@ -1,0 +1,2 @@
+pdbframe   matched 0.328  shuffled 0.082   98% of pairs above  z =  28.2  PASS
+unaligned  matched 0.080  shuffled 0.078   56% of pairs above  z =   1.4  FAIL

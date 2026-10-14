@@ -168,3 +168,4 @@ markers = [
 # the code a reader sees on the page reads top to bottom, even when the
 # script's own plotting code imported the same module earlier.
 "docs-figures/walkthrough/*.py" = ["E402", "F811"]
+"docs-figures/tutorials/*.py" = ["E402", "F811"]

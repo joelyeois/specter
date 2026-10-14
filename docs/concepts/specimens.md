@@ -38,6 +38,9 @@ physics regardless of which path built it: propagating the electron wave
 through the volume and forming an image. See [Forward
 simulation](forward-simulation.md).
 
+!!! example "In code"
+    This page is the theory behind [Structures and potentials](../walkthrough/potentials.md), [Specimens: crowding and ice](../walkthrough/specimens.md) and [Cellular specimens for cryo-ET](../tutorials/cellular-specimens.md), which show it step by step with code and figures.
+
 !!! info "Source"
     Both pipelines share `specter.potential.PotentialBuilder` and
     `specter.ice`. Single-particle specimen assembly lives in

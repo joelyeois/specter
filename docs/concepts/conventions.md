@@ -11,6 +11,9 @@ themselves, such as the meaning of RELION's Euler angles or the layout of
 a STAR file; see
 [RELION's conventions page](https://relion.readthedocs.io/en/release-3.1/Reference/Conventions.html).
 
+!!! example "In code"
+    This page is the theory behind [Scattering](../walkthrough/scattering.md) and [Contrast transfer function](../walkthrough/ctf.md#the-defocus-reference-plane), which show it step by step with code and figures.
+
 !!! info "Source"
     `specter.constants`, `specter.fft`, `specter.rotations`,
     `specter.aberrations._functions`, `specter.scattering`,

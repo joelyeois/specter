@@ -5,6 +5,9 @@ the aberrated exit wave into a detector image: intensity formation, MTF
 blur, zero-frequency counting efficiency, Poisson shot noise, and, for
 direct electron detectors, coincidence loss.
 
+!!! example "In code"
+    This page is the theory behind [Detection](../walkthrough/detection.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.microscope.Detector` (image formation, MTF, coincidence
     loss) and `specter.detectors` (bundled MTF/DQE curves per detector

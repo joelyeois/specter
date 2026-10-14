@@ -7,6 +7,9 @@ transmission function with propagating it a fixed distance (one voxel of
 Z) via a Fresnel propagator, repeated once per Z-slice of the potential
 volume.
 
+!!! example "In code"
+    This page is the theory behind [Scattering](../../walkthrough/scattering.md#oversampling) and [Tilt series](../../walkthrough/tilt-series.md), which show it step by step with code and figures.
+
 !!! info "Source"
     `Scattering.multislice` / `IterativeScattering.multislice`.
     `docs-figures/scattering_accuracy.py` produces the figures,

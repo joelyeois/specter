@@ -236,6 +236,8 @@ same order as the canonical config's tables, and the
 
 ## Next
 
-This is the end of the walkthrough. The [Tutorials](../user-guide/particle-stack.md)
-take each command further, and [Theory](../concepts/index.md) holds the
-derivations behind every stage.
+This is the end of the walkthrough. The [tutorials](../tutorials/index.md)
+take the Python objects into advanced topics, the
+[Command-line guides](../user-guide/particle-stack.md) take each command
+further, and [Theory](../concepts/index.md) holds the derivations behind
+every stage.

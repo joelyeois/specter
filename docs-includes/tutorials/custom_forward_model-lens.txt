@@ -1,0 +1,1 @@
+defocus shift 256 Å; wave at the detector (1, 512, 512)

@@ -1,0 +1,2 @@
+atoms whose first step points within 90° of home: 95%
+median cosine between the step and the way home: 0.79

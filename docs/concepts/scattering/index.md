@@ -12,6 +12,9 @@ several propagation models, selected by `scattering_model`:
 accuracy and increasing order of speed. Every model shares the same two
 physical quantities.
 
+!!! example "In code"
+    This page is the theory behind [Scattering](../../walkthrough/scattering.md) and [Inelastic scattering and energy filtering](../../tutorials/inelastic.md), which show it step by step with code and figures.
+
 !!! info "Source"
     `specter.scattering.Scattering` / `IterativeScattering`.
     `docs-figures/scattering_overview.py` and

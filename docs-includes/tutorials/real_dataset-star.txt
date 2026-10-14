@@ -1,0 +1,5 @@
+  ✓ simulated/particles.mrcs
+  ✓ simulated/particles.star
+pose round trip: max rotation-matrix difference 4.5e-07
+shift round trip: max difference 9.5e-07 Å
+defocus round trip: max difference 0.0e+00 Å

@@ -388,6 +388,11 @@ docs-figures/                  # Tracked scripts that regenerate docs/assets/ima
                               # so the code and output a reader sees are the run that made the figures. Plotting
                               # stays outside quoted sections. Rerun a page's script after changing its
                               # behaviour, then re-check the prose: numbers in the text are typed from the run.
+                              # tutorials/ holds the same for docs/tutorials/ (its _common.py loads the
+                              # walkthrough's and redirects output to images/tutorials/ and
+                              # docs-includes/tutorials/); walkthrough/gallery.py makes docs/gallery.md's
+                              # thumbnails. Theory pages (docs/concepts/) open with an "In code" box linking
+                              # to where the walkthrough or a tutorial uses them.
 docs-includes/                 # Generated Markdown fragments that docs/ pulls in via pymdownx.snippets (base_path is
                               # the repo root). OUTSIDE docs/ on purpose: a .md file inside docs_dir is built as a
                               # page of its own, and a fragment is not a page. Nothing here is edited by hand —

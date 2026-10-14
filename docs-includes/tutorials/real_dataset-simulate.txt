@@ -1,0 +1,1 @@
+(64, 128, 128) simulated, mean 250.7 counts/px

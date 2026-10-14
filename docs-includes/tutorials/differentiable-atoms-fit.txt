@@ -1,0 +1,2 @@
+σ = 0.25 Å: RMSD 0.432 -> 0.0000 Å, median atom error 0.0000 Å, 0 atoms more than 0.2 Å off, loss 1.32e-06
+σ = 0.5 Å: RMSD 0.865 -> 0.3966 Å, median atom error 0.0044 Å, 48 atoms more than 0.2 Å off, loss 0.138

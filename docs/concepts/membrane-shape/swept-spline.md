@@ -12,6 +12,9 @@ path. This is the complement to the
 back near itself, rays from a single center cross it more than once, so
 it cannot be star-convex.
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     Walks through `specter.specimen.membrane._field_swept_spline`. Figures
     are produced by `docs-figures/membrane_shape_swept_spline.py`, which

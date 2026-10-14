@@ -19,6 +19,9 @@ microtubule, with its thirteen protofilaments arranged into a closed
 tube with a lumen and an A-lattice seam, gets its own page; see
 [Microtubules](microtubules.md).
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.specimen.filament` (`_path`, `_placement`, `_generator`),
     stamped by `TomogramSpecimenGenerator._stamp_filaments`.

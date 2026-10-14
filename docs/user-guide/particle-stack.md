@@ -160,55 +160,46 @@ for GPU/host memory, timings, and matched image/Fourier checks.
 
 ## Example: matching EMPIAR-11377
 
-As a check against real data, the config below drives
+As a check against real data, the command below drives
 `specter simulate particles` from a real [CryoSPARC](https://cryosparc.com/)
-passthrough `.cs` file
-instead of randomly-sampled poses. `cs_path` reads pixel size, voltage,
-alpha, pose, and CTF straight from the `.cs` file, matching a real
-experimental dataset particle-for-particle:
+`.cs` file instead of randomly sampled poses. `cs_path` reads pixel size,
+voltage, alpha, pose, and CTF straight from the `.cs` file, matching a real
+experimental dataset particle for particle:
 
 ```bash
 specter simulate particles \
     --pdb_source 8b0x \
-    --n_pixels 512 \
-    --cs_path docs-figures/data/empiar-11377-passthrough-5particles.cs \
-    --n_particles 5 \
+    --cs_path docs-figures/data/empiar-11377-64particles-pdbframe.cs \
+    --n_pixels 128 \
     --dose 40 \
-    --ice_model gd \
-    --coincidence_radius 0.8 \
-    --potential_scale 0.5 \
-    --detector_model none \
+    --detector_model falcon4i_300kv \
     --device cuda:0
 ```
-
-`--coincidence_radius 0.8` and `--potential_scale 0.5` are the values the
-figures below were generated with, and they were set by hand. They are not
-recommended settings: a potential scale or coincidence radius tuned to make
-a simulation resemble a dataset stands in for physics the model lacks.
-To derive settings for a real dataset, use
-[`specter match particles`](dataset-twin.md), which takes the coincidence
-radius from the detector and dose rate and fits neither quantity.
 
 Pass `--star_path particles.star` instead of `--cs_path` to drive the same
 code path from a RELION `.star` file: SPECTER reads both the single-block
 layout it writes itself and the RELION 3.1+ two-block (`optics` +
 `particles`) layout. The two flags are mutually exclusive.
 
-`docs-figures/data/empiar-11377-passthrough-5particles.cs` is a 5-row slice
-of a real passthrough `.cs` file from
-[EMPIAR-11377](https://www.ebi.ac.uk/empiar/EMPIAR-11377/), a translating
-70S ribosome dataset (PDB [8b0x](https://www.rcsb.org/structure/8B0X)),
-committed to the repo so this exact command is reproducible without access
-to the original dataset. Running it and comparing the output against the 5
-matching real particle images
-(`docs-figures/data/empiar-11377-real-5particles.mrcs`) gives:
+`docs-figures/data/empiar-11377-64particles-pdbframe.cs` holds 64 particles
+of a refinement of [EMPIAR-11377](https://www.ebi.ac.uk/empiar/EMPIAR-11377/),
+a translating 70S ribosome dataset (PDB [8b0x](https://www.rcsb.org/structure/8B0X)),
+with their poses in the frame of the atomic model and rescaled to 128 px. The
+poses must be in the model's frame: a refinement whose map was never aligned
+to the model gives every particle the wrong view, which no statistic over the
+whole stack reveals. The matching real images are in
+`docs-figures/data/empiar-11377-64particles-128px.mrcs`, and
+[Simulating a real dataset](../tutorials/real-dataset.md) simulates them at
+their refined poses and transfer functions and compares the two:
 
-![Five SPECTER-simulated particles (top row) next to the five real EMPIAR-11377 particles their poses/CTF were taken from (bottom row).](../assets/images/particle-stack-empiar-11377-comparison.png){ width="900" style="display:block;margin:1.2em auto;" }
+![EMPIAR-11377 particles (top) and their simulated counterparts at the same poses and defoci (bottom).](../assets/images/tutorials/real_dataset-particles.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-Five SPECTER-simulated particles (top row) next to the five real EMPIAR-11377 particles their poses/CTF were taken from (bottom row).
+Six experimental particles (top) and the same particles simulated at their
+refined poses and transfer functions (bottom), low-pass filtered to 12 Å for
+display.
 ///
 
-That's a qualitative check on 5 particles. The stronger, quantitative check
+That is a qualitative check on a handful of particles. The stronger, quantitative check
 comes from CryoSPARC itself. Pool 2000 real EMPIAR-11377 particles with 2000
 SPECTER particles (same `pdb_source`/physics parameters, generated in bulk
 offline) into one stack, then run that stack through a single CryoSPARC 2D

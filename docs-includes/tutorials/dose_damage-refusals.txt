@@ -1,0 +1,3 @@
+ValueError: the exposure already acted on the specimen or its solvent; a dose envelope on the transfer function would count it twice
+ValueError: the exposure already acted on the specimen or its solvent; a dose envelope on the transfer function would count it twice
+ValueError: damage() and Ice(motion_variance=...) need an exposure

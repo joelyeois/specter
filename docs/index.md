@@ -90,9 +90,11 @@ A simulated cryo-ET specimen
 
 ---
 
-## Tutorials
+## Command-line guides
 
-Every workflow below is a `specter` subcommand driven by a TOML config.
+Every workflow below is a `specter` subcommand driven by a TOML config. For
+the same workflows from Python, with figures, see the
+[walkthrough](walkthrough/index.md) and the [tutorials](tutorials/index.md).
 
 <div class="grid cards" markdown>
 

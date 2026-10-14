@@ -1,0 +1,1 @@
+by hand: (1, 256, 256); largest difference 0.0e+00 of the peak

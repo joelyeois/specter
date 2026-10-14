@@ -7,6 +7,9 @@ what builds that volume and how many times the chain repeats per run.
 This page lays out the sequence once; each stage has its own page with
 the underlying math.
 
+!!! example "In code"
+    This page is the theory behind [the walkthrough](../walkthrough/index.md), which shows it step by step with code and figures.
+
 !!! info "Source"
     `specter.imaging` defines the chain as data objects and the verbs
     between them. A `Specimen` (one particle box), a `Sample` (a

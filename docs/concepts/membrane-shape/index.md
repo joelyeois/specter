@@ -3,6 +3,9 @@
 `MembraneGenerator`'s `shape_backend` builds the membrane mid-surface one
 of two ways, depending on organelle topology:
 
+!!! example "In code"
+    This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
+
 - [Spherical harmonics](spherical-harmonics.md): star-convex organelles
   (vesicles, nuclei, mitochondria). Default.
 - [Swept spline](swept-spline.md): elongated, wandering tubes

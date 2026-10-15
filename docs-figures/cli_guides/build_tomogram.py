@@ -77,7 +77,7 @@ z_show = int(bilayer.sum((1, 2)).argmax())
 y_show = int(bilayer[z_show].sum(1).argmax())
 del bilayer
 regions_volume = np.asarray(mrcfile.read(out / "tomogram_regions.mrc"))
-fractions = np.bincount(regions_volume.ravel(), minlength=3) / regions_volume.size
+fractions = np.bincount(regions_volume.ravel(), minlength=4) / regions_volume.size
 regions = regions_volume[z_show].astype(np.int64)
 del regions_volume
 with mrcfile.mmap(out / "tomogram.mrc", mode="r") as mrc:
@@ -145,9 +145,9 @@ axes[0].imshow(colours[proteins], interpolation="nearest")
 axes[0].set_title("protein_labels: one id per instance")
 axes[1].imshow(membrane_rgb, interpolation="nearest")
 axes[1].set_title("membrane_labels: one id per membrane")
-region_colours = ListedColormap(["#f2f2f2", PALETTE[3], PALETTE[0]])
-axes[2].imshow(regions, cmap=region_colours, vmin=0, vmax=2, interpolation="nearest")
-axes[2].set_title("regions: cytosol, shell, lumen")
+region_colours = ListedColormap(["#f2f2f2", PALETTE[3], PALETTE[0], "#7f7f7f"])
+axes[2].imshow(regions, cmap=region_colours, vmin=0, vmax=3, interpolation="nearest")
+axes[2].set_title("regions: cytosol, shell, lumen, film")
 for ax in axes:
     ax.set_xticks([])
     ax.set_yticks([])
@@ -161,7 +161,12 @@ write_text(
     "whole volume: "
     + ", ".join(
         f"{name} {fractions[value]:.2%}"
-        for value, name in [(0, "cytosol"), (1, "shell"), (2, "lumen")]
+        for value, name in [
+            (0, "cytosol"),
+            (1, "shell"),
+            (2, "lumen"),
+            (3, "carbon film"),
+        ]
     )
     + "\n",
 )

@@ -5,24 +5,24 @@ Device: cuda
 Carbon film: 1s
 ────────────────────────────────── Membranes ───────────────────────────────────
 ─────────────────────────────────   Placement ──────────────────────────────────
-  Placement: 7s
+  Placement: 1m 13s
 ──────────────────────────   Generation & compositing ──────────────────────────
   Generation & compositing: 8s
 ───────────────────────────   Region classification ────────────────────────────
   Region classification: 2s
 ──────────────────────────────   Shell labelling ───────────────────────────────
   Shell labelling: 0s
-Membranes (6/6 instance(s) placed): 17s
+Membranes (6/6 instance(s) placed): 1m 24s
 ────────────────────────────────── Filaments ───────────────────────────────────
 Filaments (800 monomer instance(s), 5 microtubule(s)): 1s
 ──────────────────────────── Loading PDB structures ────────────────────────────
 Loaded 26 PDB structure(s): 1s
 ─────────────────────────────── Cytosol species ────────────────────────────────
-  Target packing (cytosol): 3s
+  Target packing (cytosol): 2s
   Target rendering (cytosol): 0s
   Filler packing (cytosol): 7s
-  Filler rendering (cytosol): 3s
-Cytosol species: 15s
+  Filler rendering (cytosol): 2s
+Cytosol species: 14s
 ──────────────────────────────── Lumen species ─────────────────────────────────
   Filler packing (lumen): 2s
   Filler rendering (lumen): 0s
@@ -40,4 +40,4 @@ Lumen species: 2s
   ✓ tomograms/tomogram_membrane_labels.mrc
   ✓ tomograms/tomogram_regions.mrc
 
-Total time: 1m 1s
+Total time: 2m 7s

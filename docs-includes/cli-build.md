@@ -67,7 +67,7 @@ specter build tomogram [OPTIONS]
 | --- | --- | --- | --- |
 | `--write_picks` | `True` \| `False` | `True` | Write one copick-style .ndjson pick file per species alongside the volume. Filler species (declared via 'ratio', not 'n_copies') are included by default -- see TomogramProteinSpec's own role/export_picks docstrings for how to exclude them instead. |
 | `--annotation_version` | `TEXT` | `1.0` | Version string used in pick filenames ('{species}-{version}_orientedpoint.ndjson'). |
-| `--write_segmentation` | `True` \| `False` | `True` | Save per-instance integer label volumes as .mrc alongside the density volume -- the intended ground truth for membrane geometry specifically (not a coordinate file, since a membrane surface has no single natural 'position' the way a protein does). {filename}_protein_labels.mrc is always written; {filename}_membrane_labels.mrc and {filename}_regions.mrc (0=cytosol/1=shell/2=lumen) are added when [[membrane]] is set. |
+| `--write_segmentation` | `True` \| `False` | `True` | Save per-instance integer label volumes as .mrc alongside the density volume -- the intended ground truth for membrane geometry specifically (not a coordinate file, since a membrane surface has no single natural 'position' the way a protein does). {filename}_protein_labels.mrc is always written; {filename}_membrane_labels.mrc and {filename}_regions.mrc (0=cytosol/1=shell/2=lumen/3=carbon film) are added when [[membrane]] is set. |
 
 **Compute**{ #specter-build-tomogram-compute }
 

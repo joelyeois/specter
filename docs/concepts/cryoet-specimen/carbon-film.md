@@ -135,7 +135,9 @@ Downstream:
   after the fact (see [Filaments](filaments.md)).
 - **Beads and protein fill** avoid it for free: the region classifier
   reads carbon's high density as `shell`, the same bucket a bilayer
-  occupies, and nothing gets packed into `shell`.
+  occupies, and nothing gets packed into `shell`. The written
+  `{filename}_regions.mrc` gives the film its own class, 3, so the file
+  separates bilayer from support.
 
 Hole *placement* is deterministic and controllable: `edge_hole_center`
 solves directly for the required `hole_center` instead of sampling one.

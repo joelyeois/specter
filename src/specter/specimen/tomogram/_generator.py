@@ -347,7 +347,13 @@ class TomogramSpecimenGenerator(
     regions : dict of str to torch.Tensor
         ``{"shell", "lumen", "cytosol"}`` boolean masks, set after
         `generate()` runs (see `classify_membrane_regions`) -- computed on
-        the COMPOSITED (all instances merged) volume.
+        the COMPOSITED (all instances merged) volume. ``"shell"`` holds the
+        carbon film as well as the bilayers, which is what keeps the packed
+        species off the film.
+    carbon_mask : torch.Tensor or None
+        The carbon film's footprint, ``True`` wherever the film put density,
+        shape `target_shape`; None without a film. Set after `generate()`
+        runs, so a written region volume can tell the film from a bilayer.
     membrane_labels : torch.Tensor
         Per-instance integer label volume for the membrane SHELL itself --
         `membrane_labels == i+1` is instance `i`'s own shell (first-write-
@@ -525,6 +531,7 @@ class TomogramSpecimenGenerator(
         )
 
         self.regions: dict[str, torch.Tensor] | None = None
+        self.carbon_mask: torch.Tensor | None = None
         self.membrane_labels: torch.Tensor | None = None
         # The subset of `membrane_instances` that actually made it into the
         # volume. `membrane_instances` is the REQUEST and is never pruned;
@@ -574,6 +581,7 @@ class TomogramSpecimenGenerator(
         )
 
         volume, carbon_mask = self._stage_carbon(target_shape, voxel_size)
+        self.carbon_mask = carbon_mask
 
         # Transmembrane proteins are stamped into this during the membrane
         # loop below, so it is allocated before that loop rather than after

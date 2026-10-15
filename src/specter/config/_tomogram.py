@@ -526,7 +526,7 @@ class TomogramConfig:
     # Save per-instance integer label volumes as .mrc alongside the density
     # volume ({filename}_protein_labels.mrc always; membrane mode also gets
     # {filename}_membrane_labels.mrc and {filename}_regions.mrc (0=cytosol/
-    # 1=shell/2=lumen)) -- cast to uint16 (MRC has no int32 mode). The
+    # 1=shell/2=lumen/3=carbon film)) -- cast to uint16 (MRC has no int32 mode). The
     # segmentation mask, not a coordinate file, is the intended ground truth
     # for membrane geometry (a membrane surface has no single natural
     # "position" the way a protein does).
@@ -539,7 +539,8 @@ class TomogramConfig:
             "membrane surface has no single natural 'position' the way a protein "
             "does). {filename}_protein_labels.mrc is always written; "
             "{filename}_membrane_labels.mrc and {filename}_regions.mrc "
-            "(0=cytosol/1=shell/2=lumen) are added when [[membrane]] is set."
+            "(0=cytosol/1=shell/2=lumen/3=carbon film) are added when "
+            "[[membrane]] is set."
         ),
     )
 

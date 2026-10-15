@@ -324,8 +324,8 @@ Alongside `{filename}.mrc`, by default you get:
 - **Segmentation** (`write_segmentation`):
   `{filename}_protein_labels.mrc` (always), plus
   `{filename}_membrane_labels.mrc` and `{filename}_regions.mrc`
-  (`0=cytosol`/`1=shell`/`2=lumen`) when a `[[membrane]]` is set. This is
-  the intended ground truth for membrane geometry: a
+  (`0=cytosol`/`1=shell`/`2=lumen`/`3=carbon film`) when a `[[membrane]]`
+  is set. This is the intended ground truth for membrane geometry: a
   membrane surface has no single natural "position" the way a protein
   does, so it isn't represented in the picks files.
 
@@ -343,7 +343,7 @@ The three label volumes on the slice shown above: 1939 protein instances,
 each in its own colour; the four bilayers this slice cuts; and the region
 classes. None of this draw's membranes encloses a sealed compartment, so
 their interiors are classified as cytosol and the lumen class rounds to
-0.00% of the volume.
+0.00% of the volume. The carbon film, class 3, does not reach this slice.
 ///
 
 `protein_labels` holds every protein instance on one id counter,

@@ -798,7 +798,13 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
             gen.membrane_labels = None
             regions_volume[gen.regions["shell"]] = 1
             regions_volume[gen.regions["lumen"]] = 2
+            # The classifier counts the film as shell, which keeps the packed
+            # species off it; the file is membrane ground truth, so the film
+            # gets a class of its own there.
+            if gen.carbon_mask is not None:
+                regions_volume[gen.carbon_mask & gen.regions["shell"]] = 3
             gen.regions = None
+            gen.carbon_mask = None
             _write_label_mrc("_regions.mrc", regions_volume, "uint16")
             del regions_volume
 

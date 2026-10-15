@@ -317,6 +317,36 @@ def test_cli_build_tomogram_write_segmentation_smoke(tmp_path: Path) -> None:
     assert (tmp_path / "test_membrane_tomogram_regions.mrc").exists()
 
 
+def test_cli_build_tomogram_regions_give_the_carbon_film_its_own_class(
+    tmp_path: Path,
+) -> None:
+    """The region classifier counts the carbon film as shell, which keeps the
+    packed species off it, but `_regions.mrc` is membrane ground truth: the
+    film is class 3 there, and the bilayer stays class 1."""
+    config_path = tmp_path / "membrane_tomogram.toml"
+    _write_membrane_test_config(
+        config_path, tmp_path, include_lumen=False, include_transmembrane=False
+    )
+    config_path.write_text(
+        config_path.read_text()
+        + """
+[[carbon_film]]
+hole_radius = 6000.0
+edge_fraction = 0.1
+edge_side = "left"
+"""
+    )
+
+    result = _run_build_cli(config_path)
+    assert result.returncode == 0, result.stderr
+    with mrcfile.open(tmp_path / "test_membrane_tomogram_regions.mrc") as mrc:
+        regions = np.asarray(mrc.data)
+    assert set(np.unique(regions).tolist()) >= {0, 1, 3}
+    # The film intrudes from the left (low x) edge, the bilayer sits mid-box.
+    film_x = np.nonzero((regions == 3).any(axis=(0, 1)))[0]
+    assert film_x.min() == 0 and film_x.max() < regions.shape[2] // 2
+
+
 def test_cli_build_tomogram_write_segmentation_override(tmp_path: Path) -> None:
     """--write_segmentation False overrides the loaded TOML config's default
     (True) end to end -- no label .mrc files should be written."""

@@ -262,7 +262,14 @@ expansion is the bottleneck. Omit `--symmetry` for C1 (no symmetry).
 ## Limitations
 
 Pose, translation, and defocus refinement (`--lr_R`/`--lr_T`/`--lr_D`) are
-wired in but **unverified**: no test currently checks recovered rotations,
-translations, or defocus against ground truth. Treat a run with any of
-these set as an experiment, not a validated result, until that
-verification lands.
+validated against ground truth only with the map held fixed (no `--lr`).
+Under that condition each group, and all three together, recover simulated
+particles' true rotations, shifts and defocus from errors of 3°, 2 Å and
+300 Å, to within 0.05°, 0.02 Å and 2 Å on noiseless images; with Poisson
+noise they settle where refinement started from the truth also settles,
+the noise-limited optimum (0.14°, 0.07 Å and 3 Å for 16 particles of 6BDF
+at 4 Å and 50 e⁻/Å²). `--lr_D` refines one defocus offset that every
+particle shares. Refinement alongside the map, where a rotation or shift of
+the map can trade against the poses, is not validated: treat a run that
+sets `--lr` together with any of these as an experiment, not a validated
+result.

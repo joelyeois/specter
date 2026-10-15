@@ -211,9 +211,10 @@ by default, compute the half-map FSC after every epoch, and record the run as
 a numbered job. [Reconstruct a volume](../user-guide/reconstruction.md)
 covers the workflow.
 
-`Reconstructor` can also refine each particle's rotation, shift and defocus
-alongside the map (`lr_R`, `lr_T`, `lr_D`). That refinement is not yet
-validated against ground truth; see
+`Reconstructor` can also refine each particle's rotation and shift, and a
+defocus offset, alongside the map (`lr_R`, `lr_T`, `lr_D`). With the map held
+fixed that refinement recovers the true values of simulated particles;
+alongside map refinement it is not validated. See
 [Limitations](../user-guide/reconstruction.md#limitations).
 
 ## Next

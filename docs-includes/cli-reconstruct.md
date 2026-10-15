@@ -14,7 +14,7 @@ specter reconstruct [OPTIONS] COMMAND [ARGS]...
 
 ## `specter reconstruct particle` { #specter-reconstruct-particle }
 
-Reconstruct a 3D volume from an experimental single-particle stack, by fitting the same physics-based forward model `specter simulate particles` generates with. Takes a CryoSPARC .cs file for the poses and CTF parameters plus the .mrc/.mrcs stack it indexes, and writes the reconstructed volume, per-epoch volumes and FSC curves into a run directory. Start with --test_run, which fits one epoch on binned images and exercises every path and parameter for a fraction of the cost. Pose, translation and defocus refinement (--lr_R/--lr_T/--lr_D) are wired in but unverified against ground truth. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below is optional and, if given, overrides one field of it.
+Reconstruct a 3D volume from an experimental single-particle stack, by fitting the same physics-based forward model `specter simulate particles` generates with. Takes a CryoSPARC .cs file for the poses and CTF parameters plus the .mrc/.mrcs stack it indexes, and writes the reconstructed volume, per-epoch volumes and FSC curves into a run directory. Start with --test_run, which fits one epoch on binned images and exercises every path and parameter for a fraction of the cost. Pose, translation and defocus refinement (--lr_R/--lr_T/--lr_D) are validated against ground truth with the map held fixed, not alongside map refinement. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below is optional and, if given, overrides one field of it.
 
 ```text
 specter reconstruct particle [OPTIONS]
@@ -88,13 +88,13 @@ specter reconstruct particle [OPTIONS]
 | `--cryosparc_ref` | `TEXT` | _none_ | CryoSPARC's own reconstruction (.mrc), plotted alongside --fsc_ref for comparison. Only used when --fsc_ref is given too. Accepts a comma-separated '&lt;A&gt;,&lt;B&gt;' pair to compare each halfset against CryoSPARC's matching half-map, which is what --halfset gold wants; a single path is used for whichever halfset runs. |
 | `--use_2d_mask` | `True` \| `False` | `False` | Rotate --fsc_mask per particle, project it to 2D, and weight the image-domain loss by it. |
 
-**Refinement (unverified)**{ #specter-reconstruct-particle-refinement-unverified }
+**Refinement**{ #specter-reconstruct-particle-refinement }
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--lr_R` | `FLOAT` | _none_ | Learning rate for per-particle rotations. UNVERIFIED: pose refinement is wired in but no test checks recovered rotations against ground truth. |
-| `--lr_T` | `FLOAT` | _none_ | Learning rate for per-particle translations. UNVERIFIED, see --lr_R. |
-| `--lr_D` | `FLOAT` | _none_ | Learning rate for the defocus offset. UNVERIFIED, see --lr_R. |
+| `--lr_R` | `FLOAT` | _none_ | Learning rate for per-particle rotations. Validated against ground truth with the map held fixed (no --lr): a few degrees of error converge to the noise-limited optimum. Not validated alongside map refinement. |
+| `--lr_T` | `FLOAT` | _none_ | Learning rate for per-particle translations. Validated as --lr_R is. |
+| `--lr_D` | `FLOAT` | _none_ | Learning rate for the defocus offset every particle shares. Validated as --lr_R is. |
 | `--defocus_offset` | `FLOAT` | `0.0` | Constant offset in Angstrom added to every particle's dfu/dfv. The starting point when --lr_D refinement is enabled. |
 
 **Advanced**{ #specter-reconstruct-particle-advanced }

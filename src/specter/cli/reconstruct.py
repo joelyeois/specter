@@ -34,7 +34,7 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Output & job tracking", ["output_dir", "project", "job_id"]),
     ("Reference maps", ["fsc_ref", "fsc_mask", "cryosparc_ref", "use_2d_mask"]),
     (
-        "Refinement (unverified)",
+        "Refinement",
         ["lr_R", "lr_T", "lr_D", "defocus_offset"],
     ),
     (
@@ -107,8 +107,8 @@ def build_reconstruct_group(name: str = "reconstruct") -> click.RichGroup:
             "curves into a run directory. Start with --test_run, which fits one "
             "epoch on binned images and exercises every path and parameter for a "
             "fraction of the cost. Pose, translation and defocus refinement "
-            "(--lr_R/--lr_T/--lr_D) are wired in but unverified against ground "
-            "truth. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every "
+            "(--lr_R/--lr_T/--lr_D) are validated against ground truth with the "
+            "map held fixed, not alongside map refinement. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every "
             "flag below is optional and, if given, overrides one field of it.",
         )
     )

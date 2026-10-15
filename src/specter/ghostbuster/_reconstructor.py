@@ -502,14 +502,22 @@ class Reconstructor(_BaseReconstructor):
         tuple
             (optimizers, lr_schedulers) — only the volume optimiser gets a
             scheduler; rotation/translation/defocus optimisers use a fixed LR.
+
+        Notes
+        -----
+        No weight decay on the pose and defocus parameters. AdamW's default
+        (0.01) pulls each one towards zero by ``lr * 0.01 * value`` a step,
+        against an Adam step of about ``lr``, so a value settles where the
+        two balance, near 100 in its own units whatever the learning rate: a
+        defocus offset could not move more than ~100 A from zero.
         """
         opts, lr_schedulers = self._volume_optimizer()
         if self.lr_R is not None:
-            opts.append(AdamW([self.rotations], lr=self.lr_R))
+            opts.append(AdamW([self.rotations], lr=self.lr_R, weight_decay=0.0))
         if self.lr_T is not None:
-            opts.append(AdamW([self.translations], lr=self.lr_T))
+            opts.append(AdamW([self.translations], lr=self.lr_T, weight_decay=0.0))
         if self.lr_D is not None:
-            opts.append(AdamW([self.defocus_offset], lr=self.lr_D))
+            opts.append(AdamW([self.defocus_offset], lr=self.lr_D, weight_decay=0.0))
         return opts, lr_schedulers
 
     def _compute_loss(

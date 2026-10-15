@@ -282,27 +282,32 @@ class ReconstructionConfig:
         ),
     )
 
-    # --- Refinement (unverified) ---
-    # Pose and defocus refinement. Wired in but unverified: no test checks
-    # recovered rotations, translations or defocus against ground truth, so
-    # treat a run with these set as an experiment, not a result.
+    # --- Refinement ---
+    # Pose and defocus refinement. Validated against ground truth with the map
+    # held fixed (tests/test_reconstructor_refinement.py): each group, and all
+    # three together, recover their truth from a few degrees, Angstrom and
+    # hundred Angstrom of error. Not validated alongside map refinement.
     lr_R: float | None = setting(
         None,
         help=(
-            "Learning rate for per-particle rotations. UNVERIFIED: pose "
-            "refinement is wired in but no test checks recovered rotations against "
-            "ground truth."
+            "Learning rate for per-particle rotations. Validated against ground "
+            "truth with the map held fixed (no --lr): a few degrees of error "
+            "converge to the noise-limited optimum. Not validated alongside map "
+            "refinement."
         ),
         check="non_negative",
     )
     lr_T: float | None = setting(
         None,
-        help="Learning rate for per-particle translations. UNVERIFIED, see --lr_R.",
+        help="Learning rate for per-particle translations. Validated as --lr_R is.",
         check="non_negative",
     )
     lr_D: float | None = setting(
         None,
-        help="Learning rate for the defocus offset. UNVERIFIED, see --lr_R.",
+        help=(
+            "Learning rate for the defocus offset every particle shares. "
+            "Validated as --lr_R is."
+        ),
         check="non_negative",
     )
     # Constant offset in Angstrom added to every particle's dfu/dfv before the

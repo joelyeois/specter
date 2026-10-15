@@ -10,13 +10,14 @@ the same division of labor its protein stamping already uses (geometry
 decided here, rendering done by the caller, which alone knows about voxel
 sizes/atomic potentials).
 
-The presets: `ACTIN_SPEC` stacks uncomplexed G-actin (PDB 1J6Z [4]_) on
-F-actin's measured helix, a rise of 27.5 A and a twist of -166.6 degrees per
-subunit [6]_ [7]_ (the left-handed genetic helix of the Holmes model [2]_,
-whose twist varies from subunit to subunit [1]_); `PROTOFILAMENT_SPEC`
-stacks the alpha-beta tubulin dimer (PDB 1TUB [3]_) at the dimer repeat of
-the GDP microtubule lattice, `_lattice.DIMER_REPEAT`. Both `flex_deg` values
-are CryoTomoSim's [5]_.
+The presets: `ACTIN_SPEC` stacks one subunit of a deposited ADP-F-actin
+filament (PDB 7BT7 [4]_), lifted out in the filament frame by
+``_actin.extract_actin_subunit``, on F-actin's measured helix, a rise of
+27.5 A and a twist of -166.6 degrees per subunit [6]_ [7]_ (the left-handed
+genetic helix of the Holmes model [2]_, whose twist varies from subunit to
+subunit [1]_); `PROTOFILAMENT_SPEC` stacks the alpha-beta tubulin dimer
+(PDB 1TUB [3]_) at the dimer repeat of the GDP microtubule lattice,
+`_lattice.DIMER_REPEAT`. Both `flex_deg` values are CryoTomoSim's [5]_.
 
 References
 ----------
@@ -29,9 +30,10 @@ References
 .. [3] Nogales, E., Wolf, S. G., & Downing, K. H. (1998). Structure of the αβ
    tubulin dimer by electron crystallography. *Nature*, 391(6663), 199–203.
    https://doi.org/10.1038/34465
-.. [4] Otterbein, L. R., Graceffa, P., & Dominguez, R. (2001). The crystal
-   structure of uncomplexed actin in the ADP state. *Science*, 293(5530),
-   708–711. https://doi.org/10.1126/science.1059700
+.. [4] Kumari, A., Kesarwani, S., Javoor, M. G., Vinothkumar, K. R., &
+   Sirajuddin, M. (2020). Structural insights into actin filament
+   recognition by commonly used cellular actin markers. *The EMBO Journal*,
+   39(14), e104006. https://doi.org/10.15252/embj.2019104006 (PDB 7BT7)
 .. [5] Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
    Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
    (2023). Rapid synthesis of cryo-ET data for training deep learning models.
@@ -51,12 +53,19 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, get_args
 
 import torch
 
+from ._actin import ACTIN_FILAMENT_SOURCE
 from ._lattice import DIMER_REPEAT
 from ._path import generate_filament_path
 from ._placement import filament_orientations
+
+
+#: How the structure a `FilamentSpec` names is placed relative to the
+#: filament axis; see `FilamentSpec.frame`.
+FilamentFrame = Literal["principal_axis", "actin_filament"]
 
 
 @dataclass
@@ -66,8 +75,9 @@ class FilamentSpec:
     Parameters
     ----------
     code : str
-        PDB ID (fetched from RCSB) or local file path for the monomer
-        structure repeated along the filament.
+        PDB ID (fetched from RCSB) or local file path for the structure
+        the subunit comes from: the monomer itself, or, for
+        ``frame="actin_filament"``, a deposited model of the filament.
     step : float
         Axial rise per monomer, Å.
     flex_deg : float
@@ -88,6 +98,16 @@ class FilamentSpec:
         Monomer count per filament instance. A fixed int, or a
         ``(min, max)`` range (inclusive) drawn uniformly per instance.
         Default ``(10, 30)``.
+    frame : {"principal_axis", "actin_filament"}, optional
+        Where each subunit sits relative to the filament axis.
+        ``"principal_axis"`` (default): `code` is an isolated monomer,
+        centred on the axis with its longest principal axis along it, an
+        approximation that fixes neither the subunit's distance from the
+        axis nor its roll about it. ``"actin_filament"``: `code` is a
+        deposited model of F-actin itself; one subunit is lifted out of it
+        together with the filament axis (``_actin.extract_actin_subunit``),
+        and every copy sits where that subunit sits in the deposited
+        filament, off the axis. `ACTIN_SPEC` uses it.
     """
 
     code: str
@@ -96,6 +116,14 @@ class FilamentSpec:
     twist_deg: float = 0.0
     n_copies: int = 1
     n_monomers: int | tuple[int, int] = (10, 30)
+    frame: FilamentFrame = "principal_axis"
+
+    def __post_init__(self) -> None:
+        if self.frame not in get_args(FilamentFrame):
+            raise ValueError(
+                f"FilamentSpec.frame must be one of {get_args(FilamentFrame)}, "
+                f"got {self.frame!r}"
+            )
 
 
 #: Tubulin alpha-beta dimer (PDB 1TUB, electron crystallography) repeated
@@ -117,20 +145,26 @@ PROTOFILAMENT_SPEC = FilamentSpec(
     code="1TUB", step=DIMER_REPEAT, flex_deg=3.0, twist_deg=0.0, n_monomers=(10, 30)
 )
 
-#: Uncomplexed G-actin monomer (PDB 1J6Z) repeated as F-actin. step=27.5 A
-#: and twist=-166.6 deg are F-actin's measured rise and twist per subunit
-#: (Dominguez & Holmes 2011; von der Ecken et al. 2015; the deposited
-#: filaments 6DJO and 7BT7 give -166.55/27.45 and -166.6/27.5). The sign
-#: makes the one-start genetic helix left-handed, which in turn makes the two
-#: long-pitch strands right-handed (2 * -166.6 + 360 = +26.8 deg per 55 A).
-#: The idealised 13/6 twist, -166.15 deg, repeats after exactly 13 subunits
-#: and is a drawing convenience, not a measurement. flex=12 deg is CTS's own
-#: tuned value for actin's greater flexibility relative to microtubules.
-#: The helix is F-actin's; the subunit arrangement is not: the monomer sits
-#: on the axis with its longest principal axis along it, where a deposited
-#: filament's subunits sit 16 A off the axis with that axis ~80 deg from it.
+#: F-actin: one subunit of the deposited ADP-F-actin filament 7BT7
+#: (Kumari et al. 2020), lifted out in the filament frame
+#: (`_actin.extract_actin_subunit`), so each copy sits 15.7 A off the axis
+#: with its longest principal axis 81 deg from it, as in the deposited
+#: filament. step=27.5 A and twist=-166.6 deg are F-actin's measured rise
+#: and twist per subunit (Dominguez & Holmes 2011; von der Ecken et al.
+#: 2015), and 7BT7's own deposited helical parameters; 6DJO gives
+#: -166.55/27.45. The sign makes the one-start genetic helix left-handed,
+#: which in turn makes the two long-pitch strands right-handed
+#: (2 * -166.6 + 360 = +26.8 deg per 55 A). The idealised 13/6 twist,
+#: -166.15 deg, repeats after exactly 13 subunits and is a drawing
+#: convenience, not a measurement. flex=12 deg is CTS's own tuned value for
+#: actin's greater flexibility relative to microtubules.
 ACTIN_SPEC = FilamentSpec(
-    code="1J6Z", step=27.5, flex_deg=12.0, twist_deg=-166.6, n_monomers=(20, 60)
+    code=ACTIN_FILAMENT_SOURCE,
+    step=27.5,
+    flex_deg=12.0,
+    twist_deg=-166.6,
+    n_monomers=(20, 60),
+    frame="actin_filament",
 )
 
 
@@ -147,8 +181,15 @@ class FilamentInstance:
     code: str
     filament_id: int
     monomer_index: int
-    position_xyz: torch.Tensor  # (3,), physical Å
-    rotation_matrix: torch.Tensor  # (3, 3)
+    #: (3,), physical Å: the copy's point on the filament path. For a
+    #: filament that is a point on its axis, level with the subunit, not
+    #: necessarily the subunit's own centre: an ``"actin_filament"`` subunit
+    #: sits off the axis, at ``position_xyz + rotation_matrix @ c`` for its
+    #: centre ``c`` in the filament frame. For a microtubule it is the
+    #: dimer's centre on the tube wall.
+    position_xyz: torch.Tensor
+    #: (3, 3): template-to-world rotation; see `filament_orientations`.
+    rotation_matrix: torch.Tensor
     protofilament_index: int | None = None
 
 

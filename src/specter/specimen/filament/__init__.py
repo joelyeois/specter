@@ -1,7 +1,13 @@
+from ._actin import (
+    ACTIN_FILAMENT_SOURCE,
+    extract_actin_subunit,
+    measure_actin_filament,
+)
 from ._frames import parallel_transport_frames
 from ._generator import (
     ACTIN_SPEC,
     PROTOFILAMENT_SPEC,
+    FilamentFrame,
     FilamentInstance,
     FilamentSpec,
     place_filaments,
@@ -25,6 +31,7 @@ from ._tube import (
 from ._tubulin import MT_DIMER_SOURCE, extract_mt_dimer, measure_source_lattice
 
 __all__ = [
+    "ACTIN_FILAMENT_SOURCE",
     "ACTIN_SPEC",
     "DIMER_REPEAT",
     "LATERAL_SPACING",
@@ -32,13 +39,16 @@ __all__ = [
     "MT_DIMER_SOURCE",
     "PERSISTENCE_LENGTH",
     "PROTOFILAMENT_SPEC",
+    "FilamentFrame",
     "FilamentInstance",
     "FilamentSpec",
     "MicrotubuleInstance",
     "MicrotubuleSpec",
     "TubeLattice",
     "build_tube_instances",
+    "extract_actin_subunit",
     "extract_mt_dimer",
+    "measure_actin_filament",
     "measure_source_lattice",
     "microtubule_axis_path",
     "parallel_transport_frames",

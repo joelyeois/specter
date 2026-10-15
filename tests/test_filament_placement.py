@@ -1,4 +1,4 @@
-"""Geometry tests for the filament random-walk path, tangent-aligned
+"""Geometry tests for the filament random-walk path, parallel-transported
 orientation, and per-species placement -- pure functions, no PDB fetch, no
 PotentialBuilder/rendering, so these run fast and fully offline.
 """
@@ -149,6 +149,40 @@ def test_filament_orientations_twist_rotates_about_tangent():
     # And the relative rotation's axis is the shared tangent (relative
     # leaves it fixed).
     assert torch.allclose(relative @ tangent, tangent, atol=1e-3)
+
+
+def test_off_axis_subunits_keep_their_spacing_where_the_path_runs_along_minus_z():
+    """The only roll between consecutive monomers is the twist.
+
+    Each monomer's frame is parallel-transported along the path, so a
+    subunit sitting off the filament axis stays one subunit spacing from
+    its neighbour however the path bends. Rotating the template's ``+Z``
+    onto each tangent independently instead rolls the frame wherever the
+    path runs close to ``-Z``, where that rotation is singular: on this path
+    it moved subunits 15.7 A off the axis up to 12.4 A out of place.
+    """
+    n, radius = 41, 15.7
+    sweep = torch.linspace(-0.35, 0.35, n)
+    tangents = torch.stack(
+        [torch.full_like(sweep, 0.003), sweep, -torch.ones_like(sweep)], dim=1
+    )
+    tangents = tangents / tangents.norm(dim=1, keepdim=True)
+    bent = torch.cat(
+        [torch.zeros(1, 3), torch.cumsum(ACTIN_SPEC.step * tangents[:-1], dim=0)]
+    )
+    straight = torch.arange(n, dtype=torch.float32).unsqueeze(1) * torch.tensor(
+        [0.0, 0.0, ACTIN_SPEC.step]
+    )
+    offset = torch.tensor([radius, 0.0, 0.0])
+
+    def spacing(positions: torch.Tensor) -> torch.Tensor:
+        centres = (
+            positions + filament_orientations(positions, ACTIN_SPEC.twist_deg) @ offset
+        )
+        return (centres[1:] - centres[:-1]).norm(dim=-1)
+
+    # About 1 deg of bend per step: only that bend may change the spacing.
+    assert (spacing(bent) - spacing(straight).mean()).abs().max() < 0.5
 
 
 def test_presets_take_their_numbers_from_measured_structures():

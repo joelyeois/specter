@@ -25,6 +25,10 @@ from ..filament import (
     place_filaments,
     place_microtubules,
 )
+from ..filament._actin import (
+    extract_actin_subunit,
+    subunit_centre_in_filament_frame,
+)
 from ..membrane._placement import align_principal_axis_to_z
 from ._helpers import _insert_rotated_copies
 
@@ -337,7 +341,7 @@ class _FilamentStageMixin:
             voxel_size,
             instances,
             instance_ids=instance_ids,
-            align_to_z=False,
+            as_given=True,
         )
 
     def _microtubule_lumen_mask(
@@ -376,6 +380,54 @@ class _FilamentStageMixin:
                 mask[iz0:iz1, iy0:iy1, ix0:ix1] |= inside
         return mask
 
+    def _filament_frame(self, code: str) -> str:
+        """The `FilamentSpec.frame` of the filament species named `code`.
+
+        Instances carry only their `code`, so the frame is looked up on the
+        specs; a `code` no spec names is an isolated monomer.
+        """
+        frames = {spec.frame for spec in self.filament_specs if spec.code == code}
+        if len(frames) > 1:
+            raise ValueError(
+                f"filament code {code!r} is listed with several frames "
+                f"({sorted(frames)}); a code renders one way only"
+            )
+        return frames.pop() if frames else "principal_axis"
+
+    def _filament_template(
+        self, code: str, voxel_size: float, as_given: bool
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """One species' potential template, and where its centre sits.
+
+        Returns
+        -------
+        template : torch.Tensor
+            The rendered potential, centred on the structure's centroid.
+        centre : torch.Tensor
+            That centroid in the template's own frame relative to a copy's
+            `position_xyz`, shape ``(3,)``, Å: a copy's template centre
+            lands at ``position_xyz + rotation_matrix @ centre``. Zero
+            unless the species is an ``"actin_filament"`` subunit, whose
+            position is a point on the filament axis and whose centre sits
+            15.7 A from it.
+        """
+        if not as_given and self._filament_frame(code) == "actin_filament":
+            path = extract_actin_subunit(code, pdb_cache_dir=self.pdb_cache_dir)
+            pdb = self._load_pdb(path)
+            centre = subunit_centre_in_filament_frame(
+                path, pdb.coordinates, pdb.atomic_numbers
+            )
+            return self._build_species_template(pdb, voxel_size, self.device), centre
+
+        pdb = self._load_pdb(code)
+        coordinates = (
+            pdb.coordinates if as_given else align_principal_axis_to_z(pdb.coordinates)
+        )
+        template = self._build_species_template(
+            pdb, voxel_size, self.device, coordinates=coordinates
+        )
+        return template, torch.zeros(3)
+
     def _render_filament_instances(
         self,
         volume: torch.Tensor,
@@ -384,7 +436,7 @@ class _FilamentStageMixin:
         voxel_size: float,
         instances: list[FilamentInstance],
         instance_ids: torch.Tensor | None = None,
-        align_to_z: bool = True,
+        as_given: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         """Render placed monomer/dimer copies: one template per species,
         rotated and inserted once per instance.
@@ -396,10 +448,14 @@ class _FilamentStageMixin:
             Default None: number them sequentially from
             ``next_instance_id``, which is then advanced. Microtubule
             stamping passes explicit ids so a whole tube shares one.
-        align_to_z : bool, optional
-            Pre-rotate the template's longest principal axis onto ``+Z``.
-            Default True, as filament monomers need. Microtubules pass
-            False: their dimer template is already in the microtubule frame
+        as_given : bool, optional
+            Render each structure's coordinates as given, centred on the
+            copy's position. Default False: place each filament species by
+            its `FilamentSpec.frame`, either pre-rotating an isolated
+            monomer's longest principal axis onto ``+Z`` or lifting an
+            F-actin subunit out of a deposited filament in the filament
+            frame (`_filament_template`). Microtubules pass True: their
+            dimer template is already in the microtubule frame
             (`_tubulin.extract_mt_dimer`), where the roll about ``+Z``
             carries the radial orientation that principal-axis alignment
             has no way to know about and would be free to destroy.
@@ -422,31 +478,25 @@ class _FilamentStageMixin:
         for inst, inst_id in zip(instances, ids.tolist()):
             by_code.setdefault(inst.code, []).append((inst, inst_id))
 
-        pdb_cache: dict[str, PDB] = {}
-        templates: dict[str, torch.Tensor] = {}
-        for code in by_code:
-            if code not in pdb_cache:
-                pdb_cache[code] = self._load_pdb(code)
-            pdb = pdb_cache[code]
-            coordinates = (
-                align_principal_axis_to_z(pdb.coordinates)
-                if align_to_z
-                else pdb.coordinates
-            )
-            templates[code] = self._build_species_template(
-                pdb, voxel_size, self.device, coordinates=coordinates
-            )
+        templates: dict[str, tuple[torch.Tensor, torch.Tensor]] = {
+            code: self._filament_template(code, voxel_size, as_given)
+            for code in by_code
+        }
 
         offset = (extent_xyz / 2).to(self.device)
         for code, entries in by_code.items():
-            template = templates[code]
+            template, centre = templates[code]
 
             insts = [inst for inst, _ in entries]
+            R = torch.stack([inst.rotation_matrix for inst in insts]).to(self.device)
+            # A copy's template centre: its path point, plus the template's
+            # own centre carried into the world by the copy's rotation (zero
+            # unless the subunit sits off the filament axis).
             positions_centered = (
                 torch.stack([inst.position_xyz for inst in insts]).to(self.device)
                 - offset
+                + R @ centre.to(self.device)
             )
-            R = torch.stack([inst.rotation_matrix for inst in insts]).to(self.device)
             # `rotation_matrix` maps template coordinates to world ones (the
             # template's +Z onto the path tangent, a dimer's +X radially out),
             # while `rotate_volume` moves density by the TRANSPOSE of the

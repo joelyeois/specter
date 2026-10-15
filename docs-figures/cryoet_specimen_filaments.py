@@ -4,10 +4,10 @@ explains the filament component of `specter build tomogram`
 (``specter.specimen.filament``).
 
 Calls the same functions the real code path uses
-(`generate_filament_path`, `filament_orientations`, `place_filaments`, and
-`TomogramSpecimenGenerator` itself for the hero) rather than
-reimplementing the geometry, so the figures cannot silently drift from
-what's actually shipped.
+(`generate_filament_path`, `filament_orientations`, the generator's own
+filament renderer, and `TomogramSpecimenGenerator` itself for the hero)
+rather than reimplementing the geometry, so the figures cannot silently
+drift from what's actually shipped.
 
 Run with: uv run python docs-figures/cryoet_specimen_filaments.py
 Saves PNGs directly into docs/assets/images/.
@@ -16,6 +16,7 @@ Saves PNGs directly into docs/assets/images/.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 import matplotlib
 import numpy as np
@@ -25,15 +26,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from _render import TEAL
-from specter.crowding import insert_particles_into_micrograph
-from specter.pdb import PDB
-from specter.potential import PotentialBuilder
-from specter.rotations import build_affine_matrix, rotate_volume, rotation_aligning
-from specter.specimen.filament import ACTIN_SPEC, PROTOFILAMENT_SPEC, FilamentSpec
+from specter.rotations import rotation_aligning
+from specter.specimen.filament import (
+    ACTIN_SPEC,
+    PROTOFILAMENT_SPEC,
+    FilamentInstance,
+    FilamentSpec,
+)
 from specter.specimen.filament._path import generate_filament_path
 from specter.specimen.filament._placement import filament_orientations
-from specter.specimen.membrane._placement import align_principal_axis_to_z
-from specter.specimen.packing import estimate_protein_box_size
 from specter.specimen.tomogram import TomogramSpecimenGenerator
 
 OUT_DIR = "docs/assets/images"
@@ -62,45 +63,51 @@ def _lay_along_x(positions_xyz: torch.Tensor) -> torch.Tensor:
 
 
 def _render_segment(
-    code: str,
+    spec: FilamentSpec,
     positions_xyz: torch.Tensor,
     rotations: torch.Tensor,
     voxel_size: float,
     target_shape: tuple[int, int, int],
 ) -> torch.Tensor:
-    """Render one filament's monomers into a box, exactly the way
-    ``TomogramSpecimenGenerator._stamp_filaments`` does it: one
-    `PotentialBuilder` template per species, its longest principal axis
-    pre-aligned to +Z, then one `rotate_volume`d copy inserted per
-    monomer.
+    """Render one filament's monomers into a box through
+    ``TomogramSpecimenGenerator._render_filament_instances``, the renderer
+    `_stamp_filaments` itself calls: one template per species, prepared by
+    the spec's `frame` (an F-actin subunit lifted out of the deposited
+    filament, or a monomer's longest principal axis aligned to +Z), then
+    one rotated copy inserted per monomer.
 
-    `positions_xyz` is box-centered here (the generator's own internal
-    convention after it subtracts `extent/2`).
+    `positions_xyz` is box-centered here; the generator's instances are
+    corner-relative, so they are shifted by half the box on the way in.
     """
-    pdb = PDB(code, pdb_cache_dir=PDB_CACHE, verbose=False)
-    n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
-    builder = PotentialBuilder(
-        n_xyz=n,
-        dx=voxel_size,
-        atomic_numbers=pdb.atomic_numbers,
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=target_shape,
+        voxel_size=voxel_size,
+        protein_specs=[],
+        filament_specs=[spec],
+        pdb_cache_dir=PDB_CACHE,
+        device=DEVICE,
         progressbars=False,
-    ).to(DEVICE)
-    template = builder.forward(
-        align_principal_axis_to_z(pdb.coordinates), method="analytic"
-    ).to(DEVICE)
-
-    # `rotate_volume` moves density by the transpose of the matrix it is
-    # given, so the template-to-world rotations go in transposed, exactly as
-    # `_render_filament_instances` passes them.
-    theta = build_affine_matrix(rotations.transpose(-1, -2).to(DEVICE))
-    rotated = rotate_volume(template, theta, padding_mode="zeros")
-    volume = torch.zeros(target_shape, device=DEVICE)
-    return insert_particles_into_micrograph(
-        rotated,
-        positions_xyz.to(DEVICE),
-        pixel_size=voxel_size,
-        micrograph=volume,
-    ).cpu()
+    )
+    extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * voxel_size
+    instances = [
+        FilamentInstance(
+            code=spec.code,
+            filament_id=0,
+            monomer_index=i,
+            position_xyz=position + extent_xyz / 2,
+            rotation_matrix=rotation,
+        )
+        for i, (position, rotation) in enumerate(zip(positions_xyz, rotations))
+    ]
+    volume, _, _ = gen._render_filament_instances(
+        torch.zeros(target_shape, device=DEVICE),
+        torch.zeros(target_shape, dtype=torch.int32, device=DEVICE),
+        1,
+        voxel_size,
+        instances,
+    )
+    return volume.cpu()
 
 
 def figure_hero() -> None:
@@ -112,16 +119,7 @@ def figure_hero() -> None:
         target_shape=(60, 340, 340),
         voxel_size=voxel_size,
         protein_specs=[],
-        filament_specs=[
-            FilamentSpec(
-                code=ACTIN_SPEC.code,
-                step=ACTIN_SPEC.step,
-                flex_deg=ACTIN_SPEC.flex_deg,
-                twist_deg=ACTIN_SPEC.twist_deg,
-                n_copies=14,
-                n_monomers=(40, 90),
-            )
-        ],
+        filament_specs=[replace(ACTIN_SPEC, n_copies=14, n_monomers=(40, 90))],
         pdb_cache_dir=PDB_CACHE,
         seed=SEED,
         device=DEVICE,
@@ -187,14 +185,15 @@ def figure_flex_sweep() -> None:
 
 
 def figure_twist() -> None:
-    """Same straight monomer chain, rendered with and without the helical
-    twist. Without it every monomer presents the same face, so the strand
-    reads as a smooth ridge; with F-actin's measured -166.6 deg per-monomer
-    twist (a left-handed one-start helix) the projection picks up the
-    crossover pattern a real F-actin filament shows."""
+    """Same straight chain of F-actin subunits, rendered with and without
+    the helical twist. Without it every subunit presents the same face from
+    the same side of the axis, so the strand reads as a smooth ridge; with
+    F-actin's measured -166.6 deg per-subunit twist (a left-handed one-start
+    helix) the projection picks up the crossover pattern a real F-actin
+    filament shows."""
     voxel_size = 2.0
     n_monomers = 34
-    shape = (48, 48, 380)
+    shape = (56, 56, 380)
     positions = torch.zeros((n_monomers, 3))
     positions[:, 0] = (
         torch.arange(n_monomers, dtype=torch.float32) - (n_monomers - 1) / 2
@@ -203,9 +202,7 @@ def figure_twist() -> None:
     fig, axes = plt.subplots(2, 1, figsize=(9.0, 3.4))
     for ax, twist_deg in zip(axes, [0.0, ACTIN_SPEC.twist_deg]):
         rotations = filament_orientations(positions, twist_deg)
-        volume = _render_segment(
-            ACTIN_SPEC.code, positions, rotations, voxel_size, shape
-        )
+        volume = _render_segment(ACTIN_SPEC, positions, rotations, voxel_size, shape)
         ax.imshow(
             volume.sum(dim=0).numpy(), cmap="gray_r", origin="lower", aspect="auto"
         )
@@ -225,7 +222,7 @@ def figure_presets() -> None:
     subunits resolvable, and its flex_deg=3 keeps it far straighter."""
     voxel_size = 4.0
     specs = [
-        ("F-actin (1J6Z)", ACTIN_SPEC),
+        ("F-actin (7BT7 subunit)", ACTIN_SPEC),
         ("Microtubule protofilament (1TUB)", PROTOFILAMENT_SPEC),
     ]
     shape = (40, 200, 480)
@@ -237,7 +234,7 @@ def figure_presets() -> None:
         )
         positions = _lay_along_x(positions)
         rotations = filament_orientations(positions, spec.twist_deg)
-        volume = _render_segment(spec.code, positions, rotations, voxel_size, shape)
+        volume = _render_segment(spec, positions, rotations, voxel_size, shape)
         ax.imshow(
             volume.sum(dim=0).numpy(), cmap="gray_r", origin="lower", aspect="auto"
         )

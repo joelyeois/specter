@@ -1,13 +1,11 @@
 """
 Rotation-minimizing (parallel-transport) frames along a path.
 
-``_placement.filament_orientations`` aligns each monomer's ``+Z`` to the
-local tangent and leaves the roll about that tangent unconstrained -- fine
-for a single strand, where the only thing riding on the roll is a helical
-twist applied on top of it. A **tube** needs more: its protofilaments sit
-at fixed azimuths around the axis, so any roll drift between consecutive
-path points shears them relative to one another and the lattice comes
-apart along the bend.
+Both filament orientations (``_placement.filament_orientations``, which
+adds the helical twist on top) and tubes use them. A **tube** needs them
+most: its protofilaments sit at fixed azimuths around the axis, so any roll
+drift between consecutive path points shears them relative to one another
+and the lattice comes apart along the bend.
 
 A parallel-transport frame carries one reference normal along the path,
 removing at each step only the component that the new tangent has made

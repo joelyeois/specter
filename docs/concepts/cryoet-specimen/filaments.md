@@ -5,9 +5,9 @@
 A filaments-only specimen: fourteen actin filaments scattered through the box, summed along Z.
 ///
 
-A filament species consists of a single monomer structure, replicated
-along a random walk. Each monomer instance is a rigid-transformed copy
-of one rendered template, so a 60-monomer F-actin filament costs one
+A filament species consists of a single subunit structure, replicated
+along a random walk. Each subunit instance is a rigid-transformed copy
+of one rendered template, so a 60-subunit F-actin filament costs one
 `PotentialBuilder` render and 60 rigid-body rotations.
 
 SPECTER ships two presets: `ACTIN_SPEC`, corresponding to F-actin, and
@@ -23,18 +23,19 @@ tube with a lumen and an A-lattice seam, gets its own page; see
     This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
 
 !!! info "Source"
-    `specter.specimen.filament` (`_path`, `_placement`, `_generator`),
-    stamped by `TomogramSpecimenGenerator._stamp_filaments`.
+    `specter.specimen.filament` (`_path`, `_placement`, `_generator`,
+    `_actin`), stamped by `TomogramSpecimenGenerator._stamp_filaments`.
     `docs-figures/cryoet_specimen_filaments.py` produces the figures,
     calling the same functions the real code path does.
 
 ## The path: a persistent random walk
 
-A walk generates each filament's monomer centres, following a filament
-script in the CryoTomoSim source (Purnell et al. 2023): it advances a fixed
-distance `step` (the monomer's axial rise) along the current direction,
-then rotates that direction by a random angle drawn uniformly from
-\([0, \texttt{flex\_deg}]\) about a random axis perpendicular to it:
+A walk generates each filament's monomer positions along its axis,
+following a filament script in the CryoTomoSim source (Purnell et al.
+2023): it advances a fixed distance `step` (the monomer's axial rise)
+along the current direction, then rotates that direction by a random
+angle drawn uniformly from \([0, \texttt{flex\_deg}]\) about a random
+axis perpendicular to it:
 
 \[
 p_{i+1} = p_i + s\,d_i, \qquad
@@ -61,36 +62,65 @@ fixed weight. Here, the turn is a bounded rotation of the previous
 direction, so `flex_deg` caps how sharply a filament can kink over a
 single monomer, the physically relevant quantity for a stiff polymer.
 
-## Orientation: tangent alignment plus screw twist
+## Orientation: a transported frame plus screw twist
 
 Each monomer's rotation combines two operations, reflecting the screw
 symmetry of helical polymers:
 
-1. **Align to the tangent.** Rotate the monomer's canonical \(+Z\) onto
-   the local path tangent (monomer \(i\) → monomer \(i+1\); the last
-   monomer reuses its predecessor's tangent).
-2. **Apply the twist.** Rotate about that same axis by an accumulated
+1. **Carry a frame along the path.** The monomer's canonical \(+Z\)
+   axis is rotated onto the local path tangent (monomer \(i\) → monomer
+   \(i+1\); the last monomer reuses its predecessor's tangent) by
+   parallel transport, which adds no roll about the tangent as the path
+   bends (Bishop 1975). On a straight path this is a fixed frame.
+2. **Apply the twist.** Rotate about the tangent by an accumulated
    \(i \cdot \texttt{twist\_deg}\), by the right-hand rule about the
    direction of growth. A positive `twist_deg` builds a right-handed helix
    and a negative one a left-handed helix, the sign convention of
    deposited helical parameters, which pair a twist with a positive rise.
 
-SPECTER fixes the canonical \(+Z\) axis during template construction,
-pre-rotating the monomer's coordinates so its **longest principal
-axis** points along \(+Z\). This is an approximation; see
-[Limitations](#limitations) for a fuller discussion.
+Consecutive monomers therefore differ by the bend of the path and by the
+twist, and by nothing else. A subunit that sits off the filament axis
+would show any further roll as a displacement.
+
+How a structure's coordinates are put into that frame is set per species
+by `frame`:
+
+- **`"actin_filament"`** (`ACTIN_SPEC`). `code` names a deposited model of
+  F-actin itself, and one subunit is lifted out of it in the filament
+  frame (`extract_actin_subunit`). The filament axis is fitted from the
+  screw relating consecutive subunits, each found by a least-squares
+  superposition of one subunit onto its neighbour. The central subunit is
+  then expressed with \(+Z\) along the axis towards the barbed end, the
+  origin on the axis level with the subunit's centre, and \(+X\) out
+  through that centre. Every copy then sits where a subunit sits in the
+  deposited filament: its centre 15.7 Å from the axis, its longest
+  principal axis 81° from it.
+  Subdomains 2 and 4 (residues 33–69 and 181–269; Kabsch et al. 1990) face
+  the pointed end, and their centroid lies 21.7 Å from that of subdomains
+  1 and 3 along the axis, which fixes the polarity. Five subunits placed
+  this way on a straight path superpose onto the five of the deposited
+  filament 7BT7 (Kumari et al. 2020) with a Cα RMSD of 0.31 Å (0.63 Å over
+  all atoms), every centre within 0.07 Å and every orientation within
+  0.21°. That residual is the deposited model's own: its five chains were
+  refined independently and differ from one another by as much.
+- **`"principal_axis"`** (the default, and `PROTOFILAMENT_SPEC`). `code` is
+  an isolated monomer. SPECTER centres it on the filament axis and
+  pre-rotates its coordinates so that its **longest principal axis** points
+  along \(+Z\). This is an approximation; see
+  [Limitations](#limitations).
 
 `twist_deg` is what separates a helical polymer from a plain stack:
 
-![The same straight monomer chain rendered with twist_deg = 0 and with F-actin's measured -166.6 degrees per monomer.](../../assets/images/cryoet-filament-twist.png){ width="900" style="display:block;margin:1.2em auto;" }
+![The same straight chain of F-actin subunits rendered with twist_deg = 0 and with F-actin's measured -166.6 degrees per subunit.](../../assets/images/cryoet-filament-twist.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-The same straight monomer chain rendered with twist_deg = 0 and with F-actin's measured -166.6 degrees per monomer.
+The same straight chain of F-actin subunits rendered with twist_deg = 0 and with F-actin's measured -166.6 degrees per subunit.
 ///
 
-Without twist, every monomer presents the same face and the strand
-reads as a uniform ridge. With F-actin's measured −166.6° per subunit
-(Dominguez & Holmes 2011), the projection picks up the crossover pattern
-of a real F-actin filament.
+Without twist, every subunit presents the same face from the same side
+of the axis, and the strand reads as a uniform ridge. With F-actin's
+measured −166.6° per subunit (Dominguez & Holmes 2011), the subunits
+alternate between two long-pitch strands, and the projection shows them
+crossing over as in a real F-actin filament.
 
 The sign carries the hand. F-actin's one-start (genetic) helix is
 left-handed: each subunit turns −166.6° about the filament axis for
@@ -111,18 +141,20 @@ subunits in 6 turns, is a drawing convenience rather than a measurement
 F-actin and a microtubule protofilament rendered at the same scale.
 ///
 
-| Preset | `code` | `step` (Å) | `flex_deg` | `twist_deg` | `n_monomers` |
-|---|---|---|---|---|---|
-| `ACTIN_SPEC` | 1J6Z (G-actin; Otterbein et al. 2001) | 27.5 | 12.0 | −166.6 | (20, 60) |
-| `PROTOFILAMENT_SPEC` | 1TUB (αβ-tubulin dimer; Nogales et al. 1998) | 82.0 | 3.0 | 0.0 | (10, 30) |
+| Preset | `code` | `frame` | `step` (Å) | `flex_deg` | `twist_deg` | `n_monomers` |
+|---|---|---|---|---|---|---|
+| `ACTIN_SPEC` | 7BT7 (ADP-F-actin filament; Kumari et al. 2020) | `"actin_filament"` | 27.5 | 12.0 | −166.6 | (20, 60) |
+| `PROTOFILAMENT_SPEC` | 1TUB (αβ-tubulin dimer; Nogales et al. 1998) | `"principal_axis"` | 82.0 | 3.0 | 0.0 | (10, 30) |
 
 `step` and `twist_deg` are measured values. F-actin's rise and twist come
 from cryo-EM reconstructions of the filament: 27.6 Å and −166.6 ± 0.6°
 (Dominguez & Holmes 2011), and 27.5 Å and 166.4° (von der Ecken et al.
 2015). They refine the helix of the first atomic model of the filament
 (Holmes et al. 1990); the twist of individual subunits varies about this
-mean (Egelman et al. 1982), and `ACTIN_SPEC` uses the mean. The
-protofilament's step is the dimer repeat of the GDP microtubule lattice,
+mean (Egelman et al. 1982), and `ACTIN_SPEC` uses the mean. They are also
+the helical parameters deposited with 7BT7, the filament its subunit comes
+from; that subunit carries its bound ADP and Mg²⁺. The protofilament's
+step is the dimer repeat of the GDP microtubule lattice,
 `DIMER_REPEAT` (see [Microtubules](microtubules.md#lattice-constants)),
 so a free protofilament and a protofilament in a tube stack their dimers
 identically. `flex_deg` is a tuned value in both cases, taken from
@@ -151,16 +183,24 @@ sampling and no obstacle awareness:
 Everything placed after filaments avoids them, though: beads and the
 protein-fill stage both treat placed filament voxels as obstacles.
 
+Each placed copy records a point on the filament path together with the
+subunit's rotation, and these are what the filament's oriented-point
+picks hold; a path per filament is written beside them. For an
+`"actin_filament"` species that point lies on the filament axis level with
+the subunit, and the subunit's own centre is 15.7 Å from it, along the
+copy's rotated \(+X\) axis.
+
 ## Parameters at a glance
 
 | Parameter | Meaning | Default |
 |---|---|---|
-| `code` | PDB ID or local file for the monomer | — |
+| `code` | PDB ID or local file for the monomer, or for the F-actin model an `"actin_filament"` subunit is lifted from | — |
 | `step` | Axial rise per monomer, Å | — |
 | `flex_deg` | Maximum per-step turn, degrees | — |
 | `twist_deg` | Helical twist per monomer, degrees | 0.0 |
 | `n_copies` | Independent filament instances of this species | 1 |
 | `n_monomers` | Monomers per instance; an int, or a `(min, max)` drawn per instance | (10, 30) |
+| `frame` | `"principal_axis"` for an isolated monomer, `"actin_filament"` for a subunit lifted out of a deposited F-actin model | `"principal_axis"` |
 
 In a TOML config these are `[[filaments]]` tables, or `actin = true` for
 the `ACTIN_SPEC` preset; see
@@ -176,23 +216,28 @@ the `ACTIN_SPEC` preset; see
 - **No collision avoidance during the walk.** SPECTER doesn't redirect
   monomers landing inside another object; it resolves overlaps only
   through the post-hoc dropping described under [Placement](#placement).
-- **The stacking axis is a principal-axis approximation.** The monomer's
-  canonical \(+Z\) comes from its longest principal axis, not from
-  inter-subunit contact geometry. A real protofilament or actin docking
-  axis follows how neighbouring subunits contact each other, and the
-  inertia tensor of an isolated monomer doesn't capture that. A PDB
-  structure's native coordinate axes carry no inherent relationship to
-  its stacking direction either, so some convention has to apply; this
-  is that convention, not a structurally validated docking. For F-actin
-  the difference is large: in the deposited filaments 6DJO and 7BT7 each
-  subunit's centre sits 16 Å from the filament axis and its longest
-  principal axis lies 78–81° from it, while `ACTIN_SPEC` puts the
-  monomer's centre on the axis and its longest principal axis along it.
-  The preset therefore has F-actin's rise, twist and hand, but not its
-  subunit arrangement.
+- **The stacking axis of a `"principal_axis"` species is an
+  approximation.** The monomer's canonical \(+Z\) comes from its longest
+  principal axis, and its centre is put on the filament axis. Neither
+  follows from how neighbouring subunits contact each other, which is
+  what sets a real docking axis, and the inertia tensor of an isolated
+  monomer doesn't capture it. A PDB structure's native coordinate axes
+  carry no inherent relationship to its stacking direction either, so
+  some convention has to apply; this is that convention, not a
+  structurally validated docking. It applies to `PROTOFILAMENT_SPEC` and
+  to custom species. For F-actin the difference would be large, which is
+  why `ACTIN_SPEC` uses `"actin_filament"` instead.
+- **Every F-actin subunit is the same straight-filament subunit.** The
+  deposited model is a straight ADP filament, and each copy is a rigid
+  copy of one of its subunits. The changes of subunit structure that
+  bending and nucleotide state cause (Reynolds et al. 2022) are not
+  represented, and on a bent path the subunits follow the bend rigidly.
 
 ## References
 
+- Bishop, R. L. (1975). There is more than one way to frame a curve.
+  *The American Mathematical Monthly*, 82(3), 246–251.
+  [doi:10.1080/00029890.1975.11993807](https://doi.org/10.1080/00029890.1975.11993807)
 - Chou, S. Z., & Pollard, T. D. (2019). Mechanism of actin polymerization
   revealed by cryo-EM structures of actin filaments with three different
   bound nucleotides. *Proceedings of the National Academy of Sciences*,
@@ -207,6 +252,10 @@ the `ACTIN_SPEC` preset; see
 - Holmes, K. C., Popp, D., Gebhard, W., & Kabsch, W. (1990). Atomic model
   of the actin filament. *Nature*, 347(6288), 44–49.
   [doi:10.1038/347044a0](https://doi.org/10.1038/347044a0)
+- Kabsch, W., Mannherz, H. G., Suck, D., Pai, E. F., & Holmes, K. C.
+  (1990). Atomic structure of the actin:DNase I complex. *Nature*,
+  347(6288), 37–44.
+  [doi:10.1038/347037a0](https://doi.org/10.1038/347037a0)
 - Kumari, A., Kesarwani, S., Javoor, M. G., Vinothkumar, K. R., &
   Sirajuddin, M. (2020). Structural insights into actin filament
   recognition by commonly used cellular actin markers. *The EMBO Journal*,
@@ -215,15 +264,16 @@ the `ACTIN_SPEC` preset; see
 - Nogales, E., Wolf, S. G., & Downing, K. H. (1998). Structure of the αβ
   tubulin dimer by electron crystallography. *Nature*, 391(6663), 199–203.
   [doi:10.1038/34465](https://doi.org/10.1038/34465)
-- Otterbein, L. R., Graceffa, P., & Dominguez, R. (2001). The crystal
-  structure of uncomplexed actin in the ADP state. *Science*, 293(5530),
-  708–711. [doi:10.1126/science.1059700](https://doi.org/10.1126/science.1059700)
 - Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
   (2023). Rapid synthesis of cryo-ET data for training deep learning
   models. *bioRxiv*.
   [doi:10.1101/2023.04.28.538636](https://doi.org/10.1101/2023.04.28.538636)
   ([CTS source](https://github.com/carsonpurnell/cryotomosim_CTS))
+- Reynolds, M. J., Hachicho, C., Carl, A. G., Gong, R., & Alushin, G. M.
+  (2022). Bending forces and nucleotide state jointly regulate F-actin
+  structure. *Nature*, 611(7935), 380–386.
+  [doi:10.1038/s41586-022-05366-w](https://doi.org/10.1038/s41586-022-05366-w)
 - von der Ecken, J., Müller, M., Lehman, W., Manstein, D. J., Penczek,
   P. A., & Raunser, S. (2015). Structure of the F-actin–tropomyosin
   complex. *Nature*, 519(7541), 114–117.

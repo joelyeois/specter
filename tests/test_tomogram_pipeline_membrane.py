@@ -15,6 +15,7 @@ import torch
 
 from specter.config import TomogramConfig
 from specter.pipelines import build_tomogram_generator
+from specter.specimen.filament import ACTIN_SPEC
 
 _SMALL_FIXTURE = Path(__file__).parent / "test_data" / "1mbo.cif"
 
@@ -152,8 +153,8 @@ def test_actin_flag_is_additive_to_filaments():
     )
     gen = build_tomogram_generator(config)
     assert len(gen.filament_specs) == 2
-    codes = {spec.code for spec in gen.filament_specs}
-    assert codes == {"1TUB", "1J6Z"}
+    assert gen.filament_specs[0].code == "1TUB"
+    assert gen.filament_specs[1] == ACTIN_SPEC
 
 
 # `n_copies` is the one count spelling across every config entry type. The

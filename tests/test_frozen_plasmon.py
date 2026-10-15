@@ -279,3 +279,32 @@ def test_the_chain_s_frozen_entrypoint_matches_one_exposure():
         .detect(Exposure(4.0), noise=None)
     )
     torch.testing.assert_close(result.summed_image, one.array)
+
+
+def test_intensities_share_the_detected_images_grid():
+    """
+    The pre-detection intensities sit on the detected images' pixel grid, not
+    the oversampled propagation grid: with no MTF, unit DQE and no noise the
+    images are the intensities times each frame's dose and the pixel area,
+    pixel for pixel, padded canvas and all.
+    """
+    from specter.imaging import simulate_frozen
+
+    v = torch.zeros(2, 12, 12)
+    v[:, 4:8, 5:9] = 3.0
+    state = PotentialState(v[None], torch.zeros_like(v[None]))
+    doses = [1.0, 3.0]
+    result = simulate_frozen(
+        lambda step: state,
+        None,
+        doses,
+        voxel_size=2.0,
+        voltage=300.0,
+        nxy=12,
+        pad_fft=True,
+        oversample=2,
+        noise=None,
+    )
+    assert result.intensities.shape == result.images.shape == (2, 1, 12, 12)
+    expected = result.intensities * torch.tensor(doses)[:, None, None, None] * 4.0
+    torch.testing.assert_close(result.images, expected)

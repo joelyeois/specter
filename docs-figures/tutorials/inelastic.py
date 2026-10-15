@@ -329,8 +329,9 @@ for name, plasmons, absorbing in [
         noise=None,
         device="cuda",
     )
-    # Expected counts on the pixel grid, over the counts the vacuum would give.
-    zero_loss[name] = result.summed_image[0] / (40.0 * 2.0**2)
+    # The zero-loss intensity before detection, relative to the vacuum beam,
+    # on the image's pixel grid: (frames, images, Y, X).
+    zero_loss[name] = result.intensities[0, 0]
     print(f"{name:12s} mean zero-loss intensity {zero_loss[name].mean():.4f}")
 
 # What the absorption alone does: each image over the elastic-only one.

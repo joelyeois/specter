@@ -8,6 +8,7 @@ import torch
 from torch import nn
 
 from specter.scattering import IterativeScattering
+from specter.scattering._kernels import fourier_crop_xy
 from specter.microscope import Detector
 from ._exposure import ExposureStep, exposure_steps
 from ._specimen import PotentialState
@@ -16,7 +17,26 @@ from ._spectrum import PlasmonFilter
 
 @dataclass
 class FrozenPlasmonResult:
-    """Frame arrays have shape (frames,B,Y,X); intensities are before detection."""
+    """
+    One exposure, frame by frame.
+
+    Attributes
+    ----------
+    images : torch.Tensor
+        Detected counts, ``(frames, B, Y, X)``, on the field's pixel grid.
+    intensities : torch.Tensor
+        The dose-averaged intensity each frame deposits before detection,
+        relative to the vacuum beam, on the same pixel grid as `images`:
+        sampled from the propagation grid exactly as the detector samples it
+        (a Fourier crop, then the field's centre), before the anisotropic
+        magnification, MTF, DQE and noise. With none of those, ``images`` is
+        ``intensities`` times each frame's dose and the pixel area. Keeps
+        gradients.
+    frame_doses : torch.Tensor
+        Each frame's dose, e-/A^2.
+    metadata : dict
+        Provenance: the spectrum, the source calibration, the sampling.
+    """
 
     images: torch.Tensor
     intensities: torch.Tensor
@@ -72,6 +92,27 @@ class FrozenPlasmonForward(nn.Module):
         self.detector = detector
         self.plasmon_filter = plasmon_filter
         self.optics = optics
+
+    def _on_pixel_grid(self, intensity: torch.Tensor, nxy: int | None) -> torch.Tensor:
+        """
+        `intensity` on the grid the detector records it on: Fourier-cropped
+        from the propagation grid, then the field's centre, the same two
+        steps and arithmetic :meth:`Detector.detect_expected_counts` begins
+        with, so it lines up pixel for pixel with the detected images.
+        """
+        if self.detector.oversample > 1:
+            intensity = fourier_crop_xy(
+                intensity, intensity.shape[-1] // self.detector.oversample
+            )
+        if nxy is None or nxy == intensity.shape[-1]:
+            return intensity
+        cy, cx = intensity.shape[-2] // 2, intensity.shape[-1] // 2
+        half = nxy // 2
+        return intensity[
+            ...,
+            cy - half : cy + half + (nxy % 2),
+            cx - half : cx + half + (nxy % 2),
+        ]
 
     def forward(
         self,
@@ -134,7 +175,7 @@ class FrozenPlasmonForward(nn.Module):
             if (index + 1) % substeps:
                 continue
             intensity = integrated / frame_doses[step.frame]
-            intensities.append(intensity)
+            intensities.append(self._on_pixel_grid(intensity, nxy))
             dose = intensity.new_full((len(intensity),), frame_doses[step.frame])
             radius = torch.full_like(dose, coincidence_radius)
 

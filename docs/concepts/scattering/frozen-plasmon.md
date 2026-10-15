@@ -63,7 +63,8 @@ model = FrozenPlasmonForward(
     filter,
 )
 result = model(slab, [1.0, 1.0, 1.0], substeps=2, detector_seed=17)
-# (frame, batch, y, x); intensities are pre-detector, vacuum-normalized.
+# (frame, batch, y, x); intensities are pre-detector, vacuum-normalized,
+# on the images' pixel grid.
 print(result.images.shape, result.intensities.mean(), result.metadata)
 ```
 

@@ -1064,3 +1064,44 @@ def test_render_transmembrane_template_honours_use_deposited_bfactors():
     # unrotated in the tomogram path), while the power ratio is 0.777 in both.
     assert damped.sum().item() == pytest.approx(static.sum().item(), rel=5e-3)
     assert damped.pow(2).sum() < 0.9 * static.pow(2).sum()
+
+
+def test_a_transmembrane_template_turns_by_its_recorded_rotation():
+    """The template's +z lands along the membrane normal, ``R @ z``.
+
+    `orientation_for_normal` builds R so that R maps the template's +z (its
+    membrane axis) onto the outward normal, and `rotate_volume` turns
+    density by the transpose of the matrix it is given. Until 2026-10-16 R
+    itself was handed over, so a protein's axis landed on ``R^T @ z``:
+    pointing inward at some sites and tipped tens of degrees off the normal
+    at most. A bright voxel three voxels up the template's +z must sit along
+    ``R @ z`` from the placed centre.
+    """
+    template = torch.zeros(9, 9, 9)
+    template[7, 4, 4] = 1000.0  # (z, y, x): +3 voxels along the template's +z
+    gen = MembraneGenerator(
+        transmembrane_specs=[TransmembraneSpec("tip", template=template, frequency=12)],
+        seed=0,
+        **_SMALL_KWARGS,
+    )
+    gen.generate()
+    placements = gen.place_transmembrane(min_spacing_angstrom=15.0)
+    assert placements
+    z_axis = torch.tensor([0.0, 0.0, 1.0])
+    checked = 0
+    for placement in placements:
+        R = placement.rotation_matrix.float()
+        if abs(float((R @ z_axis) @ (R.T @ z_axis))) > 0.8:
+            continue  # this R and its transpose agree on z: no information
+        centre = gen._physical_to_voxel_index(placement.center_xyz)
+        lo = (centre - 6).clamp_min(0)
+        window = gen.volume[
+            lo[0] : centre[0] + 7, lo[1] : centre[1] + 7, lo[2] : centre[2] + 7
+        ]
+        peak = torch.stack(torch.unravel_index(window.argmax(), window.shape)) + lo
+        offset_zyx = (peak - centre).float()
+        offset_xyz = offset_zyx.flip(0)
+        direction = offset_xyz / offset_xyz.norm()
+        assert float(direction @ (R @ z_axis)) > 0.8
+        checked += 1
+    assert checked

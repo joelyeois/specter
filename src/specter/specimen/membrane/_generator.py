@@ -1446,8 +1446,14 @@ class MembraneGenerator:
             for species in sorted({choices[i] for i in site_ids}):
                 group = [i for i in site_ids if choices[i] == species]
                 template = templates[self.transmembrane_specs[species].pdb_source]
+                # `rotate_volume` turns density by R^T for
+                # `build_affine_matrix(R)`; each R here maps the template's
+                # +z onto the membrane normal, so it is passed transposed to
+                # turn the density by R itself.
                 theta = build_affine_matrix(
-                    torch.stack([rotations[i] for i in group]).to(self.device)
+                    torch.stack([rotations[i] for i in group])
+                    .transpose(-1, -2)
+                    .to(self.device)
                 )
                 volumes = rotate_volume(template, theta, padding_mode="zeros")
                 rotated.update(zip(group, volumes))

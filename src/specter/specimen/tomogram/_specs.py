@@ -56,6 +56,11 @@ class TomogramProteinSpec:
 class TomogramPlacement:
     """One placed cytosolic/lumen instance, for ground-truth bookkeeping.
 
+    `rotation_matrix` is the rotation applied to the template, in xyz: the
+    template's own coordinates ``p`` sit at ``position_xyz +
+    rotation_matrix @ p`` in the tomogram. It is the matrix the pick files
+    carry.
+
     `role` is "target" for a `TomogramProteinSpec` placed via `n_copies`
     (exact count), "filler" for one placed via `ratio`. `export_picks`
     includes "filler" placements by default (``include_filler=True``),

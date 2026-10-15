@@ -1180,3 +1180,61 @@ def test_second_generate_does_not_accumulate_beads_or_masks():
     assert len(gen._mask_cache) == n_masks
     assert torch.equal(gen.instance_labels, labels)
     assert torch.allclose(first, second)
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_a_placed_protein_records_the_rotation_its_density_was_given():
+    """A placement's (and so a pick's) rotation is the one the density shows.
+
+    The packer draws R and both its footprint test and the renderer hand R
+    to `build_affine_matrix`, which turns density by R^T. Until 2026-10-16
+    the placement recorded the drawn R, so every exported protein pick
+    carried the transpose of the orientation in the volume. The rendered
+    copy must correlate with the template turned by the recorded matrix,
+    and clearly less with its transpose.
+    """
+    from specter.potential import PotentialBuilder
+
+    n, voxel_size, m = 48, 4.0, 24
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=(n, n, n),
+        voxel_size=voxel_size,
+        protein_specs=[TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), n_copies=1)],
+        pdb_cache_dir=str(_SMALL_FIXTURE.parent),
+        parameterization="kirkland",
+        progressbars=False,
+        seed=3,
+        device="cpu",
+    )
+    volume = torch.nn.functional.pad(gen.generate(), (m // 2,) * 6)
+    (placement,) = gen.placements
+    rotation = placement.rotation_matrix
+    pdb = gen._load_pdb(str(_SMALL_FIXTURE))
+    template = pdb.coordinates - pdb.coordinates.mean(0)
+    builder = PotentialBuilder(
+        n_xyz=m,
+        dx=voxel_size,
+        atomic_numbers=pdb.atomic_numbers,
+        progressbars=False,
+        parameterization="kirkland",
+    )
+    grids = torch.meshgrid(
+        *(torch.arange(s, dtype=torch.float32) for s in volume.shape), indexing="ij"
+    )
+    weight = volume.clamp_min(0)
+    cz, cy, cx = (int(round(float((weight * g).sum() / weight.sum()))) for g in grids)
+    crop = volume[
+        cz - m // 2 : cz + m // 2, cy - m // 2 : cy + m // 2, cx - m // 2 : cx + m // 2
+    ].flatten()
+    crop = crop - crop.mean()
+
+    def correlation(coordinates: torch.Tensor) -> float:
+        expected = builder.forward(coordinates, method="analytic").flatten()
+        expected = expected - expected.mean()
+        return float(expected @ crop / (expected.norm() * crop.norm()))
+
+    recorded = correlation(template @ rotation.T)
+    transposed = correlation(template @ rotation)
+    assert recorded > 0.85
+    assert recorded > transposed + 0.1

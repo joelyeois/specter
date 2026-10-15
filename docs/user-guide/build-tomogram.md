@@ -321,6 +321,11 @@ Alongside `{filename}.mrc`, by default you get:
 - **Picks** (`write_picks`): one copick-style
   `{species}-{annotation_version}_orientedpoint.ndjson` file per species,
   filler included (see [Placement order & regions](#placement-order-regions)).
+  Each pick's `xyz_rotation_matrix` is the rotation the template was given,
+  in xyz: the template's coordinates turned by it about the template's
+  centre reproduce the copy at that location. A transmembrane protein's
+  matrix maps the template's membrane axis (+z) onto the outward membrane
+  normal.
 - **Segmentation** (`write_segmentation`):
   `{filename}_protein_labels.mrc` (always), plus
   `{filename}_membrane_labels.mrc` and `{filename}_regions.mrc`

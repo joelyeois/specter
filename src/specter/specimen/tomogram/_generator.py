@@ -1439,7 +1439,11 @@ class TomogramSpecimenGenerator(
                 # an implicit sync each, ~31 us apiece, so a 21k-instance
                 # filler pool spent ~0.7 s here doing 43k of them.
                 coords_host = species_coords.detach().cpu()
-                R_host = R.detach().cpu()
+                # The rotation the density was actually given: `rotate_volume`
+                # turns it by R^T for `build_affine_matrix(R)`, which the packer's
+                # footprint test applies the same way, so the record (and every
+                # pick) is R^T, not the R that was drawn.
+                R_host = R.transpose(-1, -2).detach().cpu()
                 ids_host = instance_ids.cpu().tolist()
                 for i in range(n_instances):
                     self.placements.append(

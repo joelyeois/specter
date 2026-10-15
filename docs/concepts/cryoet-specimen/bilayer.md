@@ -211,18 +211,24 @@ what it found.
 
 | Parameter | Meaning | Default |
 |---|---|---|
-| `bilayer_thickness` | Phosphate-to-phosphate leaflet spacing \(t\), Å | 38.0 |
+| `bilayer_thickness` | Phosphate-to-phosphate leaflet spacing \(t\), Å | 37.0 |
 | `bilayer_layer_sigma_angstrom` | Additional Gaussian broadening along \(z\), Å | 0.0 |
 | `min_transmembrane_spacing` | Minimum centre-to-centre site spacing, Å | 40.0 |
 | `transmembrane_occupancy_fraction` | Protein-over-lipid blending threshold, as a fraction of \(\psi_{\max}\) (see below) | 0.05 |
 | `frequency` (per spec; TOML `n_copies`) | Site count contributed by the species, and its weight in the per-site draw | 1 |
 | `tm_span_mask` (per spec) | Atom mask selecting the membrane-spanning region | None (full z-extent) |
 
-\(t\) defaults to 38.0 Å, inside the published 36–39 Å range for fluid
-phosphatidylcholine. It was 30.0 until 2026-08-30, the midpoint of
-polnet's `MB_THICK_RG` (25–35 Å; Martinez-Sanchez et al. 2024) — a range
-sitting entirely below the experimental one. The reference template's own spacing is 40 Å, so the
-default rescales it by 0.95.
+\(t\) defaults to 37.0 Å, the phosphate-to-phosphate spacing \(D_{HH}\)
+measured by X-ray scattering for fully hydrated fluid POPC at 30 °C
+(Kučerka et al. 2005), the lipid the reference template is built from.
+Fluid phosphatidylcholines span 35–38 Å: the same measurement gives
+35.3 Å for DMPC and 36.7 Å for DOPC, and a review of earlier measurements
+lists 36.0 Å for DMPC, 36.9 Å for DOPC and egg PC, and 38.3 Å for DPPC at
+50 °C (Nagle & Tristram-Nagle 2000). The default was 30.0 until
+2026-08-30, the midpoint of polnet's `MB_THICK_RG` (25–35 Å;
+Martinez-Sanchez et al. 2024), a range sitting entirely below the
+experimental one. The reference template's own spacing is 40 Å, so the
+default rescales it by 0.925.
 
 `transmembrane_occupancy_fraction` does not set how many proteins are
 placed. It sets where an inserted protein replaces the lipid instead of
@@ -249,9 +255,10 @@ width left to set here — only blur to add.
   the per-leaflet atom z-offsets are hand-picked from bilayer structural
   biology plus jitter, not a relaxed or MD-equilibrated structure. The
   distribution of that integral along \(z\) is therefore modelled, and
-  the template's own 40 Å phosphate spacing sits just above the published
-  36–39 Å range. Sourcing \(\psi(z)\) from an MD snapshot or from
-  published component density profiles is the open item.
+  the template's own 40 Å phosphate spacing sits about 2 Å above the
+  35–38 Å measured for fluid phosphatidylcholines. Sourcing \(\psi(z)\)
+  from an MD snapshot or from published component density profiles is the
+  open item.
 - **No leaflet asymmetry.** \(\psi(d)\) is symmetric about the mid-plane;
   real membranes are not.
 - **No lipid composition.** One profile per membrane instance, with no
@@ -276,6 +283,10 @@ width left to set here — only blur to add.
   function of temperature. *Biochimica et Biophysica Acta (BBA) –
   Biomembranes*, 1808(11), 2761–2771.
   [doi:10.1016/j.bbamem.2011.07.022](https://doi.org/10.1016/j.bbamem.2011.07.022)
+- Kučerka, N., Tristram-Nagle, S., & Nagle, J. F. (2005). Structure of
+  fully hydrated fluid phase lipid bilayers with monounsaturated chains.
+  *Journal of Membrane Biology*, 208(3), 193–202.
+  [doi:10.1007/s00232-005-7006-8](https://doi.org/10.1007/s00232-005-7006-8)
 - Luecke, H., Schobert, B., Richter, H.-T., Cartailler, J.-P., & Lanyi, J. K.
   (1999). Structure of bacteriorhodopsin at 1.55 Å resolution. *Journal of
   Molecular Biology*, 291(4), 899–911.
@@ -288,6 +299,10 @@ width left to set here — only blur to add.
 - Mott, N. F. (1930). The scattering of electrons by atoms. *Proceedings of
   the Royal Society of London. Series A*, 127(806), 658–665.
   [doi:10.1098/rspa.1930.0082](https://doi.org/10.1098/rspa.1930.0082)
+- Nagle, J. F., & Tristram-Nagle, S. (2000). Structure of lipid bilayers.
+  *Biochimica et Biophysica Acta (BBA) – Reviews on Biomembranes*, 1469(3),
+  159–195.
+  [doi:10.1016/S0304-4157(00)00016-2](https://doi.org/10.1016/S0304-4157(00)00016-2)
 - Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
   (2023). Rapid synthesis of cryo-ET data for training deep learning

@@ -29,6 +29,8 @@ from _render import TEAL
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.membrane._profile import (
     CALIBRATION_N_LIPIDS_PER_LEAFLET,
+    CALIBRATION_SEED,
+    CALIBRATION_VOXEL_SIZE_ANGSTROM,
     build_measured_bilayer_profile,
     build_reference_lipid_patch,
     compute_bilayer_profile,
@@ -73,10 +75,19 @@ def figure_profile() -> None:
     renders, against the two-Gaussian form it replaced -- the difference
     is the acyl core, which is most of the integrated potential. Right:
     what bilayer_thickness does to it."""
+    # The shipped profile's own patch and grid, so the integral in the title
+    # is the one the page quotes.
     atomic_numbers, coordinates = build_reference_lipid_patch(
-        n_lipids_per_leaflet=CALIBRATION_N_LIPIDS_PER_LEAFLET, seed=SEED, device=DEVICE
+        n_lipids_per_leaflet=CALIBRATION_N_LIPIDS_PER_LEAFLET,
+        seed=CALIBRATION_SEED,
+        device=DEVICE,
     )
-    measured = compute_bilayer_profile(atomic_numbers, coordinates, device=DEVICE)
+    measured = compute_bilayer_profile(
+        atomic_numbers,
+        coordinates,
+        voxel_size=CALIBRATION_VOXEL_SIZE_ANGSTROM,
+        device=DEVICE,
+    )
     m_d = measured.distance_angstrom.cpu().numpy()
     m_psi = measured.psi.cpu().numpy()
     old_d, old_psi = _superseded_two_gaussian()
@@ -103,7 +114,7 @@ def figure_profile() -> None:
 
     ax = axes[1]
     native = native_bilayer_thickness_angstrom()
-    for thickness, style in [(30.0, ":"), (38.0, "-"), (46.0, "--")]:
+    for thickness, style in [(30.0, ":"), (37.0, "-"), (46.0, "--")]:
         profile = build_measured_bilayer_profile(thickness_angstrom=thickness)
         psi = profile.psi.cpu().numpy()
         dist = profile.distance_angstrom.cpu().numpy()
@@ -112,7 +123,7 @@ def figure_profile() -> None:
             psi,
             style,
             color=TEAL,
-            linewidth=1.8 if thickness == 38.0 else 1.2,
+            linewidth=1.8 if thickness == 37.0 else 1.2,
             label=f"bilayer_thickness = {thickness:g}",
         )
     ax.set_xlabel("signed distance from mid-plane, d (A)")

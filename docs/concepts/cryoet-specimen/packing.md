@@ -121,9 +121,17 @@ is being collided, and a bounding sphere is ~5.6x a molecule's envelope, so
 one setting does not mean the same thing on both. Comparing them at a
 single value would measure pool sizes rather than geometry.
 
-Crowded cytoplasm is 200–320 mg/mL, which bounding spheres cannot reach at
-any setting: RSA jams long before the real volume fraction gets there. For
-reference, [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)'s
+The table converts volume fraction to concentration at a macromolecular
+density of 1.35 g/cm³, so its figures count all macromolecule, not protein
+alone, and compare with totals. Bacterial cytoplasm carries 300–400 mg/mL
+of macromolecule (Zimmerman & Trach 1991, for *E. coli*), of which
+200–320 mg/mL is protein (Elowitz et al. 1999). Cultured mammalian
+cytoplasm is far more dilute: HeLa cytoplasm holds about 76 mg/mL of
+protein (Liu et al. 2022). Footprint collision reaches 266 mg/mL, just
+below the bacterial range. Bounding spheres cannot reach that range at any
+setting, because RSA saturates long before the real volume fraction gets
+there. For reference,
+[CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)'s
 (Purnell et al. 2023) own output weighs 0.240 by the same measure, and it
 also collides real shapes rather than spheres.
 
@@ -191,10 +199,11 @@ above; that is geometry, not a scheduling failure.
 
 ### Where the ceiling is
 
-RSA has a hard jamming limit, its saturation density (Torquato et al.
-2006), well below random close packing, and
-`occupancy_fraction` is therefore a **budget, not a promise**. Bare
-spheres show the limit in its simplest form:
+RSA saturates well below random close packing. For identical spheres in
+three dimensions the saturation density is 0.3841 (Zhang & Torquato 2013;
+0.38278 in Torquato et al. 2006), and `occupancy_fraction` is therefore a
+**budget, not a promise**. Bare spheres show the ceiling in its simplest
+form:
 
 ![Achieved bare-sphere occupancy against requested occupancy_fraction, for a monodisperse and a polydisperse pool.](../../assets/images/cryoet-packing-rsa-limit.png){ width="620" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -202,8 +211,28 @@ Achieved bare-sphere occupancy against requested occupancy_fraction, for a monod
 ///
 
 Requested and achieved track each other up to ~0.2 and then part company.
-A monodisperse pool saturates near 0.28; a polydisperse one reaches ~0.41,
-because small spheres fit into gaps the large ones leave.
+A monodisperse pool levels off near 0.29, below the saturation density for
+three reasons of roughly equal size, measured at the figure's settings
+(a 2000 Å box, \(r = 60\) Å, `gap` = 5 Å):
+
+- **The gap.** Each sphere excludes a radius of \(r + g/2\), with \(g\)
+  the `gap`, so the bare volume plotted is \((60/62.5)^3 = 0.885\) of the
+  excluded volume the packer actually fills. This costs about 0.04.
+- **The walls.** Spheres may not cross the box faces, which depletes a
+  boundary layer. In a box about 16 diameters across this costs about 0.02
+  against the box interior.
+- **The trial budget.** The remaining gap to saturation shrinks only as
+  \(\tau^{-1/3}\) in the number of trials \(\tau\) (Feder's law;
+  Torquato et al. 2006), and the default `max_passes` and `stall_patience`
+  of `pack_hard_spheres_3d` stop long before saturation. Measured in excluded volume
+  over the box interior, the default reaches 0.35; ten times the passes
+  reaches 0.37, and a hundred times the passes with a pool three times as
+  large reaches 0.377.
+
+The polydisperse pool reaches 0.42 at a requested 1.0 and is still
+rising there, because small spheres fit into gaps the large ones leave.
+That value is a measurement at the default trial budget, not a known
+saturation density.
 
 Footprint packing jams too, and polydispersity raises its ceiling the same
 way, measured in macromolecule volume fraction on real molecules:
@@ -365,6 +394,14 @@ your own list breaks nothing downstream.
   electron tomograms of crowded cell cytoplasm for assessment of automated
   particle picking. *BMC Bioinformatics*, 17(1), 405.
   [doi:10.1186/s12859-016-1283-3](https://doi.org/10.1186/s12859-016-1283-3)
+- Elowitz, M. B., Surette, M. G., Wolf, P.-E., Stock, J. B., & Leibler, S.
+  (1999). Protein mobility in the cytoplasm of *Escherichia coli*.
+  *Journal of Bacteriology*, 181(1), 197–203.
+  [doi:10.1128/JB.181.1.197-203.1999](https://doi.org/10.1128/JB.181.1.197-203.1999)
+- Liu, X., Oh, S., & Kirschner, M. W. (2022). The uniformity and stability
+  of cellular mass density in mammalian cell culture. *Frontiers in Cell
+  and Developmental Biology*, 10, 1017499.
+  [doi:10.3389/fcell.2022.1017499](https://doi.org/10.3389/fcell.2022.1017499)
 - Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
   (2023). Rapid synthesis of cryo-ET data for training deep learning
@@ -385,3 +422,11 @@ your own list breaks nothing downstream.
 - Widom, B. (1966). Random sequential addition of hard spheres to a volume.
   *The Journal of Chemical Physics*, 44(10), 3888–3894.
   [doi:10.1063/1.1726548](https://doi.org/10.1063/1.1726548)
+- Zhang, G., & Torquato, S. (2013). Precise algorithm to generate random
+  sequential addition of hard hyperspheres at saturation. *Physical Review
+  E*, 88(5), 053312.
+  [doi:10.1103/PhysRevE.88.053312](https://doi.org/10.1103/PhysRevE.88.053312)
+- Zimmerman, S. B., & Trach, S. O. (1991). Estimation of macromolecule
+  concentrations and excluded volume effects for the cytoplasm of
+  *Escherichia coli*. *Journal of Molecular Biology*, 222(3), 599–620.
+  [doi:10.1016/0022-2836(91)90499-V](https://doi.org/10.1016/0022-2836(91)90499-V)

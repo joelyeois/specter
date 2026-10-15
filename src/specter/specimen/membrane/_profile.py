@@ -17,29 +17,33 @@ acyl chain, terminal methyls), with small per-atom jitter standing in for
 conformational disorder. They come from no deposited structure and no MD
 trajectory. What IS anchored is the census, and through it the integral
 (see the identity below); what is MODELLED is where along z each group
-sits. Measured against a joint SANS/SAXS refinement of POPC at 30 C [1]:
+sits. Measured against a joint SANS/SAXS refinement of POPC at 30 C [1]
+and an X-ray one at the same temperature [2]:
 
-    ===========================  ===============  ==========
-    quantity                     published [1]    this model
-    ===========================  ===============  ==========
-    area per lipid A             64.3 +/- 1.3     65.0
-    hydrocarbon thickness 2*D_C  28.8 +/- 0.6     ~27
-    phosphate-phosphate D_HH     ~36              ~39-40
-    ===========================  ===============  ==========
+    ===========================  ==================  ==========
+    quantity                     published           this model
+    ===========================  ==================  ==========
+    area per lipid A             64.3 +/- 1.3 [1]    65.0
+    hydrocarbon thickness 2*D_C  28.8 +/- 0.6 [1]    ~27
+    phosphate-phosphate D_HH     37.0 [2]            40
+    ===========================  ==================  ==========
+
+Fluid phosphatidylcholines span D_HH = 35-38 A: 35.3 A for DMPC and 36.7 A
+for DOPC at 30 C [2], 38.3 A for DPPC at 50 C [3].
 
 The area per lipid is right, inside 1 sigma, which matters because it is
 the denominator of the identity. THE ERROR IS LOCALISED IN THE HEADGROUP
 REGION, not the chains: D_H1, the phosphate-to-chain-interface distance,
-is 6.0 A here against the ~3.6 A the published numbers imply, so the
-phosphates sit about 2.4 A too far out. The core is also slightly thin, so
-the correction is not one rigid shift -- headgroups move in AND chains
-spread out.
+is 6.0 A here against the ~4.1 A that D_HH [2] and 2*D_C [1] together
+imply, so the phosphates sit about 2 A too far out. The core is also
+slightly thin, so the correction is not one rigid shift -- headgroups move
+in AND chains spread out.
 
 Not patched, deliberately. Moving an atom along z adds and removes
 nothing, so integral(psi dz) is untouched by construction and every
-projected-contrast number is unaffected; 2.4 A is sub-voxel on the 5 and
-10 A grids membranes are rendered on (1.2 voxels at 2 A). Nudging the
-offsets until D_HH lands on 36 A would swap one hand-picked table for
+projected-contrast number is unaffected; 2 A is sub-voxel on the 5 and
+10 A grids membranes are rendered on (one voxel at 2 A). Nudging the
+offsets until D_HH lands on 37 A would swap one hand-picked table for
 another tuned to two moments, leaving the shape between them invented. The
 real fix is to take the whole z-distribution from an SDP decomposition or
 an MD trajectory: the NMRlipids / FAIRMD Lipids Databank
@@ -76,7 +80,7 @@ An analytic two-Gaussian profile is wrong for a different reason. Two
 Gaussians standing on vacuum model a bilayer's *appearance* in a
 micrograph rather than its density, and deleting the acyl core that way
 costs 4.8x of the integrated potential at the template's native 40 A
-thickness (4.5x at ``MembraneGenerator``'s default 38 A, since the
+thickness (4.4x at ``MembraneGenerator``'s default 37 A, since the
 integral scales with thickness). The loss is invisible in a slice and
 dominant in a projection. The smoothing that makes real cryo-ET membranes look
 continuous comes from the microscope's own resolution limits (CTF,
@@ -102,13 +106,23 @@ References
        https://doi.org/10.1016/j.bbamem.2011.07.022
        Tables 1-3 give A, D_B and 2*D_C per lipid and temperature; D_HH
        is in the supplementary Table S7, which the open-access accepted
-       manuscript does not carry -- the ~36 A above is secondary
-       reporting, so confirm it there before treating it as the target.
+       manuscript does not carry, so the D_HH above is taken from [2].
        The paper's SDP model decomposes a bilayer into exactly the shape
        this module's template has (chemical group, mean depth, width):
        CholCH3, PCN and CG as Gaussians, the hydrocarbon region as an
        error function with CH and CH3 subtracted off. That makes it a
        drop-in replacement for `_LEAFLET_TEMPLATE` rather than a rewrite.
+.. [2] Kučerka, N., Tristram-Nagle, S., & Nagle, J. F. (2005). Structure of
+       fully hydrated fluid phase lipid bilayers with monounsaturated
+       chains. *Journal of Membrane Biology*, 208(3), 193–202.
+       https://doi.org/10.1007/s00232-005-7006-8
+       Table 1 gives D_HH at 30 C: DMPC 35.3, DOPC 36.7, POPC 37.0 A.
+.. [3] Nagle, J. F., & Tristram-Nagle, S. (2000). Structure of lipid
+       bilayers. *Biochimica et Biophysica Acta (BBA) – Reviews on
+       Biomembranes*, 1469(3), 159–195.
+       https://doi.org/10.1016/S0304-4157(00)00016-2
+       Table 6 gives D_HH for DPPC at 50 C (38.3 A), DMPC (36.0),
+       DOPC (36.9) and egg PC (36.9).
 """
 
 from __future__ import annotations
@@ -466,7 +480,9 @@ def native_bilayer_thickness_angstrom(parameterization: str = "shtyrov") -> floa
 
     Peak-to-peak of :func:`_measured_bilayer_profile`, which is what
     `thickness_angstrom` means everywhere in this module. About 40 A for the
-    default POPC template, against a published fluid-PC range of 36-39 A.
+    default POPC template, against 37.0 A measured for fluid POPC at 30 C
+    and 35-38 A across fluid phosphatidylcholines (see the module
+    docstring).
 
     Parameters
     ----------
@@ -483,7 +499,7 @@ def native_bilayer_thickness_angstrom(parameterization: str = "shtyrov") -> floa
 
 
 def build_measured_bilayer_profile(
-    thickness_angstrom: float = 30.0,
+    thickness_angstrom: float = 37.0,
     extra_sigma_angstrom: float = 0.0,
     parameterization: ScatteringFactors = "shtyrov",
     device: str | torch.device = "cpu",
@@ -508,7 +524,7 @@ def build_measured_bilayer_profile(
     Parameters
     ----------
     thickness_angstrom : float, optional
-        Phosphate-to-phosphate spacing to rescale to, A. Default 30.0,
+        Phosphate-to-phosphate spacing to rescale to, A. Default 37.0,
         matching `MembraneGenerator`. See
         :func:`native_bilayer_thickness_angstrom` for the template's own value.
     extra_sigma_angstrom : float, optional

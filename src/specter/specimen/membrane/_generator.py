@@ -784,16 +784,19 @@ class MembraneGenerator:
         value, at fixed amplitude, so the bilayer's integrated potential
         scales with it as lipid-volume conservation requires.
 
-        Default 38.0, inside the published 36-39 Å range for fluid
-        phosphatidylcholine. `polnet`'s [1]_ `MB_THICK_RG` range (25.0, 35.0)
-        sits entirely below the experimental one and is not followed: a
-        30 Å bilayer renders about 25% less integrated potential than a
-        38 Å one, since the integral scales with thickness.
+        Default 37.0, the spacing measured for fully hydrated fluid POPC
+        at 30 °C [4]_, the lipid the reference template is built from.
+        Fluid phosphatidylcholines span 35-38 Å: 35.3 Å for DMPC and
+        36.7 Å for DOPC at 30 °C [4]_, 38.3 Å for DPPC at 50 °C [5]_.
+        `polnet`'s [1]_ `MB_THICK_RG` range (25.0, 35.0) sits entirely
+        below the experimental one and is not followed: a 30 Å bilayer
+        renders about 19% less integrated potential than a 37 Å one, since
+        the integral scales with thickness.
 
         The reference lipid template's own geometry gives 40 Å
         (:func:`~specter.specimen.membrane._profile.
         native_bilayer_thickness_angstrom`), so the default compresses it by
-        0.95. That the template sits ~1 Å above the experimental range at
+        0.925. That the template sits ~2 Å above the experimental range at
         all is a property of its hand-picked z-offsets, and is the part
         of this model still waiting on real coordinates -- not something
         to correct by squeezing harder at render time.
@@ -945,6 +948,14 @@ class MembraneGenerator:
     .. [3] Milner, S. T., & Safran, S. A. (1987). Dynamical fluctuations of droplet
        microemulsions and vesicles. *Physical Review A*, 36(9), 4371–4379.
        https://doi.org/10.1103/PhysRevA.36.4371
+    .. [4] Kučerka, N., Tristram-Nagle, S., & Nagle, J. F. (2005). Structure of
+       fully hydrated fluid phase lipid bilayers with monounsaturated chains.
+       *Journal of Membrane Biology*, 208(3), 193–202.
+       https://doi.org/10.1007/s00232-005-7006-8
+    .. [5] Nagle, J. F., & Tristram-Nagle, S. (2000). Structure of lipid
+       bilayers. *Biochimica et Biophysica Acta (BBA) – Reviews on
+       Biomembranes*, 1469(3), 159–195.
+       https://doi.org/10.1016/S0304-4157(00)00016-2
     """
 
     def __init__(
@@ -977,7 +988,7 @@ class MembraneGenerator:
         swept_curvature_step_fraction: float = 0.15,
         n_lipids_per_leaflet: int = 200,
         parameterization: ScatteringFactors = "shtyrov",
-        bilayer_thickness: float = 38.0,
+        bilayer_thickness: float = 37.0,
         bilayer_layer_sigma_angstrom: float = 0.0,
         transmembrane_specs: list[TransmembraneSpec] | None = None,
         transmembrane_occupancy_fraction: float = _DEFAULT_TRANSMEMBRANE_OCCUPANCY_FRACTION,
@@ -1166,7 +1177,7 @@ class MembraneGenerator:
         """
         # The MEASURED psi(z), not a two-Gaussian form: two Gaussians on
         # vacuum discard the acyl core, which carries most of the bilayer's
-        # integrated potential (4.5x at the default 38 A thickness, 4.8x at
+        # integrated potential (4.4x at the default 37 A thickness, 4.8x at
         # the template's native 40 A) and shows up as weak membranes in
         # projection. See build_measured_bilayer_profile's docstring.
         self.profile = build_measured_bilayer_profile(

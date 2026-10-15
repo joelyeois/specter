@@ -7,8 +7,8 @@ placement if any voxel carries both; no sphere approximation appears anywhere
 in its placement path. Reproducing that here is what closes the packing-
 density gap against it: on a matched 10-species benchmark, colliding real
 rotated shapes instead of bounding spheres moves the achievable macromolecule
-volume fraction from 0.043 to ~0.15 (204 mg/mL, physiological protein
-concentration), with `..algorithms.pack_hard_spheres_3d`'s own geometry
+volume fraction from 0.043 to ~0.15 (204 mg/mL of macromolecule at
+1.35 g/cm^3), with `..algorithms.pack_hard_spheres_3d`'s own geometry
 unchanged in every other respect.
 
 The cost is not where it looks. Profiled per candidate at 6.8 A, rotating a

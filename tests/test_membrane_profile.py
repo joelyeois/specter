@@ -283,3 +283,31 @@ def test_plane_average_is_not_an_isolated_atom_cusp():
     for value in plane:
         for peak in cusp:
             assert value != pytest.approx(peak, rel=0.2)
+
+
+def test_measured_profile_stretches_to_the_requested_phosphate_spacing():
+    """`bilayer_thickness` is the phosphate-to-phosphate spacing D_HH, and
+    rescaling to it is a pure z-stretch at fixed amplitude: the headgroup
+    peaks land at +-t/2 and the integral scales as t/native, which is what
+    lipid-volume conservation requires. Checked at the default (37 A, fluid
+    POPC at 30 C) and well away from it."""
+    from specter.specimen.membrane._profile import (
+        build_measured_bilayer_profile,
+        native_bilayer_thickness_angstrom,
+    )
+
+    native = native_bilayer_thickness_angstrom()
+    native_profile = build_measured_bilayer_profile(thickness_angstrom=native)
+    native_integral = float(
+        torch.trapezoid(native_profile.psi, native_profile.distance_angstrom)
+    )
+    for thickness in (37.0, 30.0):
+        profile = build_measured_bilayer_profile(thickness_angstrom=thickness)
+        upper = profile.distance_angstrom > 0
+        peak = float(profile.distance_angstrom[upper][profile.psi[upper].argmax()])
+        assert 2.0 * peak == pytest.approx(thickness, abs=1e-4)
+        assert float(profile.psi.max()) == pytest.approx(
+            float(native_profile.psi.max())
+        )
+        integral = float(torch.trapezoid(profile.psi, profile.distance_angstrom))
+        assert integral == pytest.approx(native_integral * thickness / native, rel=1e-4)

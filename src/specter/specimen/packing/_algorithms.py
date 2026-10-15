@@ -3,11 +3,28 @@ Multi-species hard-sphere packing for specimen generation.
 
 :func:`pack_hard_spheres_3d` -- Random Sequential Addition (RSA) [1]_, fully
 vectorized across candidates, fast (sub-second to a few seconds at a few
-thousand instances), capped by RSA's known jamming limit (~28-41%
-depending on species-size diversity, well below random-close-packing;
-the saturation density of RSA for identical spheres is computed in [2]_).
-This is the backend behind `specter build tomogram`
+thousand instances). This is the backend behind `specter build tomogram`
 (`specimen.tomogram.TomogramSpecimenGenerator`).
+
+RSA saturates well below random close packing: identical spheres in three
+dimensions reach 0.3841 at saturation [2]_ (0.38278 in [3]_). This packer
+stops lower, near 0.29 of bare-sphere volume for identical spheres at its
+defaults, for three reasons of roughly equal size, measured in a 2000 A box
+of r = 60 A spheres with gap = 5 A:
+
+- the gap enlarges every exclusion sphere to r + gap/2, and the bare volume
+  is (60/62.5)^3 = 0.885 of the excluded volume (about -0.04);
+- hard walls deplete a boundary layer in a box ~16 diameters across (about
+  -0.02 against the interior);
+- `max_passes`/`stall_patience` end the run long before saturation, whose
+  remaining gap RSA closes only as tau^(-1/3) in the number of trials
+  (Feder's law, [3]_ Eq. 7). In excluded volume over the box interior
+  the defaults reach 0.35, ten times the passes 0.37, and a hundred times
+  the passes with a three-times larger pool 0.377.
+
+A polydisperse pool (r = 40-130 A) reaches about 0.42 at the same budget
+and is still rising there; that is a measured, budget-limited value, not a
+known limit.
 
 Chosen over naive/voxel-grid RSA, Lubachevsky-Stillinger, a CellPACK-style
 incremental distance field, an SDF-scored variant, Tetris-style
@@ -22,7 +39,10 @@ References
 .. [1] Widom, B. (1966). Random sequential addition of hard spheres to a volume.
    *The Journal of Chemical Physics*, 44(10), 3888–3894.
    https://doi.org/10.1063/1.1726548
-.. [2] Torquato, S., Uche, O. U., & Stillinger, F. H. (2006). Random sequential
+.. [2] Zhang, G., & Torquato, S. (2013). Precise algorithm to generate random
+   sequential addition of hard hyperspheres at saturation. *Physical Review
+   E*, 88(5), 053312. https://doi.org/10.1103/PhysRevE.88.053312
+.. [3] Torquato, S., Uche, O. U., & Stillinger, F. H. (2006). Random sequential
    addition of hard spheres in high Euclidean dimensions. *Physical Review E*,
    74(6), 061308. https://doi.org/10.1103/PhysRevE.74.061308
 """
@@ -237,8 +257,10 @@ def pack_hard_spheres_3d(
         Maximum passes per radius stage. Default 200.
     stall_patience : int, optional
         Give up on a stage (move to the next-smaller radius) after this
-        many consecutive passes place zero new spheres -- the box is
-        saturated for that radius. Default 15.
+        many consecutive passes place zero new spheres. Default 15. This is
+        a stopping rule, not a test for saturation: RSA keeps placing
+        spheres ever more slowly, and the defaults stop well short of the
+        saturation density (see the module docstring).
     clip_axes : tuple of bool, optional
         (z, y, x), matching `box`'s own axis order. True on an axis means a
         candidate's CENTER just needs to stay within the box on that axis --

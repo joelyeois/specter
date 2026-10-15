@@ -165,12 +165,13 @@ def _achieved_occupancy(
 
 
 def figure_rsa_limit() -> None:
-    """RSA jams: past a certain requested occupancy, drawing a bigger
-    candidate pool stops adding placed volume. The ceiling is higher for a
-    polydisperse pool (small spheres fit into gaps large ones leave) than a
-    monodisperse one -- which is why `filler_occupancy_fraction` is a
-    budget rather than a promise, and why raising it past ~0.5 does
-    nothing."""
+    """RSA saturates: past a certain requested occupancy, drawing a bigger
+    candidate pool adds less and less placed volume. The monodisperse pool
+    levels off near 0.29, below RSA's 0.3841 saturation density because of
+    the gap, the walls and the default trial budget; the polydisperse pool
+    (small spheres fit into gaps large ones leave) reaches ~0.42 and is
+    still rising at 1.0. Either way `filler_occupancy_fraction` is a budget
+    rather than a promise."""
     box = (2000.0, 2000.0, 2000.0)
     box_volume = box[0] * box[1] * box[2]
     requested = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0]

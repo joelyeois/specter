@@ -85,17 +85,27 @@ def build_water_kernel(
     The upper branch is this kernel's own construction -- one oxygen plus
     two hydrogens, over the molecular volume in ice -- arrived at
     independently by [2] and [3], and [3] argues explicitly that it is the
-    appropriate one for LDA ice. Against it:
+    appropriate one for LDA ice. [3] evaluates it at 0.93 g/cm^3; at the
+    0.94 g/cm^3 of the bundled ice library (``density_of_amorphous_ice``) the
+    same construction gives 4.58 V. Against that, the mean potential of
+    rendered library ice (ten 128 A crops at each of 0.5, 1.0 and 1.5 A
+    voxels; the range is over voxel size):
 
-    ==========================  ========  ==========================
-    model                       MIP       vs. 4.53 V
-    ==========================  ========  ==========================
-    oxygen only (before)        2.08 V    -54%
-    this kernel, shtyrov        3.67 V    -19%
-    this kernel, kirkland       4.55 V     +0.4%
-    ==========================  ========  ==========================
+    ===========================  ===========  ============
+    model                        MIP          vs. 4.58 V
+    ===========================  ===========  ============
+    oxygen only, shtyrov O(HH)   2.04-2.08 V  -55%
+    oxygen only, kirkland        2.96-2.99 V  -35%
+    this kernel, shtyrov         3.63-3.67 V  -21% to -20%
+    this kernel, kirkland        4.55-4.58 V  -0.6% to 0.0%
+    ===========================  ===========  ============
 
-    Do NOT read the +8% against [1]'s density-scaled 4.21 V as an error to
+    The continuum integral of the same factors at 0.94 g/cm^3 is 4.59 V
+    under kirkland and 3.63 V under shtyrov; the sampled kernels hold
+    0.992-0.998 and 1.000-1.012 of it, which is the whole spread over voxel
+    size.
+
+    Do NOT read the +8-9% against [1]'s density-scaled 4.21 V as an error to
     tune away. An isolated-atom superposition cannot represent bonding and
     is expected to sit above a measurement; [5] is the only direct
     measurement on vitrified ice (per [1], which also notes it may carry
@@ -210,7 +220,12 @@ MDSIM_DX = 0.25
 MDSIM_N = 400
 
 # Real extent of the LDA-80K MD simulation's periodic cell (see the dump
-# file's own BOX BOUNDS header): ~127.12 A per side. A native target can
+# file's own BOX BOUNDS header): ~127.12 A per side, holding 64,000
+# molecules, so the frame is at 0.932 g/cm^3, slightly below the 0.94 g/cm^3
+# the icemakers fill their boxes to (`density_of_amorphous_ice`). The target
+# is normalised per molecule (|F(k)| / sqrt(N)), so an icemaker takes its
+# structure factor from the frame and its molecule count from
+# `density_of_amorphous_ice`. A native target can
 # only be computed directly up to this size before requiring the box-size
 # extrapolation handled by interpolate_target_kernel's own interp1d call
 # (safe -- box size only changes k-sampling density of the same underlying

@@ -236,8 +236,8 @@ under two configuration fields:
 
 Measured against electron holography, the split is justified rather than
 stylistic. Amorphous ice at SPECTER's number density is expected near 4.21 V,
-scaled from liquid water's 4.48 ± 0.19 V (Yesibolati et al. 2020); Kirkland gives 4.55 V and the
-Shtyrov water species 3.67 V. For amorphous carbon, Kirkland, Lobato and Peng
+scaled from liquid water's 4.48 ± 0.19 V (Yesibolati et al. 2020); Kirkland gives 4.55-4.58 V and the
+Shtyrov water species 3.63-3.67 V at 0.5-1.5 Å voxels. For amorphous carbon, Kirkland, Lobato and Peng
 agree with each other to 0.5%, while the `C(CCC)` proxy sits around 40% above
 all three per unit density against a measured 5.19 V per g/cm³ (Wanner et
 al. 2006).

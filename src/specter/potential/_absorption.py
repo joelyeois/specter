@@ -245,7 +245,8 @@ Inelastic mean free path of protein at 300 kV, in Angstrom. Provisional.
 Derived, not measured: ``nu = sigma_inel/sigma_el = 20/Z`` per element
 (Reimer & Ross-Messemer, 1990) against isolated-atom elastic cross sections,
 evaluated for protein's composition (H 0.492, C 0.313, N 0.094, O 0.101 by
-atom fraction, Vulović et al. 2013; taken at 1.35 g/cm^3) and for water, with the
+atom fraction, Vulović et al. 2013; taken at 1.35 g/cm^3) and for water at
+0.94 g/cm^3 (``ice.density_of_amorphous_ice``), with the
 ratio anchored to :data:`INELASTIC_MFP_ICE_A` so the absolute normalisation
 of ``nu`` never has to be trusted. That gives 0.62 x ice.
 
@@ -261,8 +262,8 @@ ice, or 1915 A. A Malis/Egerton-style estimate gives 317 nm, but that formula
 carries no density term at all, which is why it puts protein and ice nearly
 together; a mean free path is ``1/(n sigma)`` and density cannot drop out.
 Scaling instead by valence-electron density, the quantity plasmon losses
-follow to first order (0.319 e/A^3 for protein against 0.249 for ice), gives
-~3080 A. The readings span 1915-3170 A, and the better-motivated physical
+follow to first order (0.319 e/A^3 for protein against 0.251 for ice), gives
+~3110 A. The readings span 1915-3170 A, and the better-motivated physical
 picture does not favour the shorter end.
 
 What rides on it: the amplitude contrast a particle carries against the water
@@ -276,7 +277,7 @@ inner potential 7.0 V). Replace this with a measurement when one exists.
 6.9 +/- 1.9 %. Adding the aperture term (:func:`aperture_mfp_protein`,
 :func:`aperture_mfp_ice`) this value predicts 4.2-5.7 % (protein inner
 potential 7.89-7.0 V), within 1.4 sigma; 3170 A predicts 2.0-2.8 % and the
-valence-density estimate 2.2-3.1 %, both about 2 sigma low. Two things keep
+valence-density estimate 2.2-3.0 %, both about 2 sigma low. Two things keep
 this from moving the value toward 1915 A (6.9-9.4 %), which fits best:
 
 - The same paper's *unfiltered* values (2.7 +/- 1.0 % protein, 5.8 +/- 1.8 %
@@ -312,12 +313,6 @@ References
    contrast of frozen-hydrated protein at 300 kV. *Journal of Structural
    Biology*, 156(3), 524–536. https://doi.org/10.1016/j.jsb.2006.07.016
 """
-
-#: Amorphous ice for the aperture cross section: the density at which this
-#: package's water kernel gives its 4.55 V mean inner potential (see
-#: ``ice/_kernels.py``'s ``build_water_kernel``), as molecules per A^3.
-_ICE_DENSITY_G_CM3 = 0.93
-_WATER_MOLAR_MASS = 18.015
 
 #: Protein by atom fraction and density, the composition
 #: :data:`INELASTIC_MFP_PROTEIN_A` is derived for (Vulović et al., 2013).
@@ -428,7 +423,7 @@ def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
     removed from the image as surely as inelastic ones removed by an energy
     filter. A multislice grid cannot carry that loss: at 1 A/px its Nyquist
     frequency (0.5 1/A) sits inside a typical aperture (12 mrad is 0.61 1/A
-    at 300 kV), and finer grids still damp it -- 400 A of ice sends 2.7% of
+    at 300 kV), and finer grids still damp it -- 400 A of ice sends 2.8% of
     the beam beyond 12 mrad by this cross section, against 0.49% on a
     0.5 A grid and 1.9% on a 0.125 A one. This supplies it as an absorption
     rate instead, the cross section integrated over the scattering the grid
@@ -442,7 +437,9 @@ def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
     frequency, and the orientation-averaged molecular form factor including
     the O-H and H-H interference terms. Atoms are summed incoherently
     between molecules, which amorphous ice's structure factor permits beyond
-    its first peak (0.3 1/A).
+    its first peak (0.3 1/A). :math:`n` is the number density of water
+    molecules at ``ice.density_of_amorphous_ice`` (0.94 g/cm^3), the density
+    the icemakers and the bundled ice library are built at.
 
     The factors are Kirkland's, per element, whatever `scattering_factors`
     the specimen is rendered with, and deliberately so. Beyond an aperture
@@ -465,13 +462,18 @@ def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
     Returns
     -------
     float
-        Mean free path in Angstrom. At 300 kV and 12 mrad, ~14,400 A.
+        Mean free path in Angstrom. At 300 kV and 12 mrad, ~14,200 A.
 
     References
     ----------
     .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
        (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
+    # Imported here rather than at module level: `specter.ice` imports
+    # `specter.potential` while it initialises, so a module-level import
+    # would be circular.
+    from ..ice._helpers import ndensity_of_amorphous_ice
+
     k_ap = _aperture_k(aperture_mrad, voltage_kv)
     k = _K_GRID
     f_o, f_h = _kirkland_f(8, k), _kirkland_f(1, k)
@@ -482,7 +484,7 @@ def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
         + 4 * f_o * f_h * torch.sin(x_oh) / x_oh
         + 2 * f_h**2 * torch.sin(x_hh) / x_hh
     )
-    n = _ICE_DENSITY_G_CM3 / (_WATER_MOLAR_MASS * 1.66054)
+    n = ndensity_of_amorphous_ice
     rate = (
         n
         * _cross_section_prefactor(voltage_kv)

@@ -206,7 +206,7 @@ the image in the same way as inelastically scattered electrons are removed by
 an energy filter. A multislice grid does not carry this scattering. At 1 Å per
 pixel the Nyquist frequency (0.5 Å⁻¹) lies inside a 12 mrad aperture
 (0.61 Å⁻¹ at 300 kV), and finer grids attenuate it: through 400 Å of amorphous
-ice the cross section below sends 2.7% of the beam beyond 12 mrad, whereas the
+ice the cross section below sends 2.8% of the beam beyond 12 mrad, whereas the
 propagated wave carries 0.49% at 0.5 Å per pixel and 1.9% at 0.125 Å per pixel.
 
 `Optics(objective_aperture=...)`, in milliradians, therefore charges this loss
@@ -221,7 +221,7 @@ cross section integrated beyond the aperture,
 evaluated with Kirkland (2010) factors for water (including its intramolecular
 interference) and for the standard protein composition
 (`potential.aperture_mfp_ice`, `potential.aperture_mfp_protein`). At 300 kV and
-12 mrad, \(\Lambda_{ap}\) is 14,400 Å for ice and 10,400 Å for protein. The
+12 mrad, \(\Lambda_{ap}\) is 14,200 Å for ice and 10,400 Å for protein. The
 rate adds to the inelastic one, and where the aperture lies inside the grid's
 Nyquist frequency the potential is low-passed at the aperture
 (`potential.aperture_lowpass`) so that the scattering the grid does carry is

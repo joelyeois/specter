@@ -270,9 +270,10 @@ where the true reference plane sits at the scattering centroid instead.
 
 Potential volumes are in **volts**. A box of water at the density of
 amorphous ice, rendered with the default `bulk_scattering_factors =
-"kirkland"`, returns a mean potential of about 4.55 V. That is within 0.4%
-of the 4.53 V an isolated-atom superposition of one oxygen and two
-hydrogens over the molecular volume of amorphous ice predicts. The
+"kirkland"`, returns a mean potential of 4.55-4.58 V at 0.5-1.5 Å voxels.
+That is within 1% of the 4.59 V an isolated-atom superposition of one
+oxygen and two hydrogens per molecule predicts at the same density,
+0.94 g/cm³. The
 measured mean inner potential of liquid water, 4.48 ± 0.19 V (Yesibolati
 et al. 2020), scales to about 4.21 V at the density of amorphous ice. An
 isolated-atom superposition cannot represent bonding and is expected to

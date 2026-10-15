@@ -29,7 +29,12 @@ the radial profile.
 
 The target itself comes from an in-house molecular dynamics reference
 frame of low-density amorphous ice at 80 K and 0 atm (LDA-80K), not from a
-published dataset. By default, each `GradientSKIcemaker` instance
+published dataset. The frame holds 64,000 molecules in a periodic cell
+127.12 Å on a side, a density of 0.932 g/cm³. The target is normalised per
+molecule, so the optimiser takes its structure factor from the frame and its
+molecule count from `ice.density_of_amorphous_ice`, 0.94 g/cm³; the bundled
+library is built at that density, 527,178 molecules per 256 Å configuration.
+By default, each `GradientSKIcemaker` instance
 recomputes the target natively at its own grid spacing and box size
 (`compute_native_target`), rather than interpolating from a single
 fixed-resolution precomputation. Matching the voxel spacing between
@@ -127,10 +132,12 @@ Mott-Bethe relation (Mott 1930; Bethe 1930) the electron scattering factor of
 an atom goes as \((Z - f_x(k))/k^2\), so a diffuse one-electron atom
 contributes strongly at low spatial frequency: the two hydrogens carry 35% of
 the molecule's integrated potential under Kirkland factors (Kirkland 2010).
-Rendered at 0.93 g/cm³, an oxygen-only kernel gives ice a mean inner
-potential of 2.95 V under Kirkland factors (2.04 V under the Shtyrov `O(HH)`
-factor; Shtyrov et al. 2026), whereas the full kernel gives 4.50-4.53 V under
-Kirkland factors at 0.5-1.5 Å voxels. Liquid water
+Rendered from the bundled library at 0.94 g/cm³, an oxygen-only kernel gives
+ice a mean inner potential of 2.96-2.99 V under Kirkland factors (2.04-2.08 V
+under the Shtyrov `O(HH)` factor; Shtyrov et al. 2026), whereas the full kernel
+gives 4.55-4.58 V under Kirkland factors at 0.5-1.5 Å voxels. The continuum
+integral of the same factors at that density is 4.59 V; the sampled kernel
+holds 99.2-99.8% of it. Liquid water
 measures 4.48 ± 0.19 V by electron holography (Yesibolati et al. 2020),
 about 4.21 V once scaled to the density of ice. An isolated-atom
 superposition cannot represent bonding and is expected to sit somewhat above
@@ -149,7 +156,7 @@ in Python), which defaults to `"kirkland"`. It is separate from
 `scattering_factors`, which governs biomolecules: the Shtyrov factors are
 fitted to bonded species of biomolecules over 0.011-0.62 Å⁻¹, and a mean
 inner potential is a \(k = 0\) quantity outside that range. The full
-Shtyrov kernel gives 3.6 V.
+Shtyrov kernel gives 3.63-3.67 V.
 
 Two grid conventions keep the rendered canvas uniform up to its faces. The
 kernel is odd-sized and centred on a voxel, so each molecule's potential is

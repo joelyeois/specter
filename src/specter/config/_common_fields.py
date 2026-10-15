@@ -169,7 +169,7 @@ def objective_aperture_setting() -> Any:
             "Krios is ~12 mrad), for absorption_model='inelastic_mfp'. Electrons "
             "scattered elastically beyond it leave the image; the loss is charged "
             "per material from the scattering cross section, since no practical "
-            "grid carries it (2.7% of the beam through 400 Angstrom of ice at "
+            "grid carries it (2.8% of the beam through 400 Angstrom of ice at "
             "12 mrad, 300 kV). Unset: no aperture."
         ),
         check="positive",

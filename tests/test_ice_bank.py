@@ -689,3 +689,34 @@ def test_slab_atoms_returns_empty_for_a_slab_with_no_molecules() -> None:
     assert empty.shape == (0, 3) and empty.dtype == torch.float64
     full = _slab_atoms(pos, offsets, chunk, nz, dx, 0, 10, "cpu")
     assert full.shape == (2, 3)
+
+
+def test_bundled_library_renders_ice_at_the_package_ice_density() -> None:
+    """
+    The bundled library is built at `density_of_amorphous_ice`, the density
+    the aperture cross section and the documented mean inner potential
+    assume, and its rendered Kirkland ice has the documented mean potential:
+    within 1.5% of the continuum integral ``n * c1 * (f_O(0) + 2 f_H(0))``,
+    4.59 V, the sampled kernel holding 0.992-0.998 of it.
+    """
+    from specter.atom._atomic_potentials import kirkland_atomic_potential_3d_fourier
+    from specter.constants import bohr_radius, electron_charge_volt_angstrom
+
+    bank = IceBank(progressbars=False)
+    for config in bank._configs:
+        density = config["positions"].shape[0] / float(config["box_L"]) ** 3
+        assert density == pytest.approx(ndensity_of_amorphous_ice, rel=1e-4)
+
+    k0 = torch.zeros(1, 1, 1)
+    f0 = sum(
+        count * float(kirkland_atomic_potential_3d_fourier(z, k0).reshape(-1)[0])
+        for z, count in ((8, 1), (1, 2))
+    )
+    c1 = 2 * math.pi * bohr_radius() * electron_charge_volt_angstrom()
+    continuum = ndensity_of_amorphous_ice * c1 * f0
+    assert continuum == pytest.approx(4.587, abs=0.002)
+
+    ice = bank.generate_ice(
+        n=96, dx=1.0, batchsize=4, generator=torch.Generator().manual_seed(0)
+    )
+    assert float(ice.double().mean()) == pytest.approx(continuum, rel=0.015)

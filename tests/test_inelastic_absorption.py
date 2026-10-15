@@ -572,6 +572,7 @@ def test_aperture_cross_section_matches_langmore_smith_total() -> None:
     elastic one, which Langmore & Smith (1992) Eq. 1 gives independently:
     ``sigma_el = 1.4e-6 Z^1.5 / beta^2 (1 - 0.26 Z / (137 beta))`` nm^2.
     """
+    from specter.ice import ndensity_of_amorphous_ice
     from specter.potential import aperture_mfp_ice
 
     gamma = 1 + VOLTAGE / 511.0
@@ -580,25 +581,43 @@ def test_aperture_cross_section_matches_langmore_smith_total() -> None:
     def sigma_el(z: int) -> float:  # A^2
         return 1.4e-6 * z**1.5 / beta**2 * (1 - 0.26 * z / (137 * beta)) * 100
 
-    n = 0.93 / (18.015 * 1.66054)
-    langmore_smith = 1.0 / (n * (sigma_el(8) + 2 * sigma_el(1)))
+    langmore_smith = 1.0 / (ndensity_of_amorphous_ice * (sigma_el(8) + 2 * sigma_el(1)))
     assert aperture_mfp_ice(0.01, VOLTAGE) == pytest.approx(langmore_smith, rel=0.1)
 
 
 def test_aperture_loss_through_ice_and_its_trends() -> None:
     """
-    2.7% of the beam leaves a 12 mrad aperture through 400 A of ice at
+    2.8% of the beam leaves a 12 mrad aperture through 400 A of ice at
     300 kV; a wider aperture loses less, and protein (denser, heavier atoms)
     scatters out faster than ice.
     """
     from specter.potential import aperture_mfp_ice, aperture_mfp_protein
 
     loss = 1 - math.exp(-400.0 / aperture_mfp_ice(12.0, VOLTAGE))
-    assert loss == pytest.approx(0.027, abs=0.002)
+    assert loss == pytest.approx(0.028, abs=0.002)
     assert aperture_mfp_ice(20.0, VOLTAGE) > aperture_mfp_ice(12.0, VOLTAGE)
     assert aperture_mfp_protein(12.0, VOLTAGE) < aperture_mfp_ice(12.0, VOLTAGE)
     with pytest.raises(ValueError):
         aperture_mfp_ice(0.0, VOLTAGE)
+
+
+def test_aperture_cross_section_follows_the_ice_library_density(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    The aperture rate is a number density times a cross section, and the
+    density is read from `ice.ndensity_of_amorphous_ice`, the one the
+    icemakers and the bundled library are built at, not from a second copy.
+    """
+    import specter.ice._helpers as helpers
+    from specter.potential import aperture_mfp_ice
+
+    base = aperture_mfp_ice(12.0, VOLTAGE)
+    assert base == pytest.approx(14_206, rel=1e-3)  # 0.94 g/cm^3
+    monkeypatch.setattr(
+        helpers, "ndensity_of_amorphous_ice", 2 * helpers.ndensity_of_amorphous_ice
+    )
+    assert aperture_mfp_ice(12.0, VOLTAGE) == pytest.approx(base / 2, rel=1e-12)
 
 
 def test_aperture_lowpass_removes_only_what_lies_beyond_the_aperture() -> None:

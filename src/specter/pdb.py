@@ -446,6 +446,11 @@ class PDB:
             adds carry whatever B gemmi assigns them, which is 0 for an atom
             built from ideal geometry.
         """
+        # A "~" a shell would have expanded reaches here verbatim from a
+        # config file or a quoted argument; left alone it becomes a directory
+        # literally named "~" in the working directory.
+        pdb_cache_dir = os.path.expanduser(pdb_cache_dir)
+        pdb_source = os.path.expanduser(pdb_source)
 
         # Determine whether pdb_source is a PDB ID or file path. The ID check
         # comes first deliberately, and the ambiguity it implies is narrower

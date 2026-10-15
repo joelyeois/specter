@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import fields
-from typing import TypeVar, overload
+from typing import Any, TypeVar, overload
 
 from ._ice import IceCacheConfig
 from ._match import MatchConfig
@@ -115,9 +116,10 @@ def load_config(
         )
     # Paths are deliberately NOT rewritten here: a relative path a user wrote
     # in a TOML (or passed on the CLI) is resolved against the current working
-    # directory, like every other CLI tool's path argument. Only an omitted
-    # pdb_cache_dir gets a computed default -- see default_pdb_cache_dir.
-    return config_cls(**flat)
+    # directory, like every other CLI tool's path argument. Only a leading "~"
+    # is expanded, as a shell would have, and only an omitted pdb_cache_dir
+    # gets a computed default -- see default_pdb_cache_dir.
+    return config_cls(**{k: _expand_home(k, v) for k, v in flat.items()})
 
 
 def apply_overrides(config: ConfigT, overrides: dict) -> ConfigT:
@@ -147,5 +149,34 @@ def apply_overrides(config: ConfigT, overrides: dict) -> ConfigT:
             f"{', '.join(sorted(valid))}."
         )
     for key, value in overrides.items():
-        setattr(config, key, value)
+        setattr(config, key, _expand_home(key, value))
     return config
+
+
+_PATH_SUFFIXES = ("_dir", "_path", "_file", "_source", "_ref")
+
+
+def _expand_home(name: str, value: Any) -> Any:
+    """
+    `value` with a leading ``~`` expanded, when `name` is a path field.
+
+    A shell expands ``~`` before a program sees it, but not inside a TOML
+    string or a quoted argument; left verbatim it names a directory called
+    ``~`` in the working directory. Applied to path-like fields only (and to
+    the same keys inside a list of tables, such as a tomogram's
+    ``[[targets]]``), so no other string is touched.
+    """
+    if isinstance(value, list):
+        return [
+            {k: _expand_home(k, v) for k, v in item.items()}
+            if isinstance(item, dict)
+            else _expand_home(name, item)
+            for item in value
+        ]
+    if (
+        isinstance(value, str)
+        and value.startswith("~")
+        and name.endswith(_PATH_SUFFIXES)
+    ):
+        return os.path.expanduser(value)
+    return value

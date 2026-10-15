@@ -624,3 +624,23 @@ def test_an_unpadded_uneven_ice_profile_warns() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         validate_config(MicrographConfig(pdb_source="6bdf", ice_profile="meniscus"))
+
+
+def test_a_leading_tilde_in_a_path_field_is_expanded(tmp_path) -> None:
+    """
+    A shell expands ``~`` before a program sees it, but not inside a TOML
+    string or a quoted flag; left verbatim, ``pdb_cache_dir = "~/.cache/..."``
+    made a directory literally named ``~`` in the working directory. Path
+    fields expand it, in the file and in overrides, and nothing else does.
+    """
+    import os
+
+    path = tmp_path / "particle.toml"
+    path.write_text(
+        '[specimen]\npdb_source = "6bdf"\npdb_cache_dir = "~/.cache/specter/pdb"\n'
+    )
+    config = load_config(str(path), ParticleStackConfig)
+    assert config.pdb_cache_dir == os.path.expanduser("~/.cache/specter/pdb")
+    apply_overrides(config, {"output_dir": "~/runs", "filename": "~stack"})
+    assert config.output_dir == os.path.expanduser("~/runs")
+    assert config.filename == "~stack"

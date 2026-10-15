@@ -191,7 +191,7 @@ def default_pdb_cache_dir() -> str:
     """
     override = os.environ.get(PDB_CACHE_ENV_VAR)
     if override:
-        return override
+        return os.path.expanduser(override)
     xdg = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg) if xdg else Path.home() / ".cache"
     return str(base / "specter" / "pdb")

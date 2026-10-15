@@ -213,6 +213,13 @@ class IceBank(_IceTiling, L.LightningModule):
         torch.Tensor
             Shape (N, 3), local frame, centered at the origin.
         """
+        if generator is not None and generator.device.type != "cpu":
+            raise ValueError(
+                f"IceBank draws its crops from a CPU generator, got one on "
+                f"{generator.device}: pass torch.Generator() (the CPU default). "
+                "The draws are a few numbers each, made on the CPU whatever "
+                "the bank's device."
+            )
         max_extent = max(crop_extent)
         candidates = [c for c in self._configs if c["box_L"] >= max_extent]
         if not candidates:
@@ -310,7 +317,10 @@ class IceBank(_IceTiling, L.LightningModule):
         batchsize : int, optional
             Number of independent crops. Default is 1.
         generator : torch.Generator, optional
-            RNG for reproducibility. Default is the global RNG.
+            A CPU generator, for reproducibility. Every random draw is a few
+            numbers made on the CPU whatever the bank's device, so a
+            generator on another device is refused. Default is the global
+            RNG.
 
         Returns
         -------
@@ -377,7 +387,10 @@ class IceBank(_IceTiling, L.LightningModule):
         device : torch.device or str, optional
             Target device for the output. Default is ``self.device``.
         generator : torch.Generator, optional
-            RNG for reproducibility. Default is the global RNG.
+            A CPU generator, for reproducibility. Every random draw is a few
+            numbers made on the CPU whatever the bank's device, so a
+            generator on another device is refused. Default is the global
+            RNG.
 
         Returns
         -------

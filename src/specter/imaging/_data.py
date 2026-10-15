@@ -43,9 +43,18 @@ def settings_group(
     return given
 
 
-def per_image(value: float | torch.Tensor, n: int, name: str) -> torch.Tensor:
-    """`value` as a float32 tensor of length `n`, a scalar broadcast."""
-    t = torch.as_tensor(value, dtype=torch.float32).flatten()
+def per_image(
+    value: float | torch.Tensor,
+    n: int,
+    name: str,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """
+    `value` as a float32 tensor of length `n`, a scalar broadcast; on
+    `device` when given, else where `value` already is (the CPU for a
+    number).
+    """
+    t = torch.as_tensor(value, dtype=torch.float32, device=device).flatten()
     if len(t) == 1:
         return t.expand(n).clone()
     if len(t) != n:
@@ -208,14 +217,19 @@ class CTF:
             Phase-plate shift in degrees. Default 0.
         """
         n = n if n is not None else torch.as_tensor(defocus).numel()
+        # Every term on the defocus's device, so a CUDA defocus gives a CUDA
+        # CTF rather than a mix the first subtraction refuses.
+        device = defocus.device if isinstance(defocus, torch.Tensor) else None
         dfu = per_image(defocus, n, "defocus")
         return cls(
             {
-                "cs": torch.full((n,), cs * 1e7),
+                "cs": torch.full((n,), cs * 1e7, device=dfu.device),
                 "dfu": dfu,
-                "dfv": dfu - per_image(astigmatism, n, "astigmatism"),
-                "dfang": per_image(astigmatism_angle, n, "astigmatism_angle"),
-                "phaseshift": torch.deg2rad(per_image(phase_shift, n, "phase_shift")),
+                "dfv": dfu - per_image(astigmatism, n, "astigmatism", device),
+                "dfang": per_image(astigmatism_angle, n, "astigmatism_angle", device),
+                "phaseshift": torch.deg2rad(
+                    per_image(phase_shift, n, "phase_shift", device)
+                ),
             }
         )
 

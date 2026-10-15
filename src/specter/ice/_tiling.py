@@ -208,7 +208,9 @@ class _IceTiling:
         accuracy. For a many-tile assembly the excluded bulk can be the
         overwhelming majority of atoms, so this matters a lot in practice.
         The untouched bulk (``~halo_mask``) is reattached unchanged at the
-        end without ever being moved to ``device``.
+        end without ever being moved to ``device``, and the result is
+        returned on the device `positions` came on: the host under
+        ``to_host``, the bank's device otherwise.
 
         Explicitly wrapped in ``torch.enable_grad()`` since this is called
         from ``generate_big_ice``/``generate_big_ice_deltas``, which callers
@@ -243,8 +245,9 @@ class _IceTiling:
                 )
                 loss.backward()
                 opt.step()
+        home = positions.device
         return torch.cat(
-            [positions[far_mask], frozen.cpu(), mobile.detach().cpu()], dim=0
+            [positions[far_mask], frozen.to(home), mobile.detach().to(home)], dim=0
         )
 
     def _tile_grid(
@@ -422,7 +425,10 @@ class _IceTiling:
         device : torch.device or str, optional
             Device to run the relaxation on. Default is ``self.device``.
         generator : torch.Generator, optional
-            RNG for reproducibility. Default is the global RNG.
+            A CPU generator, for reproducibility. Every random draw is a few
+            numbers made on the CPU whatever the bank's device, so a
+            generator on another device is refused. Default is the global
+            RNG.
 
         Returns
         -------

@@ -174,7 +174,7 @@ The `.star` file holds one row per tilt:
 ///caption
 Five of the 41 tilts, each at 2.2 µm defocus and 3 e⁻/Å². Top: the whole
 6000 Å field, low-pass filtered to 40 Å, where the membranes are dark
-outlines and the carbon film is the dark region at the right. Bottom: the
+outlines and the carbon film is the dark region at the left. Bottom: the
 central 2000 Å at 20 Å. A tilted view spans more of the specimen's x extent
 than the volume holds; the volume is reflect-padded to cover it, so at
 ±60° the film's edge appears together with its mirror image.

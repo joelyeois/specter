@@ -9,8 +9,9 @@ This page surrounds the potential rendered in
 [Structures and potentials](potentials.md) with neighbouring copies and a
 slab of amorphous ice, and shows the settings that control each.
 
-The setup renders the same 6BDF potential as the previous page and keeps its
-largest diameter for spacing the neighbours:
+The setup renders the same 6BDF potential (Berman et al. 2000; Campbell et
+al. 2015) as the previous page and keeps its largest diameter for spacing the
+neighbours:
 
 ```python
 --8<-- "docs-figures/walkthrough/specimens.py:setup"
@@ -46,7 +47,7 @@ the recipe.
 ## Crowding
 
 `crowd` places randomly rotated copies of the template around the particle
-by Poisson-disk sampling, so that no two copies sit closer than
+by Poisson-disk sampling (Bridson 2007), so that no two copies sit closer than
 `min_distance`, centre to centre. Spacing them by the particle's largest
 diameter keeps the copies from interpenetrating. The same four poses, with
 and without neighbours:
@@ -84,7 +85,8 @@ particle. It defaults to the template's own depth (256 Å here) and does not
 grow with the ice thickness set below, so thicker ice adds water above and
 below the neighbours rather than more neighbours.
 `water_air_interface=True` biases the copies toward the two surfaces of the
-ice, where particles adsorb during vitrification. Both are described in
+ice, where particles adsorb during vitrification (Noble et al. 2018). Both are
+described in
 [Pose & crowding](../concepts/pose-crowding.md#crowding).
 
 ## Ice
@@ -195,16 +197,18 @@ dotted line marks 3.7 Å.
 ///
 
 The `"gd"` ice has its first peak at 0.266 Å⁻¹ (3.76 Å), the water ring seen
-in the power spectra of real micrographs, and a second near Nyquist. Below
+in the power spectra of real micrographs (McMullan et al. 2015), and a second
+near Nyquist. Below
 0.15 Å⁻¹ its structure factor falls to between 0.05 and 0.11: ice is nearly
 incompressible, so its density fluctuates far less over long distances than
 randomly placed molecules do. Random ice has neither feature, and below 0.15 Å⁻¹
 it carries 9 to 20 times the power of structured ice. Use `"random"` for quick
 tests and `"gd"` for anything compared with experimental data.
 
-The ice uses Kirkland scattering factors by default
+The ice uses Kirkland scattering factors (Kirkland 2010) by default
 (`Ice(parameterization="kirkland")`), independently of the structure's,
-since ice is a bulk material outside the range of the Shtyrov fits.
+since ice is a bulk material outside the range of the Shtyrov fits
+(Shtyrov et al. 2026).
 
 The bundled library holds 20 configurations, each a periodic 256 Å cell of
 molecular coordinates rather than a voxel grid, so it renders at whatever
@@ -241,8 +245,9 @@ setup fixes that generator, and with it the poses `Poses.random` draws;
 
 ## Radiation damage
 
-`damage` applies each exposure's dose envelope to the specimen's potential,
-fading its high-resolution structure as the electron dose destroys it. It acts
+`damage` applies each exposure's dose envelope (Grant & Grigorieff 2015) to
+the specimen's potential, fading its high-resolution structure as the electron
+dose destroys it. It acts
 on the specimen before the ice is added, so the ice keeps its structure, and
 the volume the specimen displaces is read from the undamaged potential.
 `plan` shows that order:
@@ -265,3 +270,37 @@ structure across an exposure. Both are described in
 
 [Scattering](scattering.md) propagates an electron wave through these volumes
 and produces the exit wave.
+
+## References
+
+- Berman, H. M., Westbrook, J., Feng, Z., Gilliland, G., Bhat, T. N.,
+  Weissig, H., Shindyalov, I. N., & Bourne, P. E. (2000). The Protein Data
+  Bank. *Nucleic Acids Research*, 28(1), 235–242.
+  [doi:10.1093/nar/28.1.235](https://doi.org/10.1093/nar/28.1.235)
+- Bridson, R. (2007). Fast Poisson disk sampling in arbitrary dimensions.
+  In *ACM SIGGRAPH 2007 Sketches* (p. 22). ACM.
+  [doi:10.1145/1278780.1278807](https://doi.org/10.1145/1278780.1278807)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+  single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+  *eLife*, 4, e06980.
+  [doi:10.7554/eLife.06980](https://doi.org/10.7554/eLife.06980)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- McMullan, G., Vinothkumar, K. R., & Henderson, R. (2015). Thon rings from
+  amorphous ice and implications of beam-induced Brownian motion in single
+  particle electron cryo-microscopy. *Ultramicroscopy*, 158, 26–32.
+  [doi:10.1016/j.ultramic.2015.05.017](https://doi.org/10.1016/j.ultramic.2015.05.017)
+- Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J., Acharya, P.,
+  et al. (2018). Routine single particle CryoEM sample and grid
+  characterization by tomography. *eLife*, 7, e34257.
+  [doi:10.7554/eLife.34257](https://doi.org/10.7554/eLife.34257)
+- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+  et al. (2026). Measurement of atomic scattering factors by cryoelectron
+  microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+  e2528758123.
+  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123)

@@ -27,9 +27,10 @@ Do not "simplify" this back to a plain top-level import.
 
 References
 ----------
-Brégier, R. (2021). Deep Regression on Manifolds: A 3D Rotation Case Study.
-2021 International Conference on 3D Vision (3DV). https://arxiv.org/abs/2103.16317
-roma source: https://github.com/naver/roma
+.. [1] Bregier, R. (2021). Deep regression on manifolds: A 3D rotation case
+   study. In *2021 International Conference on 3D Vision (3DV)*
+   (pp. 166–174). IEEE. https://doi.org/10.1109/3DV53792.2021.00027
+   (roma source: https://github.com/naver/roma)
 """
 
 from __future__ import annotations

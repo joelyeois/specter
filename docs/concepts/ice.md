@@ -44,10 +44,11 @@ cell, via safe extrapolation in `compute_native_target`.
 
 ## The optimisation
 
-Positions start out uniformly random. A short L-BFGS relaxation against
-the ML-BOP energy alone (`prerelax_steps`, 30 by default) first removes
-the overlapping molecules of that start, since the full loss would
-otherwise spend its first several hundred evaluations on nothing else.
+Positions start out uniformly random. A short L-BFGS (Liu & Nocedal 1989)
+relaxation against the ML-BOP energy (Chan et al. 2019) alone
+(`prerelax_steps`, 30 by default) first removes the overlapping molecules of
+that start, since the full loss would otherwise spend its first several
+hundred evaluations on nothing else.
 L-BFGS then optimises the positions (the default; Adam is also available)
 against the combined loss
 
@@ -81,8 +82,9 @@ second term to penalise that, chosen by `mlbop_strength`
 ### ML-BOP energy penalty (default)
 
 `mlbop_strength` weights a fully differentiable penalty computed from the
-ML-BOP coarse-grained water potential (`specter.ice._energy.MLBOP`), a
-Tersoff-style two-body plus three-body bond-order potential: an
+ML-BOP coarse-grained water potential of Chan et al. (2019)
+(`specter.ice._energy.MLBOP`), a Tersoff-style (Tersoff 1988) two-body plus
+three-body bond-order potential: an
 exponential repulsive/attractive pair term smoothly cut off at `R ± D`
 (`f_R`, `f_A`, `f_C`), combined with an angular term `g(cos θ)` that
 penalises O-O-O angles away from a preferred tetrahedral-like value.
@@ -117,17 +119,19 @@ The optimised positions are one site per water molecule, and each site is
 rendered as a whole molecule by convolving the positions with a single
 potential kernel (`ice._kernels.build_water_kernel`). The kernel is the
 oxygen potential plus the potentials of two hydrogens, each smeared uniformly
-over a spherical shell at the O-H bond length of 0.9572 Å.
+over a spherical shell at the gas-phase O-H bond length of 0.9572 Å
+(Benedict et al. 1956).
 
 Hydrogen cannot be omitted from an electron scattering model. By the
-Mott-Bethe relation the electron scattering factor of an atom goes as
-\((Z - f_x(k))/k^2\), so a diffuse one-electron atom contributes strongly at
-low spatial frequency: the two hydrogens carry 35% of the molecule's
-integrated potential under Kirkland factors. Rendered at 0.93 g/cm³, an
-oxygen-only kernel gives ice a mean inner potential of 2.95 V under Kirkland
-factors (2.04 V under the Shtyrov `O(HH)` factor), whereas the full kernel
-gives 4.50-4.53 V under Kirkland factors at 0.5-1.5 Å voxels. Liquid water
-measures 4.48 ± 0.19 V by electron holography (Yesibolati et al., 2020),
+Mott-Bethe relation (Mott 1930; Bethe 1930) the electron scattering factor of
+an atom goes as \((Z - f_x(k))/k^2\), so a diffuse one-electron atom
+contributes strongly at low spatial frequency: the two hydrogens carry 35% of
+the molecule's integrated potential under Kirkland factors (Kirkland 2010).
+Rendered at 0.93 g/cm³, an oxygen-only kernel gives ice a mean inner
+potential of 2.95 V under Kirkland factors (2.04 V under the Shtyrov `O(HH)`
+factor; Shtyrov et al. 2026), whereas the full kernel gives 4.50-4.53 V under
+Kirkland factors at 0.5-1.5 Å voxels. Liquid water
+measures 4.48 ± 0.19 V by electron holography (Yesibolati et al. 2020),
 about 4.21 V once scaled to the density of ice. An isolated-atom
 superposition cannot represent bonding and is expected to sit somewhat above
 such a measurement.
@@ -173,8 +177,9 @@ V_{ice}(\mathbf{r}) \to \bigl(1 - o(\mathbf{r})\bigr)\,V_{ice}(\mathbf{r}).
 The Gaussian coarse-graining conserves the integral of the potential, so the
 total volume of water displaced is set by \(V_{ref}\) alone. How much water a
 molecule displaces is a geometric property, its mass at the partial specific
-volume of protein (0.73 cm³/g), and does not depend on the scattering factors
-used to render it; the rendered potential does. For 6BDF, the protein's mean
+volume of protein (0.73 cm³/g; Erickson 2009), and does not depend on the
+scattering factors used to render it; the rendered potential does. For 6BDF
+(Berman et al. 2000; Campbell et al. 2015), the protein's mean
 inner potential is 5.91 V under Shtyrov factors with hydrogens and 8.01 V
 under Kirkland factors, so a single fixed reference of 7.0 V displaces 0.84 or
 1.09 of the molecular volume respectively.
@@ -243,8 +248,8 @@ determines.
 
 Relaxed ice departs from independent kicks in the way liquid dynamics
 predicts, where collective density relaxes at a rate proportional to
-\(k^2/S(k)\). Ice is nearly incompressible, so its long-wavelength density
-fluctuations decorrelate far faster: the correlation area is 1/33 of the
+\(k^2/S(k)\) (de Gennes 1959). Ice is nearly incompressible, so its
+long-wavelength density fluctuations decorrelate far faster: the correlation area is 1/33 of the
 Gaussian model's at 20 Å and 1/12 at 10 Å. Near peaks of \(S(k)\) it
 decorrelates more slowly, and at short wavelengths the two models converge.
 Under the Gaussian model a 141-frame summed spectrum of pure ice shows a bright
@@ -295,8 +300,9 @@ fade the solvent that the exposure filter already decorrelates.
   not remove molecular displacements, so the same value is expected to
   hold for motion-corrected particles. With the ice thickness measured
   from the electron counts of the raw movies against a vacuum exposure,
-  0.38 reproduces the water ring of EMPIAR-11461 (ring strength 1.20
-  against 1.25). On EMPIAR-11377, whose thickness rests on a published
+  0.38 reproduces the water ring of EMPIAR-11461 (Harder et al. 2023;
+  Iudin et al. 2023), with ring strength 1.20 against 1.25. On EMPIAR-11377
+  (Fromm et al. 2023), whose thickness rests on a published
   vacuum dose rate, the simulated ring is 1.27 against 1.20. From a
   particle stack alone, \(\sigma_0^2\) trades off against ice thickness.
   The filter also acts before multislice, which is exact only for the
@@ -314,18 +320,68 @@ fade the solvent that the exposure filter already decorrelates.
 
 ## References
 
+- Benedict, W. S., Gailar, N., & Plyler, E. K. (1956). Rotation-vibration
+  spectra of deuterated water vapor. *The Journal of Chemical Physics*,
+  24(6), 1139–1165.
+  [doi:10.1063/1.1742731](https://doi.org/10.1063/1.1742731)
+- Berman, H. M., Westbrook, J., Feng, Z., Gilliland, G., Bhat, T. N.,
+  Weissig, H., Shindyalov, I. N., & Bourne, P. E. (2000). The Protein Data
+  Bank. *Nucleic Acids Research*, 28(1), 235–242.
+  [doi:10.1093/nar/28.1.235](https://doi.org/10.1093/nar/28.1.235)
+- Bethe, H. (1930). Zur Theorie des Durchgangs schneller
+  Korpuskularstrahlen durch Materie. *Annalen der Physik*, 397(3), 325–400.
+  [doi:10.1002/andp.19303970303](https://doi.org/10.1002/andp.19303970303)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D., Benmore, C.,
+  Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019). Machine learning
+  coarse grained models for water. *Nature Communications*, 10(1), 379.
+  [doi:10.1038/s41467-018-08222-6](https://doi.org/10.1038/s41467-018-08222-6)
+- de Gennes, P. G. (1959). Liquid dynamics and inelastic scattering of
+  neutrons. *Physica*, 25(7–12), 825–839.
+  [doi:10.1016/0031-8914(59)90006-0](https://doi.org/10.1016/0031-8914(59)90006-0)
+- Erickson, H. P. (2009). Size and shape of protein molecules at the
+  nanometer level determined by sedimentation, gel filtration, and electron
+  microscopy. *Biological Procedures Online*, 11(1), 32–51.
+  [doi:10.1007/s12575-009-9008-x](https://doi.org/10.1007/s12575-009-9008-x)
+- Fromm, S. A., O'Connor, K. M., Purdy, M., Bhatt, P. R., Loughran, G.,
+  Atkins, J. F., Jomaa, A., & Mattei, S. (2023). The translating bacterial
+  ribosome at 1.55 Å resolution generated by cryo-EM imaging services.
+  *Nature Communications*, 14(1), 1095.
+  [doi:10.1038/s41467-023-36742-3](https://doi.org/10.1038/s41467-023-36742-3)
+- Harder, O. F., Barrass, S. V., Drabbels, M., & Lorenz, U. J. (2023). Fast
+  viral dynamics revealed by microsecond time-resolved cryo-EM. *Nature
+  Communications*, 14(1), 5649.
+  [doi:10.1038/s41467-023-41444-x](https://doi.org/10.1038/s41467-023-41444-x)
+- Iudin, A., Korir, P. K., Somasundharam, S., Weyand, S., Cattavitello, C.,
+  Fonseca, N., Salih, O., Kleywegt, G. J., & Patwardhan, A. (2023). EMPIAR:
+  The Electron Microscopy Public Image Archive. *Nucleic Acids Research*,
+  51(D1), D1503–D1511.
+  [doi:10.1093/nar/gkac1062](https://doi.org/10.1093/nar/gkac1062)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Liu, D. C., & Nocedal, J. (1989). On the limited memory BFGS method for
+  large scale optimization. *Mathematical Programming*, 45(1–3), 503–528.
+  [doi:10.1007/BF01589116](https://doi.org/10.1007/BF01589116)
 - McMullan, G., Vinothkumar, K. R., & Henderson, R. (2015). Thon rings from
   amorphous ice and implications of beam-induced Brownian motion in single
   particle electron cryo-microscopy. *Ultramicroscopy*, 158, 26–32.
   [doi:10.1016/j.ultramic.2015.05.017](https://doi.org/10.1016/j.ultramic.2015.05.017)
-- Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D., Benmore, C.,
-  Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019). Machine learning
-  coarse grained models for water. *Nature Communications*, 10, 379.
-  [doi:10.1038/s41467-018-08222-6](https://doi.org/10.1038/s41467-018-08222-6)
-- Yesibolati, M. N., Laganà, S., Sun, H., Beleggia, M., Kathmann, S. M.,
-  Kasama, T., & Mølhave, K. (2020). Mean inner potential of liquid water.
-  *Physical Review Letters*, 124, 065502.
-  [doi:10.1103/PhysRevLett.124.065502](https://doi.org/10.1103/PhysRevLett.124.065502)
+- Mott, N. F. (1930). The scattering of electrons by atoms. *Proceedings of
+  the Royal Society of London. Series A*, 127(806), 658–665.
+  [doi:10.1098/rspa.1930.0082](https://doi.org/10.1098/rspa.1930.0082)
+- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+  et al. (2026). Measurement of atomic scattering factors by cryoelectron
+  microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+  e2528758123.
+  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123)
 - Tersoff, J. (1988). New empirical approach for the structure and energy
   of covalent systems. *Physical Review B*, 37(12), 6991–7000.
   [doi:10.1103/PhysRevB.37.6991](https://doi.org/10.1103/PhysRevB.37.6991)
+- Yesibolati, M. N., Laganà, S., Sun, H., Beleggia, M., Kathmann, S. M.,
+  Kasama, T., & Mølhave, K. (2020). Mean inner potential of liquid water.
+  *Physical Review Letters*, 124(6), 065502.
+  [doi:10.1103/PhysRevLett.124.065502](https://doi.org/10.1103/PhysRevLett.124.065502)

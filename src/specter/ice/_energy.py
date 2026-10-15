@@ -106,6 +106,12 @@ class NeighborListCache:
     ----------
     skin : float, optional
         Extra cutoff radius in Angstrom. Default 1.0.
+
+    References
+    ----------
+    .. [1] Verlet, L. (1967). Computer "experiments" on classical fluids. I.
+       Thermodynamical properties of Lennard-Jones molecules. *Physical
+       Review*, 159(1), 98–103. https://doi.org/10.1103/PhysRev.159.98
     """
 
     def __init__(self, skin: float = 1.0) -> None:
@@ -168,6 +174,16 @@ class MLBOP:
     device : torch.device or str, optional
         Device the batched triple-sum in :meth:`compute_energy` runs on.
         Default is ``"cpu"``.
+
+    References
+    ----------
+    .. [1] Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D.,
+       Benmore, C., Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019).
+       Machine learning coarse grained models for water. *Nature
+       Communications*, 10(1), 379. https://doi.org/10.1038/s41467-018-08222-6
+    .. [2] Tersoff, J. (1988). New empirical approach for the structure and
+       energy of covalent systems. *Physical Review B*, 37(12), 6991–7000.
+       https://doi.org/10.1103/PhysRevB.37.6991
     """
 
     def __init__(

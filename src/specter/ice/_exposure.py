@@ -57,6 +57,16 @@ bright low-frequency disc that McMullan et al.'s Fig. 1(a) does not show.
 The relaxation step is a structure-matching optimisation, not molecular
 dynamics, so the long-wavelength time scales are the least certain part;
 scaling them with sigma0^2 away from the measured kick is untested.
+
+References
+----------
+.. [1] McMullan, G., Vinothkumar, K. R., & Henderson, R. (2015). Thon rings
+   from amorphous ice and implications of beam-induced Brownian motion in
+   single particle electron cryo-microscopy. *Ultramicroscopy*, 158, 26–32.
+   https://doi.org/10.1016/j.ultramic.2015.05.017
+.. [2] de Gennes, P. G. (1959). Liquid dynamics and inelastic scattering of
+   neutrons. *Physica*, 25(7–12), 825–839.
+   https://doi.org/10.1016/0031-8914(59)90006-0
 """
 
 from __future__ import annotations
@@ -397,6 +407,13 @@ def solvent_coherence(
     -------
     torch.Tensor
         rho in [0, 1].
+
+    References
+    ----------
+    .. [1] McMullan, G., Vinothkumar, K. R., & Henderson, R. (2015). Thon rings
+       from amorphous ice and implications of beam-induced Brownian motion in
+       single particle electron cryo-microscopy. *Ultramicroscopy*, 158,
+       26–32. https://doi.org/10.1016/j.ultramic.2015.05.017
     """
     lag = torch.as_tensor(dose_lag, dtype=k.dtype, device=k.device).abs()
     if model == "gaussian":
@@ -547,6 +564,13 @@ def solvent_exposure_power(
     triangle-weighted averages of rho, from its cumulative integrals, and
     with equal weights the result is the continuous average over the whole
     exposure, independent of the frame count.
+
+    References
+    ----------
+    .. [1] McMullan, G., Vinothkumar, K. R., & Henderson, R. (2015). Thon rings
+       from amorphous ice and implications of beam-induced Brownian motion in
+       single particle electron cryo-microscopy. *Ultramicroscopy*, 158,
+       26–32. https://doi.org/10.1016/j.ultramic.2015.05.017
     """
     if dose < 0 or displacement_variance < 0 or n_frames < 1:
         raise ValueError("dose/motion must be nonnegative and n_frames positive")

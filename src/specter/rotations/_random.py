@@ -36,6 +36,17 @@ def random_quaternion(
     -------
     quats : torch.Tensor
         Random unit quaternions. Shape (batchsize, 4) or (4,) if batchsize=1.
+
+    References
+    ----------
+    .. [1] Shoemake, K. (1992). Uniform random rotations. In *Graphics Gems
+       III (IBM Version)* (pp. 124–132). Elsevier.
+       https://doi.org/10.1016/B978-0-08-050755-2.50036-1
+       (roma's draw.)
+    .. [2] Muller, M. E. (1959). A note on a method for generating points
+       uniformly on *n*-dimensional spheres. *Communications of the ACM*,
+       2(4), 19–20. https://doi.org/10.1145/377939.377946
+       (The normalised 4D Gaussian.)
     """
     if generator is None:
         quats = roma.random_unitquat(size=(batchsize,), device=device)  # xyzw
@@ -75,6 +86,17 @@ def random_rotation_matrix(
     -------
     rotmats : torch.Tensor
         Tensor of shape (batchsize, 3, 3) containing rotation matrices.
+
+    References
+    ----------
+    .. [1] Shoemake, K. (1992). Uniform random rotations. In *Graphics Gems
+       III (IBM Version)* (pp. 124–132). Elsevier.
+       https://doi.org/10.1016/B978-0-08-050755-2.50036-1
+       (roma's draw.)
+    .. [2] Muller, M. E. (1959). A note on a method for generating points
+       uniformly on *n*-dimensional spheres. *Communications of the ACM*,
+       2(4), 19–20. https://doi.org/10.1145/377939.377946
+       (The normalised 4D Gaussian.)
     """
     if generator is None:
         rotmats = roma.random_rotmat(size=(batchsize,), device=device)
@@ -127,6 +149,12 @@ def random_rotation_matrix_from_generator(
     -------
     torch.Tensor
         Shape (3, 3), on the CPU, ``det(R) == 1``.
+
+    References
+    ----------
+    .. [1] Mezzadri, F. (2007). How to generate random matrices from the
+       classical compact groups. *Notices of the American Mathematical
+       Society*, 54(5), 592–604. https://arxiv.org/abs/math-ph/0609050
     """
     device = "cpu" if generator is None else generator.device
     A = torch.randn(3, 3, generator=generator, device=device).cpu()

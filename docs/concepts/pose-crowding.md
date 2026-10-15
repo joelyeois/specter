@@ -19,7 +19,7 @@ mimic local particle crowding.
 
 Each image gets its own rotation quaternion and in-plane translation,
 held by `Poses` as `(B, 4)` and `(B, 2)` tensors (`Poses.random` draws them
-uniformly). Every other
+uniformly, the rotations by the method of Shoemake 1992). Every other
 pipeline in SPECTER uses the same representation, sign conventions, and
 real-space/Fourier-space application choice;
 [Conventions](conventions.md#poses) describes them once, and this page
@@ -29,7 +29,8 @@ The two kinds of particle `Specimen` differ in *where* the pose acts.
 A specimen with a pre-built volume rotates the volume itself. One built
 with `Specimen.from_atoms` instead rotates the atomic coordinates
 before voxelization, using the inverse rotation matrix
-(`roma.unitquat_to_rotmat(Q).transpose(-2, -1)`) and applying an Å-space
+(`roma.unitquat_to_rotmat(Q).transpose(-2, -1)`, from the roma library;
+Bregier 2021) and applying an Å-space
 translation directly to the coordinates, rather than through the
 `[-1, 1]`-normalized grid `grid_sample` uses. Both reach the same
 convention; see
@@ -63,8 +64,8 @@ ice, so every later stage in the chain sees the final, padded extent.
 `CrowdWithDuplicates`, recorded on a specimen by
 `Specimen.crowd(min_distance=...)`, adds rigid-transformed copies of the *same* template volume
 around the primary instance, each independently rotated and placed by
-Poisson-disk sampling (2D, in the image plane only, or 3D, throughout the
-volume). This models local particle crowding within one particle's box,
+Poisson-disk sampling (Bridson 2007), in 2D (the image plane only) or 3D
+(throughout the volume). This models local particle crowding within one particle's box,
 a different mechanism from a micrograph's `Field`, which packs copies of
 its template across a whole field of view with a `Packing` collision
 backend; see
@@ -109,7 +110,7 @@ random numbers, so a seeded specimen is unchanged.
 
 Cryo-EM specimens preferentially adsorb particles at the two ice–air
 interfaces rather than distributing them uniformly through the ice's
-thickness. `water_air_interface=True` reproduces this with a
+thickness (Noble et al. 2018). `water_air_interface=True` reproduces this with a
 two-Gaussian probability profile along \(z\), peaked at the top and
 bottom surfaces and falling to a configurable `baseline` in the bulk;
 placement keeps or rejects each candidate position by sampling against
@@ -125,3 +126,20 @@ ice surfaces at its own \((x, y)\) column. The same `ice_profile` also
 gates ordinary 3D placement regardless of `water_air_interface`: it
 rejects outright any candidate whose particle radius would poke through
 its local surface, so a placement never lands partly in vacuum.
+
+## References
+
+- Bregier, R. (2021). Deep regression on manifolds: A 3D rotation case
+  study. In *2021 International Conference on 3D Vision (3DV)*
+  (pp. 166–174). IEEE.
+  [doi:10.1109/3DV53792.2021.00027](https://doi.org/10.1109/3DV53792.2021.00027)
+- Bridson, R. (2007). Fast Poisson disk sampling in arbitrary dimensions.
+  In *ACM SIGGRAPH 2007 Sketches* (p. 22). ACM.
+  [doi:10.1145/1278780.1278807](https://doi.org/10.1145/1278780.1278807)
+- Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J., Acharya, P.,
+  et al. (2018). Routine single particle CryoEM sample and grid
+  characterization by tomography. *eLife*, 7, e34257.
+  [doi:10.7554/eLife.34257](https://doi.org/10.7554/eLife.34257)
+- Shoemake, K. (1992). Uniform random rotations. In *Graphics Gems III (IBM
+  Version)* (pp. 124–132). Elsevier.
+  [doi:10.1016/B978-0-08-050755-2.50036-1](https://doi.org/10.1016/B978-0-08-050755-2.50036-1)

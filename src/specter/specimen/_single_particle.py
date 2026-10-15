@@ -148,6 +148,20 @@ class MicrographSpecimenGenerator(L.LightningModule):
         (:func:`~specter.potential.template_occupancy_reference`). Default None
         reads occupancy against the fixed
         :data:`~specter.potential.FULL_OCCUPANCY_POTENTIAL_V`.
+
+    References
+    ----------
+    .. [1] Bridson, R. (2007). Fast Poisson disk sampling in arbitrary
+       dimensions. In *ACM SIGGRAPH 2007 Sketches* (p. 22). ACM.
+       https://doi.org/10.1145/1278780.1278807
+    .. [2] Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J.,
+       Acharya, P., et al. (2018). Routine single particle CryoEM sample and
+       grid characterization by tomography. *eLife*, 7, e34257.
+       https://doi.org/10.7554/eLife.34257
+    .. [3] Erickson, H. P. (2009). Size and shape of protein molecules at the
+       nanometer level determined by sedimentation, gel filtration, and
+       electron microscopy. *Biological Procedures Online*, 11(1), 32–51.
+       https://doi.org/10.1007/s12575-009-9008-x
     """
 
     def __init__(

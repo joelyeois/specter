@@ -5,8 +5,9 @@ Without a profile, ice is a slab of uniform thickness that exactly fills the
 simulation box: :func:`~specter.arrays.compute_nz` sizes the box from
 ``ice_thickness``, and :func:`~specter.ice.blend_ice_into_volume` generates ice
 at the box's full ``(nz, nxy, nxy)`` shape. Real vitrified films are not
-uniform. Ice in a foil hole is a meniscus pinned to the rim, and a micrograph
-taken off-centre in that hole sees a thickness ramp across its field.
+uniform. Ice in a foil hole is a meniscus pinned to the rim [1]_, and a
+micrograph taken off-centre in that hole sees a thickness ramp across its
+field.
 
 An :class:`IceProfile` replaces the single scalar with two scalar fields over
 the micrograph plane,
@@ -39,6 +40,13 @@ vacuum a profile leaves in the box does not move it. A level mid-plane, which
 every profile without a ``tilt`` has, puts the centroid at the box's midplane,
 where :func:`~specter.aberrations.defocus_midplane_shift` already places the
 nominal defocus; a tilted, unevenly thick film moves it off that plane.
+
+References
+----------
+.. [1] Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J., Acharya,
+   P., et al. (2018). Routine single particle CryoEM sample and grid
+   characterization by tomography. *eLife*, 7, e34257.
+   https://doi.org/10.7554/eLife.34257
 """
 
 from __future__ import annotations

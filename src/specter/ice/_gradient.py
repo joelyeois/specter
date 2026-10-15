@@ -133,6 +133,16 @@ class GradientSKIcemaker(L.LightningModule):
         to 256 Å (beyond the ~127 Å real MD cell, via safe box-size
         extrapolation -- see :func:`compute_native_target`). Pass an
         explicit path to use a fixed target instead.
+
+    References
+    ----------
+    .. [1] Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D.,
+       Benmore, C., Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019).
+       Machine learning coarse grained models for water. *Nature
+       Communications*, 10(1), 379. https://doi.org/10.1038/s41467-018-08222-6
+    .. [2] Liu, D. C., & Nocedal, J. (1989). On the limited memory BFGS method
+       for large scale optimization. *Mathematical Programming*, 45(1–3),
+       503–528. https://doi.org/10.1007/BF01589116
     """
 
     def __init__(
@@ -287,8 +297,8 @@ class GradientSKIcemaker(L.LightningModule):
             If set, the ML-BOP penalty becomes
             ``(E_per_atom - mlbop_target) ** 2`` instead of minimizing
             ``E_per_atom`` directly. Amorphous ice phases are metastable,
-            not energy-minimal -- LDA ice in particular is a *compressed*
-            amorphous phase, so its ML-BOP energy sits measurably above the
+            not energy-minimal -- LDA ice is a metastable, disordered
+            phase, so its ML-BOP energy sits measurably above the
             true minimum (real LDA-80K MD frames score around -0.41 eV/atom,
             not the more negative values a denser/more crystalline packing
             would reach). Minimizing ``E_per_atom`` unboundedly pulls the

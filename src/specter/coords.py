@@ -42,6 +42,17 @@ def poisson_disk_neighbors(
     -------
     pts : (m,2) torch.Tensor
         Sampled 2D coordinates, including the seed point.
+
+    Notes
+    -----
+    Bridson's algorithm [1]_, with the neighbour test one vectorised distance
+    check against every accepted point.
+
+    References
+    ----------
+    .. [1] Bridson, R. (2007). Fast Poisson disk sampling in arbitrary
+       dimensions. In *ACM SIGGRAPH 2007 Sketches* (p. 22). ACM.
+       https://doi.org/10.1145/1278780.1278807
     """
     H, W = box
     # True division: `-H // 2` floors, which for an odd extent put the box
@@ -152,8 +163,14 @@ def poisson_disk_neighbors_3d(
     -----
     - The coordinate system is centered at (0,0,0), with ranges:
       x ∈ [-W/2, W/2], y ∈ [-H/2, H/2], z ∈ [-D/2, D/2].
-    - The function uses Bridson's Poisson-disk sampling; the neighbour test is
-      one vectorised distance check against every accepted point.
+    - The function uses Bridson's Poisson-disk sampling [1]_; the neighbour
+      test is one vectorised distance check against every accepted point.
+
+    References
+    ----------
+    .. [1] Bridson, R. (2007). Fast Poisson disk sampling in arbitrary
+       dimensions. In *ACM SIGGRAPH 2007 Sketches* (p. 22). ACM.
+       https://doi.org/10.1145/1278780.1278807
     """
     D, H, W = box
     z_min, z_max = -D / 2, D / 2

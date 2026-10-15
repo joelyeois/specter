@@ -9,8 +9,8 @@ introduced.
 
 ## Setup
 
-The specimen is the crowded, solvated 6BDF recipe from
-[Specimens: crowding and ice](specimens.md):
+The specimen is the crowded, solvated 6BDF (Berman et al. 2000; Campbell et
+al. 2015) recipe from [Specimens: crowding and ice](specimens.md):
 
 ```python
 --8<-- "docs-figures/walkthrough/particle_stacks.py:setup"
@@ -169,12 +169,32 @@ After normalisation the values are no longer electron counts
 ```
 
 The images alone do not record their poses and CTF terms.
-`specter simulate particles` writes the stack together with a RELION `.star`
-file that does, and can take its poses and CTF terms from an existing
-CryoSPARC or RELION dataset instead of sampling them; see
+`specter simulate particles` writes the stack together with a RELION
+(Scheres 2012) `.star` file that does, and can take its poses and CTF terms
+from an existing CryoSPARC (Punjani et al. 2017) or RELION dataset instead of
+sampling them; see
 [From Python to the command line](command-line.md).
 
 ## Next
 
 [Micrographs](micrographs.md) images a whole field of particles in one slab
 of ice, the way a micrograph records them before they are picked.
+
+## References
+
+- Berman, H. M., Westbrook, J., Feng, Z., Gilliland, G., Bhat, T. N.,
+  Weissig, H., Shindyalov, I. N., & Bourne, P. E. (2000). The Protein Data
+  Bank. *Nucleic Acids Research*, 28(1), 235–242.
+  [doi:10.1093/nar/28.1.235](https://doi.org/10.1093/nar/28.1.235)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
+  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
+  determination. *Nature Methods*, 14(3), 290–296.
+  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)
+- Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian approach to
+  cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
+  519–530.
+  [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)

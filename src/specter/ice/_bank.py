@@ -93,6 +93,16 @@ class IceBank(_IceTiling, L.LightningModule):
     progressbars : bool, optional
         Whether to show progress bars over batched generation. Default is
         True.
+
+    References
+    ----------
+    .. [1] Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D.,
+       Benmore, C., Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019).
+       Machine learning coarse grained models for water. *Nature
+       Communications*, 10(1), 379. https://doi.org/10.1038/s41467-018-08222-6
+    .. [2] Mezzadri, F. (2007). How to generate random matrices from the
+       classical compact groups. *Notices of the American Mathematical
+       Society*, 54(5), 592–604. https://arxiv.org/abs/math-ph/0609050
     """
 
     method: IceModel = "gd"

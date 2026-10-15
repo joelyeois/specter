@@ -45,8 +45,8 @@ writes the micrograph below:
 ///caption
 The micrograph low-pass filtered to 15 Å (left), the boxed 400 Å region at
 8 Å (centre), and the power spectrum of the unfiltered image (right). The
-6BDF copies sit in 500 Å of amorphous ice; at 20 e⁻/Å² they are faint in a
-single exposure, while the Thon rings and the ice's 3.7 Å ring are clear in
+6BDF (Berman et al. 2000; Campbell et al. 2015) copies sit in 500 Å of
+amorphous ice; at 20 e⁻/Å² they are faint in a single exposure, while the Thon rings and the ice's 3.7 Å ring are clear in
 the spectrum.
 ///
 
@@ -83,9 +83,9 @@ TOML and the command reference.
 Unlike particle-stack generation, where each box is small enough that a
 uniform ice slab is a reasonable approximation, a micrograph spans a large
 enough field that real ice geometry becomes visible across it. Real
-vitrified ice is a meniscus pinned to a foil hole's rim, not a flat slab,
-and a micrograph taken off-centre in that hole sees a thickness ramp across
-its field. `ice_profile` selects among three shapes:
+vitrified ice is a meniscus pinned to a foil hole's rim, not a flat slab
+(Noble et al. 2018), and a micrograph taken off-centre in that hole sees a
+thickness ramp across its field. `ice_profile` selects among three shapes:
 
 - **`flat`** (default): a uniform slab, the same behaviour as setting a
   bare `ice_thickness` with no profile.
@@ -244,3 +244,18 @@ calls. Build a `MicrographConfig` directly in Python (or load one with
   the amorphous ice generator.
 - [Configure a run](configuration.md): complete TOML/CLI field reference.
 - [Manage jobs](jobs.md): recording runs under a project name.
+
+## References
+
+- Berman, H. M., Westbrook, J., Feng, Z., Gilliland, G., Bhat, T. N.,
+  Weissig, H., Shindyalov, I. N., & Bourne, P. E. (2000). The Protein Data
+  Bank. *Nucleic Acids Research*, 28(1), 235–242.
+  [doi:10.1093/nar/28.1.235](https://doi.org/10.1093/nar/28.1.235)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J., Acharya, P.,
+  et al. (2018). Routine single particle CryoEM sample and grid
+  characterization by tomography. *eLife*, 7, e34257.
+  [doi:10.7554/eLife.34257](https://doi.org/10.7554/eLife.34257)

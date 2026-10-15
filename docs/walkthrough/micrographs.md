@@ -10,7 +10,8 @@ imaged and detected with the same verbs as a particle.
 
 ## Building a field
 
-The field starts from the same rendered 6BDF template as the previous pages:
+The field starts from the same rendered 6BDF template (Berman et al. 2000;
+Campbell et al. 2015) as the previous pages:
 
 ```python
 --8<-- "docs-figures/walkthrough/micrographs.py:setup"
@@ -82,7 +83,8 @@ The wave is formed on a grid twice as fine as the pixels, and the detector
 samples it down to the 1536 px image
 ([Grid aliasing](../concepts/scattering/multislice.md#grid-aliasing-oversample-and-klim)).
 The defocus a `CTF` carries is that of the specimen's midplane, the value a
-CTF fit reports and CryoSPARC and RELION record; the `ExitWave` records how
+CTF fit reports and CryoSPARC (Punjani et al. 2017) and RELION (Scheres 2012)
+record; the `ExitWave` records how
 far its exit face lies from that plane and `apply_ctf` accounts for the
 difference
 ([The defocus reference plane](../concepts/conventions.md#the-defocus-reference-plane)).
@@ -160,8 +162,9 @@ does and does not fix.
 
 ## Ice thickness profiles
 
-Ice in a foil hole is a meniscus rather than a slab, and a micrograph taken
-off the hole's centre sees its thickness change across the field. An
+Ice in a foil hole is a meniscus rather than a slab (Noble et al. 2018), and
+a micrograph taken off the hole's centre sees its thickness change across the
+field. An
 `IceProfile` replaces the uniform `thickness` with a thickness that varies
 laterally. A wedge ramps it linearly:
 
@@ -202,3 +205,26 @@ from a TOML config, and writes the stack with a RELION `.star` file; see
 
 [Tilt series](tilt-series.md) images a specimen volume from many angles in
 one dose-accumulating series.
+
+## References
+
+- Berman, H. M., Westbrook, J., Feng, Z., Gilliland, G., Bhat, T. N.,
+  Weissig, H., Shindyalov, I. N., & Bourne, P. E. (2000). The Protein Data
+  Bank. *Nucleic Acids Research*, 28(1), 235–242.
+  [doi:10.1093/nar/28.1.235](https://doi.org/10.1093/nar/28.1.235)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J., Acharya, P.,
+  et al. (2018). Routine single particle CryoEM sample and grid
+  characterization by tomography. *eLife*, 7, e34257.
+  [doi:10.7554/eLife.34257](https://doi.org/10.7554/eLife.34257)
+- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
+  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
+  determination. *Nature Methods*, 14(3), 290–296.
+  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)
+- Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian approach to
+  cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
+  519–530.
+  [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)

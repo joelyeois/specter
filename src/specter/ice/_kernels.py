@@ -63,8 +63,9 @@ def build_water_kernel(
     has to carry the whole molecule. Rendering only the oxygen -- what
     specter did before -- drops the two hydrogens entirely, and for
     ELECTRON scattering that is not a small omission. Hydrogen's scattering
-    factor is disproportionately large at low k (Mott-Bethe: f_e goes as
-    (Z - f_x)/k^2, so a diffuse one-electron atom is far from negligible),
+    factor is disproportionately large at low k (Mott-Bethe [6], [7]: f_e
+    goes as (Z - f_x)/k^2, so a diffuse one-electron atom is far from
+    negligible),
     and two of them make up 43% of a water molecule at k=0 under shtyrov
     (35% under kirkland), still ~24% at 1.5 A.
 
@@ -118,7 +119,8 @@ def build_water_kernel(
     Lobato and Peng are per-element, valid at k=0, and agree there.
 
     The hydrogens are placed on a **spherical shell** at
-    `WATER_OH_DISTANCE`, not at the oxygen's own position. Both choices give
+    `WATER_OH_DISTANCE` (0.9572 A, the gas-phase bond length [8]), not at
+    the oxygen's own position. Both choices give
     the identical MIP, since a volume integral does not care where density
     sits, but they differ at every nonzero frequency: molecules are randomly
     oriented, so a hydrogen's contribution decoheres as
@@ -140,7 +142,8 @@ def build_water_kernel(
         Voxel size in Angstrom.
     parameterization : str, optional
         Atomic scattering-factor parameterization for the oxygen. Default
-        ``'shtyrov'``, which types it as the water species ``O(HH)``.
+        ``'kirkland'``; ``'shtyrov'`` types the oxygen as the water species
+        ``O(HH)``.
 
     Returns
     -------
@@ -150,27 +153,43 @@ def build_water_kernel(
 
     References
     ----------
-    .. [1] Yesibolati et al. "Mean Inner Potential of Liquid Water."
-           Phys. Rev. Lett. 124, 065502 (2020).
-           https://doi.org/10.1103/PhysRevLett.124.065502
-           Table I of this paper compiles the theoretical and experimental
-           water/ice values, density-corrected to a common 1 g/cm^3.
-    .. [2] Vulovic, Ravelli, van Vliet, Koster, Lazic, Lucken, Rullgard,
-           Oktem and Rieger. "Image formation modeling in cryo-electron
-           microscopy." J. Struct. Biol. 183, 19-32 (2013).
-    .. [3] Okamoto. "Resilient quantum electron microscopy."
-           Phys. Rev. A 106, 022605 (2022); arXiv:2001.05603.
-           https://doi.org/10.1103/PhysRevA.106.022605
-           Appendix: "The mean inner potential of ice is computed to be
-           4.5276 V ... the inner potential of the water molecule,
-           consisting of 2 hydrogen atoms and one oxygen atom, divided by
-           its molecular volume in ice."
-    .. [4] Shang and Sigworth. "Hydration-layer models for cryo-EM image
-           simulation." J. Struct. Biol. 180, 10-16 (2012).
-    .. [5] Harscher and Lichte. "Inelastic mean free path and mean inner
-           potential of carbon foil and vitrified ice measured with
-           electron holography." Electron Microscopy '98 (ICEM-14,
-           Cancun), pp. 553-554 (1998).
+    .. [1] Yesibolati, M. N., Laganà, S., Sun, H., Beleggia, M., Kathmann,
+       S. M., Kasama, T., & Mølhave, K. (2020). Mean inner potential of
+       liquid water. *Physical Review Letters*, 124(6), 065502.
+       https://doi.org/10.1103/PhysRevLett.124.065502
+       Table I of this paper compiles the theoretical and experimental
+       water/ice values, density-corrected to a common 1 g/cm^3.
+    .. [2] Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J.,
+       Lazić, I., Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013).
+       Image formation modeling in cryo-electron microscopy. *Journal of
+       Structural Biology*, 183(1), 19–32.
+       https://doi.org/10.1016/j.jsb.2013.05.008
+    .. [3] Okamoto, H. (2022). Resilient quantum electron microscopy.
+       *Physical Review A*, 106(2), 022605.
+       https://doi.org/10.1103/PhysRevA.106.022605 (arXiv:2001.05603).
+       Appendix: "The mean inner potential of ice is computed to be
+       4.5276 V ... the inner potential of the water molecule,
+       consisting of 2 hydrogen atoms and one oxygen atom, divided by
+       its molecular volume in ice."
+    .. [4] Shang, Z., & Sigworth, F. J. (2012). Hydration-layer models for
+       cryo-EM image simulation. *Journal of Structural Biology*, 180(1),
+       10–16. https://doi.org/10.1016/j.jsb.2012.04.021
+    .. [5] Harscher, A., & Lichte, H. (1998). Inelastic mean free path and
+       mean inner potential of carbon foil and vitrified ice measured with
+       electron holography. In H. A. Calderón Benavides & M. J. Yacamán
+       (Eds.), *Electron Microscopy 1998: Proceedings of the 14th
+       International Congress on Electron Microscopy (ICEM-14), Cancún*
+       (pp. 553–554). Institute of Physics Publishing.
+    .. [6] Mott, N. F. (1930). The scattering of electrons by atoms.
+       *Proceedings of the Royal Society of London. Series A*, 127(806),
+       658–665. https://doi.org/10.1098/rspa.1930.0082
+    .. [7] Bethe, H. (1930). Zur Theorie des Durchgangs schneller
+       Korpuskularstrahlen durch Materie. *Annalen der Physik*, 397(3),
+       325–400. https://doi.org/10.1002/andp.19303970303
+    .. [8] Benedict, W. S., Gailar, N., & Plyler, E. K. (1956).
+       Rotation-vibration spectra of deuterated water vapor. *The Journal
+       of Chemical Physics*, 24(6), 1139–1165.
+       https://doi.org/10.1063/1.1742731
     """
     oxygen = build_atomic_potential_kernel(
         dx,

@@ -55,10 +55,10 @@ cell at 1 Å per voxel keeps the example to a couple of minutes:
 
 The optimisation recipe is fixed rather than exposed: it matches the
 structure factor \(S(k)\) of a molecular-dynamics frame of low-density
-amorphous ice, and holds the coarse-grained ML-BOP water energy near that
-frame's measured −0.413 eV per molecule. Two libraries built under different
-recipes would be two different phases of ice, and `IceBank` would draw from
-them interchangeably. The S(k) loss reported is measured on the coordinates
+amorphous ice, and holds the coarse-grained ML-BOP water energy (Chan et al.
+2019) near that frame's measured −0.413 eV per molecule. Two libraries built
+under different recipes would be two different phases of ice, and `IceBank`
+would draw from them interchangeably. The S(k) loss reported is measured on the coordinates
 as stored, which the file keeps in a fixed-point encoding, so it is what any
 later simulation reads back.
 
@@ -193,3 +193,10 @@ each cell size costs to build.
   the water energy the recipe targets.
 - [Rendering](../concepts/ice.md#rendering): how a crop's positions become a
   potential.
+
+## References
+
+- Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D., Benmore, C.,
+  Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019). Machine learning
+  coarse grained models for water. *Nature Communications*, 10(1), 379.
+  [doi:10.1038/s41467-018-08222-6](https://doi.org/10.1038/s41467-018-08222-6)

@@ -231,7 +231,15 @@ def filter_by_local_z_density(
     -----
     The probability distribution is: P(z) = baseline + amplitude * (G1 + G2)
     where G1 and G2 are Gaussians centered at each point's own ``z_bot`` and
-    ``z_top``.
+    ``z_top``. The profile models the adsorption of most particles to the
+    air-water interfaces observed by cryo-electron tomography [1]_.
+
+    References
+    ----------
+    .. [1] Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J.,
+       Acharya, P., et al. (2018). Routine single particle CryoEM sample and
+       grid characterization by tomography. *eLife*, 7, e34257.
+       https://doi.org/10.7554/eLife.34257
     """
     if len(pts) == 0:
         return pts, torch.zeros(curve_points)
@@ -300,6 +308,13 @@ def filter_by_z_density(
     -----
     The probability distribution is: P(z) = baseline + amplitude * (G1 + G2)
     where G1 and G2 are Gaussians centered at z_min and z_max respectively.
+
+    References
+    ----------
+    .. [1] Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J.,
+       Acharya, P., et al. (2018). Routine single particle CryoEM sample and
+       grid characterization by tomography. *eLife*, 7, e34257.
+       https://doi.org/10.7554/eLife.34257
     """
     if len(pts) == 0:
         return pts, torch.zeros(curve_points)
@@ -561,6 +576,19 @@ class CrowdWithDuplicates(L.LightningModule):
         Rotated duplicates ready for insertion into a micrograph.
     N : int
         Number of duplicates generated.
+
+    References
+    ----------
+    .. [1] Bridson, R. (2007). Fast Poisson disk sampling in arbitrary
+       dimensions. In *ACM SIGGRAPH 2007 Sketches* (p. 22). ACM.
+       https://doi.org/10.1145/1278780.1278807
+    .. [2] Shoemake, K. (1992). Uniform random rotations. In *Graphics Gems
+       III (IBM Version)* (pp. 124–132). Elsevier.
+       https://doi.org/10.1016/B978-0-08-050755-2.50036-1
+    .. [3] Noble, A. J., Dandey, V. P., Wei, H., Brasch, J., Chase, J.,
+       Acharya, P., et al. (2018). Routine single particle CryoEM sample and
+       grid characterization by tomography. *eLife*, 7, e34257.
+       https://doi.org/10.7554/eLife.34257
     """
 
     def __init__(

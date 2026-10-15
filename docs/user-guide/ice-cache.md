@@ -3,8 +3,8 @@
 For the underlying physics, see [Ice structure](../concepts/ice.md).
 
 `GradientSKIcemaker` generates amorphous ice by optimising water positions
-against the structure factor $S(k)$ and ML-BOP energy of real low-density
-amorphous ice. That optimisation costs several minutes for a
+against the structure factor $S(k)$ and ML-BOP energy (Chan et al. 2019) of
+real low-density amorphous ice. That optimisation costs several minutes for a
 production-scale cell (see [Cost](#cost)), far too much to repeat per
 simulation. `IceBank` therefore separates the two: it optimises and stores
 each configuration once, and a simulation draws a randomly rotated,
@@ -65,7 +65,7 @@ it. The [command reference](../api/cli/build.md#specter-build-ice) lists them al
 ### Filtering inactive ML-BOP neighbours
 
 ML-BOP evaluates only neighbours whose cutoff weight is positive. The Verlet
-cache retains its extra 1 Å skin, so a neighbour can become active again without
+cache (Verlet 1967) retains its extra 1 Å skin, so a neighbour can become active again without
 a new search, but each evaluation filters skin-only pairs **before** enumerating
 three-body triplets. This saves work without changing the physical cutoff,
 optimisation recipe, float64 positions, float32 kernels or fixed-point storage.
@@ -355,5 +355,9 @@ whole library, equivalent to calling `IceBank.plot_diagnostics`.
 
 - Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D., Benmore, C.,
   Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019). Machine learning
-  coarse grained models for water. *Nature Communications*, 10, 379.
-  <https://doi.org/10.1038/s41467-018-08222-6>
+  coarse grained models for water. *Nature Communications*, 10(1), 379.
+  [doi:10.1038/s41467-018-08222-6](https://doi.org/10.1038/s41467-018-08222-6)
+- Verlet, L. (1967). Computer "experiments" on classical fluids. I.
+  Thermodynamical properties of Lennard-Jones molecules. *Physical Review*,
+  159(1), 98–103.
+  [doi:10.1103/PhysRev.159.98](https://doi.org/10.1103/PhysRev.159.98)

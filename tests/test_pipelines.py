@@ -447,18 +447,27 @@ def test_run_tilt_series_chained_tomogram_config_creates_two_separate_jobs(
     # The link: the tiltseries job's own recorded volume_path points
     # straight into the tomogram job's directory.
     assert tilt_job["params"]["volume_path"] == str(tomo_dir / "tomogram.mrc")
+    # One seed reproduces both: the series' seed, drawn because none was
+    # given, is recorded, and the tomogram's is derived from it.
+    from specter.imaging._stages import SEED_STAGE_SPECIMEN
+    from specter.random_seed import derive_seed
+
+    seed = tilt_job["params"]["seed"]
+    assert isinstance(seed, int)
+    assert tomo_job["params"]["seed"] == derive_seed(seed, SEED_STAGE_SPECIMEN)
 
 
 def test_run_tilt_series_chained_tomogram_config_respects_explicit_tracking(
     tmp_path: Path,
 ) -> None:
-    """If tomogram_config already has its own project, cascading doesn't
-    override it -- e.g. reusing one tracked tomogram build across several
-    tiltseries runs in a different project."""
+    """If tomogram_config already has its own project, or seed, cascading
+    doesn't override it -- e.g. reusing one tracked tomogram build across
+    several tiltseries runs in a different project."""
     tomogram_config = _minimal_tomogram_config(
-        project="shared-tomograms", output_dir=str(tmp_path)
+        project="shared-tomograms", output_dir=str(tmp_path), seed=11
     )
     config = TiltSeriesConfig(
+        seed=5,
         voxel_size=tomogram_config.voxel_size,
         micrograph_size=48,
         min_tilt_angle=-5,
@@ -475,10 +484,11 @@ def test_run_tilt_series_chained_tomogram_config_respects_explicit_tracking(
     )
     run_tilt_series(config, tomogram_config=tomogram_config)
 
-    assert (
-        tmp_path / "shared-tomograms" / "tomograms" / "J001" / "tomogram.mrc"
-    ).exists()
+    tomo_dir = tmp_path / "shared-tomograms" / "tomograms" / "J001"
+    assert (tomo_dir / "tomogram.mrc").exists()
     assert (tmp_path / "this-run" / "tiltseries" / "J001" / "tilt_series.mrcs").exists()
+    # Its own seed is kept too.
+    assert json.loads((tomo_dir / "job.json").read_text())["params"]["seed"] == 11
 
 
 class _FakeGenerator:

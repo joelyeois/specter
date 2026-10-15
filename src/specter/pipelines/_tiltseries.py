@@ -23,7 +23,8 @@ from specter.config import (
     validate_config,
 )
 from specter.imaging import CTF, Exposure, Poses, Sample
-from specter.imaging._stages import read_dose_weights
+from specter.imaging._stages import SEED_STAGE_SPECIMEN, read_dose_weights
+from specter.random_seed import derive_seed
 from specter.io import create_micrograph_starfile
 from specter.specimen import load_specimen_volume
 
@@ -74,7 +75,9 @@ def run_tilt_series(
         not exposed here) -- for several tomograms, call
         `run_build_tomogram(tomogram_config, n_tomograms=N)` yourself and
         loop `run_tilt_series(config=..., ...)` over each resulting
-        ``volume_path`` instead.
+        ``volume_path`` instead. Unless ``tomogram_config.seed`` is set, the
+        tomogram is seeded from ``config.seed`` (drawn and printed first if
+        unset), so the one seed reproduces specimen and series together.
 
         If this run is tracked (``config.project``/``job_id`` set) and
         ``tomogram_config`` wasn't independently configured for tracking,
@@ -127,6 +130,17 @@ def run_tilt_series(
             job_id = _reserve_next_job_id(tomogram_config.project, root)
             tomogram_config = dataclasses.replace(
                 tomogram_config, job_id=job_id, output_dir=root
+            )
+
+        # One seed reproduces the whole chained run: the series' own seed,
+        # drawn now and printed if unset, also seeds the tomogram, unless that
+        # config names its own. Derived rather than shared, so the specimen's
+        # draws and the series' are separate streams.
+        seed = config.seed if config.seed is not None else _seed_or_draw(None)
+        config = dataclasses.replace(config, seed=seed)
+        if tomogram_config.seed is None:
+            tomogram_config = dataclasses.replace(
+                tomogram_config, seed=derive_seed(seed, SEED_STAGE_SPECIMEN)
             )
 
         section("Building specimen volume (tomogram_config)")

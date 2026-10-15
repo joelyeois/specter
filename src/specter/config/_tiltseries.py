@@ -272,7 +272,10 @@ class TiltSeriesConfig:
     )  # falls back to CPU when none is available
 
     # --- Reproducibility ---
-    seed: int | None = seed_setting("ice and noise sampling")
+    seed: int | None = seed_setting(
+        "ice and noise sampling, and for the tomogram --tomogram_config builds "
+        "when that config sets no seed of its own"
+    )
 
     # --- Output ---
     # One path field, not one per layout: this is the single directory a run

@@ -1,8 +1,9 @@
 """Microtubule surface-lattice geometry, frames and tube placement.
 
-Pure geometry -- no PDB fetch, no rendering -- except for the two tests
-marked ``network``, which check the hardcoded lattice constants against the
-deposited structures they were measured from.
+Pure geometry -- no PDB fetch, no rendering -- except for the tests marked
+``network``, which check the hardcoded lattice constants and the extracted
+dimer against the deposited structures they come from. The dimer's polarity
+is also pinned offline, on a synthetic protofilament patch.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 
+import numpy as np
 import pytest
 import torch
 
@@ -482,6 +484,174 @@ def test_extracted_dimer_is_in_the_microtubule_frame(tmp_path):
     assert float(extent[2]) == pytest.approx(2 * MONOMER_RISE, abs=25.0)
     assert float(extent[2]) > float(extent[0])
     assert float(extent[2]) > float(extent[1])
+
+
+@pytest.mark.network
+def test_extracted_3jal_dimer_is_one_heterodimer_pointing_plus_end_up(tmp_path):
+    """The two chains are one dimer, and +Z is its plus end.
+
+    In 3JAL alpha binds GTP at the N-site and beta GMPCPP (G2P) at the
+    E-site. The N-site lies inside the dimer, covered by its own beta (whose
+    Lys254 comes within 3.6 A of the GTP); the E-site faces the next dimer
+    and is exposed at the plus end. An inter-dimer pair has the two
+    nucleotides the other way round, with the GTP at the template's end and
+    the G2P between the monomers.
+    """
+    import gemmi
+
+    from specter.specimen.filament import extract_mt_dimer
+
+    model = gemmi.read_structure(extract_mt_dimer(pdb_cache_dir=str(tmp_path)))[0]
+
+    def xyz(residues) -> np.ndarray:
+        return np.array([[a.pos.x, a.pos.y, a.pos.z] for r in residues for a in r])
+
+    alpha, beta = (
+        next(c for c in model if any(r.name == name for r in c))
+        for name in ("GTP", "G2P")
+    )
+    z_alpha = xyz(r for r in alpha if r.name != "GTP")[:, 2].mean()
+    z_beta = xyz(r for r in beta if r.name != "G2P")[:, 2].mean()
+    n_site = xyz(r for r in alpha if r.name == "GTP")
+    e_site = xyz(r for r in beta if r.name == "G2P")
+
+    assert z_alpha < 0 < z_beta
+    assert z_alpha < n_site[:, 2].mean() < z_beta  # inside the dimer
+    assert e_site[:, 2].mean() > z_beta  # at the plus end
+    lys254 = xyz(r for r in beta if r.seqid.num == 254)
+    assert next(r.name for r in beta if r.seqid.num == 254) == "LYS"
+    assert np.linalg.norm(lys254[:, None] - n_site[None], axis=-1).min() < 5.0
+
+
+def _write_tubulin_patch(path, plus_sign: int) -> dict[str, str]:
+    """A synthetic 3-protofilament x 4-monomer microtubule patch, as mmCIF.
+
+    Each monomer is a 420-atom cloud on the 13-protofilament lattice, with
+    its nucleotide on the face pointing to the plus end, at
+    ``plus_sign * z``. Chains run A..L protofilament by protofilament from
+    the minus end, alpha first, so the intra-dimer pairs are (A, B), (C, D),
+    ... and an alpha's beta neighbour on its minus side belongs to the
+    previous dimer. Returns chain name -> "alpha" / "beta".
+    """
+    import gemmi
+
+    rng = np.random.default_rng(0)
+    structure = gemmi.Structure()
+    structure.name = "SYNT"
+    model = gemmi.Model("1")
+    kinds: dict[str, str] = {}
+
+    def atom(name: str, element: str, xyz: np.ndarray) -> gemmi.Atom:
+        a = gemmi.Atom()
+        a.name, a.element, a.occ = name, gemmi.Element(element), 1.0
+        a.pos = gemmi.Position(*map(float, xyz))
+        return a
+
+    names = iter("ABCDEFGHIJKL")
+    for p in range(3):
+        phi = math.radians(60.0 + p * _3JAL_LATERAL_TWIST_DEG)
+        for m in range(4):
+            kind = "alpha" if m % 2 == 0 else "beta"
+            z = plus_sign * (m * MONOMER_RISE + p * _3JAL_LATERAL_RISE)
+            centre = np.array([110.9 * math.cos(phi), 110.9 * math.sin(phi), z])
+            chain = gemmi.Chain(next(names))
+            kinds[chain.name] = kind
+            directions = rng.normal(size=(420, 3))
+            directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+            cloud = centre + 24.0 * directions * rng.uniform(size=(420, 1)) ** (1 / 3)
+            for i, point in enumerate(cloud):
+                residue = gemmi.Residue()
+                residue.name, residue.seqid = "ALA", gemmi.SeqId(i + 1, " ")
+                residue.entity_type = gemmi.EntityType.Polymer
+                residue.add_atom(atom("CA", "C", point))
+                chain.add_residue(residue)
+            nucleotide = gemmi.Residue()
+            nucleotide.name = "GTP" if kind == "alpha" else "GDP"
+            nucleotide.seqid, nucleotide.het_flag = gemmi.SeqId(500, " "), "H"
+            nucleotide.entity_type = gemmi.EntityType.NonPolymer
+            site = centre + np.array([0.0, 0.0, plus_sign * 17.0])
+            for j in range(5):
+                nucleotide.add_atom(atom(f"P{j}", "P", site + rng.normal(0, 0.5, 3)))
+            chain.add_residue(nucleotide)
+            model.add_chain(chain)
+    structure.add_model(model)
+    structure.setup_entities()
+
+    # gemmi does not write entity descriptions; the extraction reads them to
+    # tell alpha from beta, as in a deposited file.
+    document = structure.make_mmcif_document()
+    rows: dict[str, list[str]] = {"id": [], "type": [], "pdbx_description": []}
+    for entity in structure.entities:
+        chain_name = entity.subchains[0][0]
+        polymer = entity.entity_type == gemmi.EntityType.Polymer
+        rows["id"].append(entity.name)
+        rows["type"].append("polymer" if polymer else "non-polymer")
+        rows["pdbx_description"].append(
+            f"Tubulin {kinds[chain_name]} chain" if polymer else "guanine nucleotide"
+        )
+    document.sole_block().set_mmcif_category("_entity.", rows)
+    document.write_file(str(path))
+    return kinds
+
+
+@pytest.mark.parametrize("plus_sign", [-1, 1])
+def test_extracted_dimer_pairs_alpha_with_its_own_beta_and_points_plus_end_up(
+    plus_sign, tmp_path
+):
+    """Offline guard on the dimer's polarity, whichever way the source runs.
+
+    Both betas next to an alpha are one monomer rise away, so geometry along
+    the axis cannot pick the partner; the beta capping alpha's nucleotide
+    can. ``plus_sign=-1`` is 3JAL's case, plus end along the deposited -z,
+    in which picking "the beta one rise further along +z" takes the
+    previous dimer's beta and points the template at the minus end.
+    """
+    import gemmi
+
+    from specter.specimen.filament import extract_mt_dimer
+
+    kinds = _write_tubulin_patch(tmp_path / "SYNT.cif", plus_sign)
+    model = gemmi.read_structure(extract_mt_dimer("SYNT", pdb_cache_dir=str(tmp_path)))[
+        0
+    ]
+
+    def z_of(chain, residue_names) -> float:
+        return float(
+            np.mean([a.pos.z for r in chain if r.name in residue_names for a in r])
+        )
+
+    alpha, beta = model[0], model[1]
+    assert (kinds[alpha.name], kinds[beta.name]) == ("alpha", "beta")
+    # One dimer: in the patch, chains of a dimer are named consecutively.
+    assert ord(beta.name) - ord(alpha.name) == 1
+
+    z_alpha, z_beta = z_of(alpha, {"ALA"}), z_of(beta, {"ALA"})
+    assert z_alpha == pytest.approx(-MONOMER_RISE / 2, abs=1.5)
+    assert z_beta == pytest.approx(MONOMER_RISE / 2, abs=1.5)
+    # alpha's nucleotide between the monomers, beta's at the +Z (plus) end.
+    assert z_alpha < z_of(alpha, {"GTP"}) < z_beta
+    assert z_of(beta, {"GDP"}) > z_beta
+
+
+def test_a_cached_dimer_from_an_older_extraction_is_re_extracted(tmp_path):
+    """A stale template must not survive a change to the extraction: the
+    cached file carries its version, and an older one is rewritten."""
+    from specter.specimen.filament import extract_mt_dimer
+    from specter.specimen.filament._tubulin import _dimer_block_name
+
+    _write_tubulin_patch(tmp_path / "SYNT.cif", plus_sign=-1)
+    stale = tmp_path / "SYNT-mtdimer.cif"
+    stale.write_text("data_SYNT_mtdimer\n")
+
+    path = extract_mt_dimer("SYNT", pdb_cache_dir=str(tmp_path))
+    assert path == str(stale)
+    first_line = stale.read_text().splitlines()[0]
+    assert first_line == f"data_{_dimer_block_name('SYNT')}"
+
+    # And a current one is reused as-is.
+    mtime = stale.stat().st_mtime_ns
+    extract_mt_dimer("SYNT", pdb_cache_dir=str(tmp_path))
+    assert stale.stat().st_mtime_ns == mtime
 
 
 def test_one_instance_id_per_filament_not_per_monomer():

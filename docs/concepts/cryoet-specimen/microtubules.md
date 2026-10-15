@@ -138,9 +138,23 @@ microtubule frame, with protofilaments running as columns of monomers
 at constant \((x, y)\), and their asymmetric unit is a small
 multi-protofilament patch. `extract_mt_dimer` fits the tube axis from
 those neighbouring protofilaments, lifts out one αβ dimer, and
-re-expresses it with \(+Z\) along the protofilament (α → β, the
-plus-end direction) and \(+X\) pointing outwards. It caches the result
+re-expresses it with \(+Z\) along the protofilament, pointing from α to β
+toward the plus end, and \(+X\) pointing outwards. It caches the result
 next to the downloaded structure.
+
+The nucleotides identify the dimer and its polarity. Each tubulin monomer
+binds a guanine nucleotide on the face that points to the plus end. The
+nucleotide of α, at the non-exchangeable N-site, lies at the interface
+inside the dimer and is covered by the dimer's own β. The nucleotide of β,
+at the exchangeable E-site, lies at the interface with the next dimer, so
+β and its nucleotide are exposed at the plus end (Mitchison 1993; Nogales
+et al. 1998; Nogales et al. 1999). Both β subunits adjacent to an α along
+the protofilament sit one monomer rise away, and the axial geometry alone
+cannot tell the dimer partner from the β of the neighbouring dimer.
+`extract_mt_dimer` therefore pairs an α with the β whose atoms contact the
+α's nucleotide, and takes the direction from α to β as the plus end. In
+3JAL the partner β lies 3.6 Å from the α's GTP and the other adjacent β
+26 Å from it; the plus end points along the deposited \(-z\).
 
 The default source is **3JAL**, a 13-protofilament GMPCPP microtubule
 co-polymerized with EB3, which compacts its lattice to the GDP spacing
@@ -218,9 +232,9 @@ relative to one another. `parallel_transport_frames` carries one
 reference normal along the path, removing only the component each new
 tangent invalidates: the minimum rotation that stays orthogonal, so no
 spurious twist accumulates. This is a discrete form of the relatively
-parallel (rotation-minimizing) frame of Bishop (1975). That's why microtubules can't reuse
-`filament_orientations`, which leaves the roll about the tangent
-unconstrained.
+parallel (rotation-minimizing) frame of Bishop (1975). Single-strand
+filaments use the same frames, with their helical twist added on top
+([Filaments](filaments.md)).
 
 ## Placement
 
@@ -246,7 +260,9 @@ as obstacles.
 Every dimer of one tube shares a **single** instance-label id, so a
 microtubule reads as one object in the segmentation rather than ~950
 loose dimers. `export_picks` writes one `-microtubule` entry per tube
-carrying its axis polyline, radius and protofilament count; the
+carrying its axis polyline, radius and protofilament count. The polyline's
+points run from the minus end to the plus end, since every dimer's \(+Z\)
+follows the axis in the direction of increasing point index. The
 per-dimer copies stay available in `microtubule_dimer_instances`.
 
 ## Parameters at a glance
@@ -314,6 +330,15 @@ bend_radius = 30000.0    # 3 µm; omit for the in-cell random walk
   protofilament number, seam, and handedness. *The Journal of Cell Biology*,
   102(3), 1067–1073.
   [doi:10.1083/jcb.102.3.1067](https://doi.org/10.1083/jcb.102.3.1067)
+- Mitchison, T. J. (1993). Localization of an exchangeable GTP binding site
+  at the plus end of microtubules. *Science*, 261(5124), 1044–1047.
+  [doi:10.1126/science.8102497](https://doi.org/10.1126/science.8102497)
+- Nogales, E., Wolf, S. G., & Downing, K. H. (1998). Structure of the αβ
+  tubulin dimer by electron crystallography. *Nature*, 391(6663), 199–203.
+  [doi:10.1038/34465](https://doi.org/10.1038/34465)
+- Nogales, E., Whittaker, M., Milligan, R. A., & Downing, K. H. (1999).
+  High-resolution model of the microtubule. *Cell*, 96(1), 79–88.
+  [doi:10.1016/S0092-8674(00)80961-7](https://doi.org/10.1016/S0092-8674(00)80961-7)
 - Pampaloni, F., Lattanzi, G., Jonáš, A., Surrey, T., Frey, E., &
   Florin, E.-L. (2006). Thermal fluctuations of grafted microtubules
   provide evidence of a length-dependent persistence length. *Proceedings

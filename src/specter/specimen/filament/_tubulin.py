@@ -15,10 +15,22 @@ frame, with protofilaments running as columns of monomers at constant
 axis fitted from its neighbouring protofilaments, gives both axes directly
 off the deposited geometry -- no fitting, no calibration.
 
+Which beta belongs to which alpha is read off the nucleotides. Each
+monomer binds a guanine nucleotide on the face that points to the
+microtubule plus end: alpha's (the non-exchangeable N-site) sits at the
+interface inside the dimer, capped by the dimer's own beta, and beta's (the
+exchangeable E-site) at the interface with the next dimer, exposed at the
+plus end [2]_ [3]_ [4]_. Neither the chain names nor the geometry along the
+axis identify the pair -- both betas next to an alpha are one monomer rise
+away -- so the partner is the beta whose atoms touch the alpha's
+nucleotide, and alpha -> beta is the plus-end direction. In 3JAL that beta
+comes within 3.6 A of the alpha's GTP, the beta on the alpha's other side
+26 A, and the plus end points along the deposited ``-z``.
+
 The extracted dimer is re-expressed so that
 
-* ``+Z`` is the protofilament axis, pointing alpha -> beta (the microtubule
-  plus-end direction), and
+* ``+Z`` is the protofilament axis, pointing alpha -> beta, toward the
+  microtubule plus end, and
 * ``+X`` points radially outwards, away from the tube axis,
 
 then cached next to the downloaded structure so the (small) extraction runs
@@ -30,6 +42,15 @@ References
    origin of microtubule dynamic instability and its modulation by EB
    proteins. *Cell*, 162(4), 849–859. https://doi.org/10.1016/j.cell.2015.07.012
    (PDB 3JAL, 3JAT)
+.. [2] Nogales, E., Wolf, S. G., & Downing, K. H. (1998). Structure of the
+   αβ tubulin dimer by electron crystallography. *Nature*, 391(6663),
+   199–203. https://doi.org/10.1038/34465
+.. [3] Nogales, E., Whittaker, M., Milligan, R. A., & Downing, K. H. (1999).
+   High-resolution model of the microtubule. *Cell*, 96(1), 79–88.
+   https://doi.org/10.1016/S0092-8674(00)80961-7
+.. [4] Mitchison, T. J. (1993). Localization of an exchangeable GTP binding
+   site at the plus end of microtubules. *Science*, 261(5124), 1044–1047.
+   https://doi.org/10.1126/science.8102497
 """
 
 from __future__ import annotations
@@ -64,6 +85,24 @@ _MAX_TUBULIN_RESIDUES = 480
 #: this groups chains into columns without catching the neighbour.
 _COLUMN_RADIUS = 25.0
 
+#: Guanine nucleotides deposited at tubulin's N- and E-sites: GTP, GDP and
+#: the slowly hydrolysable analogues GMPCPP (G2P), GMPPCP (GCP), GTPgammaS
+#: (GSP) and GMPPNP (GNP).
+_GUANINE_NUCLEOTIDES = frozenset({"GTP", "GDP", "G2P", "GCP", "GSP", "GNP"})
+
+#: Largest atom-atom distance, Å, at which a beta still counts as capping an
+#: alpha's N-site nucleotide. 3.6 A in 3JAL; the beta on the far side of the
+#: alpha, which belongs to the previous dimer, is 26 A away.
+_N_SITE_CONTACT = 6.0
+
+#: Version of the extracted dimer, stamped into the cached file's data block
+#: name. A cached dimer written by another version is re-extracted rather
+#: than reused, so raise this whenever the atoms or the frame
+#: `extract_mt_dimer` writes change. Unstamped files (version 1) paired each
+#: alpha with the beta of the neighbouring dimer, and their +Z pointed at
+#: the minus end.
+_MT_DIMER_VERSION = 2
+
 
 def _ca_centroid(chain: gemmi.Chain) -> np.ndarray | None:
     """Centroid of a chain's CA atoms, or None if it is not a protein chain
@@ -72,6 +111,58 @@ def _ca_centroid(chain: gemmi.Chain) -> np.ndarray | None:
     if not _MIN_TUBULIN_RESIDUES <= len(ca) <= _MAX_TUBULIN_RESIDUES:
         return None
     return np.asarray(ca).mean(axis=0)
+
+
+def _nucleotide_xyz(chain: gemmi.Chain) -> np.ndarray | None:
+    """Coordinates of the guanine nucleotide a tubulin chain binds, or None."""
+    xyz = [
+        [a.pos.x, a.pos.y, a.pos.z]
+        for res in chain
+        if res.name in _GUANINE_NUCLEOTIDES
+        for a in res
+    ]
+    return np.asarray(xyz) if xyz else None
+
+
+def _polymer_xyz(chain: gemmi.Chain) -> np.ndarray:
+    """Coordinates of a chain's polymer atoms, ligands excluded."""
+    return np.asarray(
+        [[a.pos.x, a.pos.y, a.pos.z] for res in chain.get_polymer() for a in res]
+    )
+
+
+def _central_column(
+    columns: list[list[str]],
+    centroids: dict[str, np.ndarray],
+    direction: np.ndarray,
+    axis_point: np.ndarray,
+) -> list[str]:
+    """The protofilament column in the middle of the patch, by azimuth."""
+    radials = []
+    for column in columns:
+        offset = np.stack([centroids[c] for c in column]).mean(axis=0) - axis_point
+        offset = offset - np.dot(offset, direction) * direction
+        radials.append(offset / np.linalg.norm(offset))
+    # Azimuths measured from the patch's mean direction, so a patch that
+    # straddles +-180 degrees in the deposited frame still sorts in order.
+    reference = np.sum(radials, axis=0)
+    reference = reference / np.linalg.norm(reference)
+    side = np.cross(direction, reference)
+    azimuths = [
+        math.atan2(float(np.dot(r, side)), float(np.dot(r, reference))) for r in radials
+    ]
+    return columns[int(np.argsort(azimuths)[len(columns) // 2])]
+
+
+def _dimer_block_name(source: str) -> str:
+    """mmCIF data block name of an extracted dimer, carrying its version."""
+    return f"{source}_mtdimer_v{_MT_DIMER_VERSION}"
+
+
+def _is_current_dimer(path: str, source: str) -> bool:
+    """Whether a cached dimer was written by this version of the extraction."""
+    with open(path) as fh:
+        return fh.readline().strip() == f"data_{_dimer_block_name(source)}"
 
 
 def _entity_descriptions(cif_path: str) -> dict[str, str]:
@@ -235,14 +326,22 @@ def extract_mt_dimer(
     -------
     str
         Path to an mmCIF holding the two chains of one dimer, rotated so
-        ``+Z`` is the protofilament axis (alpha -> beta) and ``+X`` points
-        radially outwards from the tube axis.
+        ``+Z`` is the protofilament axis, pointing alpha -> beta toward the
+        plus end, and ``+X`` points radially outwards from the tube axis.
 
     Raises
     ------
     ValueError
         If the source has too few protofilaments to fit a tube axis, or no
-        alpha/beta pair stacked along one protofilament could be found.
+        alpha in the chosen protofilament has its nucleotide capped by a
+        beta one monomer rise away.
+
+    Notes
+    -----
+    An alpha's partner is the beta in contact with the alpha's own
+    nucleotide (the N-site, inside the dimer), not merely a beta one
+    monomer rise away: the beta on the alpha's other side is equally far
+    and belongs to the neighbouring dimer. See the module docstring.
     """
     if pdb_cache_dir is None:
         from ...config import default_pdb_cache_dir
@@ -251,7 +350,11 @@ def extract_mt_dimer(
     pdb_cache_dir = str(pdb_cache_dir)
 
     out_path = os.path.join(pdb_cache_dir, f"{source}-mtdimer.cif")
-    if os.path.exists(out_path) and not overwrite:
+    if (
+        os.path.exists(out_path)
+        and not overwrite
+        and _is_current_dimer(out_path, source)
+    ):
         return out_path
 
     cif_path = PDB.fetch_pdb_file(
@@ -278,9 +381,9 @@ def extract_mt_dimer(
 
     direction, axis_point, columns = _fit_tube_axis(centroids)
 
-    # Pick a dimer from the most central column, so the fitted radial
-    # direction is least affected by the patch's edges.
-    column = sorted(columns, key=len, reverse=True)[len(columns) // 2]
+    # Take the dimer from the column in the middle of the patch, the one
+    # furthest from its edges.
+    column = _central_column(columns, centroids, direction, axis_point)
     alphas = [c for c in column if "alpha" in entities[c]]
     betas = [c for c in column if "beta" in entities[c]]
     if not alphas or not betas:
@@ -289,22 +392,39 @@ def extract_mt_dimer(
             f"({[entities[c] for c in column]})"
         )
 
-    # alpha -> beta must point one monomer rise along the axis; that fixes
-    # the sign of +Z (the microtubule plus-end direction).
+    # Pair an alpha with the beta capping its nucleotide: that interface is
+    # the one inside the dimer (see the module docstring). Distance along
+    # the axis cannot decide it, since the beta of the previous dimer is
+    # one monomer rise away on the alpha's other side.
     pair = None
     for a in alphas:
-        for b in betas:
-            offset = np.dot(centroids[b] - centroids[a], direction)
-            if 30.0 < offset < 50.0:
-                pair = (a, b)
-                break
-        if pair:
+        site = _nucleotide_xyz(st[0][a])
+        if site is None:
+            continue
+        contact = {
+            b: float(
+                np.linalg.norm(
+                    _polymer_xyz(st[0][b])[:, None] - site[None], axis=-1
+                ).min()
+            )
+            for b in betas
+        }
+        b = min(contact, key=contact.__getitem__)
+        rise = abs(float(np.dot(centroids[b] - centroids[a], direction)))
+        if contact[b] <= _N_SITE_CONTACT and 30.0 < rise < 50.0:
+            pair = (a, b)
             break
     if pair is None:
         raise ValueError(
-            f"{source}: no alpha-beta pair one monomer rise apart in column {column}"
+            f"{source}: no alpha in column {column} has its nucleotide capped "
+            "by a beta one monomer rise away"
         )
     alpha_name, beta_name = pair
+
+    # alpha -> beta is the plus-end direction, and fixes the sign of +Z.
+    plus = direction * np.sign(
+        np.dot(centroids[beta_name] - centroids[alpha_name], direction)
+    )
 
     dimer_centre = np.stack([centroids[alpha_name], centroids[beta_name]]).mean(axis=0)
 
@@ -314,14 +434,14 @@ def extract_mt_dimer(
     radial = radial - np.dot(radial, direction) * direction
     radius = float(np.linalg.norm(radial))
     radial = radial / radius
-    tangential = np.cross(direction, radial)
+    tangential = np.cross(plus, radial)
 
     # Rows are the new basis expressed in the deposited frame, so
     # `coords @ basis.T` re-expresses coordinates in the microtubule frame.
-    basis = np.stack([radial, tangential, direction])
+    basis = np.stack([radial, tangential, plus])
 
     out = gemmi.Structure()
-    out.name = f"{source}_mtdimer"
+    out.name = _dimer_block_name(source)
     model = gemmi.Model(1)
     for name in (alpha_name, beta_name):
         model.add_chain(st[0][name].clone())
@@ -341,8 +461,8 @@ def extract_mt_dimer(
         logger.info(
             f"{source}: dimer {alpha_name}(alpha)+{beta_name}(beta) from a "
             f"{len(columns)}-protofilament patch; fitted radius "
-            f"{radius:.1f} A, axis "
-            f"[{direction[0]:+.3f}, {direction[1]:+.3f}, {direction[2]:+.3f}] "
+            f"{radius:.1f} A, plus end along "
+            f"[{plus[0]:+.3f}, {plus[1]:+.3f}, {plus[2]:+.3f}] "
             f"-> {out_path}"
         )
     return out_path

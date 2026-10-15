@@ -47,7 +47,9 @@ class MicrotubuleInstance:
         Dimer structure the tube was built from.
     axis_xyz : torch.Tensor
         Axis polyline, shape ``(n_rings, 3)``, physical ``(x, y, z)``,
-        corner-relative (the convention `export_picks` writes out).
+        corner-relative (the convention `export_picks` writes out). It runs
+        from the minus end to the plus end, the direction each dimer's +Z
+        (alpha to beta) points.
     lattice : TubeLattice
         Surface lattice used, including radius and seam offset.
     """

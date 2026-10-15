@@ -220,11 +220,27 @@ is a plain short exposure after the pre-exposure \(N_0\) of the earlier
 tilts, and takes the unweighted mean \(\frac{1}{D}\int e^{-N/2N_e}\,dN\)
 over its own interval instead. At 40 e⁻/Å² the weighted form is 0.58,
 0.46 and 0.35 at 10, 6.7 and 3.7 Å. Damage starts at zero exposure; the
-constant \(c\) is part of the fit, not an onset dose. The fit was measured
-at 300 kV. Damage per electron follows the inelastic cross section, which
-scales as \(1/\beta^2\), so \(N_e\) is multiplied by
-\(\beta^2(V)/\beta^2(300\,\text{kV})\) at other voltages: 0.80 at 200 kV,
-the factor RELION and MotionCor2 also apply, and 0.50 at 100 kV.
+constant \(c\) is part of the fit, not an onset dose.
+
+The fit was measured at 300 kV. At another voltage \(N_e\) is divided by the
+damage per incident electron relative to 300 kV. Peet et al. (2019) measured
+that ratio on two-dimensional crystals of paraffin and purple membrane as
+1.57 ± 0.03 at 100 keV. Over the same step the elastic cross section of
+carbon, which scales as \(1/\beta^2\), rises by 2.01 ± 0.05 and the
+inelastic cross section by 1.51 ± 0.1, so the damage follows the inelastic
+cross section, which they found linear in \(1/\beta^2\) with a different
+slope and intercept from the elastic one. The damage per electron is
+therefore taken as proportional to \(a + 1/\beta^2\), with \(a = 1.27\)
+fixed by the measured ratio, so that
+
+\[
+N_e(k; V) = N_e(k; 300\,\text{kV})\,
+\frac{a + 1/\beta^2(300\,\text{kV})}{a + 1/\beta^2(V)}.
+\]
+
+The factor is 1 at 300 kV, 0.637 at 100 kV, the measured \(1/1.57\) that
+RELION also applies (Naydenova et al. 2019), and 0.877 at 200 kV, where it
+is an interpolation (see [Limitations](#limitations)).
 
 Where the envelope acts is a choice, ``Envelopes(dose_envelope_target=...)``.
 The default, `"transfer_function"`, multiplies the transfer function and so
@@ -408,6 +424,22 @@ per-particle quantity; `"legacy"` has no equivalent.
   image of a batch shares one specimen volume, and the damage filter serves
   the batch; images with different doses must be simulated in separate
   calls.
+- **The critical exposure at 200 kV is interpolated.** The damage ratio is
+  measured at 100 kV only, and the factor 0.877 at 200 kV follows from the
+  \(a + 1/\beta^2\) form fixed at 100 and 300 keV; outside 100 to 300 kV the
+  form is an extrapolation. The factor of 0.80 that RELION,
+  cisTEM and MotionCor3 apply at 200 kV is a convention rather than a
+  measurement: it equals the elastic ratio
+  \(\beta^2(200\,\text{kV})/\beta^2(300\,\text{kV})\), and the "about 25%
+  lower" critical exposure at 200 kV of Grant & Grigorieff (2015) rests on an
+  elastic cross section as well. Danev et al. (2026) found that the fit
+  scaled by 0.75 predicted a worse resolution than a 200 kV pre-exposure
+  series reached, and that taking the exposure at 82% of its measured value
+  brought the prediction close to the data, an effective factor of about
+  0.91. They named the accuracy of the damage model for that specimen and
+  support film, and a decline in emission current during the session, as
+  possible causes, so the result supports a factor above 0.80 without
+  measuring it.
 
 - **`torch_ctf` cannot express tetrafoil.** `LegacyAberrationAdapter` has no
   `tetrafoil1`-`tetrafoil4` mapping. Passing a nonzero one raises
@@ -442,6 +474,9 @@ per-particle quantity; `"legacy"` has no equivalent.
   transmission electron microscopy. *Proceedings of the National Academy of
   Sciences*, 111(44), 15635–15640.
   [doi:10.1073/pnas.1418377111](https://doi.org/10.1073/pnas.1418377111)
+- Danev, R., Yanagisawa, H., Yamashita, K., Eisenstein, F., & Kikkawa, M.
+  (2026). Atomic resolution cryo-EM at 200 keV. *IUCrJ*, 13(4), 343–353.
+  [doi:10.1107/S2052252526004100](https://doi.org/10.1107/S2052252526004100)
 - Erickson, H. P., & Klug, A. (1971). Measurement and compensation of
   defocusing and aberrations by Fourier processing of electron micrographs.
   *Philosophical Transactions of the Royal Society of London. B, Biological
@@ -478,6 +513,14 @@ per-particle quantity; `"legacy"` has no equivalent.
 - Madsen, J., & Susi, T. (2021). The abTEM code: Transmission electron
   microscopy from first principles. *Open Research Europe*, 1, 24.
   [doi:10.12688/openreseurope.13015.2](https://doi.org/10.12688/openreseurope.13015.2)
+- Naydenova, K., McMullan, G., Peet, M. J., Lee, Y., Edwards, P. C., Chen,
+  S., Leahy, E., Scotcher, S., Henderson, R., & Russo, C. J. (2019). CryoEM
+  at 100 keV: a demonstration and prospects. *IUCrJ*, 6(6), 1086–1098.
+  [doi:10.1107/S2052252519012612](https://doi.org/10.1107/S2052252519012612)
+- Peet, M. J., Henderson, R., & Russo, C. J. (2019). The energy dependence
+  of contrast and damage in electron cryomicroscopy of biological molecules.
+  *Ultramicroscopy*, 203, 125–131.
+  [doi:10.1016/j.ultramic.2019.02.007](https://doi.org/10.1016/j.ultramic.2019.02.007)
 - Penczek, P. A. (2010). Image restoration in cryo-electron microscopy.
   *Methods in Enzymology*, 482, 35–72.
   [doi:10.1016/S0076-6879(10)82002-6](https://doi.org/10.1016/S0076-6879(10)82002-6)

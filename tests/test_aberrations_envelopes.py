@@ -187,30 +187,41 @@ def test_dose_envelope_pre_exposure_short_interval_limit():
     assert torch.allclose(tilt, ref, rtol=1e-3)
 
 
-def test_critical_exposure_scales_with_beta_squared():
-    """300 kV is the fit itself; 200 kV gives the conventional 0.80; 100 kV 0.50."""
-    from specter.aberrations._envelopes import critical_exposure
+def test_critical_exposure_follows_the_measured_damage_ratio():
+    """300 kV is the fit itself; 100 kV is Peet et al.'s measured 1/1.57.
+
+    Damage per electron goes as ``a + 1/beta^2`` with ``a`` fixed by the
+    measured 100/300 keV damage ratio of 1.57, not as the elastic
+    ``1/beta^2`` (which would give 0.498 at 100 kV and 0.802 at 200 kV).
+    """
+    from specter.aberrations._envelopes import DAMAGE_INTERCEPT, critical_exposure
+
+    # Independent of the module's helper: m0 c^2 = 510.99895 keV (CODATA).
+    def inv_beta2(kv: float) -> float:
+        gamma = 1.0 + kv / 510.99895
+        return gamma**2 / (gamma**2 - 1.0)
+
+    a = (inv_beta2(100.0) - 1.57 * inv_beta2(300.0)) / 0.57
+    assert DAMAGE_INTERCEPT == pytest.approx(a, rel=1e-6)
+    assert DAMAGE_INTERCEPT == pytest.approx(1.2695, abs=1e-4)
 
     k = torch.tensor([0.05, 0.1, 0.2, 0.3])
     ne300 = critical_exposure(k)
-    assert torch.allclose(critical_exposure(k, voltage=300.0), ne300)
-    assert torch.allclose(
-        critical_exposure(k, voltage=200.0) / ne300,
-        torch.full_like(k, 0.802),
-        atol=2e-3,
-    )
-    assert torch.allclose(
-        critical_exposure(k, voltage=100.0) / ne300,
-        torch.full_like(k, 0.498),
-        atol=2e-3,
-    )
+    assert torch.equal(critical_exposure(k, voltage=300.0), ne300)
+    for kv, expected in [(100.0, 1 / 1.57), (200.0, 0.8772), (120.0, 0.7013)]:
+        ratio = critical_exposure(k, voltage=kv) / ne300
+        assert torch.allclose(ratio, torch.full_like(k, expected), atol=1e-4), kv
+        assert expected == pytest.approx(
+            (a + inv_beta2(300.0)) / (a + inv_beta2(kv)), abs=1e-4
+        )
     # A per-image voltage tensor broadcasts as (B, 1, 1) against a 2-D grid.
     grid = k.view(1, -1).expand(4, -1)
     per_image = critical_exposure(grid, voltage=torch.tensor([300.0, 100.0]))
     assert per_image.shape == (2, 4, 4)
-    assert torch.allclose(per_image[0], ne300.expand(4, -1))
+    assert per_image.dtype == grid.dtype
+    assert torch.equal(per_image[0], ne300.expand(4, -1))
     assert torch.allclose(
-        per_image[1] / per_image[0], torch.full((4, 4), 0.498), atol=2e-3
+        per_image[1] / per_image[0], torch.full((4, 4), 1 / 1.57), atol=1e-5
     )
     # The envelope uses the scaled Ne, so 100 kV damages more than 300 kV.
     e100 = dose_envelope(k, torch.tensor(40.0), voltage=100.0)

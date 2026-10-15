@@ -19,6 +19,7 @@ References
 from __future__ import annotations
 
 import math
+from typing import TypeVar
 
 import torch
 
@@ -27,6 +28,35 @@ from ..constants import rest_mass_energy
 
 #: A Gaussian's FWHM over its standard deviation, ``2 sqrt(2 ln 2)``.
 FWHM_TO_SIGMA = 2.0 * math.sqrt(2.0 * math.log(2.0))
+
+
+_Voltage = TypeVar("_Voltage", float, torch.Tensor)
+
+
+def _inverse_beta_squared(voltage_kv: _Voltage) -> _Voltage:
+    """``1 / beta^2 = gamma^2 / (gamma^2 - 1)`` at an accelerating voltage in kV."""
+    gamma2 = (1.0 + voltage_kv * 1.0e3 / rest_mass_energy()) ** 2
+    return gamma2 / (gamma2 - 1.0)
+
+
+#: Radiation damage per incident electron at 100 keV over that at 300 keV,
+#: 1.57 +/- 0.03: the mean ratio of the critical exposures of paraffin and
+#: purple-membrane 2D crystals at 80 K, from the fading of their diffraction
+#: spots at 9, 5 and 4 A (Peet, Henderson & Russo 2019, Table 1). The elastic
+#: cross section of carbon rises by 2.01 +/- 0.05 over the same step and the
+#: inelastic one by 1.51 +/- 0.1, which the damage follows.
+DAMAGE_RATIO_100_TO_300_KV = 1.57
+
+#: Intercept ``a`` of the damage per incident electron, taken as proportional
+#: to ``a + 1/beta^2``. Peet, Henderson & Russo (2019) measured the inelastic
+#: cross section of carbon to be linear in ``1/beta^2`` over 100-300 keV, with
+#: a slope and intercept that differ from the elastic cross section's, and the
+#: damage to follow the inelastic cross section. ``a`` is solved here so that
+#: the 100/300 keV ratio equals ``DAMAGE_RATIO_100_TO_300_KV`` exactly: 1.2695.
+DAMAGE_INTERCEPT = (
+    _inverse_beta_squared(100.0)
+    - DAMAGE_RATIO_100_TO_300_KV * _inverse_beta_squared(300.0)
+) / (DAMAGE_RATIO_100_TO_300_KV - 1.0)
 
 
 def b_envelope(k2: torch.Tensor, bfactor: torch.Tensor) -> torch.Tensor:
@@ -236,11 +266,36 @@ def critical_exposure(
     ``c`` is part of the fit, not an onset dose: damage starts at zero
     exposure at every frequency. At ``k = 0`` the value is ``inf``.
 
-    The fit was measured at 300 kV. Damage per electron scales with the
-    inelastic cross section, which goes as :math:`1/\\beta^2`, so at
-    another accelerating voltage the critical exposure is scaled by
-    :math:`\\beta^2(V) / \\beta^2(300\\,\\text{kV})`: 0.80 at 200 kV (the
-    factor RELION and MotionCor2 apply) and 0.50 at 100 kV.
+    The fit was measured at 300 kV. At another accelerating voltage the
+    critical exposure is divided by the damage per incident electron
+    relative to 300 kV. That ratio follows the inelastic cross section, not
+    the elastic one: Peet et al. [2]_ measured the damage to 2D crystals as
+    1.57 +/- 0.03 times higher at 100 keV than at 300 keV, against
+    2.01 +/- 0.05 for elastic scattering (the :math:`1/\\beta^2` law) and
+    1.51 +/- 0.1 for inelastic scattering, which they found linear in
+    :math:`1/\\beta^2` with a different slope and intercept from the
+    elastic cross section. The damage per electron is therefore taken as
+    proportional to :math:`a + 1/\\beta^2`, with ``a = DAMAGE_INTERCEPT``
+    (1.27) solved from the measured ratio, so that
+
+    .. math::
+
+        N_e(k; V) = N_e(k; 300\\,\\text{kV})
+        \\frac{a + 1/\\beta^2(300\\,\\text{kV})}{a + 1/\\beta^2(V)}.
+
+    The factor is 1 at 300 kV, 0.637 at 100 kV (the measured
+    :math:`1/1.57`, which RELION also applies [3]_) and 0.877 at 200 kV.
+    The damage ratio is measured at 100 kV only, so the 200 kV value is an
+    interpolation, and outside 100-300 kV the form is an extrapolation.
+    The 0.80 that RELION, cisTEM and MotionCor3 apply at 200 kV is a
+    convention: it is the elastic ratio
+    :math:`\\beta^2(200\\,\\text{kV})/\\beta^2(300\\,\\text{kV})`, and
+    Grant & Grigorieff's "about 25% lower" at 200 kV [1]_ rests on an
+    elastic cross section as well. For a 200 kV pre-exposure series,
+    Danev et al. [4]_ found the fit scaled by 0.75 predicted a worse
+    resolution than was reached, and taking the exposure at 82% of its
+    measured value brought the prediction close to it, an effective factor
+    of about 0.91 (0.75/0.82).
 
     Parameters
     ----------
@@ -262,17 +317,28 @@ def critical_exposure(
     .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
        single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
        *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
+    .. [2] Peet, M. J., Henderson, R., & Russo, C. J. (2019). The energy
+       dependence of contrast and damage in electron cryomicroscopy of
+       biological molecules. *Ultramicroscopy*, 203, 125–131.
+       https://doi.org/10.1016/j.ultramic.2019.02.007
+    .. [3] Naydenova, K., McMullan, G., Peet, M. J., Lee, Y., Edwards, P. C.,
+       Chen, S., Leahy, E., Scotcher, S., Henderson, R., & Russo, C. J.
+       (2019). CryoEM at 100 keV: a demonstration and prospects. *IUCrJ*,
+       6(6), 1086–1098. https://doi.org/10.1107/S2052252519012612
+    .. [4] Danev, R., Yanagisawa, H., Yamashita, K., Eisenstein, F., &
+       Kikkawa, M. (2026). Atomic resolution cryo-EM at 200 keV. *IUCrJ*,
+       13(4), 343–353. https://doi.org/10.1107/S2052252526004100
     """
     ne = a * torch.pow(k, b) + c
     if voltage is None:
         return ne
-    v = torch.as_tensor(voltage, dtype=ne.dtype, device=ne.device)
+    # In float64, so that 300 kV gives a factor of exactly 1.
+    v = torch.as_tensor(voltage, dtype=torch.float64, device=ne.device)
     if v.ndim == 1:
         v = v.view(-1, 1, 1)
-    m0c2 = rest_mass_energy() / 1.0e3  # keV
-    beta2 = 1.0 - 1.0 / (1.0 + v / m0c2) ** 2
-    beta2_300 = 1.0 - 1.0 / (1.0 + 300.0 / m0c2) ** 2
-    return ne * (beta2 / beta2_300)
+    damage_300 = DAMAGE_INTERCEPT + _inverse_beta_squared(300.0)
+    factor = damage_300 / (DAMAGE_INTERCEPT + _inverse_beta_squared(v))
+    return ne * factor.to(ne.dtype)
 
 
 def dose_envelope(
@@ -332,8 +398,9 @@ def dose_envelope(
         Critical-exposure fit parameters, see :func:`critical_exposure`.
     voltage : float or torch.Tensor, optional
         Accelerating voltage in kV, which rescales the critical exposure by
-        :math:`\\beta^2(V)/\\beta^2(300\\,\\text{kV})` (see
-        :func:`critical_exposure`). None means 300 kV.
+        the measured voltage dependence of radiation damage (0.637 at
+        100 kV, 0.877 at 200 kV; see :func:`critical_exposure`). None means
+        300 kV.
 
     Returns
     -------

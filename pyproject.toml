@@ -22,7 +22,13 @@ dependencies = [
     # mismatch here is not fatal: the GPU transform warns once and falls
     # back to scipy (see specimen/membrane/_field.py).
     "cupy-cuda12x>=13.0; sys_platform != 'darwin'",
+    # Non-uniform FFTs (specter.nufft): exact point-group averaging evaluates a
+    # volume's transform at rotated frequencies. cufinufft publishes Linux and
+    # Windows wheels only; on macOS, or when it cannot load, finufft runs the
+    # same transform on the CPU.
+    "cufinufft>=2.5; sys_platform != 'darwin'",
     "eerfile>=0.0.4",
+    "finufft>=2.5",
     "gemmi>=0.7.3",
     "h5py>=3.14.0",
     "lightning>=2.5.5",
@@ -98,8 +104,10 @@ torch = { index = "pytorch-cu121" }
 [[tool.mypy.overrides]]
 module = [
     "cryosparc.*",
+    "cufinufft.*",
     "cupy.*",
     "cupyx.*",
+    "finufft.*",
     "ipywidgets.*",
     "mrcfile.*",
     "pandas.*",

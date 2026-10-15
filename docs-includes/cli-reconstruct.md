@@ -53,8 +53,8 @@ specter reconstruct particle [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--symmetry` | `TEXT` | _none_ | Point-group symmetry enforced on the volume, e.g. C3, D7, I1. Omit for C1. |
-| `--symmetry_mode` | `real` \| `fourier` | `fourier` | Domain in which symmetry is applied. |
-| `--symmetry_batchsize` | `INTEGER` | _none_ | Batch size used when applying symmetry operators to the volume. Lower it if symmetry expansion runs out of memory. |
+| `--symmetry_mode` | `exact` \| `real` \| `fourier` | `exact` | How the point group is averaged. exact: through the volume's own transform at rotated frequencies, with no interpolation. real/fourier: by interpolated rotation, which attenuates the map every epoch. |
+| `--symmetry_batchsize` | `INTEGER` | _none_ | Batch size used when applying symmetry operators to the volume with symmetry_mode real or fourier. Lower it if symmetry expansion runs out of memory. exact does not use it. |
 
 **Sanity check**{ #specter-reconstruct-particle-sanity-check }
 

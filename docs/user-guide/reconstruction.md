@@ -282,9 +282,16 @@ whole-command speed gains depend on the workload.
 ## Symmetry
 
 `--symmetry` enforces a point-group symmetry (e.g. `C3`, `D7`, `I1`) on the
-volume every epoch, in real space or Fourier space, selected via
-`--symmetry_mode`. `--symmetry_batchsize` lowers memory use when symmetry
-expansion is the bottleneck. Omit `--symmetry` for C1 (no symmetry).
+volume every epoch. Omit it for C1 (no symmetry). The default
+`--symmetry_mode exact` averages the group through the volume's own transform
+at rotated frequencies, computed with a non-uniform FFT (Barnett et al. 2019;
+Shih et al. 2021), so no interpolation attenuates the map. `real` and
+`fourier` rotate the volume with trilinear interpolation instead, which loses
+amplitude on every epoch; see
+[Conventions](../concepts/conventions.md#applying-a-pose-real-space-or-fourier-space)
+for the measured loss. `--symmetry_batchsize` lowers the memory of those two
+modes on a large box. An I1 average of a 560³ map takes about 30 s and 5 GiB
+on a GPU with `exact`.
 
 ## Limitations
 
@@ -303,6 +310,11 @@ result.
 
 ## References
 
+- Barnett, A. H., Magland, J., & af Klinteberg, L. (2019). A parallel
+  nonuniform fast Fourier transform library based on an "exponential of
+  semicircle" kernel. *SIAM Journal on Scientific Computing*, 41(5),
+  C479–C504.
+  [doi:10.1137/18M120885X](https://doi.org/10.1137/18M120885X)
 - Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
   (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
   20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
@@ -329,3 +341,8 @@ result.
 - Scheres, S. H. W., & Chen, S. (2012). Prevention of overfitting in cryo-EM
   structure determination. *Nature Methods*, 9(9), 853–854.
   [doi:10.1038/nmeth.2115](https://doi.org/10.1038/nmeth.2115)
+- Shih, Y.-h., Wright, G., Andén, J., Blaschke, J., & Barnett, A. H. (2021).
+  cuFINUFFT: A load-balanced GPU library for general-purpose nonuniform FFTs.
+  In *2021 IEEE International Parallel and Distributed Processing Symposium
+  Workshops (IPDPSW)* (pp. 688–697). IEEE.
+  [doi:10.1109/IPDPSW52791.2021.00105](https://doi.org/10.1109/IPDPSW52791.2021.00105)

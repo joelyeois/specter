@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Literal
 
 import roma
 import torch
 
+from ..options import SymmetryMode
 from ..rotations import rotate_volume, rotate_volume_fourier
+from ._exact import symmetrize_exact
 from ._matrices import (
     _icosahedral_i1_matrices,
     _icosahedral_i2_matrices,
@@ -162,7 +163,7 @@ def apply_symmetry(
     volume: torch.Tensor,
     sym_ops: torch.Tensor | str,
     batchsize: int | None = None,
-    method: Literal["fourier", "real"] = "fourier",
+    method: SymmetryMode = "exact",
 ) -> torch.Tensor:
     """
     Apply rotational symmetry to a volume.
@@ -175,10 +176,16 @@ def apply_symmetry(
         Either a tensor of shape (n_sym, 3, 4) affine matrices, or a symmetry
         label string (e.g. 'C3', 'D2', 'I', 'O', 'T').
     batchsize : int, optional
-        Number of symmetry operations to apply per batch. If None, applies all
-        at once. Default is None.
-    method : str, optional
-        Rotation method: 'fourier' or 'real'. Default is 'fourier'.
+        Number of symmetry operations to apply per batch with ``"real"`` or
+        ``"fourier"``. If None, applies all at once. Ignored by ``"exact"``,
+        whose memory does not grow with the group. Default is None.
+    method : {"exact", "real", "fourier"}, optional
+        ``"exact"`` averages through the volume's own transform at rotated
+        frequencies (`symmetrize_exact`), with no interpolation, so a map
+        that already has the symmetry is returned unchanged. ``"real"`` and
+        ``"fourier"`` rotate the volume with trilinear interpolation in real
+        or Fourier space, which attenuates the map on every pass. Default
+        ``"exact"``.
 
     Returns
     -------
@@ -191,6 +198,9 @@ def apply_symmetry(
         sym_ops = get_rotation_matrices(
             sym_ops, return_affine=True
         )  # returns tensor n_sym x 3 x 4
+
+    if method == "exact":
+        return symmetrize_exact(volume, sym_ops)
 
     sym_ops = sym_ops.to(volume.device, dtype=volume.dtype)
     n_sym = len(sym_ops)

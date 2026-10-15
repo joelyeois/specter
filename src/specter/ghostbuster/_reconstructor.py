@@ -43,7 +43,7 @@ from ._losses import (
     update_sigma2,
 )
 from ..settings import Optics, Propagation
-from specter.options import RotateMode, Scheduler
+from specter.options import Scheduler, SymmetryMode
 
 #: Largest table of projected 2D masks `Reconstructor` keeps on the device,
 #: in bytes. The table is ``n_particles * nxy**2`` float32 values, 1 MiB a
@@ -180,7 +180,7 @@ class Reconstructor(_BaseReconstructor):
         use_2d_mask: bool = False,
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
-        symmetry_mode: RotateMode = "fourier",
+        symmetry_mode: SymmetryMode = "exact",
         use_cpu_for_symmetry: bool = False,
         tag: str = "untagged",
         run_dir: str | Path | None = None,
@@ -284,7 +284,7 @@ class Reconstructor(_BaseReconstructor):
         self,
         symmetry: str | None,
         symmetry_batchsize: int | None,
-        symmetry_mode: RotateMode,
+        symmetry_mode: SymmetryMode,
         use_cpu_for_symmetry: bool,
     ) -> None:
         """Store symmetry settings and register the symmetry rotation matrices."""

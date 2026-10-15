@@ -33,7 +33,7 @@ _FIELD_ALIAS = {
     "potential_method": options.PotentialMethod,
     "conv_backend": options.ConvBackend,
     "rotate_mode": options.RotateMode,
-    "symmetry_mode": options.RotateMode,
+    "symmetry_mode": options.SymmetryMode,
     "tilt_axis": options.TiltAxis,
     "scheduler": options.Scheduler,
 }

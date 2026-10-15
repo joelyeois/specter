@@ -19,7 +19,7 @@ from ..settings import Optics, Propagation
 from ._helpers import _images_to_counts
 from ._reconstructor import Reconstructor
 from ._pipeline_base import _GhostbusterBase
-from specter.options import ImageUnits, RotateMode, Scheduler
+from specter.options import ImageUnits, Scheduler, SymmetryMode
 
 
 class Ghostbuster(_GhostbusterBase):
@@ -102,8 +102,9 @@ class Ghostbuster(_GhostbusterBase):
         Point-group symmetry to enforce (e.g. ``"C3"``, ``"I1"``).
     symmetry_batchsize : int, optional
         Batch size used when applying symmetry to the volume.
-    symmetry_mode : {"real", "fourier"}
-        Domain in which symmetry is applied.
+    symmetry_mode : {"exact", "real", "fourier"}
+        How the point group is averaged; see `specter.symmetries.apply_symmetry`.
+        Default ``"exact"``.
     sparsity : float, optional
         L1 regularisation weight on V.
     nps_weight : torch.Tensor, optional
@@ -184,7 +185,7 @@ class Ghostbuster(_GhostbusterBase):
         optics: Optics = Optics(),
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
-        symmetry_mode: RotateMode = "fourier",
+        symmetry_mode: SymmetryMode = "exact",
         sparsity: float | None = None,
         nps_weight: torch.Tensor | None = None,
         learn_noise_model: bool = False,

@@ -91,6 +91,11 @@ TemporalCoherence = Literal["integrated", "envelope"]
 #: Whether a volume is rotated in real or Fourier space.
 RotateMode = Literal["real", "fourier"]
 
+#: How a point group is averaged: exactly through the volume's own transform
+#: (`specter.symmetries.symmetrize_exact`), or by rotating the volume with
+#: interpolation in real or Fourier space.
+SymmetryMode = Literal["exact", "real", "fourier"]
+
 #: Where the rotation centre of an even-sized grid sits.
 GridOrigin = Literal["relion", "center"]
 
@@ -142,6 +147,7 @@ __all__ = [
     "PadMode",
     "PotentialMethod",
     "RotateMode",
+    "SymmetryMode",
     "ScatteringFactors",
     "ScatteringModel",
     "Scheduler",

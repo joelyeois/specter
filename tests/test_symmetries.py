@@ -2,7 +2,8 @@ import pytest
 import roma
 import torch
 
-from specter.symmetries import apply_symmetry, get_rotation_matrices
+from specter.rotations import rotate_volume
+from specter.symmetries import apply_symmetry, get_rotation_matrices, symmetrize_exact
 
 # ---------------------------------------------------------------------------
 # get_rotation_matrices
@@ -123,3 +124,79 @@ def test_apply_symmetry_batchsize_matches_unbatched() -> None:
     unbatched = apply_symmetry(volume, "C4", batchsize=None, method="real")
     batched = apply_symmetry(volume, "C4", batchsize=2, method="real")
     assert torch.allclose(unbatched, batched, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# symmetrize_exact
+# ---------------------------------------------------------------------------
+
+
+def _compact_object(n: int, seed: int = 0) -> torch.Tensor:
+    """Smooth Gaussian blobs inside the inscribed sphere: a band-limited particle."""
+    g = torch.Generator().manual_seed(seed)
+    centres = torch.randn(40, 3, generator=g, dtype=torch.float64)
+    radii = torch.rand(40, 1, generator=g, dtype=torch.float64) ** (1 / 3) * 0.3 * n
+    centres = centres / centres.norm(dim=1, keepdim=True) * radii
+    z, y, x = torch.meshgrid(
+        *[torch.arange(n, dtype=torch.float64) - n // 2] * 3, indexing="ij"
+    )
+    v = torch.zeros(n, n, n, dtype=torch.float64)
+    for cx, cy, cz in centres:
+        v += torch.exp(-((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2) / 4.5)
+    return v.float()
+
+
+def _rel(a: torch.Tensor, b: torch.Tensor) -> float:
+    return float((a - b).norm() / b.norm())
+
+
+@pytest.mark.parametrize("shape", [(17, 17, 17), (16, 16, 16), (12, 14, 18)])
+def test_symmetrize_exact_identity_returns_volume(shape: tuple[int, int, int]) -> None:
+    volume = torch.randn(shape)
+    assert _rel(symmetrize_exact(volume, torch.eye(3)[None]), volume) < 2e-4
+
+
+def test_symmetrize_exact_c4_matches_grid_permutation() -> None:
+    """A quarter turn about voxel N//2 of an odd box permutes the grid exactly, so
+    the average needs no interpolation and must hold even for white noise."""
+    volume = torch.randn(17, 17, 17)
+    expected = torch.stack(
+        [torch.rot90(volume, k, dims=(1, 2)) for k in range(4)]
+    ).mean(0)
+    assert _rel(symmetrize_exact(volume, get_rotation_matrices("C4")), expected) < 1e-4
+
+
+@pytest.mark.parametrize("n", [24, 25])
+def test_symmetrize_exact_is_idempotent_where_interpolation_is_not(n: int) -> None:
+    """Averaging a symmetric map over its group again must change nothing. The
+    interpolating modes attenuate it on every pass, which is the loss this
+    method exists to remove."""
+    group = get_rotation_matrices("I1")
+    once = symmetrize_exact(_compact_object(n), group)
+    assert _rel(symmetrize_exact(once, group), once) < 1e-4
+    assert _rel(apply_symmetry(once, group, method="fourier"), once) > 0.05
+
+
+def test_symmetrize_exact_follows_rotate_volume_convention() -> None:
+    """One operator samples the input at R x, as rotate_volume does, not at R^T x."""
+    volume = _compact_object(32)
+    rotation = roma.rotvec_to_rotmat(torch.tensor([0.3, -0.7, 0.5]))
+    affine = torch.cat([rotation, torch.zeros(3, 1)], 1)[None]
+    interpolated = rotate_volume(volume, affine)[0]
+    assert _rel(symmetrize_exact(volume, rotation[None]), interpolated) < 0.1
+    assert _rel(symmetrize_exact(volume, rotation.T[None]), interpolated) > 0.5
+
+
+def test_apply_symmetry_defaults_to_exact() -> None:
+    volume = _compact_object(16)
+    expected = symmetrize_exact(volume, get_rotation_matrices("D3"))
+    assert torch.allclose(apply_symmetry(volume, "D3"), expected)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_symmetrize_exact_cuda_matches_cpu() -> None:
+    volume = _compact_object(20)
+    group = get_rotation_matrices("D7")
+    on_gpu = symmetrize_exact(volume.cuda(), group)
+    assert on_gpu.device.type == "cuda"
+    assert _rel(on_gpu.cpu(), symmetrize_exact(volume, group)) < 1e-4

@@ -9,7 +9,13 @@ from ._common_fields import (
 )
 from ._field import help_of, setting
 from typing import Literal
-from specter.options import EwaldSphereSign, ImageUnits, RotateMode, Scheduler
+from specter.options import (
+    EwaldSphereSign,
+    ImageUnits,
+    RotateMode,
+    Scheduler,
+    SymmetryMode,
+)
 
 
 @dataclass
@@ -143,14 +149,20 @@ class ReconstructionConfig:
             "Point-group symmetry enforced on the volume, e.g. C3, D7, I1. Omit for C1."
         ),
     )
-    symmetry_mode: RotateMode = setting(
-        "fourier", help="Domain in which symmetry is applied."
+    symmetry_mode: SymmetryMode = setting(
+        "exact",
+        help=(
+            "How the point group is averaged. exact: through the volume's own "
+            "transform at rotated frequencies, with no interpolation. real/fourier: "
+            "by interpolated rotation, which attenuates the map every epoch."
+        ),
     )
     symmetry_batchsize: int | None = setting(
         None,
         help=(
-            "Batch size used when applying symmetry operators "
-            "to the volume. Lower it if symmetry expansion runs out of memory."
+            "Batch size used when applying symmetry operators to the volume with "
+            "symmetry_mode real or fourier. Lower it if symmetry expansion runs "
+            "out of memory. exact does not use it."
         ),
         check="positive",
     )

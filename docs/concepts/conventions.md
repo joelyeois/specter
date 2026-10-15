@@ -172,11 +172,31 @@ centred in a roomy box, and the less accurate one for a crowded or off-centre
 specimen, or for any volume whose density reaches the box edge. It costs two
 FFTs and two resampling passes rather than one.
 
-One path selects `"fourier"` by default: `apply_symmetry`, which
-`Reconstructor` calls to enforce a point group on the reconstructed volume.
-Symmetry operations are pure rotations about a centred volume, which is the
-regime where the Fourier path is most accurate and where its circular shift
-never applies.
+Point-group averaging uses neither method by default. `apply_symmetry`,
+which `Reconstructor` calls once per epoch to enforce a point group, takes
+`method="exact"` (`symmetrize_exact`): it evaluates the volume's
+discrete-space transform at rotated frequencies with a type-2 non-uniform FFT
+(Barnett et al. 2019; Shih et al. 2021) and inverts the mean. No step
+resamples the grid, so averaging a map that already has the symmetry returns
+it unchanged. Both interpolating methods attenuate it instead, and the loss
+compounds over the epochs of a reconstruction. Measured on a 560³ capsid at
+1.47 Å per voxel, as the fraction of its amplitude a symmetric map keeps after
+one I1 average:
+
+| Resolution band | `"exact"` | `"real"` | `"fourier"` |
+|---|---|---|---|
+| 200–20 Å | 1.000 | 0.998 | 0.718 |
+| 20–8 Å | 1.000 | 0.955 | 0.717 |
+| 8–4.5 Å | 1.000 | 0.837 | 0.720 |
+| 4.5–3.5 Å | 1.000 | 0.719 | 0.722 |
+| 3.5–2.94 Å | 0.981 | 0.598 | 0.711 |
+
+The remainder in the last `"exact"` row is aliasing in the test map itself.
+The `"fourier"` loss is flat because the capsid fills most of the box, the
+regime in which the table above shows that path to be least accurate. The
+exact average holds for a map that is band-limited and lies inside the box's
+inscribed sphere; density reaching the box faces wraps, as in any
+Fourier-space rotation.
 
 Rotation origin follows the same `"relion"` / `"center"` choice described
 above. In Fourier space, the rotation necessarily centres on the
@@ -381,6 +401,11 @@ as well.
   & Loh, N. D. (2023). Single-shot, coherent, pop-out 3D metrology.
   *Communications Physics*, 6(1), 321.
   [doi:10.1038/s42005-023-01431-6](https://doi.org/10.1038/s42005-023-01431-6)
+- Barnett, A. H., Magland, J., & af Klinteberg, L. (2019). A parallel
+  nonuniform fast Fourier transform library based on an "exponential of
+  semicircle" kernel. *SIAM Journal on Scientific Computing*, 41(5),
+  C479–C504.
+  [doi:10.1137/18M120885X](https://doi.org/10.1137/18M120885X)
 - Bregier, R. (2021). Deep regression on manifolds: A 3D rotation case
   study. In *2021 International Conference on 3D Vision (3DV)* (pp.
   166–174). IEEE.
@@ -411,6 +436,11 @@ as well.
   cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
   519–530.
   [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)
+- Shih, Y.-h., Wright, G., Andén, J., Blaschke, J., & Barnett, A. H. (2021).
+  cuFINUFFT: A load-balanced GPU library for general-purpose nonuniform FFTs.
+  In *2021 IEEE International Parallel and Distributed Processing Symposium
+  Workshops (IPDPSW)* (pp. 688–697). IEEE.
+  [doi:10.1109/IPDPSW52791.2021.00105](https://doi.org/10.1109/IPDPSW52791.2021.00105)
 - Yesibolati, M. N., Laganà, S., Sun, H., Beleggia, M., Kathmann, S. M.,
   Kasama, T., & Mølhave, K. (2020). Mean inner potential of liquid water.
   *Physical Review Letters*, 124(6), 065502.

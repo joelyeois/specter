@@ -37,11 +37,12 @@ lr = 0.1               # volume learning rate; unset to freeze the volume
 scheduler = "LambdaLR"
 lr_decay = 0.1         # LambdaLR only: multiplier = 1 / (1 + lr_decay * sqrt(step))
 
-# Omit `symmetry` for C1. Lower symmetry_batchsize if applying the operators
-# runs out of memory on a large box.
+# Omit `symmetry` for C1. "exact" averages the point group without
+# interpolation; symmetry_batchsize applies only to the interpolating "real" and
+# "fourier" modes, and lowers their memory on a large box.
 [symmetry]
 # symmetry = "I1"
-symmetry_mode = "fourier"
+symmetry_mode = "exact"
 # symmetry_batchsize = 3
 
 # One epoch on binned images: every file path, .cs field and physics setting is

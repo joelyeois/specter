@@ -9,6 +9,7 @@ tests at all for TomogramReconstructor prior to this file.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -231,3 +232,77 @@ def test_run_dir_writes_expected_artifacts(tmp_path: Path, tr_kwargs: dict) -> N
     metrics = json.loads((tmp_path / "metrics.json").read_text())
     assert metrics["total_batches"] == 2  # 1 batch/epoch x 2 epochs
     assert {"epoch_01", "epoch_02"} <= set(metrics["epochs"])
+
+
+# ---------------------------------------------------------------------------
+# The delocalisation band
+# ---------------------------------------------------------------------------
+
+
+def _band_model(
+    nxy: int,
+    voxel_size: float,
+    defocus: float,
+    *,
+    cs: float = 0.0,
+    angles: tuple[float, ...] = (0.0,),
+    model: str = "multislice",
+    nz: int = 16,
+) -> TomogramReconstructor:
+    theta = torch.deg2rad(torch.tensor(angles))
+    zeros = torch.zeros_like(theta)
+    quaternions = roma.rotvec_to_unitquat(torch.stack([zeros, theta, zeros], -1))
+    n = len(angles)
+    return TomogramReconstructor(
+        V=torch.zeros(nz, nxy, nxy),
+        voxel_size=voxel_size,
+        quaternions=quaternions,
+        translations=torch.zeros(n, 2),
+        ctf_params={"dfu": torch.full((n,), defocus), "cs": torch.full((n,), cs)},
+        voltage=300.0,
+        dose_per_angstrom=1.0,
+        tilt=TiltGeometry(tilt_axis="y"),
+        propagation=Propagation(scattering_model=model, alpha=0.1),
+    )
+
+
+def test_the_edge_band_is_the_lens_delocalisation_distance() -> None:
+    """
+    With no spherical aberration the band is lambda * k_Nyquist times the
+    defocus of the deepest plane, the midplane's plus half the column, in
+    pixels; it widens with defocus, and a model with no depth at zero defocus
+    has none.
+    """
+    from specter.constants import energy_to_wavelength
+
+    voxel = 8.0
+    widths = [_band_model(512, voxel, df)._edge_pads()[0] for df in (5e3, 15e3, 3e4)]
+    assert widths == sorted(widths) and widths[0] < widths[-1]
+    half_depth = 16 * voxel / 2
+    reach = energy_to_wavelength(300.0) * (0.5 / voxel) * (3e4 + half_depth)
+    assert widths[-1] == math.ceil(reach / voxel)
+    assert _band_model(512, voxel, 0.0, model="projection")._edge_pads() == [0]
+    # Spherical aberration pulls the high frequencies back towards focus.
+    assert _band_model(512, voxel, 3e4, cs=2.7e7)._edge_pads()[0] <= widths[-1]
+
+
+def test_an_edge_band_wider_than_a_quarter_field_is_dropped() -> None:
+    """A field too small for its defocus has no unreached pixels to keep."""
+    assert _band_model(32, 2.0, 12000.0)._edge_pads() == [0]
+    assert _band_model(512, 2.0, 12000.0)._edge_pads()[0] > 0
+
+
+def test_the_loss_ignores_residuals_inside_the_edge_band() -> None:
+    model = _band_model(64, 4.0, 12000.0)
+    band = model._edge_pads()[0]
+    assert 0 < band <= 64 // 4
+    sim = torch.ones(64, 64)
+    edge = sim.clone()
+    edge[:band] += 5.0
+    edge[:, -band:] += 5.0
+    inside = sim.clone()
+    inside[32, 32] += 5.0
+    assert float(model._compute_loss(sim, edge, 0)) == 0.0
+    assert float(model._compute_loss(sim, inside, 0)) > 0.0
+    model.use_fov_mask = False
+    assert float(model._compute_loss(sim, edge, 0)) > 0.0

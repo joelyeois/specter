@@ -8,6 +8,7 @@ from __future__ import annotations
 from specter import logger
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from .. import tilt as tilt_geometry
 from ..aberrations._functions import defocus_midplane_shift
 from ..arrays import center_crop
+from ..constants import energy_to_wavelength
 from ..imaging import CTF, ExitWave
 from ..imaging._tilt import tilt_defocus_shift, tilt_theta
 from ..scattering import IterativeScattering
@@ -73,9 +75,12 @@ class TomogramReconstructor(_BaseReconstructor):
     sparsity : float, optional
         L1 regularisation weight on V.
     use_fov_mask : bool
-        If ``True``, the MSE loss at each tilt is restricted to the central
-        strip corresponding to real (non-padded) volume, eliminating gradient
-        contributions from reflected boundary content.  Default ``True``.
+        If ``True``, the loss at each tilt is restricted to the pixels the
+        forward model can predict: the central strip corresponding to real
+        (non-padded) volume at high tilt, less a band at every edge as wide
+        as the transfer function delocalises the image (:meth:`_edge_pads`).
+        Within that band the data carry whatever surrounds the field, which
+        the volume does not contain. Default ``True``.
     propagation : Propagation, optional
         How the forward model computes the exit wave (model, amplitude
         contrast, bandlimit). The same object the `TiltSeries` that produced
@@ -259,6 +264,100 @@ class TomogramReconstructor(_BaseReconstructor):
             )
         return V
 
+    def _loss_mask(self, tilt_idx: int) -> torch.Tensor | None:
+        """
+        The pixels of tilt `tilt_idx` the loss compares, or ``None`` for all.
+
+        The real-FOV strip (:meth:`_fov_mask`) less the delocalisation band
+        at every edge (:meth:`_edge_pads`).
+        """
+        mask = self._fov_mask(tilt_idx)
+        edge = self._edge_pads()[tilt_idx]
+        if edge == 0:
+            return mask
+        if mask is None:
+            mask = torch.ones(
+                self.nxy, self.nxy, device=self.device, dtype=torch.float32
+            )
+        mask[:edge, :] = 0.0
+        mask[self.nxy - edge :, :] = 0.0
+        mask[:, :edge] = 0.0
+        mask[:, self.nxy - edge :] = 0.0
+        return mask
+
+    def _edge_pads(self) -> list[int]:
+        """
+        Per-tilt width, in pixels, of the band at the field's edges that the
+        transfer function fills from outside the field.
+
+        The lens displaces the image of each spatial frequency ``k`` by
+        ``|dchi/dk| / (2 pi) = lambda k |Df - Cs lambda^2 k^2|``, the
+        delocalisation of an aberrated image. Out to the pixel Nyquist, and
+        over every plane of the tilted column (the nominal defocus, the
+        midplane's, plus or minus half the column's depth, and both
+        astigmatic axes), the largest displacement bounds how far the
+        specimen's surroundings reach into the field. The forward model
+        cannot predict those pixels, since its volume ends at the field, so
+        the loss leaves them out: fitting them anyway makes the edge voxels
+        explain what lies outside the volume, and the interior degrades the
+        longer the fit runs.
+
+        A band wider than a quarter of the field per side leaves no pixel the
+        surroundings cannot reach, so excluding it only discards data; such a
+        tilt gets no band (0), and the log says so.
+
+        Computed once per device and cached, as :meth:`_fov_pads` is.
+        """
+        key = self.quaternions.device
+        cached = getattr(self, "_edge_pads_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        wavelength = energy_to_wavelength(self.voltage)
+        k = torch.linspace(0.0, 0.5 / self.voxel_size, 1025, dtype=torch.float64)
+        params = {name: getattr(self, name).detach().cpu() for name in self.ctf_params}
+        n_tilts = len(self.quaternions)
+        zero = torch.zeros(n_tilts)
+        dfu = params.get("dfu", zero)
+        dfv = params.get("dfv", dfu)
+        cs = params.get("cs", zero)
+        model = self.propagation.scattering_model
+        cap = self.nxy // 4
+        pads: list[int] = []
+        too_wide = []
+        for i in range(n_tilts):
+            theta = tilt_theta(
+                self.quaternions[i : i + 1].detach().cpu(),
+                self.translations[i : i + 1].detach().cpu(),
+                self.nxy,
+                self.voxel_size,
+            )
+            half_depth = tilt_defocus_shift(
+                (1, self.nz, self.nxy, self.nxy), theta, self.voxel_size, model
+            )
+            low = float(min(dfu[i], dfv[i])) - half_depth
+            high = float(max(dfu[i], dfv[i])) + half_depth
+            spherical = float(cs[i]) * wavelength**2 * k**2
+            reach = max(
+                float((wavelength * k * (defocus - spherical).abs()).max())
+                for defocus in (low, high)
+            )
+            pad = math.ceil(reach / self.voxel_size)
+            if pad > cap:
+                too_wide.append(i)
+                pad = 0
+            pads.append(pad)
+        if too_wide:
+            logger.warning(
+                "the transfer function delocalises the image of tilts %s "
+                "further than a quarter of the %d px field, so no part of it "
+                "is free of the specimen's surroundings; those tilts are "
+                "compared without an edge band",
+                too_wide,
+                self.nxy,
+            )
+        self._edge_pads_cache = (key, pads)
+        return pads
+
     def _fov_mask(self, tilt_idx: int) -> torch.Tensor | None:
         """
         Binary mask for the real-FOV region at the given tilt.
@@ -386,8 +485,9 @@ class TomogramReconstructor(_BaseReconstructor):
         tilt_idx: int,
     ) -> torch.Tensor:
         """
-        Squared residual per pixel over the tilt's Poisson variance, with
-        optional FOV masking.
+        Squared residual per pixel over the tilt's Poisson variance, over the
+        pixels the forward model can predict (:meth:`_loss_mask`) when
+        ``use_fov_mask``.
 
         Dividing by the expected counts per pixel makes the loss a per-pixel
         chi-squared under Poisson statistics. Shot noise then contributes
@@ -399,7 +499,7 @@ class TomogramReconstructor(_BaseReconstructor):
         """
         mse = F.mse_loss(sim, obs, reduction="none") / self.dose_per_pixel[tilt_idx]
         if self.use_fov_mask:
-            mask = self._fov_mask(tilt_idx)
+            mask = self._loss_mask(tilt_idx)
             if mask is not None:
                 # Normalise by the number of valid pixels so that all tilt
                 # angles contribute equal gradient signal regardless of FOV

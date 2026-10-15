@@ -89,7 +89,10 @@ class TomogramGhostbuster(_GhostbusterBase):
     optics : Optics, optional
         The aberration engine and phase plate. Default ``Optics()``.
     use_fov_mask : bool
-        Mask MSE loss to the real-FOV region per tilt.  Default ``True``.
+        Restrict the loss to the pixels the forward model can predict: the
+        real-FOV region per tilt, less the band at the field's edges that the
+        transfer function fills from outside it
+        (``TomogramReconstructor._edge_pads``). Default ``True``.
     scheduler : str
         LR scheduler.  Default ``"LambdaLR"``.
     slice_batchsize : int

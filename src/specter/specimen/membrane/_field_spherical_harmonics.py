@@ -93,12 +93,6 @@ from scipy.special import sph_harm_y, sph_harm_y_all
 
 from ._field import MembraneField, _signed_distance_transform
 
-# _placement.py's Newton projection (`x - phi(x) * normal(x)`) only converges
-# reliably if phi closely satisfies the Eikonal property near the surface --
-# true by construction for distance_transform_edt output, but only as
-# well-resolved as the grid.
-_MIN_RELIABLE_VOXELS_PER_RADIUS = 8.0
-
 # Voxels of the working grid `generate_membrane_field_spherical_harmonics` builds
 # per slab. Bounds the device memory its per-voxel geometry holds at once: the
 # widest intermediate is float64, so ~8 bytes a voxel times a handful of live
@@ -440,9 +434,10 @@ def generate_membrane_field_spherical_harmonics(
     discretization noise already present, for a measured 31-173x wall-time
     reduction depending on working-grid size.
 
-    The same Eikonal/grid-resolution caveat applies to
-    `_placement.sample_surface_sites`'s Newton-projection surface search --
-    see this function's own warning below.
+    `_placement.sample_surface_sites` projects onto this field with a Newton
+    step scaled by phi's measured slope along the normal, since a
+    ``dist_out - dist_in`` field has a slope near 2 across the surface cell
+    rather than the Eikonal 1.
 
     Returns
     -------
@@ -543,21 +538,6 @@ def generate_membrane_field_spherical_harmonics(
     # See _signed_distance_transform's own docstring for why this is
     # GPU-accelerated (optionally) rather than always scipy.
     phi = _signed_distance_transform(inside, spacing_angstrom, device)
-
-    voxels_per_radius = min(sh_axes) / spacing_angstrom
-    if voxels_per_radius < _MIN_RELIABLE_VOXELS_PER_RADIUS:
-        warnings.warn(
-            f"generate_membrane_field_spherical_harmonics: min(sh_axes) "
-            f"({min(sh_axes):.1f} A) is only {voxels_per_radius:.1f} "
-            f"working-grid voxels at spacing_angstrom={spacing_angstrom:.2f} A -- below the "
-            f"{_MIN_RELIABLE_VOXELS_PER_RADIUS:.0f} voxels/radius verified reliable "
-            "for sample_surface_sites' Newton-projection surface sampling. "
-            "Transmembrane placement may silently find zero sites at this "
-            "resolution. Increase sh_axes, or decrease spacing_angstrom (e.g. a "
-            "smaller voxel_size on the owning MembraneGenerator), to raise this "
-            "ratio.",
-            stacklevel=2,
-        )
 
     clipped = bool(
         inside[0].any()

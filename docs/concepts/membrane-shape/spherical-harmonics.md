@@ -183,9 +183,6 @@ box.
 - **Star-convex only.** The method cannot represent branching tubules,
   self-occluding folds, or anything where a ray from the center crosses
   the surface more than once.
-- **Grid resolution matters.** Below about 8 voxels per radius, surface
-  sampling for protein placement can find zero sites with no other
-  symptom; the generator warns when this happens.
 - **The SDF has voxel-scale texture**, visible as a faint ripple under
   raking light (see the hero image), an expected consequence of computing
   distance to the nearest boundary voxel rather than the continuous

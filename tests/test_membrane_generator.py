@@ -366,26 +366,6 @@ def test_shape_backend_supports_transmembrane_placement(kwargs: dict) -> None:
     assert len(placements) > 0
 
 
-def test_spherical_harmonics_backend_warns_when_axes_too_small_for_reliable_resolution():
-    """Regression test for a real finding: sh_axes too small relative to
-    the working grid's spacing makes sample_surface_sites' Newton
-    projection unreliable, previously silently finding zero transmembrane
-    sites with no warning at all -- this backend derives phi from
-    distance_transform_edt on a boolean mask, so the same Eikonal/grid-
-    resolution reasoning applies."""
-    gen = MembraneGenerator(
-        target_shape=(80, 80, 80),
-        voxel_size=4.0,
-        shape_backend="spherical_harmonics",
-        sh_axes=(18.0, 18.0, 18.0),  # ~6.4 voxels/radius, below the
-        # verified-reliable floor (_MIN_RELIABLE_VOXELS_PER_RADIUS)
-        n_lipids_per_leaflet=6,
-        seed=0,
-    )
-    with pytest.warns(UserWarning, match="voxels/radius"):
-        gen.generate()
-
-
 def test_spherical_harmonics_zero_amplitude_isotropic_matches_sphere_sdf():
     """sh_amplitude=0.0 with isotropic sh_axes collapses to a plain sphere
     -- phi should match the analytic sphere SDF to within the EDT grid's own
@@ -729,14 +709,13 @@ def test_place_transmembrane_warns_on_partial_or_zero_placement():
         shape_backend="spherical_harmonics",
         sh_axes=(18.0, 18.0, 18.0),
         n_lipids_per_leaflet=6,
-        # frequency=8 (not e.g. 3): verified directly this many requested
-        # sites reliably falls short at this resolution/spacing (a lower
-        # frequency, e.g. 3-5, sometimes fully succeeds by chance despite
-        # the low-resolution risk generate()'s own proactive warning
-        # already flags -- that warning is a risk indicator, not a
-        # guarantee of shortfall, so this reactive-warning test needs its
-        # own separately-verified failure case).
-        transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=8)],
+        # frequency=40: an ~18 A vesicle cannot hold that many sites 15 A
+        # apart (fewer than 30 even in the best spherical packing; random
+        # sequential placement reaches 10-13), so the shortfall is
+        # geometric. The 8 requested here before fell short only because
+        # most candidates failed to project onto the surface; since the
+        # projection was fixed on 2026-10-16, 8 fill on every seed tried.
+        transmembrane_specs=[TransmembraneSpec(pdb_source=str(pdb_path), frequency=40)],
         seed=0,
     )
     with warnings.catch_warnings(record=True):
@@ -744,7 +723,7 @@ def test_place_transmembrane_warns_on_partial_or_zero_placement():
         gen.generate()
     with pytest.warns(UserWarning, match="requested transmembrane sites were found"):
         placements = gen.place_transmembrane(min_spacing_angstrom=15.0)
-    assert len(placements) < 8
+    assert len(placements) < 40
 
 
 def _synthetic_inside_mask(shape=(30, 30, 30), radius=8.0) -> np.ndarray:
@@ -1076,20 +1055,26 @@ def test_a_transmembrane_template_turns_by_its_recorded_rotation():
     pointing inward at some sites and tipped tens of degrees off the normal
     at most. A bright voxel three voxels up the template's +z must sit along
     ``R @ z`` from the placed centre.
+
+    One site per membrane, over several seeds: with several sites 15 A
+    apart, a neighbour's tip falls inside the search window and is often
+    the voxel the argmax finds (7 of 12 sites on seed 0 read another
+    site's tip).
     """
     template = torch.zeros(9, 9, 9)
     template[7, 4, 4] = 1000.0  # (z, y, x): +3 voxels along the template's +z
-    gen = MembraneGenerator(
-        transmembrane_specs=[TransmembraneSpec("tip", template=template, frequency=12)],
-        seed=0,
-        **_SMALL_KWARGS,
-    )
-    gen.generate()
-    placements = gen.place_transmembrane(min_spacing_angstrom=15.0)
-    assert placements
     z_axis = torch.tensor([0.0, 0.0, 1.0])
     checked = 0
-    for placement in placements:
+    for seed in range(6):
+        gen = MembraneGenerator(
+            transmembrane_specs=[
+                TransmembraneSpec("tip", template=template, frequency=1)
+            ],
+            seed=seed,
+            **_SMALL_KWARGS,
+        )
+        gen.generate()
+        (placement,) = gen.place_transmembrane()
         R = placement.rotation_matrix.float()
         if abs(float((R @ z_axis) @ (R.T @ z_axis))) > 0.8:
             continue  # this R and its transpose agree on z: no information

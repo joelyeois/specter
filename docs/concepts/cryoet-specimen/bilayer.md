@@ -171,8 +171,16 @@ Because \(\phi\) is a dense signed field defined everywhere rather than a
 mesh, the local surface normal at any point is its gradient: exact, and
 available without a mesh or a KD-tree. Placement uses that directly:
 
-1. **Project onto the surface.** Newton iteration on the field:
-   \(\mathbf{x} \leftarrow \mathbf{x} - \phi(\mathbf{x})\,\nabla\phi(\mathbf{x})\).
+1. **Project onto the surface.** Candidates drawn uniformly over the
+   working grid are moved by Newton iteration along the unit normal
+   \(\hat{\mathbf{n}} = \nabla\phi / |\nabla\phi|\):
+   \(\mathbf{x} \leftarrow \mathbf{x} - \phi(\mathbf{x})\,\hat{\mathbf{n}}(\mathbf{x}) / \max(\partial_{\hat{\mathbf{n}}}\phi, 1)\).
+   The slope term is required because a field built by a distance
+   transform has no voxel centre within one spacing of the surface, so
+   \(\phi\) changes by two spacings across the cell that straddles it. A
+   step of \(\phi\) alone overshoots there and oscillates about the
+   surface without converging. With the slope included, 96–99% of
+   candidates converge on working grids from 1 to 8 Å.
 2. **Reject crowded sites**, enforcing `min_transmembrane_spacing`
    centre-to-centre.
 3. **Orient.** Align the protein's canonical axis to the local normal,

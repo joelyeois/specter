@@ -336,9 +336,8 @@ def _signed_distance_transform(
 
     Other GPU distance-transform routes were considered and rejected: the
     pure-PyTorch options either only implement an approximate transform
-    (raster-scan or soft-min), which risks distorting the Eikonal property
-    (``|grad(phi)| ~= 1``) `_placement.py`'s Newton-projection surface
-    search relies on, or are 2D-only; the one exact PyTorch-native option
+    (raster-scan or soft-min), which distorts the distance the bilayer
+    profile is looked up by, or are 2D-only; the one exact PyTorch-native option
     (FastGeodis) ships no prebuilt wheel and needs a local CUDA-toolkit
     build to install. `cupy`'s wheel is prebuilt and already matches this
     project's own CUDA 12.1 pin for `torch` (see `pyproject.toml`'s

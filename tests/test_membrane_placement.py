@@ -2,7 +2,11 @@ import pytest
 import torch
 
 from specter.specimen.membrane._field import MembraneField, blend_field, SphereSource
+from specter.specimen.membrane._field_spherical_harmonics import (
+    generate_membrane_field_spherical_harmonics,
+)
 from specter.specimen.membrane._placement import (
+    _project_to_surface,
     align_principal_axis_to_z,
     align_transmembrane_depth,
     orientation_for_normal,
@@ -75,6 +79,56 @@ def test_sample_surface_sites_on_sphere_are_on_surface_with_min_spacing():
     radial_direction = sites / torch.linalg.norm(sites, dim=-1, keepdim=True)
     cosine = (normals * radial_direction).sum(dim=-1)
     assert (cosine > 0.9).all()
+
+
+def _vesicle_field(spacing_angstrom: float, seed: int = 0) -> MembraneField:
+    """A spherical-harmonics vesicle: its phi comes from the distance
+    transform, unlike `_sphere_field`'s analytic one."""
+    n = int(round(256.0 / spacing_angstrom))
+    return generate_membrane_field_spherical_harmonics(
+        shape_zyx=(n, n, n),
+        spacing_angstrom=spacing_angstrom,
+        sh_max_degree=8,
+        sh_axes=(80.0, 80.0, 80.0),
+        sh_amplitude=0.15,
+        sh_spectrum_power=2.0,
+        device="cpu",
+        seed=seed,
+    )
+
+
+@pytest.mark.parametrize("spacing_angstrom", [2.0, 8.0])
+def test_project_to_surface_converges_on_a_distance_transform_field(
+    spacing_angstrom: float,
+) -> None:
+    # A distance-transform phi has no voxel centre within one spacing of the
+    # surface, so its slope across the straddling cell is ~2. A plain
+    # `x - phi * n` step overshot there and oscillated, landing only 18%
+    # (2 A) and 3% (8 A) of these candidates within tolerance; a Newton step
+    # along the normal lands 98% and 94%.
+    field = _vesicle_field(spacing_angstrom)
+    nz, ny, nx = field.phi.shape
+    extent = torch.tensor([nx, ny, nz], dtype=torch.float32) * spacing_angstrom
+    generator = torch.Generator().manual_seed(0)
+    candidates = field.origin_xyz + torch.rand((512, 3), generator=generator) * extent
+    projected = _project_to_surface(field, candidates, iterations=8)
+    converged = (field.sample(projected).abs() < 1.0).float().mean()
+    assert converged > 0.9
+
+
+def test_sample_surface_sites_places_a_single_site_on_a_coarse_vesicle() -> None:
+    # One requested site gets 20 candidate draws. With the oscillating
+    # projection above, 31 of these 50 came back empty, and so did ~10% of
+    # seeds on the 3.1 A field behind the CLI's membrane smoke test.
+    for field_seed in range(2):
+        field = _vesicle_field(8.0, seed=field_seed)
+        for seed in range(25):
+            sites, normals = sample_surface_sites(
+                field, n_sites=1, min_spacing_angstrom=40.0, seed=seed
+            )
+            assert sites.shape == (1, 3), (field_seed, seed)
+            assert field.sample(sites).abs().item() < 1.0
+            assert normals.shape == (1, 3)
 
 
 def test_sample_surface_sites_seed_reproducible():

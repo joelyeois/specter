@@ -156,17 +156,16 @@ def _write_membrane_test_config(
     # spare, and (measured) also places transmembrane sites reliably, so
     # both smoke tests can share one geometry.
     sh_radius_angstrom = 110.0
-    # Three requested sites, not one: sample_surface_sites draws
-    # 20 * n_sites candidates, and on this working grid only ~12% of them
-    # Newton-project onto the surface, so a single request finds nothing
-    # about 8% of the time (0.88^20) and the outcome turned on the default
-    # bilayer_thickness through the grid size. Three gives 60 draws, a
-    # miss probability near 5e-4.
+    # One requested site, the case most exposed to a failed surface
+    # projection: it gets only 20 candidate draws. On this 3.1 A working
+    # grid ~12% of candidates used to project, and the request came back
+    # empty for ~10% of seeds; ~98% project now (see
+    # sample_surface_sites).
     transmembrane_block = (
         f"""
 [[membrane_transmembrane_specs]]
 pdb_source = "{_SMALL_FIXTURE}"
-n_copies = 3
+n_copies = 1
 """
         if include_transmembrane
         else ""

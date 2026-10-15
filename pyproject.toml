@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "biopython>=1.85",
-    "biotite>=1.4.0",
     "click>=8.4.2",
     "connected-components-3d>=4.1.0",
     "cryosparc-tools>=5.0",
@@ -98,7 +97,6 @@ torch = { index = "pytorch-cu121" }
 
 [[tool.mypy.overrides]]
 module = [
-    "biotite.*",
     "cryosparc.*",
     "cupy.*",
     "cupyx.*",

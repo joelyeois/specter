@@ -465,7 +465,7 @@ ice-data/                     # Two 32 MB legacy MDSimDump inputs, notebook-only
 |---|---|
 | `torch` | GPU computation, all array ops |
 | `lightning` | Distributed training (ghostbuster) |
-| `biopython`, `biotite`, `gemmi` | PDB/mmCIF parsing |
+| `biopython`, `gemmi` | PDB/mmCIF parsing |
 | `cryosparc-tools` | `.cs` file I/O, isolated to `io/_cryosparc.py` |
 | `mrcfile`, `starfile`, `eerfile` | Cryo-EM file formats; `starfile` backs RELION `.star` I/O in `io/_relion.py` |
 | `roma` | Quaternion/rotation math (`rotations/`) |

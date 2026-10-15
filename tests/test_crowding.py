@@ -403,3 +403,28 @@ def test_2d_placement_spans_the_whole_box_in_angstrom(dx: float) -> None:
     for axis in range(2):
         assert float(xy_px[:, axis].max()) > n / 2 - reach
         assert float(xy_px[:, axis].min()) < -n / 2 + reach
+
+
+def test_a_set_packing_seed_still_changes_a_seeded_packing() -> None:
+    """
+    In a seeded run every item's packer is reseeded from the run's seed, and
+    until 2026-10-15 that silently replaced a `packing_seed` the caller set:
+    `specter simulate micrograph --seed 1 --packing_seed 2` packed exactly as
+    `--packing_seed 3` did. The set value is now mixed in. Left unset, a
+    seeded packing is the item's own seed, as before.
+    """
+    from specter.imaging import _stages as stages
+
+    template = torch.rand(16, 16, 16)
+    geometry = _shape_backend_geometry()
+    canvas = (1, geometry["nz_out"], geometry["nxy_out"], geometry["nxy_out"])
+
+    def packed(packing_seed: int | None) -> torch.Tensor:
+        crowd = CrowdWithDuplicates(template, packing_seed=packing_seed, **geometry)
+        stages.crowd_into(torch.zeros(canvas), crowd, seeds=[7])
+        assert crowd.packing_seed == packing_seed, "restored after the batch"
+        return crowd.coords
+
+    assert stages.packer_seed(7, None) == 7
+    assert not torch.equal(packed(2), packed(3))
+    assert torch.equal(packed(2), packed(2))

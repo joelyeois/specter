@@ -34,7 +34,7 @@ from ..potential import (
     inelastic_absorption_potential,
     potential_occupancy_slabs,
 )
-from ..random_seed import seeded_rng
+from ..random_seed import derive_seed, seeded_rng
 from ..scattering._kernels import fourier_crop_xy, fourier_upsample_xy
 from ..settings import Camera, Ice, Optics, Propagation
 
@@ -314,6 +314,17 @@ SEED_STAGE_DETECTOR = 2
 SEED_STAGE_SPECIMEN = 3
 
 
+def packer_seed(item_seed: int, packing_seed: int | None) -> int:
+    """
+    The shape packer's seed for one item of a seeded run.
+
+    The item's own seed, or, when the caller also fixed the packer's seed
+    (`Packing.seed`), one derived from both, so that setting still changes
+    the packing without the item ceasing to be a function of its index.
+    """
+    return item_seed if packing_seed is None else derive_seed(item_seed, packing_seed)
+
+
 #: Voxel budget for one solvate slab, and the slice count it is capped at.
 #: The occupancy blur reads `halo` slices past each slab on both sides, so
 #: the redundant work is (chunk + 2 halo) / chunk: 2x at the 16 slices a
@@ -390,7 +401,7 @@ def crowd_into(
         packing_seed = crowd.packing_seed
         try:
             for i, item_seed in enumerate(seeds):
-                crowd.packing_seed = item_seed
+                crowd.packing_seed = packer_seed(item_seed, packing_seed)
                 with seeded_rng(item_seed):
                     crowd(into=V[i])
         finally:

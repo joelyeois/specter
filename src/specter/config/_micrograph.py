@@ -427,7 +427,11 @@ class MicrographConfig:
         ),
     )  # shape backend only
     packing_seed: int | None = setting(
-        None, help="Shape backend's RNG seed. packing_backend='shape' only."
+        None,
+        help=(
+            "Shape backend's RNG seed. With --seed, mixed into each "
+            "micrograph's own packing seed. packing_backend='shape' only."
+        ),
     )  # shape backend only
     n_candidates: int | None = setting(
         None,

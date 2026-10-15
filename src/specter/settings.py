@@ -575,7 +575,8 @@ class Packing:
         Consecutive rejections tolerated before giving up (shape backend).
         Default 5000.
     seed : int, optional
-        RNG seed for the packing (shape backend). Default None.
+        RNG seed for the packing (shape backend). In a seeded run it is mixed
+        into each image's own packing seed. Default None.
     n_candidates : int, optional
         Candidate positions drawn (shape backend). Default None, estimated.
     """

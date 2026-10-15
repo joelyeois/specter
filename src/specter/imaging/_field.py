@@ -688,13 +688,14 @@ class Field:
             assembled = assemble()
         else:
             # The crowd and ice draws are on the CPU; the shape packer's
-            # NumPy stream is seeded through `packing_seed`, restored after.
+            # NumPy stream is seeded through `packing_seed` (mixed with the
+            # one the caller set, if any), restored after.
             draw_seed = derive_seed(seed, index, stages.SEED_STAGE_SPECIMEN)
             crowd = engine.crowd
             packing_seed = None if crowd is None else crowd.packing_seed
             try:
                 if crowd is not None:
-                    crowd.packing_seed = draw_seed
+                    crowd.packing_seed = stages.packer_seed(draw_seed, packing_seed)
                 with seeded_rng(draw_seed):
                     assembled = assemble()
             finally:

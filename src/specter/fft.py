@@ -513,6 +513,10 @@ def fourier_shell_correlation(
     """
     Compute the Fourier Shell Correlation (FSC) between two 3D volumes.
 
+    The FSC of Harauz & van Heel (1986) [1]_: the normalised cross-correlation
+    of the two volumes' Fourier coefficients over each shell of constant
+    spatial frequency.
+
     Parameters
     ----------
     volume1, volume2 : torch.Tensor
@@ -523,7 +527,8 @@ def fourier_shell_correlation(
         High-resolution cutoff. Frequencies beyond 1/res_cutoff are zeroed.
     randomise_phases_beyond : float | None, optional
         Resolution limit beyond which phases are randomised, for
-        phase-randomisation FSC (gold-standard artefact validation).
+        phase-randomisation FSC (gold-standard artefact validation; Chen et
+        al. 2013 [2]_).
     return_real : bool, optional
         If True (default), return real-part FSC (standard definition).
         If False, return the magnitude of the complex cross-correlation per shell.
@@ -546,6 +551,17 @@ def fourier_shell_correlation(
         voxel-index radius, which coincides with physical frequency only when
         every axis has the same length; a non-cubic volume would otherwise
         return a silently wrong ``k`` axis.
+
+    References
+    ----------
+    .. [1] Harauz, G., & van Heel, M. (1986). Exact filters for general
+       geometry three dimensional reconstruction. *Optik*, 73, 146–156.
+    .. [2] Chen, S., McMullan, G., Faruqi, A. R., Murshudov, G. N., Short,
+       J. M., Scheres, S. H. W., & Henderson, R. (2013). High-resolution noise
+       substitution to measure overfitting and validate resolution in 3D
+       structure determination by single particle electron cryomicroscopy.
+       *Ultramicroscopy*, 135, 24–35.
+       https://doi.org/10.1016/j.ultramic.2013.06.004
     """
     # Lazy import to avoid circular dependency (arrays imports fft)
     from .arrays import radial_profile_3d

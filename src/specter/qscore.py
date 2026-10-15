@@ -1,12 +1,19 @@
 """
 Per-atom Q-score calculation using PyTorch with optional GPU support.
 
-Implements the algorithm of Pintilie et al. (2020) Science 370 (6516).
+Implements the algorithm of Pintilie et al. (2020) [1]_.
 Each atom receives a Pearson correlation score between the density sampled
 on concentric shells around it and the profile of an ideal Gaussian peak.
 
-Based on the original qscore implementation by Jamali et al.:
+Based on K. Jamali's Python implementation of Q-scores:
     https://github.com/jamaliki/qscore
+
+References
+----------
+.. [1] Pintilie, G., Zhang, K., Su, Z., Li, S., Schmid, M. F., & Chiu, W.
+   (2020). Measurement of atom resolvability in cryo-EM maps with Q-scores.
+   *Nature Methods*, 17(3), 328–334.
+   https://doi.org/10.1038/s41592-020-0731-1
 """
 
 from __future__ import annotations
@@ -163,6 +170,13 @@ class QScore:
     >>> qs = QScore(device="cuda:0")
     >>> q = qs.score("structure.cif", "map.mrc")
     >>> qs.summarize(q)
+
+    References
+    ----------
+    .. [1] Pintilie, G., Zhang, K., Su, Z., Li, S., Schmid, M. F., & Chiu, W.
+       (2020). Measurement of atom resolvability in cryo-EM maps with
+       Q-scores. *Nature Methods*, 17(3), 328–334.
+       https://doi.org/10.1038/s41592-020-0731-1
     """
 
     def __init__(

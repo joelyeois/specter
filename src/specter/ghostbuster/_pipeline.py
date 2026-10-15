@@ -109,7 +109,7 @@ class Ghostbuster(_GhostbusterBase):
     nps_weight : torch.Tensor, optional
         Per-frequency noise power spectrum weight for the loss.
     learn_noise_model : bool
-        Whether to estimate sigma²(k) from residuals (RELION-style).
+        Whether to estimate sigma²(k) from residuals (RELION-style [3]_).
     use_ncc : bool
         Whether to use normalised cross-correlation loss instead of MSE.
     fsc_ref : torch.Tensor, str, Path, or None
@@ -133,7 +133,7 @@ class Ghostbuster(_GhostbusterBase):
     n_particles : int, optional
         Use only the first ``n_particles`` particles. Defaults to all.
     halfset : {"A", "B", "all"}
-        Gold-standard half-set to extract from the ``.cs`` file.
+        Gold-standard half-set [1]_ [2]_ to extract from the ``.cs`` file.
     run_dir : str or Path, optional
         Directory for all job outputs. Injected automatically by
         :meth:`~specter.jobs.Job.create` when used inside a ``Job`` context.
@@ -146,6 +146,19 @@ class Ghostbuster(_GhostbusterBase):
         ``N = dose_per_angstrom * pixel_size**2``.
         ``"counts"`` is electrons per pixel, used as is, such as a specter
         stack written with ``normalize_particles=False``.
+
+    References
+    ----------
+    .. [1] Henderson, R., Sali, A., Baker, M. L., Carragher, B., Devkota, B.,
+       Downing, K. H., et al. (2012). Outcome of the first electron microscopy
+       validation task force meeting. *Structure*, 20(2), 205–214.
+       https://doi.org/10.1016/j.str.2011.12.014
+    .. [2] Scheres, S. H. W., & Chen, S. (2012). Prevention of overfitting in
+       cryo-EM structure determination. *Nature Methods*, 9(9), 853–854.
+       https://doi.org/10.1038/nmeth.2115
+    .. [3] Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian
+       approach to cryo-EM structure determination. *Journal of Structural
+       Biology*, 180(3), 519–530. https://doi.org/10.1016/j.jsb.2012.09.006
     """
 
     _job_log_exclude: tuple[str, ...] = ("halfset", "cryosparc_ref")

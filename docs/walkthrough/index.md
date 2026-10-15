@@ -7,9 +7,9 @@ model to a detected micrograph and back to a reconstructed map.
 
 ![The stages of image formation and the SPECTER object each one produces.](../assets/images/walkthrough/walkthrough-chain.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-One particle of 6BDF followed through image formation, labelled with the
-object each stage returns and the call that produced it. The last two panels
-are low-pass filtered to 5 Å for display.
+One particle of 6BDF (Campbell et al. 2015) followed through image formation,
+labelled with the object each stage returns and the call that produced it.
+The last two panels are low-pass filtered to 5 Å for display.
 ///
 
 Every stage is a verb on the object the previous stage returned:
@@ -59,3 +59,10 @@ lives in the same scripts.
 The pages explain enough physics to make each step legible. The derivations,
 conventions and validation behind them are in [Theory](../concepts/index.md),
 and every page links to the relevant part.
+
+## References
+
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)

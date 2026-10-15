@@ -106,7 +106,8 @@ class Reconstructor(_BaseReconstructor):
         LR scheduler applied to the volume optimiser. Default is "LambdaLR".
         ``"OneCycleLR"`` treats ``lr`` as the peak learning rate and decays
         aggressively over the configured run, which is useful for short
-        screening jobs.
+        screening jobs (the one-cycle policy of Smith & Topin [2]_).
+        ``"CosineAnnealingWarmRestarts"`` is SGDR [1]_.
     sparsity : float, optional
         L1 regularisation weight on V. None disables sparsity.
     symmetry : str, optional
@@ -135,6 +136,15 @@ class Reconstructor(_BaseReconstructor):
     halfset_label : str, optional
         Short label (e.g. ``"A"`` or ``"B"``) appended to saved filenames when
         two halfset runs share the same ``run_dir``.
+
+    References
+    ----------
+    .. [1] Loshchilov, I., & Hutter, F. (2017). SGDR: Stochastic gradient
+       descent with warm restarts. *International Conference on Learning
+       Representations (ICLR)*. https://arxiv.org/abs/1608.03983
+    .. [2] Smith, L. N., & Topin, N. (2019). Super-convergence: very fast
+       training of neural networks using large learning rates. *Proceedings
+       of SPIE*, 11006, 1100612. https://doi.org/10.1117/12.2520589
     """
 
     def __init__(
@@ -510,6 +520,17 @@ class Reconstructor(_BaseReconstructor):
         against an Adam step of about ``lr``, so a value settles where the
         two balance, near 100 in its own units whatever the learning rate: a
         defocus offset could not move more than ~100 A from zero.
+
+        Every optimiser is AdamW [2]_, Adam [1]_ with decoupled weight decay.
+
+        References
+        ----------
+        .. [1] Kingma, D. P., & Ba, J. (2015). Adam: A method for stochastic
+           optimization. *International Conference on Learning
+           Representations (ICLR)*. https://arxiv.org/abs/1412.6980
+        .. [2] Loshchilov, I., & Hutter, F. (2019). Decoupled weight decay
+           regularization. *International Conference on Learning
+           Representations (ICLR)*. https://arxiv.org/abs/1711.05101
         """
         opts, lr_schedulers = self._volume_optimizer()
         if self.lr_R is not None:

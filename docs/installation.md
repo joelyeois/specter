@@ -116,23 +116,23 @@ yourself.
 
 ## Monomer Library (for Shtyrov scattering factors)
 
-The default `shtyrov` parameterization fits scattering factors per *bonded
-species* rather than per element: SPECTER types an atom by what it is
-bonded to, so a methyl carbon reads `C(HHHC)` and a water oxygen reads
-`O(HH)`. Twenty of the forty-two tabulated species contain hydrogen.
+The default `shtyrov` parameterization (Shtyrov et al. 2026) fits scattering
+factors per *bonded species* rather than per element: SPECTER types an atom
+by what it is bonded to, so a methyl carbon reads `C(HHHC)` and a water
+oxygen reads `O(HH)`. Twenty of the forty-two tabulated species contain hydrogen.
 
 Deposited structures almost never include hydrogens, since typical
 resolution does not resolve them. The
-[Monomer Library](https://github.com/MonomerLibrary/monomers) supplies
-them instead, the same chemical-component dictionary
+[Monomer Library](https://github.com/MonomerLibrary/monomers) (Vagin et al.
+2004) supplies them instead, the same chemical-component dictionary
 [REFMAC](https://www.ccp4.ac.uk/html/refmac5.html) and
 [Coot](https://www2.mrc-lmb.cam.ac.uk/personal/pemsley/coot/) use. SPECTER
 does not bundle it: it runs roughly 1.5 GB, and carries its own license.
 
 Without it, every H-containing species fails to match and those atoms fall
-back to per-element Peng factors. Measured on myoglobin, that is about
-**44% of a hydrogen-free protein**. SPECTER still runs, and warns once
-per process.
+back to per-element Peng factors (Peng et al. 1996). Measured on myoglobin
+(PDB 1A6M; Vojtěchovský et al. 1999), that is about **44% of a
+hydrogen-free protein**. SPECTER still runs, and warns once per process.
 
 ```bash
 git clone https://github.com/MonomerLibrary/monomers.git
@@ -233,3 +233,25 @@ pip install -e ".[docs]"      # build docs locally
 
 See [Basic examples](basic-examples.md) for complete templates, or start the
 [walkthrough](walkthrough/index.md).
+
+## References
+
+- Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+  parameterization of elastic and absorptive electron atomic scattering
+  factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+  [doi:10.1107/S0108767395014371](https://doi.org/10.1107/S0108767395014371)
+- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M., et
+  al. (2026). Measurement of atomic scattering factors by cryoelectron
+  microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+  e2528758123.
+  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123)
+- Vagin, A. A., Steiner, R. A., Lebedev, A. A., Potterton, L., McNicholas, S.,
+  Long, F., & Murshudov, G. N. (2004). REFMAC5 dictionary: Organization of
+  prior chemical knowledge and guidelines for its use. *Acta
+  Crystallographica Section D: Biological Crystallography*, 60(12),
+  2184–2195.
+  [doi:10.1107/S0907444904023510](https://doi.org/10.1107/S0907444904023510)
+- Vojtěchovský, J., Chu, K., Berendzen, J., Sweet, R. M., & Schlichting, I.
+  (1999). Crystal structures of myoglobin-ligand complexes at near-atomic
+  resolution. *Biophysical Journal*, 77(4), 2153–2174.
+  [doi:10.1016/S0006-3495(99)77056-6](https://doi.org/10.1016/S0006-3495(99)77056-6)

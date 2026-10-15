@@ -20,8 +20,8 @@ measures the map against the model it came from and against itself.
 
 ## A stack with a known answer
 
-The ground truth is 6BDF rendered at 2 Å voxels, in a 256 Å box that holds
-the 192 Å complex at any orientation:
+The ground truth is 6BDF (Campbell et al. 2015) rendered at 2 Å voxels, in a
+256 Å box that holds the 192 Å complex at any orientation:
 
 ```python
 --8<-- "docs-figures/walkthrough/reconstruction.py:setup"
@@ -69,7 +69,7 @@ copy of the map after every epoch:
 
 The map starts from an empty box. `kmask` confines it to the sphere of
 frequencies the voxel grid can represent, and `lr` is the learning rate of
-the AdamW optimizer that updates it.
+the AdamW optimizer (Loshchilov & Hutter 2019) that updates it.
 
 ![Central slices and projections of the ground truth and the reconstruction.](../assets/images/walkthrough/reconstruction-maps.png){ width="760" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -115,8 +115,8 @@ gives the details.
 
 ## Measuring the map
 
-The Fourier shell correlation compares two maps one spatial frequency at a
-time,
+The Fourier shell correlation (Harauz & van Heel 1986) compares two maps one
+spatial frequency at a time,
 
 \[
 \mathrm{FSC}(k) = \frac{\mathrm{Re}\sum_{|\mathbf{k}| \in k} F_1(\mathbf{k})\, F_2^*(\mathbf{k})}
@@ -125,7 +125,7 @@ time,
 
 summing over the shell of Fourier components at frequency \(k\). Against a
 known model, the resolution is conventionally read where the FSC falls
-through 0.5:
+through 0.5 (Rosenthal & Henderson 2003):
 
 ```python
 --8<-- "docs-figures/walkthrough/reconstruction.py:fsc"
@@ -172,8 +172,9 @@ half maps below are what to watch.
 
 Real data come without a model to compare against. The gold-standard
 procedure splits the particles into two halves, reconstructs each
-independently, and correlates the two half maps. Their noise is independent,
-so the FSC between them measures the signal they share:
+independently, and correlates the two half maps (Henderson et al. 2012;
+Scheres & Chen 2012). Their noise is independent, so the FSC between them
+measures the signal they share:
 
 ```python
 --8<-- "docs-figures/walkthrough/reconstruction.py:halves"
@@ -195,7 +196,7 @@ Each half was trained for twenty epochs, so that it takes as many optimizer
 steps as the full map. Each holds half the particles, so its map is noisier
 than the full map, and the half-map FSC sits below the full map's FSC against
 the truth. The relation between them follows from the half maps' independent
-noise (Rosenthal & Henderson, 2003): the full map's correlation with the
+noise (Rosenthal & Henderson 2003): the full map's correlation with the
 truth is \(\sqrt{2\,\mathrm{FSC}_{1/2}/(1+\mathrm{FSC}_{1/2})}\), and a half-map
 FSC of 0.143 corresponds to 0.5 against the truth. That is why half maps are
 read at 0.143. Here the prediction follows the measured curve across the
@@ -224,7 +225,23 @@ this walkthrough at scale with the `specter` command.
 
 ## References
 
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Harauz, G., & van Heel, M. (1986). Exact filters for general geometry three
+  dimensional reconstruction. *Optik*, 73, 146–156.
+- Henderson, R., Sali, A., Baker, M. L., Carragher, B., Devkota, B., Downing,
+  K. H., et al. (2012). Outcome of the first electron microscopy validation
+  task force meeting. *Structure*, 20(2), 205–214.
+  [doi:10.1016/j.str.2011.12.014](https://doi.org/10.1016/j.str.2011.12.014)
+- Loshchilov, I., & Hutter, F. (2019). Decoupled weight decay regularization.
+  *International Conference on Learning Representations (ICLR)*.
+  [arXiv:1711.05101](https://arxiv.org/abs/1711.05101)
 - Rosenthal, P. B., & Henderson, R. (2003). Optimal determination of particle
   orientation, absolute hand, and contrast loss in single-particle electron
-  cryomicroscopy. *Journal of Molecular Biology* **333**(4), 721–745.
+  cryomicroscopy. *Journal of Molecular Biology*, 333(4), 721–745.
   [doi:10.1016/j.jmb.2003.07.013](https://doi.org/10.1016/j.jmb.2003.07.013)
+- Scheres, S. H. W., & Chen, S. (2012). Prevention of overfitting in cryo-EM
+  structure determination. *Nature Methods*, 9(9), 853–854.
+  [doi:10.1038/nmeth.2115](https://doi.org/10.1038/nmeth.2115)

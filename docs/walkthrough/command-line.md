@@ -3,10 +3,10 @@
 The walkthrough built images one verb at a time, which is the right way to
 see what each stage does. A production run wants something else: thousands of
 images, batched to fit the GPU, spread over several GPUs, written to files
-that RELION and CryoSPARC read, and recorded so it can be repeated. The
-`specter` command does that. Each of its simulate commands loads a TOML
-config, builds the same `specter.imaging` objects this walkthrough used, and
-writes the result to disk.
+that RELION (Scheres 2012) and CryoSPARC (Punjani et al. 2017) read, and
+recorded so it can be repeated. The `specter` command does that. Each of its
+simulate commands loads a TOML config, builds the same `specter.imaging`
+objects this walkthrough used, and writes the result to disk.
 
 ## A first run
 
@@ -241,3 +241,13 @@ take the Python objects into advanced topics, the
 [Command-line guides](../user-guide/particle-stack.md) take each command
 further, and [Theory](../concepts/index.md) holds the derivations behind
 every stage.
+
+## References
+
+- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
+  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
+  determination. *Nature Methods*, 14(3), 290–296.
+  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)
+- Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian approach to
+  cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
+  519–530. [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)

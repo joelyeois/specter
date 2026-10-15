@@ -129,7 +129,7 @@ def update_sigma2(
 ) -> torch.Tensor:
     """Update the per-shell noise variance sigma^2(k) from real-space residuals.
 
-    Mirrors the RELION noise model: the unexplained residuals are
+    Mirrors the RELION noise model [1]_: the unexplained residuals are
     radially-averaged in Fourier space (via ``compute_nps_2d``) to estimate
     sigma^2(k) per shell, then an EMA smooths the estimate across batches.
 
@@ -150,6 +150,12 @@ def update_sigma2(
     -------
     torch.Tensor
         Updated sigma^2(k), same shape as ``sigma2_k``.
+
+    References
+    ----------
+    .. [1] Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian
+       approach to cryo-EM structure determination. *Journal of Structural
+       Biology*, 180(3), 519–530. https://doi.org/10.1016/j.jsb.2012.09.006
     """
     with torch.no_grad():
         # Raw per-shell power spectrum of residuals, shape (H, W//2+1)
@@ -170,7 +176,7 @@ def noise_weighted_loss(
     sigma2_k: torch.Tensor,
     w: torch.Tensor,
 ) -> torch.Tensor:
-    """RELION-style loss: weight residuals by 1/sigma^2(k).
+    """RELION-style loss [1]_: weight residuals by 1/sigma^2(k).
 
     Callers must update ``sigma2_k`` (via :func:`update_sigma2`) before
     calling this function; gradient flows only through the residuals
@@ -191,6 +197,12 @@ def noise_weighted_loss(
     -------
     torch.Tensor
         Scalar loss.
+
+    References
+    ----------
+    .. [1] Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian
+       approach to cryo-EM structure determination. *Journal of Structural
+       Biology*, 180(3), 519–530. https://doi.org/10.1016/j.jsb.2012.09.006
     """
     images_f = torch.fft.rfft2(images)
     out_f = torch.fft.rfft2(out)

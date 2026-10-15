@@ -16,9 +16,9 @@ Before you start: this tutorial assumes the walkthrough pages
 
 ## A differentiable image
 
-The setup renders 6BDF at 2 Å voxels and defines the image of 16 random
-poses as a function of two scalars: a potential scale, which multiplies the
-rendered potential, and the defocus. SPECTER has no setting for the scale;
+The setup renders 6BDF (Campbell et al. 2015) at 2 Å voxels and defines the
+image of 16 random poses as a function of two scalars: a potential scale,
+which multiplies the rendered potential, and the defocus. SPECTER has no setting for the scale;
 the function multiplies the tensor itself, which is all it takes to make any
 quantity differentiable.
 
@@ -90,8 +90,8 @@ optimiser faces:
 --8<-- "docs-includes/tutorials/differentiable-landscape.txt"
 ```
 
-Adam then fits both parameters together, from three starting defoci up to
-4000 Å away. The defocus is optimised in micrometres, so that one learning
+Adam (Kingma & Ba 2015) then fits both parameters together, from three
+starting defoci up to 4000 Å away. The defocus is optimised in micrometres, so that one learning
 rate suits both parameters:
 
 ```python
@@ -124,7 +124,8 @@ instead of rotating a fixed volume, so the image is a differentiable function
 of the coordinates themselves (see
 [Rendering from coordinates](../walkthrough/potentials.md#rendering-from-coordinates)).
 The target is 24 noiseless views of ubiquitin
-([1UBQ](https://www.rcsb.org/structure/1UBQ), 660 atoms):
+([1UBQ](https://www.rcsb.org/structure/1UBQ), 660 atoms; Vijay-Kumar et al.
+1987):
 
 ```python
 --8<-- "docs-figures/tutorials/differentiable.py:atoms"
@@ -206,3 +207,16 @@ not yet validated against ground truth; see
   coordinates.
 - [`IterativeScattering` and tilted volumes](../concepts/scattering/multislice.md#iterativescattering-and-tilted-volumes):
   gradient checkpointing for long propagations.
+
+## References
+
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Kingma, D. P., & Ba, J. (2015). Adam: A method for stochastic optimization.
+  *International Conference on Learning Representations (ICLR)*.
+  [arXiv:1412.6980](https://arxiv.org/abs/1412.6980)
+- Vijay-Kumar, S., Bugg, C. E., & Cook, W. J. (1987). Structure of ubiquitin
+  refined at 1.8 Å resolution. *Journal of Molecular Biology*, 194(3),
+  531–544. [doi:10.1016/0022-2836(87)90679-6](https://doi.org/10.1016/0022-2836(87)90679-6)

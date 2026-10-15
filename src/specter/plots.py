@@ -416,9 +416,12 @@ def plot_particle_stack(
     plt.show()
 
 
-#: Gold-standard half-map FSC threshold (two independent half-set reconstructions).
+#: Gold-standard half-map FSC threshold (two independent half-set reconstructions;
+#: Rosenthal & Henderson 2003).
 HALFMAP_FSC_THRESHOLD = 0.143
-#: Map-to-model FSC threshold (a reconstruction against a known reference).
+#: Map-to-model FSC threshold (a reconstruction against a known reference): the
+#: correlation with a perfect reference that a half-map FSC of 0.143 corresponds
+#: to (Rosenthal & Henderson 2003).
 MAP_TO_MODEL_FSC_THRESHOLD = 0.5
 
 
@@ -453,6 +456,13 @@ def fsc_resolution(
     str
         Resolution formatted as ``"1.397 Å"``, or ``">Nyquist"`` when the FSC
         never crosses the threshold.
+
+    References
+    ----------
+    .. [1] Rosenthal, P. B., & Henderson, R. (2003). Optimal determination of
+       particle orientation, absolute hand, and contrast loss in
+       single-particle electron cryomicroscopy. *Journal of Molecular
+       Biology*, 333(4), 721–745. https://doi.org/10.1016/j.jmb.2003.07.013
     """
     kf = k.cpu().float()
     ff = fsc.cpu().float()
@@ -552,6 +562,13 @@ def plot_map_to_model_fsc(
         ``None`` when ``show=True`` (figure is displayed and closed).
         The figure object when ``show=False``; caller is responsible for
         closing it.
+
+    References
+    ----------
+    .. [1] Rosenthal, P. B., & Henderson, R. (2003). Optimal determination of
+       particle orientation, absolute hand, and contrast loss in
+       single-particle electron cryomicroscopy. *Journal of Molecular
+       Biology*, 333(4), 721–745. https://doi.org/10.1016/j.jmb.2003.07.013
     """
     # Normalise to a flat list of (Z, Y, X) tensors
     if isinstance(volumes, torch.Tensor):
@@ -678,6 +695,13 @@ def plot_halfmap_fsc(
     ------
     ValueError
         If the number of volumes in volumes_A and volumes_B do not match.
+
+    References
+    ----------
+    .. [1] Rosenthal, P. B., & Henderson, R. (2003). Optimal determination of
+       particle orientation, absolute hand, and contrast loss in
+       single-particle electron cryomicroscopy. *Journal of Molecular
+       Biology*, 333(4), 721–745. https://doi.org/10.1016/j.jmb.2003.07.013
     """
     # Normalise to flat lists of (Z, Y, X) tensors
     if isinstance(volumes_A, torch.Tensor):

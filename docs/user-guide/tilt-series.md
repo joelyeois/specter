@@ -4,7 +4,7 @@
 simulates the tilted acquisition: multislice (or first-Born/projection/CTF)
 scattering through the volume at each tilt angle, CTF/aberrations, dose,
 amorphous ice, and detector effects. It saves the result as a `.mrcs` tilt
-stack plus a RELION-style `.star` file. This is the **imaging half** of the
+stack plus a RELION-style (Scheres 2012) `.star` file. This is the **imaging half** of the
 cryo-ET pipeline; the volume itself comes from `specter build tomogram`.
 See [Build a tomogram specimen](build-tomogram.md) for that half.
 
@@ -76,7 +76,8 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
   Grant & Grigorieff (2015) radiation-damage envelope per tilt: each tilt
   is treated as a plain exposure of `dose_per_tilt` taken after the
   summed dose of the tilts before it, in index order, so supply the tilt
-  geometry in acquisition order for a dose-symmetric scheme. See
+  geometry in acquisition order for a dose-symmetric scheme (Hagen et al.
+  2017). See
   [Aberrations](../concepts/aberrations.md).
 - **Absorption**: `absorption_model = "inelastic_mfp"` replaces the
   amplitude-contrast ratio with an imaginary potential derived from measured
@@ -102,8 +103,8 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
   `GradientSKIcemaker` configs, realistic and near-free at this
   cache size), `"random"` (cheap, low-fidelity `RandomIcemaker`), or `"none"`
   (no ice). `ice_cache_dir` overrides the bundled `specter/ice_data/ice_cache`;
-  `ice_relax_steps` runs local MLBOP seam relaxation for `"gd"` (0 by
-  default). See [Ice structure](../concepts/ice.md).
+  `ice_relax_steps` runs local MLBOP (Chan et al. 2019) seam relaxation
+  for `"gd"` (0 by default). See [Ice structure](../concepts/ice.md).
 - **`coincidence_radius`**: effective coincidence-loss exclusion radius in
   pixels (exclusion area = πr²) for direct-detector modelling; matters most
   once `detector_model` is one of the `k3_*` presets.
@@ -216,8 +217,9 @@ only describe an idealized, evenly-spaced series about an exactly
 horizontal or vertical axis. Real acquisitions have a tilt axis at some
 arbitrary angle and (after alignment) per-tilt shifts. `specter.tilt`
 (`read_aretomo3_aln`/`read_aretomo3_xf`/`read_aretomo3_global_shifts`,
-`tilt_to_quaternions`) parses [AreTomo3](https://github.com/czimaginginstitute/AreTomo3)'s
-`.aln`/`.xf`/global-shifts output
+`tilt_to_quaternions`) parses the `.aln`/`.xf`/global-shifts output of
+[AreTomo3](https://github.com/czimaginginstitute/AreTomo3) (Peck et al.
+2026), which runs AreTomo's tomographic alignment (Zheng et al. 2022),
 into quaternions/translations for exactly this case. This is a Python-API
 feature only: `Poses` takes arbitrary quaternions and shifts, as an
 alternative to `Poses.tilt_series(angles)`, but `TiltSeriesConfig`/the CLI
@@ -241,7 +243,8 @@ series = Sample.from_volume(volume, 1.35).tilt_series(
 The readers follow AreTomo3's own conventions, which were checked by
 reconstructing a SPECTER-projected bead phantom with AreTomo3 (`-Cmd 2`)
 from the same `.aln`. `ROT` is the tilt-axis angle measured
-counter-clockwise from the image y axis, as in IMOD, so `ROT = 0`
+counter-clockwise from the image y axis, as in IMOD (Kremer et al.
+1996), so `ROT = 0`
 corresponds to `tilt_axis = "y"`. `TX`/`TY` are the shifts AreTomo3
 applies to align a raw image, so the raw image holds its content displaced
 by `+(TX, TY)`, and the returned translations are `-(TX, TY)` in Å.
@@ -268,8 +271,37 @@ same calls.
   [Aberrations](../concepts/aberrations.md),
   [Detector](../concepts/detector.md): the physics behind each stage.
 - [Ice structure](../concepts/ice.md): the `ice_model` options.
+
+## References
+
+- Chan, H., Cherukara, M. J., Narayanan, B., Loeffler, T. D., Benmore, C.,
+  Gray, S. K., & Sankaranarayanan, S. K. R. S. (2019). Machine learning
+  coarse grained models for water. *Nature Communications*, 10(1), 379.
+  [doi:10.1038/s41467-018-08222-6](https://doi.org/10.1038/s41467-018-08222-6)
+- Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+  single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+  *eLife*, 4, e06980.
+  [doi:10.7554/eLife.06980](https://doi.org/10.7554/eLife.06980)
+- Hagen, W. J. H., Wan, W., & Briggs, J. A. G. (2017). Implementation of a
+  cryo-electron tomography tilt-scheme optimized for high resolution
+  subtomogram averaging. *Journal of Structural Biology*, 197(2), 191–198.
+  [doi:10.1016/j.jsb.2016.06.007](https://doi.org/10.1016/j.jsb.2016.06.007)
+- Kremer, J. R., Mastronarde, D. N., & McIntosh, J. R. (1996). Computer
+  visualization of three-dimensional image data using IMOD. *Journal of
+  Structural Biology*, 116(1), 71–76.
+  [doi:10.1006/jsbi.1996.0013](https://doi.org/10.1006/jsbi.1996.0013)
+- Peck, A., Yu, Y., Paraan, M., Kimanius, D., Ermel, U. H., Hutchings, J.,
+  et al. (2026). AreTomoLive: automated reconstruction of comprehensively
+  corrected and denoised cryo-electron tomograms in real time and at high
+  throughput. *Nature Methods*, 23(6), 1121–1125.
+  [doi:10.1038/s41592-026-03093-y](https://doi.org/10.1038/s41592-026-03093-y)
+  (Describes AreTomo3.)
+- Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian approach to
+  cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
+  519–530. [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)
 - Zheng, S., Wolff, G., Greenan, G., Chen, Z., Faas, F. G. A., Bárcena, M.,
   Koster, A. J., Cheng, Y., & Agard, D. A. (2022). AreTomo: An integrated
-  software package for automated marker-free, motion-corrected cryo-electron
-  tomographic alignment and reconstruction. *Journal of Structural Biology:
-  X*, 6, 100068. [doi:10.1016/j.yjsbx.2022.100068](https://doi.org/10.1016/j.yjsbx.2022.100068)
+  software package for automated marker-free, motion-corrected
+  cryo-electron tomographic alignment and reconstruction. *Journal of
+  Structural Biology: X*, 6, 100068.
+  [doi:10.1016/j.yjsbx.2022.100068](https://doi.org/10.1016/j.yjsbx.2022.100068)

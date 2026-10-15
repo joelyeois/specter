@@ -51,7 +51,8 @@ The right panel functions as a consistency check rather than a result.
 Bulk mass density and the fcc lattice's own number density
 (\(4/a^3\) with \(a = 4.0782\) Å) are unrelated routes to the same
 material, and they agree to 0.2%. The rendered bead's interior mean lands
-on the same value, ≈29 V, the literature ballpark for gold.
+on the same value, ≈29 V, the literature ballpark for gold (Popescu et al.
+2007).
 
 ## Atoms, not a gas
 
@@ -69,7 +70,8 @@ The generator draws each bead's crystal orientation uniformly over
 SO(3), so no two fiducials show their fringes running the same way.
 
 The generator doesn't offer a uniform gas of atoms (scattered at bulk
-number density, binned into voxels) as an alternative fill. A Poisson
+number density, binned into voxels, the fill CryoTomoSim uses; Purnell et
+al. 2023) as an alternative fill. A Poisson
 gas carries per-voxel shot noise a crystalline solid does not have
 (~10% of the projected signal at a 5 Å voxel against ~3% for the
 lattice, rising to ~22% at 2 Å) and collapses each atom's whole
@@ -116,7 +118,7 @@ SPECTER deliberately does **not** expose the band limit
 the finest lumps at ~30° of arc, roughly a quarter of the bead across,
 which is the scale colloidal gold irregularity shows. The flat spectrum
 is a deliberate departure from the membrane backend's
-\(\propto \ell^{-2}\) default: that encodes the Helfrich thermal
+\(\propto \ell^{-2}\) default: that encodes the Helfrich (1973) thermal
 bending spectrum of a lipid bilayer, which has no analogue in a metal
 nanoparticle. A bead's irregularity comes from growth and twinning, not
 bending modes. Neither is known well enough to fit, so exposing them
@@ -156,10 +158,10 @@ regardless of size.
 | `radius` | Nominal bead radius, Å; scalar or `[low, high]` per instance | — |
 | `count` (`n_copies` in TOML) | Instances in this population | 1 |
 | `bead_roughness` | RMS radius modulation as a fraction of radius; scalar or `[low, high]` | 0.12 |
-| `parameterization` | Atomic potential model for gold: `kirkland`, `lobato` or `peng` | `kirkland` |
+| `parameterization` | Atomic potential model for gold: `kirkland` (Kirkland 2010), `lobato` (Lobato & Van Dyck 2014) or `peng` (Peng et al. 1996) | `kirkland` |
 
 `shtyrov` resolves to `peng` rather than being rejected. Shtyrov fits
-scattering factors per bonded species, the bundled tables contain no
+scattering factors per bonded species (Shtyrov et al. 2026), the bundled tables contain no
 elemental gold, and a fiducial has no bonds to type in any case, so gold
 takes the same per-element fallback a structure atom does when its species
 misses the table. In a tomogram the beads follow `bulk_scattering_factors`
@@ -181,6 +183,37 @@ band limit and spectrum.
 
 ## References
 
-- Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
-  deep learning models. *bioRxiv* 2023.04.28.538636.
-  [CTS source](https://github.com/carsonpurnell/cryotomosim_CTS).
+- Helfrich, W. (1973). Elastic properties of lipid bilayers: theory and
+  possible experiments. *Zeitschrift für Naturforschung C*, 28(11–12),
+  693–703. [doi:10.1515/znc-1973-11-1209](https://doi.org/10.1515/znc-1973-11-1209)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+  (2nd ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
+  scattering factors, electron densities and electrostatic potentials for
+  neutral atoms that obey all physical constraints. *Acta Crystallographica
+  Section A: Foundations and Advances*, 70(6), 636–649.
+  [doi:10.1107/S205327331401643X](https://doi.org/10.1107/S205327331401643X)
+- Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+  parameterization of elastic and absorptive electron atomic scattering
+  factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+  [doi:10.1107/S0108767395014371](https://doi.org/10.1107/S0108767395014371)
+- Popescu, R., Müller, E., Wanner, M., Gerthsen, D., Schowalter, M.,
+  Rosenauer, A., Böttcher, A., Löffler, D., & Weis, P. (2007). Increase of
+  the mean inner Coulomb potential in Au clusters induced by surface
+  tension and its implication for electron scattering. *Physical Review
+  B*, 76(23), 235411.
+  [doi:10.1103/PhysRevB.76.235411](https://doi.org/10.1103/PhysRevB.76.235411)
+  (Compiles measured bulk-gold values of 16.8–30.2 V and calculated values
+  of 25.0–35.9 V, and measures 32.2 ± 3.6 V.)
+- Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+  Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+  (2023). Rapid synthesis of cryo-ET data for training deep learning
+  models. *bioRxiv*.
+  [doi:10.1101/2023.04.28.538636](https://doi.org/10.1101/2023.04.28.538636)
+  ([CTS source](https://github.com/carsonpurnell/cryotomosim_CTS))
+- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+  et al. (2026). Measurement of atomic scattering factors by cryoelectron
+  microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+  e2528758123.
+  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123)

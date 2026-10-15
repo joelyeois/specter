@@ -93,6 +93,13 @@ exists to catch. Warning on every such local dip would suppress this
 effect entirely, so the check instead compares ``step_length_angstrom`` against
 the MEAN drawn radius: it fires only when beading would be the norm along
 the whole tube, not the occasional exception.
+
+The spheres are blended with the polynomial smooth minimum of [1]_.
+
+References
+----------
+.. [1] Quilez, I. Smooth minimum (article).
+   https://iquilezles.org/articles/smin/
 """
 
 from __future__ import annotations

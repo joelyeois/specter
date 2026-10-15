@@ -5,7 +5,7 @@ they are plain transcribed data.
 
 ## PEI2016_CROWDING_TABLE
 
-Source (full credit): Pei L, Xu M, Frazier Z, Alber F. "Simulating cryo
+Source (full credit) [1]_: Pei L, Xu M, Frazier Z, Alber F. "Simulating cryo
 electron tomograms of crowded cell cytoplasm for assessment of automated
 particle picking." BMC Bioinformatics. 2016;17(1):405.
 doi:10.1186/s12859-016-1283-3. PMCID: PMC5050594.
@@ -32,6 +32,22 @@ specimen -- there isn't one universal answer to what's "really" in the
 cytoplasm (composition varies by organism/cell state, and most of it is
 below any real dataset's identification threshold anyway). Swap in a
 different/broader list freely; nothing downstream depends on this exact set.
+
+## CRYOETSIM_PARTICLE_TABLE
+
+Transcribed from the CryoSiam preprint's CryoETSim species table [2]_; see
+the comment block above that table for which categories are included.
+
+References
+----------
+.. [1] Pei, L., Xu, M., Frazier, Z., & Alber, F. (2016). Simulating cryo electron
+   tomograms of crowded cell cytoplasm for assessment of automated particle
+   picking. *BMC Bioinformatics*, 17(1), 405.
+   https://doi.org/10.1186/s12859-016-1283-3
+.. [2] Stojanovska, F., Sanchez, R. M., Jensen, R. K., Mahamid, J., Kreshuk, A.,
+   & Zaugg, J. B. (2025). CryoSiam: self-supervised representation learning
+   for automated analysis of cryo-electron tomograms. *bioRxiv*.
+   https://doi.org/10.1101/2025.11.11.687379
 """
 
 from __future__ import annotations

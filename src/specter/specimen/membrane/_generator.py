@@ -675,8 +675,10 @@ class MembraneGenerator:
         own docstring. `"spherical_harmonics"` backend only. Default 0.15.
     sh_spectrum_power : float, optional
         Exponent `p` in `Var(a_lm) ~ 1 / [l*(l+1)]**p`; `2.0` matches the
-        Helfrich (1973) thermal bending-mode spectrum of a lipid bilayer at
-        equilibrium. `"spherical_harmonics"` backend only. Default 2.0.
+        Helfrich (1973) [2]_ thermal bending-mode spectrum of a lipid
+        bilayer at equilibrium, in the large-`l`, tensionless limit of the
+        vesicle spectrum of Milner & Safran (1987) [3]_.
+        `"spherical_harmonics"` backend only. Default 2.0.
     swept_total_length : float, optional
         Approximate path CONTOUR length (not bounding-box extent), Å.
         See `generate_membrane_field_swept_spline`'s own docstring. Default
@@ -783,7 +785,7 @@ class MembraneGenerator:
         scales with it as lipid-volume conservation requires.
 
         Default 38.0, inside the published 36-39 Å range for fluid
-        phosphatidylcholine. `polnet`'s `MB_THICK_RG` range (25.0, 35.0)
+        phosphatidylcholine. `polnet`'s [1]_ `MB_THICK_RG` range (25.0, 35.0)
         sits entirely below the experimental one and is not followed: a
         30 Å bilayer renders about 25% less integrated potential than a
         38 Å one, since the integral scales with thickness.
@@ -932,11 +934,17 @@ class MembraneGenerator:
 
     References
     ----------
-    Martinez-Sanchez, A., Lamm, L., Jasnin, M., & Phelippeau, H. (2024). Simulating
-    the cellular context in synthetic datasets for cryo-electron tomography. IEEE
-    Transactions on Medical Imaging, 43(11), 3742–3754.
-    https://doi.org/10.1109/TMI.2024.3398401
-    polnet source: https://github.com/anmartinezs/polnet
+    .. [1] Martinez-Sanchez, A., Lamm, L., Jasnin, M., & Phelippeau, H. (2024).
+       Simulating the cellular context in synthetic datasets for cryo-electron
+       tomography. *IEEE Transactions on Medical Imaging*, 43(11), 3742–3754.
+       https://doi.org/10.1109/TMI.2024.3398401
+       (polnet source: https://github.com/anmartinezs/polnet)
+    .. [2] Helfrich, W. (1973). Elastic properties of lipid bilayers: theory and
+       possible experiments. *Zeitschrift für Naturforschung C*, 28(11–12),
+       693–703. https://doi.org/10.1515/znc-1973-11-1209
+    .. [3] Milner, S. T., & Safran, S. A. (1987). Dynamical fluctuations of droplet
+       microemulsions and vesicles. *Physical Review A*, 36(9), 4371–4379.
+       https://doi.org/10.1103/PhysRevA.36.4371
     """
 
     def __init__(

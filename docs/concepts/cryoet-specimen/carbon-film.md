@@ -10,8 +10,8 @@ circular hole cut through it. `CarbonFilmGenerator` paints it into the
 canvas before anything else, so everything you place afterwards works
 around it.
 
-Its geometry comes from an **alpha shape** over a jittered 3D point
-cloud instead of an analytic boundary. That gives the rim a shape that
+Its geometry comes from an **alpha shape** (Edelsbrunner & Mücke 1994)
+over a jittered 3D point cloud instead of an analytic boundary. That gives the rim a shape that
 differs from z-slice to z-slice, with islands and overhangs, rather
 than a swept 2D outline.
 
@@ -21,14 +21,15 @@ than a swept 2D outline.
 !!! info "Source"
     `specter.specimen._carbon` (`CarbonFilmGenerator`, `edge_hole_center`),
     a from-scratch replication of CryoTomoSim's `gen_carbon.m`/
-    `carbonshape`. `docs-figures/cryoet_specimen_carbon_film.py`
+    `carbonshape` (Purnell et al. 2023).
+    `docs-figures/cryoet_specimen_carbon_film.py`
     produces the figures.
 
 ## Why the hole is bigger than the picture
 
 A Quantifoil R1.2/1.3 grid (the standard for high-resolution
-single-particle and cryo-ET collection) has 1.2 µm holes: a **6000 Å
-radius**, far larger than any single tomogram's field of view. In
+single-particle and cryo-ET collection) has 1.2 µm holes
+([Quantifoil](#references)): a **6000 Å radius**, far larger than any single tomogram's field of view. In
 practice you get one of three cases: entirely inside a hole (no carbon
 at all), entirely on the carbon, or catching one hole's edge near a
 frame border. A small hole fully contained within the frame does not
@@ -117,7 +118,8 @@ Left: mean inner potential at three placed-density fractions against the literat
 bulk. That's a calibration, not an appearance fudge factor: the
 independent-atom model carries no bonding correction, so depositing
 full bulk density overshoots the 7.8–9.1 V mean inner potential
-reported for amorphous carbon. 0.7× lands at ≈8.4 V, matching a real
+reported for amorphous carbon, whose upper end is the 9.09 V measured by
+electron holography on a 1.75 g/cm³ film (Wanner et al. 2006). 0.7× lands at ≈8.4 V, matching a real
 per-atom-physics measurement of 8.56 ± 1.4 V to within noise.
 
 ## Interaction with everything else
@@ -171,8 +173,20 @@ You get at most one `[[carbon_film]]` table per run.
 
 ## References
 
-- Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
-  deep learning models. *bioRxiv* 2023.04.28.538636.
-  [CTS source](https://github.com/carsonpurnell/cryotomosim_CTS).
-- [Quantifoil circular holes](https://www.quantifoil.com/products/quantifoil/quantifoil-circular-holes):
-  the R1.2/1.3 hole spec.
+- Edelsbrunner, H., & Mücke, E. P. (1994). Three-dimensional alpha shapes.
+  *ACM Transactions on Graphics*, 13(1), 43–72.
+  [doi:10.1145/174462.156635](https://doi.org/10.1145/174462.156635)
+- Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+  Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+  (2023). Rapid synthesis of cryo-ET data for training deep learning
+  models. *bioRxiv*.
+  [doi:10.1101/2023.04.28.538636](https://doi.org/10.1101/2023.04.28.538636)
+  ([CTS source](https://github.com/carsonpurnell/cryotomosim_CTS))
+- Quantifoil. Quantifoil circular holes: product specification (R1.2/1.3,
+  1.2 µm holes at 1.3 µm spacing).
+  [quantifoil.com](https://www.quantifoil.com/products/quantifoil/quantifoil-circular-holes)
+- Wanner, M., Bach, D., Gerthsen, D., Werner, R., & Tesche, B. (2006).
+  Electron holography of thin amorphous carbon films: Measurement of the
+  mean inner potential and a thickness-independent phase shift.
+  *Ultramicroscopy*, 106(4–5), 341–345.
+  [doi:10.1016/j.ultramic.2005.10.004](https://doi.org/10.1016/j.ultramic.2005.10.004)

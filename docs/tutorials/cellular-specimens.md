@@ -33,7 +33,7 @@ rebuilt with one more component and the earlier ones stay where they were.
 A `MembraneGenerator` draws one closed membrane: here a vesicle whose surface
 is a spherical-harmonic perturbation of an ellipsoid with semi-axes drawn
 from 200–320 Å, rendered as a 38 Å lipid bilayer and studded with
-bacteriorhodopsin (`1C3W`) at 20 sites per vesicle. `MembraneInstance` wraps
+bacteriorhodopsin (`1C3W`; Luecke et al. 1999) at 20 sites per vesicle. `MembraneInstance` wraps
 each one for the tomogram, which places it by collision-rejecting random
 placement. `CarbonFilmSpec` paints the edge of the carbon support into the
 field before anything else is placed:
@@ -94,8 +94,8 @@ exactly that count, and is the species a picker would be trained to find.
 *Filler* (`ratio`, the default) is then packed around the targets, the
 cytoskeleton and the beads until the region reaches `occupancy_fraction` or
 no further copy fits. `build_filler_pool_specs` draws filler species from a
-bundled reference table of cytosolic proteins, here the 11 of at least
-300 kDa.
+bundled reference table of cytosolic proteins (Pei et al. 2016), here the 11
+of at least 300 kDa.
 `location` restricts a species to the cytosol or to the lumen of the
 vesicles:
 
@@ -116,9 +116,10 @@ proteins. The vesicles, filaments and beads keep their positions from stage
 to stage.
 ///
 
-Both targets reached their exact counts. The filler stopped at 1,684
-cytosolic copies of 11 species and 18 RuBisCO complexes in the two small
-lumens. In the final panel the dense protein fill lowers the contrast of the
+Both targets, the human 80S ribosome (`6QZP`; Natchiar et al. 2017) and
+human apoferritin (`7VD8`; Fan et al. 2021), reached their exact counts. The
+filler stopped at 1,684 cytosolic copies of 11 species and 18 RuBisCO
+complexes (`1BXN`; Hansen et al. 1999) in the two small lumens. In the final panel the dense protein fill lowers the contrast of the
 vesicles and microtubules, while the gold beads still stand out.
 
 ## Ground truth
@@ -128,7 +129,7 @@ into the membrane shell, the lumen enclosed by membranes, and the cytosol
 connected to the box faces; `gen.instance_labels` gives every protein
 instance its own integer id; `gen.membrane_labels` gives each membrane one;
 and `gen.export_picks` writes the positions and orientations of every species
-as copick-style `.ndjson` files:
+as copick-style (Ermel et al. 2026) `.ndjson` files:
 
 ```python
 --8<-- "docs-figures/tutorials/cellular_specimens.py:ground-truth"
@@ -172,7 +173,7 @@ both in full.
 The assembled volume is an ordinary potential, so it images through the
 same objects as any other specimen. `Sample.from_volume` wraps it, and
 `tilt_series` adds amorphous ice around it and images it over a
-dose-symmetric ±45° series at 3 e⁻/Å² per tilt:
+dose-symmetric (Hagen et al. 2017) ±45° series at 3 e⁻/Å² per tilt:
 
 ```python
 --8<-- "docs-figures/tutorials/cellular_specimens.py:tilt-series"
@@ -238,3 +239,38 @@ the one-command tilt series.
 - [Filaments](../concepts/cryoet-specimen/filaments.md#placement) and [Microtubules](../concepts/cryoet-specimen/microtubules.md#the-lattice).
 - [Gold fiducial beads](../concepts/cryoet-specimen/beads.md#atoms-not-a-gas) and [Carbon support film](../concepts/cryoet-specimen/carbon-film.md#the-rim).
 - [Regions & protein packing](../concepts/cryoet-specimen/packing.md#two-priority-tiers).
+
+## References
+
+- Ermel, U. H., Schwartz, J., Zhao, Z., Ji, D., Peck, A., Yu, Y.,
+  Paraan, M., Carragher, B., Frangakis, A. S., & Harrington, K. I. S.
+  (2026). copick: An open dataset interface and toolkit for collaborative
+  annotation and analysis of cryo-electron tomography data. *Protein
+  Science*, 35(5), e70578.
+  [doi:10.1002/pro.70578](https://doi.org/10.1002/pro.70578)
+- Fan, H., Wang, B., Zhang, Y., Zhu, Y., Song, B., Xu, H., Zhai, Y.,
+  Qiao, M., & Sun, F. (2021). A cryo-electron microscopy support film
+  formed by 2D crystals of hydrophobin HFBI. *Nature Communications*,
+  12(1), 7257.
+  [doi:10.1038/s41467-021-27596-8](https://doi.org/10.1038/s41467-021-27596-8)
+- Hagen, W. J. H., Wan, W., & Briggs, J. A. G. (2017). Implementation of a
+  cryo-electron tomography tilt-scheme optimized for high resolution
+  subtomogram averaging. *Journal of Structural Biology*, 197(2), 191–198.
+  [doi:10.1016/j.jsb.2016.06.007](https://doi.org/10.1016/j.jsb.2016.06.007)
+- Hansen, S., Vollan, V. B., Hough, E., & Andersen, K. (1999). The crystal
+  structure of rubisco from *Alcaligenes eutrophus* reveals a novel
+  central eight-stranded β-barrel formed by β-strands from four subunits.
+  *Journal of Molecular Biology*, 288(4), 609–621.
+  [doi:10.1006/jmbi.1999.2701](https://doi.org/10.1006/jmbi.1999.2701)
+- Luecke, H., Schobert, B., Richter, H.-T., Cartailler, J.-P., & Lanyi, J. K.
+  (1999). Structure of bacteriorhodopsin at 1.55 Å resolution. *Journal of
+  Molecular Biology*, 291(4), 899–911.
+  [doi:10.1006/jmbi.1999.3027](https://doi.org/10.1006/jmbi.1999.3027)
+- Natchiar, S. K., Myasnikov, A. G., Kratzat, H., Hazemann, I., &
+  Klaholz, B. P. (2017). Visualization of chemical modifications in the
+  human 80S ribosome structure. *Nature*, 551(7681), 472–477.
+  [doi:10.1038/nature24482](https://doi.org/10.1038/nature24482)
+- Pei, L., Xu, M., Frazier, Z., & Alber, F. (2016). Simulating cryo
+  electron tomograms of crowded cell cytoplasm for assessment of automated
+  particle picking. *BMC Bioinformatics*, 17(1), 405.
+  [doi:10.1186/s12859-016-1283-3](https://doi.org/10.1186/s12859-016-1283-3)

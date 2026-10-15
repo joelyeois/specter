@@ -11,7 +11,7 @@ A rendered microtubule: projection along z, and a cross-section perpendicular to
 
 A microtubule is a closed tube of 13 protofilaments, each a stack of
 αβ-tubulin dimers, wrapped so the lateral tubulin–tubulin bonds form a
-3-start helix. `specter build tomogram` builds a microtubule as many
+3-start helix (Mandelkow et al. 1986). `specter build tomogram` builds a microtubule as many
 rigid copies of a single tubulin dimer, the same machinery
 [filaments](filaments.md) use, so a microtubule costs one
 `PotentialBuilder` render plus one rotation per dimer.
@@ -56,7 +56,7 @@ repeating unit is the dimer, following 13 lateral bonds back around to
 protofilament 0 lands half a dimer away from where protofilament 0
 starts. That half-dimer is one monomer, so an α ends up
 against a β: the A-lattice **seam**, with the other twelve junctions
-B-lattice.
+B-lattice (Mandelkow et al. 1986).
 
 The code carries no special case for it. Because the stagger derives
 from \(N\), the same arithmetic produces a seam at every protofilament
@@ -72,12 +72,13 @@ Rendered cross-sections at 11, 13 and 14 protofilaments, and radius versus proto
 `n_protofilaments` changes the radius, since the same lateral spacing
 has to fit around a longer circumference. The right-hand panel checks
 the model against the two deposited reconstructions its constants come
-from.
+from (Zhang et al. 2015; Zhang et al. 2018).
 
 ### Lattice constants
 
 Measured off deposited microtubule reconstructions
-(`measure_source_lattice`), not taken from a textbook:
+(`measure_source_lattice`), not taken from a textbook: 3JAL
+(Zhang et al. 2015) and 6DPU (Zhang et al. 2018).
 
 | | [3JAL](https://www.rcsb.org/structure/3JAL) (13 pf) | [6DPU](https://www.rcsb.org/structure/6DPU) (14 pf) | across N |
 |---|---|---|---|
@@ -92,8 +93,8 @@ number accommodates it by sliding the lateral bond, which keeps the
 protofilaments close to parallel with the tube axis at every \(N\).
 
 !!! warning "No supertwist"
-    Non-13-protofilament microtubules do supertwist slightly, and
-    SPECTER does not model it. The residual implied by deposited
+    Non-13-protofilament microtubules do supertwist slightly
+    (Chrétien & Wade 1991), and SPECTER does not model it. The residual implied by deposited
     helical parameters is ~0.1°, and those parameters aren't precise
     enough to pin it down: two 14-protofilament entries report 25.7°
     vs 25.75° per subunit, which alone moves the implied skew by
@@ -118,13 +119,13 @@ re-expresses it with \(+Z\) along the protofilament (α → β, the
 plus-end direction) and \(+X\) pointing outwards. It caches the result
 next to the downloaded structure.
 
-The default source is **3JAL**, a 13-protofilament GMPCPP-microtubule;
-extraction drops its two bound EB3 chains. The commoner
-kinesin-decorated microtubule structures
-([6DPU](https://www.rcsb.org/structure/6DPU),
-[3JAT](https://www.rcsb.org/structure/3JAT)) are 14-protofilament
-lattices, so their dimer sits at the wrong radius for the
-13-protofilament default.
+The default source is **3JAL**, a 13-protofilament GMPCPP-microtubule
+(Zhang et al. 2015); extraction drops its two bound EB3 chains. The
+commoner kinesin-decorated microtubule structures, such as
+[3JAT](https://www.rcsb.org/structure/3JAT) (Zhang et al. 2015), and the
+undecorated [6DPU](https://www.rcsb.org/structure/6DPU) (Zhang et al.
+2018) are 14-protofilament lattices, so their dimer sits at the wrong
+radius for the 13-protofilament default.
 
 ![Radial density profile of the rendered tube.](../../assets/images/cryoet-microtubule-wall.png){ width="760" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -144,7 +145,7 @@ Thermal versus mechanical bending, both drawn at true scale with the real tube w
 ///
 
 A microtubule's axis follows the same persistent random walk filaments
-use, carried by [parallel-transport frames](#framing) so the
+use, carried by [parallel-transport frames](#framing) (Bishop 1975) so the
 protofilaments don't shear apart around a bend. Its flex angle is
 **derived**, not tuned: matching the walk's
 \(\langle\theta^2\rangle = f^2/3\) to a worm-like chain's
@@ -154,7 +155,8 @@ protofilaments don't shear apart around a bend. Its flex angle is
 f = \sqrt{6 \, \Delta s / L_p} \approx 0.40^\circ
 \]
 
-at tubulin's persistence length. A microtubule is stiff enough that
+at tubulin's persistence length, taken as 1 mm (Gittes et al. (1993)
+measured 5.2 mm for taxol-stabilized microtubules). A microtubule is stiff enough that
 this stays nearly straight: it wanders about half its own diameter over
 a whole tomogram field.
 
@@ -175,7 +177,8 @@ any roll drift between consecutive path points would shear them
 relative to one another. `parallel_transport_frames` carries one
 reference normal along the path, removing only the component each new
 tangent invalidates: the minimum rotation that stays orthogonal, so no
-spurious twist accumulates. That's why microtubules can't reuse
+spurious twist accumulates. This is a discrete form of the relatively
+parallel (rotation-minimizing) frame of Bishop (1975). That's why microtubules can't reuse
 `filament_orientations`, which leaves the roll about the tangent
 unconstrained.
 
@@ -241,6 +244,26 @@ bend_radius = 30000.0    # 3 µm; omit for a straight, thermally bent tube
 
 ## References
 
+- Bishop, R. L. (1975). There is more than one way to frame a curve.
+  *The American Mathematical Monthly*, 82(3), 246–251.
+  [doi:10.1080/00029890.1975.11993807](https://doi.org/10.1080/00029890.1975.11993807)
+- Chrétien, D., & Wade, R. H. (1991). New data on the microtubule surface
+  lattice. *Biology of the Cell*, 71(1–2), 161–174.
+  [doi:10.1016/0248-4900(91)90062-R](https://doi.org/10.1016/0248-4900(91)90062-R)
+- Gittes, F., Mickey, B., Nettleton, J., & Howard, J. (1993). Flexural
+  rigidity of microtubules and actin filaments measured from thermal
+  fluctuations in shape. *The Journal of Cell Biology*, 120(4), 923–934.
+  [doi:10.1083/jcb.120.4.923](https://doi.org/10.1083/jcb.120.4.923)
+- Mandelkow, E. M., Schultheiss, R., Rapp, R., Müller, M., & Mandelkow, E.
+  (1986). On the surface lattice of microtubules: helix starts,
+  protofilament number, seam, and handedness. *The Journal of Cell Biology*,
+  102(3), 1067–1073.
+  [doi:10.1083/jcb.102.3.1067](https://doi.org/10.1083/jcb.102.3.1067)
 - Zhang, R., Alushin, G. M., Brown, A., & Nogales, E. (2015). Mechanistic
   origin of microtubule dynamic instability and its modulation by EB
-  proteins. *Cell*, 162(4), 849–859. (PDB 3JAL)
+  proteins. *Cell*, 162(4), 849–859. (PDB 3JAL, 3JAT)
+  [doi:10.1016/j.cell.2015.07.012](https://doi.org/10.1016/j.cell.2015.07.012)
+- Zhang, R., LaFrance, B., & Nogales, E. (2018). Separating the effects of
+  nucleotide and EB binding on microtubule structure. *Proceedings of the
+  National Academy of Sciences*, 115(27), E6191–E6200. (PDB 6DPU)
+  [doi:10.1073/pnas.1802637115](https://doi.org/10.1073/pnas.1802637115)

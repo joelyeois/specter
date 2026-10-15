@@ -30,7 +30,8 @@ tube with a lumen and an A-lattice seam, gets its own page; see
 
 ## The path: a persistent random walk
 
-A walk generates each filament's monomer centres: it advances a fixed
+A walk generates each filament's monomer centres, following a filament
+script in the CryoTomoSim source (Purnell et al. 2023): it advances a fixed
 distance `step` (the monomer's axial rise) along the current direction,
 then rotates that direction by a random angle drawn uniformly from
 \([0, \texttt{flex\_deg}]\) about a random axis perpendicular to it:
@@ -84,9 +85,9 @@ The same straight monomer chain rendered with twist_deg = 0 and with F-actin's r
 ///
 
 Without twist, every monomer presents the same face and the strand
-reads as a uniform ridge. With F-actin's measured 166.15° per subunit,
-the projection picks up the crossover pattern you see in a real F-actin
-filament.
+reads as a uniform ridge. With F-actin's measured 166.15° per subunit
+(Holmes et al. 1990), the projection picks up the crossover pattern you
+see in a real F-actin filament.
 
 ## Presets
 
@@ -97,12 +98,13 @@ F-actin and a microtubule protofilament rendered at the same scale.
 
 | Preset | `code` | `step` (Å) | `flex_deg` | `twist_deg` | `n_monomers` |
 |---|---|---|---|---|---|
-| `ACTIN_SPEC` | 1J6Z (G-actin) | 27.3 | 12.0 | 166.15 | (20, 60) |
-| `PROTOFILAMENT_SPEC` | 1TUB (αβ-tubulin dimer) | 85.0 | 3.0 | 0.0 | (10, 30) |
+| `ACTIN_SPEC` | 1J6Z (G-actin; Otterbein et al. 2001) | 27.3 | 12.0 | 166.15 | (20, 60) |
+| `PROTOFILAMENT_SPEC` | 1TUB (αβ-tubulin dimer; Nogales et al. 1998) | 85.0 | 3.0 | 0.0 | (10, 30) |
 
 `step` and `twist_deg` are measured values (F-actin's helical repeat
-from Holmes/Egelman; tubulin's 85 Å dimer repeat). `flex_deg` is a
-tuned value in both cases, not a persistence-length measurement.
+from Holmes et al. 1990 and Egelman et al. 1982; tubulin's 85 Å dimer
+repeat). `flex_deg` is a tuned value in both cases, taken from
+CryoTomoSim (Purnell et al. 2023), not a persistence-length measurement.
 
 `twist_deg = 0` is correct for the protofilament preset: a single
 protofilament does not itself twist. Its 13-protofilament tube geometry
@@ -163,10 +165,21 @@ the `ACTIN_SPEC` preset; see
 
 ## References
 
-- Holmes, K. C., Popp, D., Gebhard, W., & Kabsch, W. (1990). Atomic model
-  of the actin filament. *Nature*, 347(6288), 44–49.
 - Egelman, E. H., Francis, N., & DeRosier, D. J. (1982). F-actin is a helix
   with a random variable twist. *Nature*, 298(5870), 131–135.
-- Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
-  deep learning models. *bioRxiv* 2023.04.28.538636.
-  [CTS source](https://github.com/carsonpurnell/cryotomosim_CTS).
+  [doi:10.1038/298131a0](https://doi.org/10.1038/298131a0)
+- Holmes, K. C., Popp, D., Gebhard, W., & Kabsch, W. (1990). Atomic model
+  of the actin filament. *Nature*, 347(6288), 44–49.
+  [doi:10.1038/347044a0](https://doi.org/10.1038/347044a0)
+- Nogales, E., Wolf, S. G., & Downing, K. H. (1998). Structure of the αβ
+  tubulin dimer by electron crystallography. *Nature*, 391(6663), 199–203.
+  [doi:10.1038/34465](https://doi.org/10.1038/34465)
+- Otterbein, L. R., Graceffa, P., & Dominguez, R. (2001). The crystal
+  structure of uncomplexed actin in the ADP state. *Science*, 293(5530),
+  708–711. [doi:10.1126/science.1059700](https://doi.org/10.1126/science.1059700)
+- Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+  Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+  (2023). Rapid synthesis of cryo-ET data for training deep learning
+  models. *bioRxiv*.
+  [doi:10.1101/2023.04.28.538636](https://doi.org/10.1101/2023.04.28.538636)
+  ([CTS source](https://github.com/carsonpurnell/cryotomosim_CTS))

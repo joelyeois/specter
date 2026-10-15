@@ -14,7 +14,7 @@ the lens and the camera image as on the previous pages.
 A tilt series images a pre-assembled volume, wrapped by
 `Sample.from_volume`. The volume can come from anywhere: the output of
 `specter build tomogram`, a map read from an MRC file, or, as here, a field of
-6BDF copies drawn without ice. Tomography works at coarser voxels than
+6BDF copies (Campbell et al. 2015) drawn without ice. Tomography works at coarser voxels than
 single-particle imaging, so the template is rendered at 4 Å:
 
 ```python
@@ -45,8 +45,8 @@ The specimen: 6BDF copies through a 600 Å slab, projected along the beam
 `Poses.tilt_series` turns tilt angles into one pose per tilt, in acquisition
 order, about the \(x\) axis by default. `Exposure.tilt_series` gives each tilt
 its dose and the dose the specimen had already received when the tilt began.
-The angles here follow a dose-symmetric scheme, which starts at zero and
-alternates sides so that the low tilts, which carry the most information, are
+The angles here follow a dose-symmetric scheme (Hagen et al. 2017), which
+starts at zero and alternates sides so that the low tilts, which carry the most information, are
 recorded before the specimen is damaged:
 
 ```python
@@ -141,8 +141,9 @@ different heights, and so at different defoci.
 Tilting the slab lengthens the beam's path through it from \(t\) to
 \(t/\cos\theta\). Under `inelastic_mfp` absorption, an electron crossing a
 path of length \(L\) reaches the image unscattered by inelastic events with
-probability \(e^{-L/\lambda_\mathrm{in}}\), so the mean intensity of each
-tilt should follow
+probability \(e^{-L/\lambda_\mathrm{in}}\), the relation by which zero-loss
+imaging measures ice thickness (Rice et al. 2018), so the mean intensity of
+each tilt should follow
 
 \[
 \bar I(\theta) = \exp\!\left(-\frac{t}{\lambda_\mathrm{in}\cos\theta}\right).
@@ -152,7 +153,7 @@ tilt should follow
 ///caption
 The mean noiseless intensity of each of the 41 tilts (points) against
 \(\exp[-t/(\lambda_\mathrm{in}\cos\theta)]\) for the 600 Å slab and the
-3950 Å inelastic mean free path of ice at 300 kV (line).
+3950 Å inelastic mean free path of ice at 300 kV (line; Rice et al. 2018).
 ///
 
 The simulated tilts agree with the prediction to within \(2\times10^{-4}\)
@@ -187,3 +188,19 @@ described in
 
 [Reconstruction](reconstruction.md) inverts the forward model: it recovers a
 map from images by simulating them with the same chain.
+
+## References
+
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Hagen, W. J. H., Wan, W., & Briggs, J. A. G. (2017). Implementation of a
+  cryo-electron tomography tilt-scheme optimized for high resolution
+  subtomogram averaging. *Journal of Structural Biology*, 197(2), 191–198.
+  [doi:10.1016/j.jsb.2016.06.007](https://doi.org/10.1016/j.jsb.2016.06.007)
+- Rice, W. J., Cheng, A., Noble, A. J., Eng, E. T., Kim, L. Y., Carragher,
+  B., & Potter, C. S. (2018). Routine determination of ice thickness for
+  cryo-EM grids. *Journal of Structural Biology*, 204(1), 38–44.
+  [doi:10.1016/j.jsb.2018.06.007](https://doi.org/10.1016/j.jsb.2018.06.007)
+  (Apparent inelastic mean free path of 395 ± 11 nm at 300 kV.)

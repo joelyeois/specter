@@ -180,4 +180,5 @@ the default `swept_flexibility_range` of `(0.08, 0.25)` brackets it.
 
 ## References
 
-- Iñigo Quilez, [Smooth minimum](https://iquilezles.org/articles/smin/).
+- Quilez, I. Smooth minimum (article).
+  [iquilezles.org/articles/smin](https://iquilezles.org/articles/smin/)

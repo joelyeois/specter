@@ -12,7 +12,8 @@ a whole number of dimers.
 
 Constants below are measured off deposited microtubule reconstructions
 rather than taken from a textbook -- 3JAL (13-protofilament
-GMPCPP-microtubule + EB3) and 6DPU (14-protofilament kinesin-microtubule):
+GMPCPP-microtubule + EB3 [1]_) and 6DPU (14-protofilament undecorated
+GMPCPP-microtubule [2]_):
 
 ===================  ==============  ==============  =====================
 quantity             3JAL (13 pf)    6DPU (14 pf)    behaviour across N
@@ -23,22 +24,43 @@ monomer rise             40.9 A          41.4 A      ~constant
 lateral stagger           9.43 A          9.00 A     tracks n_start*rise/N
 ===================  ==============  ==============  =====================
 
-The last row matters: the stagger is **not** a fixed property of the
+The 3-start lateral helix, the B-lattice and the seam follow Mandelkow et
+al. [3]_. The last row matters: the stagger is **not** a fixed property of the
 lateral bond. A lattice with a different protofilament number accommodates
 it by sliding the lateral bond, which keeps the protofilaments essentially
 parallel to the tube axis at every N. Protofilament skew (the "supertwist"
-of non-13-protofilament microtubules) is therefore not modelled here: the
+of non-13-protofilament microtubules [4]_) is therefore not modelled here: the
 residual implied by deposited helical parameters is ~0.1 degrees, and those
 parameters are not precise enough to pin it down (two 14-protofilament
 entries report 25.7 vs 25.75 degrees per subunit, which alone moves the
 implied skew by ~0.15 degrees). Modelling it properly needs direct moire-
 period measurements as a source, not PDB metadata.
 
+The thermal bending of `thermal_flex_deg` uses a 1 mm persistence length,
+below the 5.2 mm measured for taxol-stabilized microtubules [5]_.
+
 References
 ----------
-Zhang, R., Alushin, G. M., Brown, A., & Nogales, E. (2015). Mechanistic
-origin of microtubule dynamic instability and its modulation by EB
-proteins. Cell, 162(4), 849-859. (PDB 3JAL)
+.. [1] Zhang, R., Alushin, G. M., Brown, A., & Nogales, E. (2015). Mechanistic
+   origin of microtubule dynamic instability and its modulation by EB
+   proteins. *Cell*, 162(4), 849–859. https://doi.org/10.1016/j.cell.2015.07.012
+   (PDB 3JAL, 3JAT)
+.. [2] Zhang, R., LaFrance, B., & Nogales, E. (2018). Separating the effects of
+   nucleotide and EB binding on microtubule structure. *Proceedings of the
+   National Academy of Sciences*, 115(27), E6191–E6200.
+   https://doi.org/10.1073/pnas.1802637115 (PDB 6DPU)
+.. [3] Mandelkow, E. M., Schultheiss, R., Rapp, R., Müller, M., & Mandelkow, E.
+   (1986). On the surface lattice of microtubules: helix starts,
+   protofilament number, seam, and handedness. *The Journal of Cell Biology*,
+   102(3), 1067–1073. https://doi.org/10.1083/jcb.102.3.1067
+.. [4] Chrétien, D., & Wade, R. H. (1991). New data on the microtubule surface
+   lattice. *Biology of the Cell*, 71(1–2), 161–174.
+   https://doi.org/10.1016/0248-4900(91)90062-R
+.. [5] Gittes, F., Mickey, B., Nettleton, J., & Howard, J. (1993). Flexural
+   rigidity of microtubules and actin filaments measured from thermal
+   fluctuations in shape. *The Journal of Cell Biology*, 120(4), 923–934.
+   https://doi.org/10.1083/jcb.120.4.923 (5.2 mm for taxol-stabilized
+   microtubules.)
 """
 
 from __future__ import annotations
@@ -47,7 +69,7 @@ import math
 from dataclasses import dataclass
 
 #: Axial rise per tubulin **monomer** along a protofilament, Å.
-#: Measured 40.9 A (3JAL, GMPCPP) and 41.4 A (6DPU, GDP).
+#: Measured 40.9 A (3JAL, GMPCPP) and 41.4 A (6DPU, GMPCPP).
 MONOMER_RISE = 41.0
 
 #: Axial repeat of the alpha-beta **dimer**, i.e. the stamped unit, Å.
@@ -61,8 +83,9 @@ LATERAL_SPACING = 53.5
 
 #: Flexural persistence length of a microtubule, Å (1 mm). Measured
 #: values span roughly 1-5 mm depending on nucleotide state, taxol and the
-#: measurement method; the low end is used here so that thermal bending is
-#: not under-stated. Used only to derive the path's per-step flex angle --
+#: measurement method (5.2 mm for taxol-stabilized microtubules, Gittes et
+#: al. 1993, J. Cell Biol. 120, 923-934); the low end is used here so that
+#: thermal bending is not under-stated. Used only to derive the path's per-step flex angle --
 #: see `thermal_flex_deg`.
 PERSISTENCE_LENGTH = 1.0e7
 

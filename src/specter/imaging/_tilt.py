@@ -324,6 +324,15 @@ class TiltSeries:
     behind the padding, the margins and the absorption field, which is a
     constant over the volume's box rather than a scalar: a tilted slice
     extends past the rotated slab into vacuum, where nothing may absorb.
+
+    With `damaged`, the per-tilt damage envelope is built from the critical
+    exposure of Grant & Grigorieff [1]_.
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
 
     def __init__(

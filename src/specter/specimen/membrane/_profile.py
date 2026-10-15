@@ -95,10 +95,11 @@ must still pass ``test_bilayer_profile_integral_matches_popc_stoichiometry``.
 
 References
 ----------
-.. [1] Kucerka, Nieh and Katsaras. "Fluid phase lipid areas and bilayer
-       thicknesses of commonly used phosphatidylcholines as a function of
-       temperature." Biochim. Biophys. Acta Biomembranes 1808, 2761-2771
-       (2011). https://doi.org/10.1016/j.bbamem.2011.07.022
+.. [1] Kučerka, N., Nieh, M.-P., & Katsaras, J. (2011). Fluid phase lipid
+       areas and bilayer thicknesses of commonly used phosphatidylcholines
+       as a function of temperature. *Biochimica et Biophysica Acta (BBA) –
+       Biomembranes*, 1808(11), 2761–2771.
+       https://doi.org/10.1016/j.bbamem.2011.07.022
        Tables 1-3 give A, D_B and 2*D_C per lipid and temperature; D_HH
        is in the supplementary Table S7, which the open-access accepted
        manuscript does not carry -- the ~36 A above is secondary

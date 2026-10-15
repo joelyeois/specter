@@ -2,7 +2,7 @@
 
 ![A vesicle's sampled transmembrane sites with their surface normals, and the rendered slab with bacteriorhodopsin embedded in the bilayer.](../../assets/images/cryoet-bilayer-transmembrane.png){ width="880" style="display:block;margin:1.2em auto;" }
 ///caption
-A vesicle's sampled transmembrane sites with their surface normals, and the rendered slab with bacteriorhodopsin embedded in the bilayer.
+A vesicle's sampled transmembrane sites with their surface normals, and the rendered slab with bacteriorhodopsin (PDB 1C3W; Luecke et al. 1999) embedded in the bilayer.
 ///
 
 [Membrane shape](../membrane-shape/index.md) produces a signed field
@@ -29,7 +29,8 @@ lookup.
 builds a schematic atomic bilayer patch, `PotentialBuilder` renders it,
 and `compute_bilayer_profile` averages that render laterally over the
 central 60% of the patch, which is the region carrying the intended
-areal density of one lipid per 65 Å². The result is a profile in volts,
+areal density of one lipid per 65 Å², close to the 64.3 Å² measured for
+fluid POPC at 30 °C (Kučerka et al. 2011). The result is a profile in volts,
 on the same scale as any `PotentialBuilder`-rendered protein template, so
 a membrane and an inserted transmembrane protein are directly
 commensurate in the same volume.
@@ -46,8 +47,8 @@ its surroundings across its whole thickness.
 
 That the core exceeds ice is not obvious, and reasoning from mass density
 gets the sign wrong: hydrocarbon at 0.9 g/cm³ is the less dense material.
-For electrons the relevant currency is not electron density. Mott-Bethe
-leaves a diffuse one-electron atom screening its own proton poorly at low
+For electrons the relevant currency is not electron density. The
+Mott-Bethe relation (Bethe 1928; Mott 1930) leaves a diffuse one-electron atom screening its own proton poorly at low
 \(k\), so hydrogen scatters about 2.5× what carbon does per unit mass,
 and the acyl core is the most hydrogen-rich region of the molecule. The
 same effect governs the [amorphous ice](../ice.md) kernel.
@@ -124,8 +125,9 @@ The lipid template carries the exact stoichiometry of POPC,
 C\(_{42}\)H\(_{82}\)NO\(_8\)P, and the scattering integral per element is
 a property of the scattering tables. Together they predict 254.5 V·Å;
 the rendered patch measures 254.0. The same identity applied to a protein
-predicts apoferritin's mean inner potential as 7.03 V against 7.00 V
-measured by rendering it, so the check is not circular.
+predicts the mean inner potential of sweet-potato β-amylase (PDB 1FA2;
+Cheong et al. 1995) as 7.03 V against 7.00 V measured by rendering it, so
+the check is not circular.
 
 Hydrogen is load-bearing in that census. POPC's 82 hydrogens are a
 quarter of the molecule's total scattering, and a template omitting them
@@ -175,7 +177,8 @@ available without a mesh or a KD-tree. Placement uses that directly:
    centre-to-centre.
 3. **Orient.** Align the protein's canonical axis to the local normal,
    then apply a free random spin about that same axis (the two-step
-   construction CTS and polnet both use).
+   construction CTS and polnet both use; Purnell et al. 2023;
+   Martinez-Sanchez et al. 2024).
 4. **Set the depth.** Translate along the aligned axis so the
    transmembrane span's midpoint sits at the bilayer mid-plane. Never
    rescale: hydrophobic mismatch between a protein's real span and the
@@ -217,8 +220,8 @@ what it found.
 
 \(t\) defaults to 38.0 Å, inside the published 36–39 Å range for fluid
 phosphatidylcholine. It was 30.0 until 2026-08-30, the midpoint of
-polnet's `MB_THICK_RG` (25–35 Å) — a range sitting entirely below the
-experimental one. The reference template's own spacing is 40 Å, so the
+polnet's `MB_THICK_RG` (25–35 Å; Martinez-Sanchez et al. 2024) — a range
+sitting entirely below the experimental one. The reference template's own spacing is 40 Å, so the
 default rescales it by 0.95.
 
 `transmembrane_occupancy_fraction` does not set how many proteins are
@@ -259,10 +262,35 @@ width left to set here — only blur to add.
 
 ## References
 
+- Bethe, H. (1928). Theorie der Beugung von Elektronen an Kristallen.
+  *Annalen der Physik*, 392(17), 55–129.
+  [doi:10.1002/andp.19283921704](https://doi.org/10.1002/andp.19283921704)
+- Cheong, C. G., Eom, S. H., Chang, C., Shin, D. H., Song, H. K., Min, K.,
+  Moon, J. H., Kim, K. K., Hwang, K. Y., & Suh, S. W. (1995).
+  Crystallization, molecular replacement solution, and refinement of
+  tetrameric β-amylase from sweet potato. *Proteins: Structure, Function,
+  and Bioinformatics*, 21(2), 105–117.
+  [doi:10.1002/prot.340210204](https://doi.org/10.1002/prot.340210204)
+- Kučerka, N., Nieh, M.-P., & Katsaras, J. (2011). Fluid phase lipid areas
+  and bilayer thicknesses of commonly used phosphatidylcholines as a
+  function of temperature. *Biochimica et Biophysica Acta (BBA) –
+  Biomembranes*, 1808(11), 2761–2771.
+  [doi:10.1016/j.bbamem.2011.07.022](https://doi.org/10.1016/j.bbamem.2011.07.022)
+- Luecke, H., Schobert, B., Richter, H.-T., Cartailler, J.-P., & Lanyi, J. K.
+  (1999). Structure of bacteriorhodopsin at 1.55 Å resolution. *Journal of
+  Molecular Biology*, 291(4), 899–911.
+  [doi:10.1006/jmbi.1999.3027](https://doi.org/10.1006/jmbi.1999.3027)
 - Martinez-Sanchez, A., Lamm, L., Jasnin, M., & Phelippeau, H. (2024).
   Simulating the cellular context in synthetic datasets for cryo-electron
-  tomography. *IEEE TMI* 43(11), 3742–3754.
-  [polnet source](https://github.com/anmartinezs/polnet).
-- Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
-  deep learning models. *bioRxiv* 2023.04.28.538636.
-  [CTS source](https://github.com/carsonpurnell/cryotomosim_CTS).
+  tomography. *IEEE Transactions on Medical Imaging*, 43(11), 3742–3754.
+  [doi:10.1109/TMI.2024.3398401](https://doi.org/10.1109/TMI.2024.3398401)
+  ([polnet source](https://github.com/anmartinezs/polnet))
+- Mott, N. F. (1930). The scattering of electrons by atoms. *Proceedings of
+  the Royal Society of London. Series A*, 127(806), 658–665.
+  [doi:10.1098/rspa.1930.0082](https://doi.org/10.1098/rspa.1930.0082)
+- Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+  Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+  (2023). Rapid synthesis of cryo-ET data for training deep learning
+  models. *bioRxiv*.
+  [doi:10.1101/2023.04.28.538636](https://doi.org/10.1101/2023.04.28.538636)
+  ([CTS source](https://github.com/carsonpurnell/cryotomosim_CTS))

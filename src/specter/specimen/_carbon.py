@@ -1,6 +1,9 @@
 """
 Carbon support film generation: a from-scratch replication of CryoTomoSim
-(CTS)'s ``gen_carbon.m``/``carbonshape`` alpha-shape geometry.
+(CTS)'s ``gen_carbon.m``/``carbonshape`` [1]_ alpha-shape [2]_ geometry.
+The literature mean-inner-potential range the deposition is checked
+against (7.8-9.1 V, see ``_PLACED_DENSITY_FRACTION``) has its upper end at
+the 9.09 V measured by electron holography on a 1.75 g/cm^3 film [3]_.
 
 A roughened rim needs genuinely 3D noise. An analytic boundary (per-angle
 jitter on a circle, linearly interpolated) looks artificially smooth: flat
@@ -33,11 +36,19 @@ are deliberately *not* carried over:
 
 References
 ----------
-Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S., Grillo, M.,
-Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T. (2023). Rapid
-synthesis of cryo-ET data for training deep learning models. bioRxiv
-2023.04.28.538636. https://doi.org/10.1101/2023.04.28.538636
-CTS source: https://github.com/carsonpurnell/cryotomosim_CTS
+.. [1] Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+   (2023). Rapid synthesis of cryo-ET data for training deep learning models.
+   *bioRxiv*. https://doi.org/10.1101/2023.04.28.538636
+   (CTS source: https://github.com/carsonpurnell/cryotomosim_CTS)
+.. [2] Edelsbrunner, H., & Mücke, E. P. (1994). Three-dimensional alpha shapes.
+   *ACM Transactions on Graphics*, 13(1), 43–72.
+   https://doi.org/10.1145/174462.156635
+.. [3] Wanner, M., Bach, D., Gerthsen, D., Werner, R., & Tesche, B. (2006).
+   Electron holography of thin amorphous carbon films: Measurement of the
+   mean inner potential and a thickness-independent phase shift.
+   *Ultramicroscopy*, 106(4–5), 341–345.
+   https://doi.org/10.1016/j.ultramic.2005.10.004
 """
 
 from __future__ import annotations

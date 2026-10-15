@@ -58,8 +58,9 @@ c_{lm} \sim \mathcal{N}\!\left(0,\ \big[l(l+1)\big]^{-p}\right)
 
 \(p\) is `sh_spectrum_power`. \(p = 2\) (default) reproduces the
 [Helfrich](#references) (1973) thermal bending-mode spectrum of a lipid
-bilayer: long-wavelength undulations dominate, short-wavelength wrinkles are
-suppressed. Lower \(p\) shifts weight toward finer, less membrane-like
+bilayer, in the large-\(l\), tensionless limit of the quasi-spherical vesicle
+spectrum derived by Milner & Safran (1987): long-wavelength undulations
+dominate, short-wavelength wrinkles are suppressed. Lower \(p\) shifts weight toward finer, less membrane-like
 roughness.
 
 ![Var(a_lm) vs. harmonic degree l, for several values of spectrum_power.](../../assets/images/membrane-sh-spectrum.png){ width="420"  style="display:block;margin:1.2em auto;" }
@@ -193,5 +194,8 @@ box.
 ## References
 
 - Helfrich, W. (1973). Elastic properties of lipid bilayers: theory and
-  possible experiments. *Zeitschrift für Naturforschung C*, 28(11-12),
-  693-703. [doi:10.1515/znc-1973-11-1209](https://doi.org/10.1515/znc-1973-11-1209)
+  possible experiments. *Zeitschrift für Naturforschung C*, 28(11–12),
+  693–703. [doi:10.1515/znc-1973-11-1209](https://doi.org/10.1515/znc-1973-11-1209)
+- Milner, S. T., & Safran, S. A. (1987). Dynamical fluctuations of droplet
+  microemulsions and vesicles. *Physical Review A*, 36(9), 4371–4379.
+  [doi:10.1103/PhysRevA.36.4371](https://doi.org/10.1103/PhysRevA.36.4371)

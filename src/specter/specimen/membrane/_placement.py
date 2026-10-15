@@ -13,17 +13,16 @@ normal, then apply a free random spin around that same axis.
 
 References
 ----------
-Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S., Grillo, M.,
-Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T. (2023). Rapid
-synthesis of cryo-ET data for training deep learning models. bioRxiv
-2023.04.28.538636. https://doi.org/10.1101/2023.04.28.538636
-CTS source: https://github.com/carsonpurnell/cryotomosim_CTS
-
-Martinez-Sanchez, A., Lamm, L., Jasnin, M., & Phelippeau, H. (2024). Simulating
-the cellular context in synthetic datasets for cryo-electron tomography. IEEE
-Transactions on Medical Imaging, 43(11), 3742–3754.
-https://doi.org/10.1109/TMI.2024.3398401
-polnet source: https://github.com/anmartinezs/polnet
+.. [1] Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+   (2023). Rapid synthesis of cryo-ET data for training deep learning models.
+   *bioRxiv*. https://doi.org/10.1101/2023.04.28.538636
+   (CTS source: https://github.com/carsonpurnell/cryotomosim_CTS)
+.. [2] Martinez-Sanchez, A., Lamm, L., Jasnin, M., & Phelippeau, H. (2024).
+   Simulating the cellular context in synthetic datasets for cryo-electron
+   tomography. *IEEE Transactions on Medical Imaging*, 43(11), 3742–3754.
+   https://doi.org/10.1109/TMI.2024.3398401
+   (polnet source: https://github.com/anmartinezs/polnet)
 """
 
 from __future__ import annotations

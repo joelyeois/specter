@@ -5,8 +5,8 @@ combination of: one or more organic membranes, filament species (e.g.
 F-actin), gold fiducial beads, a carbon support film, and densely packed
 protein species (region-gated to cytosol/lumen when a membrane is present).
 It writes a `.mrc` density volume plus
-copick-style `.ndjson` ground-truth picks and, by default, segmentation
-label volumes. The `.mrc` is directly usable as `specter simulate
+copick-style (Ermel et al. 2026) `.ndjson` ground-truth picks and, by
+default, segmentation label volumes. The `.mrc` is directly usable as `specter simulate
 tiltseries`'s `--volume_path`. This is the specimen-building half of the
 cryo-ET pipeline; see [Generate a tilt series](tilt-series.md) for the
 imaging half.
@@ -115,9 +115,9 @@ per region:
 only matters when a `[[membrane]]` is present. Without one, the whole box
 is "cytosol." `filler_from_pei2016`/`filler_from_cryoetsim` pull from
 bundled reference tables (Pei et al. 2016 generic crowding, and the
-CryoETSim dataset table respectively; see
-[Regions & protein packing](../concepts/cryoet-specimen/packing.md#references)
-for both citations) instead of hand-listing PDB codes; both are additive
+CryoETSim dataset table of Stojanovska et al. 2025 respectively; see
+[Regions & protein packing](../concepts/cryoet-specimen/packing.md#filler-reference-tables)
+for both) instead of hand-listing PDB codes; both are additive
 and can be combined with each other and with hand-written `[[filler]]`
 entries.
 
@@ -144,11 +144,11 @@ Two fields choose the atomic scattering factors, split by material:
 
 - **`scattering_factors`** (default `shtyrov`) applies to biomolecules:
   targets, filler, filaments, microtubules and transmembrane proteins.
-  Shtyrov factors are fitted per bonded species, so they need each
-  structure's bond topology. A `[[membrane]]` table that names its own
+  Shtyrov factors are fitted per bonded species (Shtyrov et al. 2026), so
+  they need each structure's bond topology. A `[[membrane]]` table that names its own
   `parameterization` overrides this field for that population.
-- **`bulk_scattering_factors`** (default `kirkland`) applies to the carbon
-  film and the gold fiducial beads. Shtyrov factors are fitted for
+- **`bulk_scattering_factors`** (default `kirkland`; Kirkland 2010) applies
+  to the carbon film and the gold fiducial beads. Shtyrov factors are fitted for
   biomolecules over a limited spatial-frequency range, and bulk materials
   lie outside that domain.
 
@@ -157,7 +157,7 @@ typing depends on hydrogens being present. A hydrogen-free deposition types
 completely only when a Monomer Library is available, through
 `monomer_library_path` or the `$CLIBD_MON` environment variable; without one,
 roughly 44% of a hydrogen-free protein falls back to per-element Peng
-factors. `readd_hydrogens` controls what the library does: `"auto"`
+factors (Peng et al. 1996). `readd_hydrogens` controls what the library does: `"auto"`
 (default) keeps hydrogens a file already carries and adds them only to a
 structure that has none, `true` always re-adds them from ideal geometry, and
 `false` adds no hydrogen density while still using the library for typing.
@@ -400,3 +400,32 @@ CLI calls. Build a `TomogramConfig` directly in Python (or load one with
   builds.
 - [Configure a run](configuration.md): general TOML/CLI field reference
   conventions shared across all `specter` commands.
+
+## References
+
+- Ermel, U. H., Schwartz, J., Zhao, Z., Ji, D., Peck, A., Yu, Y.,
+  Paraan, M., Carragher, B., Frangakis, A. S., & Harrington, K. I. S.
+  (2026). copick: An open dataset interface and toolkit for collaborative
+  annotation and analysis of cryo-electron tomography data. *Protein
+  Science*, 35(5), e70578.
+  [doi:10.1002/pro.70578](https://doi.org/10.1002/pro.70578)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+  (2nd ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Pei, L., Xu, M., Frazier, Z., & Alber, F. (2016). Simulating cryo
+  electron tomograms of crowded cell cytoplasm for assessment of automated
+  particle picking. *BMC Bioinformatics*, 17(1), 405.
+  [doi:10.1186/s12859-016-1283-3](https://doi.org/10.1186/s12859-016-1283-3)
+- Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+  parameterization of elastic and absorptive electron atomic scattering
+  factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+  [doi:10.1107/S0108767395014371](https://doi.org/10.1107/S0108767395014371)
+- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+  et al. (2026). Measurement of atomic scattering factors by cryoelectron
+  microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+  e2528758123.
+  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123)
+- Stojanovska, F., Sanchez, R. M., Jensen, R. K., Mahamid, J., Kreshuk, A.,
+  & Zaugg, J. B. (2025). CryoSiam: self-supervised representation learning
+  for automated analysis of cryo-electron tomograms. *bioRxiv*.
+  [doi:10.1101/2025.11.11.687379](https://doi.org/10.1101/2025.11.11.687379)

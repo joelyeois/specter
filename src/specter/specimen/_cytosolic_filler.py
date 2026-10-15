@@ -19,7 +19,19 @@ from:
   always weighted equally.
 
 The tables themselves, with their provenance, live in
-`specter.specimen._filler_tables` and are re-exported here.
+`specter.specimen._filler_tables` and are re-exported here: the first is
+from Pei et al. [1]_, the second from the CryoETSim dataset [2]_.
+
+References
+----------
+.. [1] Pei, L., Xu, M., Frazier, Z., & Alber, F. (2016). Simulating cryo electron
+   tomograms of crowded cell cytoplasm for assessment of automated particle
+   picking. *BMC Bioinformatics*, 17(1), 405.
+   https://doi.org/10.1186/s12859-016-1283-3
+.. [2] Stojanovska, F., Sanchez, R. M., Jensen, R. K., Mahamid, J., Kreshuk, A.,
+   & Zaugg, J. B. (2025). CryoSiam: self-supervised representation learning
+   for automated analysis of cryo-electron tomograms. *bioRxiv*.
+   https://doi.org/10.1101/2025.11.11.687379
 """
 
 from __future__ import annotations

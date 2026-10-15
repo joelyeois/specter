@@ -12,7 +12,14 @@ apart along the bend.
 A parallel-transport frame carries one reference normal along the path,
 removing at each step only the component that the new tangent has made
 invalid. That is the minimum rotation needed to stay orthogonal, so no
-spurious twist accumulates.
+spurious twist accumulates: a discrete form of Bishop's relatively
+parallel adapted frame [1]_.
+
+References
+----------
+.. [1] Bishop, R. L. (1975). There is more than one way to frame a curve.
+   *The American Mathematical Monthly*, 82(3), 246–251.
+   https://doi.org/10.1080/00029890.1975.11993807
 """
 
 from __future__ import annotations

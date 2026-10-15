@@ -1,10 +1,11 @@
 """
 Multi-species hard-sphere packing for specimen generation.
 
-:func:`pack_hard_spheres_3d` -- Random Sequential Addition (RSA), fully
+:func:`pack_hard_spheres_3d` -- Random Sequential Addition (RSA) [1]_, fully
 vectorized across candidates, fast (sub-second to a few seconds at a few
 thousand instances), capped by RSA's known jamming limit (~28-41%
-depending on species-size diversity, well below random-close-packing).
+depending on species-size diversity, well below random-close-packing;
+the saturation density of RSA for identical spheres is computed in [2]_).
 This is the backend behind `specter build tomogram`
 (`specimen.tomogram.TomogramSpecimenGenerator`).
 
@@ -15,6 +16,15 @@ last reaches substantially higher density but has no obstacle-avoidance
 mechanism, and its per-iteration Python-loop cost runs into hours on the
 candidate pools a production-scale tomogram (hundreds of voxels per axis)
 draws; RSA's ceiling, reached in seconds, is the target here.
+
+References
+----------
+.. [1] Widom, B. (1966). Random sequential addition of hard spheres to a volume.
+   *The Journal of Chemical Physics*, 44(10), 3888–3894.
+   https://doi.org/10.1063/1.1726548
+.. [2] Torquato, S., Uche, O. U., & Stillinger, F. H. (2006). Random sequential
+   addition of hard spheres in high Euclidean dimensions. *Physical Review E*,
+   74(6), 061308. https://doi.org/10.1103/PhysRevE.74.061308
 """
 
 from __future__ import annotations

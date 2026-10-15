@@ -116,7 +116,8 @@ Region map, per-instance membrane labels, and per-instance protein/filament/bead
 - `instance_labels`: one id per filament, microtubule, bead, target,
   filler and transmembrane protein instance. A filament or microtubule is
   labelled as one object, not as its individual monomers or dimers.
-- Picks: copick-style `.ndjson` per species, positions and orientations.
+- Picks: copick-style (Ermel et al. 2026) `.ndjson` per species, positions
+  and orientations.
   The generator exports targets and filler by default. A species placed both
   as a target and as filler in the same region keeps its filler instances in
   a separate `-filler`-suffixed file.
@@ -143,8 +144,8 @@ natural "position" the way a protein does, so `membrane_labels` and
 ## Provenance
 
 Both [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)
-(CTS) and [Polnet](https://github.com/anmartinezs/polnet) inspired
-`TomogramSpecimenGenerator`. Two components descend directly from CTS,
+(CTS; Purnell et al. 2023) and [Polnet](https://github.com/anmartinezs/polnet)
+(Martinez-Sanchez et al. 2024) inspired `TomogramSpecimenGenerator`. Two components descend directly from CTS,
 both generic bulk-material simulations with no placement logic of their
 own: the [gold beads](beads.md) (`gen_beads.m`) and the
 [carbon film](carbon-film.md) (`gen_carbon.m`/`carbonshape`). SPECTER
@@ -153,8 +154,20 @@ Polnet.
 
 ## References
 
-- Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
-  deep learning models. *bioRxiv* 2023.04.28.538636.
+- Ermel, U. H., Schwartz, J., Zhao, Z., Ji, D., Peck, A., Yu, Y.,
+  Paraan, M., Carragher, B., Frangakis, A. S., & Harrington, K. I. S.
+  (2026). copick: An open dataset interface and toolkit for collaborative
+  annotation and analysis of cryo-electron tomography data. *Protein
+  Science*, 35(5), e70578.
+  [doi:10.1002/pro.70578](https://doi.org/10.1002/pro.70578)
 - Martinez-Sanchez, A., Lamm, L., Jasnin, M., & Phelippeau, H. (2024).
   Simulating the cellular context in synthetic datasets for cryo-electron
-  tomography. *IEEE TMI* 43(11), 3742–3754.
+  tomography. *IEEE Transactions on Medical Imaging*, 43(11), 3742–3754.
+  [doi:10.1109/TMI.2024.3398401](https://doi.org/10.1109/TMI.2024.3398401)
+  ([polnet source](https://github.com/anmartinezs/polnet))
+- Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+  Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+  (2023). Rapid synthesis of cryo-ET data for training deep learning
+  models. *bioRxiv*.
+  [doi:10.1101/2023.04.28.538636](https://doi.org/10.1101/2023.04.28.538636)
+  ([CTS source](https://github.com/carsonpurnell/cryotomosim_CTS))

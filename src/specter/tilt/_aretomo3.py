@@ -1,15 +1,26 @@
 """
-Parsers for AreTomo3's tilt-geometry output formats (``.aln``, global-shift
-CSV, ``.xf``) into quaternions and shifts for :class:`~specter.imaging.Poses`.
+Parsers for AreTomo3's [2]_ tilt-geometry output formats (``.aln``,
+global-shift CSV, ``.xf``) into quaternions and shifts for
+:class:`~specter.imaging.Poses`. AreTomo3 runs AreTomo's tomographic
+alignment [1]_; the ``.xf`` file and the tilt-axis angle convention are
+IMOD's [3]_.
 
 References
 ----------
-Zheng, S., Wolff, G., Greenan, G., Chen, Z., Faas, F. G. A., Bárcena, M.,
-Koster, A. J., Cheng, Y., & Agard, D. A. (2022). AreTomo: An integrated
-software package for automated marker-free, motion-corrected cryo-electron
-tomographic alignment and reconstruction. Journal of Structural Biology: X, 6,
-100068. https://doi.org/10.1016/j.yjsbx.2022.100068
-AreTomo3 source: https://github.com/czimaginginstitute/AreTomo3
+.. [1] Zheng, S., Wolff, G., Greenan, G., Chen, Z., Faas, F. G. A., Bárcena, M.,
+   Koster, A. J., Cheng, Y., & Agard, D. A. (2022). AreTomo: An integrated
+   software package for automated marker-free, motion-corrected
+   cryo-electron tomographic alignment and reconstruction. *Journal of
+   Structural Biology: X*, 6, 100068. https://doi.org/10.1016/j.yjsbx.2022.100068
+.. [2] Peck, A., Yu, Y., Paraan, M., Kimanius, D., Ermel, U. H., Hutchings, J.,
+   et al. (2026). AreTomoLive: automated reconstruction of comprehensively
+   corrected and denoised cryo-electron tomograms in real time and at high
+   throughput. *Nature Methods*, 23(6), 1121–1125.
+   https://doi.org/10.1038/s41592-026-03093-y (describes AreTomo3; source:
+   https://github.com/czimaginginstitute/AreTomo3)
+.. [3] Kremer, J. R., Mastronarde, D. N., & McIntosh, J. R. (1996). Computer
+   visualization of three-dimensional image data using IMOD. *Journal of
+   Structural Biology*, 116(1), 71–76. https://doi.org/10.1006/jsbi.1996.0013
 """
 
 from __future__ import annotations

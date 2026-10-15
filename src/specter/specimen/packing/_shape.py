@@ -1,7 +1,7 @@
 """
 Exact-shape ("voxel occupancy") packing.
 
-This is what CryoTomoSim does. Its `helper_arrayinsert.m` `'overlaptest'`
+This is what CryoTomoSim [1]_ does. Its `helper_arrayinsert.m` `'overlaptest'`
 binarizes the destination patch and the rotated source patch and rejects the
 placement if any voxel carries both; no sphere approximation appears anywhere
 in its placement path. Reproducing that here is what closes the packing-
@@ -26,7 +26,19 @@ Obstacles and region restriction both enter through the same `occupancy`
 grid: seed it True wherever an instance may not go. That subsumes what
 `pack_hard_spheres_3d` needs an `exclusion_distance_field` for -- membranes,
 filaments and carbon are already rendered as volumes, so they are stamped
-directly rather than distance-transformed.
+directly rather than distance-transformed. Placement is Random Sequential
+Addition [2]_.
+
+References
+----------
+.. [1] Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+   (2023). Rapid synthesis of cryo-ET data for training deep learning models.
+   *bioRxiv*. https://doi.org/10.1101/2023.04.28.538636
+   (CTS source: https://github.com/carsonpurnell/cryotomosim_CTS)
+.. [2] Widom, B. (1966). Random sequential addition of hard spheres to a volume.
+   *The Journal of Chemical Physics*, 44(10), 3888–3894.
+   https://doi.org/10.1063/1.1726548
 """
 
 from __future__ import annotations

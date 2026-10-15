@@ -65,6 +65,20 @@ Algorithm
    interesting regions.
 
 No mesh is ever constructed.
+
+The default undulation spectrum, ``Var(a_lm) ~ [l(l+1)]**-2``, is the
+large-``l``, tensionless form of the thermal fluctuation spectrum of a
+quasi-spherical vesicle [2]_ whose bilayer has Helfrich bending
+elasticity [1]_.
+
+References
+----------
+.. [1] Helfrich, W. (1973). Elastic properties of lipid bilayers: theory and
+   possible experiments. *Zeitschrift für Naturforschung C*, 28(11–12),
+   693–703. https://doi.org/10.1515/znc-1973-11-1209
+.. [2] Milner, S. T., & Safran, S. A. (1987). Dynamical fluctuations of droplet
+   microemulsions and vesicles. *Physical Review A*, 36(9), 4371–4379.
+   https://doi.org/10.1103/PhysRevA.36.4371
 """
 
 from __future__ import annotations

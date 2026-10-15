@@ -9,6 +9,31 @@ rotates/inserts a copy at every ``FilamentInstance`` this module returns --
 the same division of labor its protein stamping already uses (geometry
 decided here, rendering done by the caller, which alone knows about voxel
 sizes/atomic potentials).
+
+The presets: `ACTIN_SPEC` stacks uncomplexed G-actin (PDB 1J6Z [4]_) with
+F-actin's helical twist [1]_ [2]_; `PROTOFILAMENT_SPEC` stacks the
+alpha-beta tubulin dimer (PDB 1TUB [3]_). Both `flex_deg` values are
+CryoTomoSim's [5]_.
+
+References
+----------
+.. [1] Egelman, E. H., Francis, N., & DeRosier, D. J. (1982). F-actin is a helix
+   with a random variable twist. *Nature*, 298(5870), 131–135.
+   https://doi.org/10.1038/298131a0
+.. [2] Holmes, K. C., Popp, D., Gebhard, W., & Kabsch, W. (1990). Atomic model
+   of the actin filament. *Nature*, 347(6288), 44–49.
+   https://doi.org/10.1038/347044a0
+.. [3] Nogales, E., Wolf, S. G., & Downing, K. H. (1998). Structure of the αβ
+   tubulin dimer by electron crystallography. *Nature*, 391(6663), 199–203.
+   https://doi.org/10.1038/34465
+.. [4] Otterbein, L. R., Graceffa, P., & Dominguez, R. (2001). The crystal
+   structure of uncomplexed actin in the ADP state. *Science*, 293(5530),
+   708–711. https://doi.org/10.1126/science.1059700
+.. [5] Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+   (2023). Rapid synthesis of cryo-ET data for training deep learning models.
+   *bioRxiv*. https://doi.org/10.1101/2023.04.28.538636
+   (CTS source: https://github.com/carsonpurnell/cryotomosim_CTS)
 """
 
 from __future__ import annotations

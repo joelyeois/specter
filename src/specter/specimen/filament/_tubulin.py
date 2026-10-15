@@ -22,7 +22,14 @@ The extracted dimer is re-expressed so that
 * ``+X`` points radially outwards, away from the tube axis,
 
 then cached next to the downloaded structure so the (small) extraction runs
-once per source.
+once per source. The default source, PDB 3JAL, is from Zhang et al. [1]_.
+
+References
+----------
+.. [1] Zhang, R., Alushin, G. M., Brown, A., & Nogales, E. (2015). Mechanistic
+   origin of microtubule dynamic instability and its modulation by EB
+   proteins. *Cell*, 162(4), 849–859. https://doi.org/10.1016/j.cell.2015.07.012
+   (PDB 3JAL, 3JAT)
 """
 
 from __future__ import annotations
@@ -44,8 +51,9 @@ from ...pdb import PDB
 #: The two 131-residue EB3 chains are dropped during extraction.
 #:
 #: Chosen over the more common kinesin-decorated microtubule structures
-#: (6DPU, 3JAT) because those are 14-protofilament lattices, so their dimer
-#: sits at a different radius from the 13-protofilament default.
+#: (e.g. 3JAT) and the undecorated 6DPU because those are 14-protofilament
+#: lattices, so their dimer sits at a different radius from the
+#: 13-protofilament default.
 MT_DIMER_SOURCE = "3JAL"
 
 _MIN_TUBULIN_RESIDUES = 380

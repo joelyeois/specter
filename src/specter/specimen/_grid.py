@@ -1,6 +1,6 @@
 """
 Gold fiducial bead generation -- a from-scratch port of CryoTomoSim (CTS)'s
-``gen_beads.m``. No dependency on polnet or VTK.
+``gen_beads.m`` [1]_. No dependency on polnet or VTK.
 
 Generic, self-contained physics (no CTS-specific placement logic). Used by
 ``specimen.tomogram.TomogramSpecimenGenerator`` (the generator behind
@@ -18,7 +18,9 @@ i.e. the same physics used everywhere else in specter to turn atoms into
 scattering potential, just fed a bulk material's number density instead of
 explicit PDB coordinates. This lands in real volts and is independent of
 voxel size, and the resulting mean inner potential comes out in the
-literature ballpark for gold (~29 V at this bulk density), unlike CTS's
+literature ballpark for gold (~29 V at this bulk density; [2]_ compiles
+measured values of 16.8-30.2 V and calculated values of 25.0-35.9 V, and
+measures 32.2 +/- 3.6 V), unlike CTS's
 raw atom-count value (dimensionally inconsistent with
 ``PotentialBuilder``'s V*Å-unit output, and unphysically dependent on
 voxel size).
@@ -49,11 +51,16 @@ carbon-specific about the physics itself.
 
 References
 ----------
-Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S., Grillo, M.,
-Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T. (2023). Rapid
-synthesis of cryo-ET data for training deep learning models. bioRxiv
-2023.04.28.538636. https://doi.org/10.1101/2023.04.28.538636
-CTS source: https://github.com/carsonpurnell/cryotomosim_CTS
+.. [1] Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+   (2023). Rapid synthesis of cryo-ET data for training deep learning models.
+   *bioRxiv*. https://doi.org/10.1101/2023.04.28.538636
+   (CTS source: https://github.com/carsonpurnell/cryotomosim_CTS)
+.. [2] Popescu, R., Müller, E., Wanner, M., Gerthsen, D., Schowalter, M.,
+   Rosenauer, A., Böttcher, A., Löffler, D., & Weis, P. (2007). Increase of
+   the mean inner Coulomb potential in Au clusters induced by surface tension
+   and its implication for electron scattering. *Physical Review B*, 76(23),
+   235411. https://doi.org/10.1103/PhysRevB.76.235411
 """
 
 from __future__ import annotations

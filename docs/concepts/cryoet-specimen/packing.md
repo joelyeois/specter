@@ -10,8 +10,8 @@ answers two questions per species: *where is this allowed to be*, and
 *how many fit*.
 
 The first is topology: classifying the volume into cytosol, lumen and
-shell. The second is Random Sequential Addition, obstacle- and
-region-aware, colliding each molecule's real rotated footprint against a
+shell. The second is Random Sequential Addition (Widom 1966), obstacle-
+and region-aware, colliding each molecule's real rotated footprint against a
 running occupancy grid.
 
 !!! example "In code"
@@ -124,8 +124,8 @@ single value would measure pool sizes rather than geometry.
 Crowded cytoplasm is 200–320 mg/mL, which bounding spheres cannot reach at
 any setting: RSA jams long before the real volume fraction gets there. For
 reference, [CryoTomoSim](https://github.com/carsonpurnell/cryotomosim_CTS)'s
-own output weighs 0.240 by the same measure, and it also collides real
-shapes rather than spheres.
+(Purnell et al. 2023) own output weighs 0.240 by the same measure, and it
+also collides real shapes rather than spheres.
 
 Footprint collision costs little for that density. On the 5 Å production
 configuration the packer places 19,249 filler instances to 37.7% occupancy
@@ -167,7 +167,8 @@ also Random Sequential Addition, fully vectorized across candidates. It
 places spheres **largest-radius-first, in stages**: one stage per unique
 radius, carrying accepted spheres forward. Within a stage, every remaining
 candidate gets one trial position per pass. The packer generates and
-conflict-checks positions simultaneously through a `vesin` neighbour list,
+conflict-checks positions simultaneously through a [`vesin`](#references)
+neighbour list,
 and resolves candidates that conflict within the same pass with a one-shot
 "local minimum priority wins" independent-set selection, rather than a
 Python loop over pairs.
@@ -190,7 +191,8 @@ above; that is geometry, not a scheduling failure.
 
 ### Where the ceiling is
 
-RSA has a hard jamming limit well below random close packing, and
+RSA has a hard jamming limit, its saturation density (Torquato et al.
+2006), well below random close packing, and
 `occupancy_fraction` is therefore a **budget, not a promise**. Bare
 spheres show the limit in its simplest form:
 
@@ -351,7 +353,7 @@ your own list breaks nothing downstream.
 - **Contact, not interpenetration.** Instances may touch but never
   overlap. Real proteins' surface loops and hydration shells do
   interdigitate slightly, and CryoTomoSim models that with a softer
-  overlap test. Testing found reproducing it needs only ~2% tolerance,
+  overlap test (Purnell et al. 2023). Testing found reproducing it needs only ~2% tolerance,
   but the design rejects that approach: it would make instance labels
   ambiguous at exactly the contacts a picker is trained on.
 - **Jamming, not equilibrium.** RSA densities are not thermodynamically
@@ -361,13 +363,25 @@ your own list breaks nothing downstream.
 
 - Pei, L., Xu, M., Frazier, Z., & Alber, F. (2016). Simulating cryo
   electron tomograms of crowded cell cytoplasm for assessment of automated
-  particle picking. *BMC Bioinformatics* 17(1), 405.
+  particle picking. *BMC Bioinformatics*, 17(1), 405.
+  [doi:10.1186/s12859-016-1283-3](https://doi.org/10.1186/s12859-016-1283-3)
+- Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
+  Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
+  (2023). Rapid synthesis of cryo-ET data for training deep learning
+  models. *bioRxiv*.
+  [doi:10.1101/2023.04.28.538636](https://doi.org/10.1101/2023.04.28.538636)
+  ([CTS source](https://github.com/carsonpurnell/cryotomosim_CTS))
 - Stojanovska, F., Sanchez, R. M., Jensen, R. K., Mahamid, J., Kreshuk, A.,
   & Zaugg, J. B. (2025). CryoSiam: self-supervised representation learning
-  for automated analysis of cryo-electron tomograms. *bioRxiv*
-  2025.11.11.687379. https://doi.org/10.1101/2025.11.11.687379
-- Purnell, C., et al. (2023). Rapid synthesis of cryo-ET data for training
-  deep learning models. *bioRxiv* 2023.04.28.538636.
-  [CTS source](https://github.com/carsonpurnell/cryotomosim_CTS).
-- [vesin](https://github.com/Luthaf/vesin): the neighbour list behind the
-  vectorized conflict check.
+  for automated analysis of cryo-electron tomograms. *bioRxiv*.
+  [doi:10.1101/2025.11.11.687379](https://doi.org/10.1101/2025.11.11.687379)
+- Torquato, S., Uche, O. U., & Stillinger, F. H. (2006). Random sequential
+  addition of hard spheres in high Euclidean dimensions. *Physical Review
+  E*, 74(6), 061308.
+  [doi:10.1103/PhysRevE.74.061308](https://doi.org/10.1103/PhysRevE.74.061308)
+- vesin. Compute neighbor lists for atomistic systems (software); the
+  neighbour list behind the vectorized conflict check.
+  [github.com/Luthaf/vesin](https://github.com/Luthaf/vesin)
+- Widom, B. (1966). Random sequential addition of hard spheres to a volume.
+  *The Journal of Chemical Physics*, 44(10), 3888–3894.
+  [doi:10.1063/1.1726548](https://doi.org/10.1063/1.1726548)

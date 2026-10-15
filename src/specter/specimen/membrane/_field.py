@@ -165,9 +165,9 @@ def blend_field(
     Evaluate the smooth-min union of ``sources`` at arbitrary points.
 
     Each source contributes ``|x - center| - radius`` (an exact sphere SDF);
-    the sources are combined with a polynomial smooth-min so the result is a
-    single continuous field whose zero level set is a smooth, organic union
-    of the spheres rather than a hard-edged one.
+    the sources are combined with a polynomial smooth-min [1]_ so the result
+    is a single continuous field whose zero level set is a smooth, organic
+    union of the spheres rather than a hard-edged one.
 
     Parameters
     ----------
@@ -182,6 +182,11 @@ def blend_field(
     -------
     torch.Tensor
         Signed field values, shape ``(...)``.
+
+    References
+    ----------
+    .. [1] Quilez, I. Smooth minimum (article).
+       https://iquilezles.org/articles/smin/
     """
     if not sources:
         raise ValueError("sources must be non-empty")

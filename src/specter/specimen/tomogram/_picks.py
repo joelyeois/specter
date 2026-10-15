@@ -1,7 +1,19 @@
 """
-Pick export for `TomogramSpecimenGenerator`: copick/CryoET-Data-Portal-style
-.ndjson files for every placed protein, transmembrane protein, filament,
-microtubule and gold bead (see `export_picks`).
+Pick export for `TomogramSpecimenGenerator`: copick [1]_/CryoET-Data-Portal
+[2]_-style .ndjson files for every placed protein, transmembrane protein,
+filament, microtubule and gold bead (see `export_picks`).
+
+References
+----------
+.. [1] Ermel, U. H., Schwartz, J., Zhao, Z., Ji, D., Peck, A., Yu, Y., Paraan, M.,
+   Carragher, B., Frangakis, A. S., & Harrington, K. I. S. (2026). copick: An
+   open dataset interface and toolkit for collaborative annotation and
+   analysis of cryo-electron tomography data. *Protein Science*, 35(5),
+   e70578. https://doi.org/10.1002/pro.70578
+.. [2] Ermel, U., Cheng, A., Ni, J. X., Gadling, J., Venkatakrishnan, M., Evans, K.,
+   et al. (2024). A data portal for providing standardized annotations for
+   cryo-electron tomography. *Nature Methods*, 21(12), 2200–2202.
+   https://doi.org/10.1038/s41592-024-02477-2
 """
 
 from __future__ import annotations

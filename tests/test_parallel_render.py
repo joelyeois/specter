@@ -380,6 +380,12 @@ def test_build_pdb_cache_concurrently_submits_expensive_sources_first(monkeypatc
 
     monkeypatch.setattr(parallel_render_module, "ProcessPoolExecutor", _RecordingPool)
     monkeypatch.setattr(parallel_render_module, "as_completed", lambda futures: [])
+    # The first parse, whatever this machine's cache holds: once every source
+    # has a parsed entry each one costs the same 0.15 s to load, the pool is not
+    # worth spawning, and nothing is submitted at all.
+    import specter.pdb
+
+    monkeypatch.setattr(specter.pdb, "_parsed_cache_path", lambda *args: None)
 
     sources = sorted(_TABLE_SOURCES)
     build_pdb_cache_concurrently(

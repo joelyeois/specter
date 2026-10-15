@@ -303,6 +303,12 @@ negates it, so protein appears bright in the output `.mrcs`. This matches
 the contrast-inverted particle stacks that RELION extraction and
 CryoSPARC produce.
 
+Reading works the other way round. A CryoSPARC stack records its polarity
+in `blob/sign`: +1 for the recorded contrast, -1 for the inverted contrast
+of a normalised restack. `specter match` and `Ghostbuster` bring every
+image they read to the recorded polarity by multiplying it by its sign,
+taken as -1 when the `.cs` file does not record one.
+
 `specter` does not invert micrographs and tilt series.
 `normalize_micrographs` and `normalize_tilt_series` both default to
 disabled, and when enabled they standardise only. After any of these

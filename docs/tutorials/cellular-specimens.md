@@ -191,9 +191,8 @@ reflection.
 ![Three tilts of the specimen, noiseless and detected.](../assets/images/tutorials/cellular_specimens-tilts.png){ width="800" style="display:block;margin:1.2em auto;" }
 ///caption
 The tilts at −45°, 0° and +45°, noiseless (top) and detected at 3 e⁻/Å²
-(bottom), at 4 µm underfocus and low-pass filtered to 20 Å for display;
-each panel shows the central 160 px. A vesicle and a gold bead move across
-the field as the specimen tilts.
+(bottom), at 4 µm underfocus and low-pass filtered to 20 Å for display. A
+vesicle and a gold bead move across the field as the specimen tilts.
 ///
 
 The same objects take the specimen further: a finer voxel size for

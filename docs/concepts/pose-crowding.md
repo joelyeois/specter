@@ -50,9 +50,10 @@ before the rest of the chain runs:
 - **XY-padding** (`pad_fft`) adds `nxy // 2` pixels on each side before
   scattering, to keep the specimen's own energy away from the boundary
   wraparound that FFT-based propagation and reflect-mode ice padding
-  would otherwise introduce. It is off by default; enabling it trades
-  memory and compute for reduced edge artifacts at the field of view's
-  boundary.
+  would otherwise introduce. From Python it is off for a particle box
+  unless asked for (`Propagation.pad_fft` is `None`, the path's own
+  default); `specter simulate particles` turns it on. It trades memory and
+  compute for reduced edge artifacts at the field of view's boundary.
 
 `pad_volume` applies both after pose but before crowding, scaling, and
 ice, so every later stage in the chain sees the final, padded extent.

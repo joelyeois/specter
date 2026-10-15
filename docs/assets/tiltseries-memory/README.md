@@ -21,8 +21,10 @@ construction. Both implementations are loaded from their own source files.
 ## What changed
 
 At a potential scale of exactly 1, scattering reads the current padded
-volume directly. Other scales still multiply it. The current volume is
-resolved after each solvent or damage render, including host fallback.
+volume directly. Other scales still multiply it. (The potential scale was
+removed on 2026-10-15; scattering now always reads the volume directly.)
+The current volume is resolved after each solvent or damage render,
+including host fallback.
 The CLI does not accumulate exit waves when `save_exitwaves=false`, and
 does not accumulate the unused noiseless stack. Python callers still get
 all three stacks by default; the collection flags explicitly opt out.

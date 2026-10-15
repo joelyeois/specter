@@ -323,10 +323,8 @@ def lowpass(x: torch.Tensor, resolution: float) -> torch.Tensor:
 shown = [angles.index(a) for a in (-45.0, 0.0, 45.0)]
 fig, axes = plt.subplots(2, 3, figsize=(8.0, 5.5))
 for col, i in enumerate(shown):
-    # The central 160 px: the outer rows carry the transfer function's
-    # delocalization wrapped across the unpadded field (reported upstream).
-    clean = as_numpy(lowpass(unpadded(noiseless[i]), 20.0))[8:-8, 8:-8]
-    noisy = as_numpy(lowpass(tilts[i].array[0], 20.0))[8:-8, 8:-8]
+    clean = as_numpy(lowpass(unpadded(noiseless[i]), 20.0))
+    noisy = as_numpy(lowpass(tilts[i].array[0], 20.0))
     for row, data in enumerate([clean, noisy]):
         show_image(
             axes[row, col],

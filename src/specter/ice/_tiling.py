@@ -425,10 +425,10 @@ class _IceTiling:
         device : torch.device or str, optional
             Device to run the relaxation on. Default is ``self.device``.
         generator : torch.Generator, optional
-            A CPU generator, for reproducibility. Every random draw is a few
-            numbers made on the CPU whatever the bank's device, so a
-            generator on another device is refused. Default is the global
-            RNG.
+            For reproducibility, on any device: every random draw is a few
+            numbers made where the generator lives. A CPU generator and a
+            CUDA one seeded alike draw differently (different engines).
+            Default is the global RNG.
 
         Returns
         -------

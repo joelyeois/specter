@@ -64,13 +64,19 @@ def test_seam_relaxation_runs_on_the_bank_device(tmp_path):
 
 
 @needs_cuda
-def test_a_generator_off_the_cpu_is_refused_by_name(tmp_path):
+def test_a_generator_on_the_gpu_draws_reproducibly(tmp_path):
     """
-    The bank draws its crops on the CPU, so a CUDA generator is refused with
-    a message saying so rather than torch's device error.
+    The crops' few random numbers are drawn where the generator lives, so a
+    CUDA generator works and repeats itself under the same seed, and a
+    different seed draws different ice.
     """
     bank = _bank(tmp_path)
-    with pytest.raises(ValueError, match="CPU generator"):
-        bank.generate_ice(
-            n=24, dx=1.0, generator=torch.Generator(device="cuda").manual_seed(0)
-        )
+
+    def ice(seed: int) -> torch.Tensor:
+        generator = torch.Generator(device="cuda").manual_seed(seed)
+        return bank.generate_ice(n=24, dx=1.0, generator=generator)
+
+    first = ice(0)
+    assert torch.isfinite(first).all()
+    assert torch.equal(first, ice(0))
+    assert not torch.equal(first, ice(1))

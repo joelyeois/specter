@@ -860,3 +860,29 @@ def test_non_cubic_fourier_rotation_matches_real_space(
 
     rot = VolumeRotator(*shape, padding_mode="zeros", mode="fourier").double()
     assert torch.allclose(rot(V, theta)[0], four, atol=1e-10)
+
+
+def test_a_generator_makes_rotation_draws_repeatable() -> None:
+    """
+    With a generator the samplers draw from it alone: the same seed gives the
+    same quaternions and matrices, and the global stream is untouched.
+    Without one they are roma's draws, unchanged.
+    """
+    from specter.rotations import random_quaternion
+
+    torch.manual_seed(0)
+    expected = torch.rand(1)
+    torch.manual_seed(0)
+    q1 = random_quaternion(8, generator=torch.Generator().manual_seed(4))
+    q2 = random_quaternion(8, generator=torch.Generator().manual_seed(4))
+    R = random_rotation_matrix(8, generator=torch.Generator().manual_seed(4))
+    assert torch.equal(torch.rand(1), expected)
+    assert torch.equal(q1, q2)
+    torch.testing.assert_close(q1.norm(dim=-1), torch.ones(8))
+    torch.testing.assert_close(R, roma.unitquat_to_rotmat(q1))
+    torch.testing.assert_close(torch.linalg.det(R), torch.ones(8))
+
+    torch.manual_seed(5)
+    default = random_quaternion(6)
+    torch.manual_seed(5)
+    assert torch.equal(default, roma.random_unitquat(size=(6,)))

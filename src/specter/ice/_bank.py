@@ -213,13 +213,6 @@ class IceBank(_IceTiling, L.LightningModule):
         torch.Tensor
             Shape (N, 3), local frame, centered at the origin.
         """
-        if generator is not None and generator.device.type != "cpu":
-            raise ValueError(
-                f"IceBank draws its crops from a CPU generator, got one on "
-                f"{generator.device}: pass torch.Generator() (the CPU default). "
-                "The draws are a few numbers each, made on the CPU whatever "
-                "the bank's device."
-            )
         max_extent = max(crop_extent)
         candidates = [c for c in self._configs if c["box_L"] >= max_extent]
         if not candidates:
@@ -231,17 +224,24 @@ class IceBank(_IceTiling, L.LightningModule):
                 "config; use generate_big_ice()/generate_big_ice_deltas() "
                 "instead for volumes larger than the cache."
             )
-        idx = int(torch.randint(len(candidates), (1,), generator=generator).item())
+        # Each draw is made where the generator lives, the one place its
+        # stream can be read, and brought to the CPU: a CPU generator (or
+        # none) draws exactly as it always has.
+        draws = "cpu" if generator is None else generator.device
+        idx = int(
+            torch.randint(len(candidates), (1,), generator=generator, device=draws)
+        )
         config = candidates[idx]
         box_L = config["box_L"]
 
-        # Random draws stay on CPU regardless of self.device -- generator
-        # (if given) is a CPU torch.Generator by convention throughout this
-        # module/its tests, and these are tiny tensors anyway. Only the
-        # actual candidate-gathering math below (O(n_source_atoms x
-        # n_periodic_images), the real cost for small crops out of a large
-        # source -- see _get_source_pos) runs on self.device.
-        center_cpu = (torch.rand(3, generator=generator) - 0.5) * box_L
+        # The draws are a few numbers each, and the geometry built from them
+        # stays on the CPU whatever self.device. Only the candidate-gathering
+        # math below (O(n_source_atoms x n_periodic_images), the real cost for
+        # small crops out of a large source -- see _get_source_pos) runs on
+        # self.device.
+        center_cpu = (
+            torch.rand(3, generator=generator, device=draws).cpu() - 0.5
+        ) * box_L
         R_cpu = random_rotation_matrix_from_generator(generator)
 
         source_pos = self._get_source_pos(config)
@@ -317,10 +317,10 @@ class IceBank(_IceTiling, L.LightningModule):
         batchsize : int, optional
             Number of independent crops. Default is 1.
         generator : torch.Generator, optional
-            A CPU generator, for reproducibility. Every random draw is a few
-            numbers made on the CPU whatever the bank's device, so a
-            generator on another device is refused. Default is the global
-            RNG.
+            For reproducibility, on any device: every random draw is a few
+            numbers made where the generator lives. A CPU generator and a
+            CUDA one seeded alike draw differently (different engines).
+            Default is the global RNG.
 
         Returns
         -------
@@ -387,10 +387,10 @@ class IceBank(_IceTiling, L.LightningModule):
         device : torch.device or str, optional
             Target device for the output. Default is ``self.device``.
         generator : torch.Generator, optional
-            A CPU generator, for reproducibility. Every random draw is a few
-            numbers made on the CPU whatever the bank's device, so a
-            generator on another device is refused. Default is the global
-            RNG.
+            For reproducibility, on any device: every random draw is a few
+            numbers made where the generator lives. A CPU generator and a
+            CUDA one seeded alike draw differently (different engines).
+            Default is the global RNG.
 
         Returns
         -------

@@ -5,6 +5,8 @@ import math
 import pytest
 import torch
 
+from specter.arrays import center_crop
+
 from specter.cpu_threads import limited_cpu_threads
 from specter.imaging import Exposure, Poses, Sample, Specimen
 from specter.imaging import _stages as stages
@@ -39,10 +41,15 @@ def seeded(volume, **kwargs):
 
 
 def waves(series, device=None):
-    """Every tilt's exit wave on the pixel grid, ``(n_tilts, Y, X)``."""
+    """Every tilt's exit wave on the field's pixel grid, ``(n_tilts, Y, X)``."""
     with torch.no_grad(), limited_cpu_threads(1):
         return torch.cat(
-            [series.scatter(i, device=device).pixels() for i in range(len(series))]
+            [
+                center_crop(
+                    series.scatter(i, device=device).pixels(), series.nxy, dim=(-2, -1)
+                )
+                for i in range(len(series))
+            ]
         )
 
 

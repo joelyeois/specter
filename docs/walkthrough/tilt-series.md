@@ -95,8 +95,9 @@ Two settings are specific to this page.
 `absorption_model="inelastic_mfp"` removes inelastically scattered electrons
 from the image, as an energy filter does, at the measured mean free path of
 amorphous ice ([Mean-free-path absorption support](../concepts/scattering/index.md#mean-free-path-absorption-support)).
-A tilt series also propagates on a canvas with a 32 px zero-filled margin
-(`pad_fft`, on by default for tilts). The FFT treats the frame as periodic,
+A tilt series also propagates on a canvas with a 32 px margin (`pad_fft`, on
+by default for tilts), keeps it through the transfer function, and crops the
+image to the field at the detector. The FFT treats the frame as periodic,
 and under tilt its two edges cross the slab at different depths; without the
 margin the edges of the high tilts darken, by 16% at 60° for a uniform slab
 ([`IterativeScattering` and tilted volumes](../concepts/scattering/multislice.md#iterativescattering-and-tilted-volumes)).
@@ -114,6 +115,10 @@ detector act on it as on any other wave:
 ```{ .text .output }
 --8<-- "docs-includes/walkthrough/tilt-series-scatter.txt"
 ```
+
+The wave is 896 points across: the 384 px field and its 32 px margin on
+each side, on the propagation grid twice as fine as the pixels. The detector
+crops the image back to the field.
 
 Each wave carries the offset from its own tilted column's exit face to the
 specimen's midplane, so the defocus in the `CTF` stays the nominal,
@@ -150,7 +155,7 @@ The mean noiseless intensity of each of the 41 tilts (points) against
 3950 Å inelastic mean free path of ice at 300 kV (line).
 ///
 
-The simulated tilts agree with the prediction to within \(7\times10^{-5}\)
+The simulated tilts agree with the prediction to within \(2\times10^{-4}\)
 relative, from 0.859 at 0° to 0.738 at ±60°: at the highest tilts a quarter
 of the electrons leave the image, against 14% at zero tilt. The agreement
 checks that the tilted propagation sees the path a tilted slab presents. The

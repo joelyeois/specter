@@ -2,15 +2,17 @@
 The tilt-series objects (`Sample.tilt_series` -> `TiltSeries`) against the
 generator they replaced.
 
-The references under ``tests/test_data/imaging_tilt_*.pt`` are the retired
+The references under ``tests/test_data/imaging_tilt_*.pt`` were the retired
 `TiltSeriesGenerator`'s images and exit waves on these exact inputs and
-seeds, written once while both existed.
+seeds, written while both existed. The multislice cases were re-recorded on
+2026-10-15, when a tilt began keeping its FFT margin through the transfer
+function rather than wrapping the field's edges into each other; a missing
+reference is written on first run (delete one to re-record it).
 
 Exact without ice. With ice, to float tolerance and without noise: the
 references were written while the CPU ice splat still accumulated in
 thread-scheduling order, so they carry ~1e-5 V of that noise, which Poisson
-counts would turn into different integers. The series run on the retired
-generator's 16 px FFT margin.
+counts would turn into different integers.
 """
 
 from __future__ import annotations
@@ -58,7 +60,7 @@ def _compare(
     exact: bool = True,
 ) -> None:
     icemaker = RandomIcemaker(PIXEL, NXY, NZ) if ice.model == "random" else None
-    want = torch.load(REFERENCES / f"imaging_tilt_{reference}.pt", weights_only=True)
+    path = REFERENCES / f"imaging_tilt_{reference}.pt"
     exposure = Exposure.tilt_series(dose, N)
     on_specimen = envelopes.dose_envelope_target == "specimen"
     series = Sample.from_volume(_volume(), PIXEL).tilt_series(
@@ -73,7 +75,6 @@ def _compare(
         seed=7,
         objective_aperture=optics.objective_aperture,
         propagation=propagation,
-        fft_pad_margin=16,
         log=False,
     )
     got, waves_got = [], []
@@ -96,6 +97,10 @@ def _compare(
             )
             got.append(image.array)
     got_t, waves_t = torch.cat(got), torch.stack(waves_got, dim=1)[0]
+    if not path.exists():
+        torch.save({"images": got_t, "waves": waves_t}, path)
+        return
+    want = torch.load(path, weights_only=True)
     if exact:
         assert torch.equal(waves_t, want["waves"])
         assert torch.equal(got_t, want["images"])

@@ -19,6 +19,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from .. import tilt as tilt_geometry
 from ..aberrations._functions import defocus_midplane_shift
+from ..arrays import center_crop
 from ..imaging import CTF, ExitWave
 from ..imaging._tilt import tilt_defocus_shift, tilt_theta
 from ..scattering import IterativeScattering
@@ -225,8 +226,10 @@ class TomogramReconstructor(_BaseReconstructor):
             oversample=propagation.oversample,
             crop=False,
             alpha=propagation.alpha,
-            # The same canvas `TiltSeries` propagates on, so the two agree.
+            # The same canvas `TiltSeries` propagates on, kept through the
+            # transfer function as it keeps it, so the two agree.
             pad_fft=propagation.pads(True),
+            keep_pad=True,
         )
         # The image grid: the transfer function is applied and the intensity
         # formed on the propagation grid, then sampled to the pixel grid, as
@@ -345,7 +348,7 @@ class TomogramReconstructor(_BaseReconstructor):
             pixel_size=self.voxel_size,
             voltage=self.voltage,
             nxy=self.nxy,
-            pad_nxy=self.nxy,
+            pad_nxy=self.iterative_scattering.output_nxy,
             oversample=self._image_oversample,
             defocus_shift=tilt_defocus_shift(
                 tuple(V_batched.shape), theta_matrix, self.voxel_size, model
@@ -365,7 +368,8 @@ class TomogramReconstructor(_BaseReconstructor):
             backend=self.optics.aberration_backend,
             lpp_params=self.optics.lpp_params,
         ).intensity(cc=None)
-        return self.dose_per_pixel[tilt_idx] * image.pixels()[0]
+        field = center_crop(image.pixels()[0], self.nxy, dim=(-2, -1))
+        return self.dose_per_pixel[tilt_idx] * field
 
     def forward(self, tilt_idx: int) -> torch.Tensor:
         """Simulate tilt image ``tilt_idx`` using the current volume."""

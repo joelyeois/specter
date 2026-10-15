@@ -551,6 +551,9 @@ class TiltSeries:
             roi_padding_mode="zeros",
             pad_fft=p.pads(True),
             fft_pad_margin=fft_pad_margin,
+            # The margin carries on through the transfer function; the image
+            # is cropped to the field at the detector.
+            keep_pad=True,
         )
         self._warned_on_host = False
 
@@ -728,7 +731,7 @@ class TiltSeries:
             pixel_size=self.voxel_size,
             voltage=self.voltage,
             nxy=self.nxy,
-            pad_nxy=self.nxy,
+            pad_nxy=self.scattering.output_nxy,
             oversample=1 if linear else p.oversample,
             defocus_shift=shift,
             ids=torch.tensor([series]),

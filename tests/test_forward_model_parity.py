@@ -21,7 +21,7 @@ import itertools
 import pytest
 import torch
 
-from specter.arrays import ball3d
+from specter.arrays import ball3d, center_crop
 from specter.ghostbuster import Reconstructor
 from specter.imaging import CTF, Exposure, Poses, Specimen, simulate_particles
 from specter.settings import Propagation, TiltGeometry
@@ -259,7 +259,8 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
     waves = series.scatter(0)
     # Cc off: the inverse takes no envelopes by design (see _simulate). The
     # intensity per unit dose, as the simulators detect it.
-    clean = waves.apply_ctf(CTF(ctf_params)).intensity(cc=None).pixels()[0]
+    intensity = waves.apply_ctf(CTF(ctf_params)).intensity(cc=None).pixels()[0]
+    clean = center_crop(intensity, nxy, dim=(-2, -1))  # the field, as detected
 
     inverse = TomogramReconstructor(
         V=volume[0].clone(),
@@ -290,23 +291,20 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
     """
     A simulated tilt series must reconstruct back to the volume it came from.
 
-    Recovery, not pixel parity, is the right claim for the tilt path. The two
-    ends deliberately prepare the volume differently at the edges --
-    `TiltSeries` reflect-pads XY so a tilted ray stays on-grid, and
-    `TomogramReconstructor._prepare_volume` documents why it does not, leaving
-    the FOV mask to drop the periphery from the loss. Demanding identical
-    images would fail on a region neither end uses. What must agree is anything
-    acting on the interior: the defocus convention, the amplitude-contrast
-    term, the scattering model. A reconstruction cannot converge if those
-    differ, so convergence is the test.
+    Recovery, not pixel parity, is the right claim for the tilt path; what
+    must agree is anything acting on the interior: the defocus convention,
+    the amplitude-contrast term, the scattering model. A reconstruction
+    cannot converge if those differ, so convergence is the test.
 
-    Calibrated against a wrong forward model rather than against zero, with
-    the reconstructor's own loss (squared residual over the expected counts
-    per pixel). Reconstructing with the CTF the tilt series was simulated
-    with drops the loss ~87x and reaches a correlation of 0.78; getting the
-    defocus wrong by 8000 A drops it ~6x and reaches 0.41. Correlation is capped well below 1
-    by the missing wedge, which a +/-45 degree range leaves regardless of how
-    well the forward model matches.
+    Both ends take the specimen's surroundings as vacuum here. By default
+    `TiltSeries` reflect-pads a volume too narrow for its tilt coverage, while
+    `TomogramReconstructor._prepare_volume` documents why it does not; and a
+    tilt keeps its FFT margin through the transfer function, which carries
+    whatever surrounds the field into its edges. With the simulator's
+    padding, that edge band differs between the two ends and holds the
+    recovered correlation to 0.645; without it, 0.845. Correlation is capped
+    well below 1 by the missing wedge, which a +/-45 degree range leaves
+    regardless of how well the forward model matches.
     """
     from specter.ghostbuster import TomogramReconstructor
     from specter.imaging import Sample
@@ -331,6 +329,7 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         micrograph_size=nxy,
         tilt=TiltGeometry(tilt_axis="y"),
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
+        pad_volume=False,
         log=False,
     )
     dose_per_pixel = 2.0 * pixel_size**2
@@ -339,7 +338,14 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         observed = (
             torch.stack(
                 [
-                    series.scatter(i).apply_ctf(CTF(ctf_params)).intensity().pixels()[0]
+                    center_crop(
+                        series.scatter(i)
+                        .apply_ctf(CTF(ctf_params))
+                        .intensity()
+                        .pixels()[0],
+                        nxy,
+                        dim=(-2, -1),
+                    )
                     for i in range(n_tilts)
                 ]
             )[None]

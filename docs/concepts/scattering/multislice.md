@@ -162,8 +162,12 @@ implements the identical recursion above, but fetches each Z-slice via
 rather than indexing directly into `V`. Two further mechanisms apply:
 
 - **`pad_fft`**, on by default for a tilt series, runs the entire
-  recursion on a canvas padded by `fft_pad_margin` (32) zero-filled pixels
-  on each side, cropping back to `nxy` only once at the end. The FFT treats
+  recursion on a canvas padded by `fft_pad_margin` (32) pixels on each
+  side, which sample the volume beyond the field and are zero where it ends.
+  A tilt keeps that canvas through the transfer function, itself a circular
+  convolution, and the detector crops the image to the field, so the CTF's
+  delocalisation draws on what surrounds the field instead of wrapping the
+  field's opposite edges into each other. The FFT treats
   the frame as periodic, and under tilt its two edges cross the slab at
   depths a frame width times \(\tan\theta\) apart, so an unpadded
   recursion joins a phase step there that every slice diffracts into both

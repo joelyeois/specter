@@ -19,6 +19,7 @@ import roma
 import torch
 
 from specter.aberrations import Aberration
+from specter.arrays import center_crop
 from specter.imaging import (
     CTF,
     ExitWave,
@@ -624,16 +625,17 @@ def test_edge_margin_pads_beyond_the_geometric_minimum(ctf_params):
 
 
 def test_pad_fft_multislice_shapes_match(ctf_params):
-    """pad_fft must not change output shapes, and must not crash -- at any tilt.
+    """pad_fft must not change the detected image's shape, and must not crash
+    -- at any tilt.
 
     Regression guard for a tilt-angle artifact distinct from edge_margin's:
     multislice's per-slice Fresnel propagation is an FFT-based convolution
     that is periodic over whatever canvas it runs on. Propagating at exactly
     the output size gives it zero headroom; under tilt the resulting per-step
     wraparound compounds coherently into a visible artifact along all four
-    frame edges. pad_fft fixes this inside IterativeScattering.multislice:
-    pad once before the recursion, crop back once at the end, so the
-    propagator's size and the wave's pixel grid are always the image size.
+    frame edges. pad_fft pads once before the recursion; the wave and its
+    intensity keep the padded canvas through the transfer function, also a
+    circular convolution, and the detector crops the image to the field.
 
     This also covers the scenario that used to crash: the identity (0 deg)
     path previously did raw tensor indexing with no bounds handling, and the
@@ -648,11 +650,13 @@ def test_pad_fft_multislice_shapes_match(ctf_params):
         assert series.scattering.nxy == series.nxy == 32
 
         waves = series.scatter(0)
-        assert waves.pad_nxy == 32
+        canvas = 32 + 2 * series.scattering.fft_pad_margin
+        assert waves.pad_nxy == canvas
         intensity = waves.apply_ctf(CTF(ctf_params)).intensity()
         image = intensity.detect(exposure[0:1], noise=None)
-        for tensor in (image.array, waves.pixels(), intensity.pixels()):
-            assert tensor.shape[-2:] == (32, 32)
+        assert image.array.shape[-2:] == (32, 32)
+        for tensor in (waves.pixels(), intensity.pixels()):
+            assert tensor.shape[-2:] == (canvas, canvas)
 
 
 def test_pad_fft_changes_the_exit_wave_under_tilt():
@@ -664,7 +668,8 @@ def test_pad_fft_changes_the_exit_wave_under_tilt():
     padded, _ = _tilt_series(
         [45.0], propagation=Propagation(scattering_model="multislice", pad_fft=True)
     )
-    assert not torch.allclose(base.scatter(0).pixels(), padded.scatter(0).pixels())
+    field = center_crop(padded.scatter(0).pixels(), 32, dim=(-2, -1))
+    assert not torch.allclose(base.scatter(0).pixels(), field)
 
 
 def test_a_series_leaves_its_volume_where_it_was_given():

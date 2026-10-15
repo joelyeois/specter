@@ -53,6 +53,7 @@ class IterativeScattering(L.LightningModule):
         fft_pad_margin: int = 32,
         oversample: int = 1,
         crop: bool = True,
+        keep_pad: bool = False,
     ):
         """
         Parameters
@@ -127,6 +128,14 @@ class IterativeScattering(L.LightningModule):
             Crop the oversampled exit wave back to the slice grid (default),
             or return it on the propagation grid for the image to be formed
             there; see :class:`Scattering`. Default True.
+        keep_pad : bool, optional
+            Under ``pad_fft``, return the multislice wave on the whole padded
+            canvas, :attr:`output_nxy` pixels across, rather than cropped to
+            ``nxy``. The margin samples the volume beyond the field, so the
+            transfer function, a circular convolution as well, then sees what
+            surrounds the field instead of wrapping its opposite edges into
+            each other; the image is cropped to the field at the detector.
+            Default False.
         """
         super().__init__()
         if not isinstance(oversample, int) or oversample < 1:
@@ -145,6 +154,7 @@ class IterativeScattering(L.LightningModule):
         self.roi_padding_mode = roi_padding_mode
         self.pad_fft = pad_fft
         self.fft_pad_margin = fft_pad_margin
+        self.keep_pad = keep_pad
 
         k = frequency_grid(nxy, pixel_size)
         self.register_buffer("k2", k**2, persistent=False)
@@ -661,15 +671,28 @@ class IterativeScattering(L.LightningModule):
                     elastic_block, source_block = [], []
         return self._output(wave, canvas)
 
+    @property
+    def output_nxy(self) -> int:
+        """
+        Pixels across the wave :meth:`forward` returns: the padded canvas for
+        a multislice wave under ``keep_pad``, else ``nxy``.
+        """
+        padded = self.pad_fft and self.keep_pad
+        return (
+            self.padded_nxy
+            if padded and self.scattering_model == "multislice"
+            else self.nxy
+        )
+
     def _output(self, wave: torch.Tensor, canvas: int) -> torch.Tensor:
         """
         The multislice exit wave as the caller asked for it: cropped to the
-        slice grid, or left on the propagation grid; either way with the
-        ``pad_fft`` canvas margin removed.
+        slice grid, or left on the propagation grid; with the ``pad_fft``
+        canvas margin removed unless ``keep_pad``.
         """
         if self.crop:
             wave = fourier_crop_xy(wave, canvas)
-        if self.pad_fft:
+        if self.pad_fft and not self.keep_pad:
             out = self.nxy if self.crop else self.nxy * self.oversample
             wave = center_crop(wave, out, dim=(-2, -1))
         return wave

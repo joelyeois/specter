@@ -162,11 +162,19 @@ print(
 )
 # --8<-- [end:scatter]
 
+
+def field(image) -> torch.Tensor:
+    """The first image on the field's pixels, the FFT margin cropped."""
+    pixels = image.pixels()[0]
+    m = (image.pad_nxy - image.nxy) // 2
+    return pixels[m : m + image.nxy, m : m + image.nxy]
+
+
 show = [-60.0, -30.0, 0.0, 30.0, 60.0]
 fig, axes = plt.subplots(2, len(show), figsize=(2.0 * len(show), 4.3))
 for col, a in enumerate(show):
     i = angles.index(a)
-    clean = lowpass(images[i].pixels()[0], 12.0, 4.0)
+    clean = lowpass(field(images[i]), 12.0, 4.0)
     noisy = lowpass(tilts[i].array[0], 12.0, 4.0)
     show_image(
         axes[0, col],
@@ -187,7 +195,7 @@ save(fig, "tilt-series-gallery")
 # attenuation over the slanted path t / cos(theta).
 mfp = ice_inelastic_mfp(300.0)
 thickness = sample.nz * 4.0
-mean = np.array([float(im.pixels()[0].mean()) for im in images])
+mean = np.array([float(field(im).mean()) for im in images])
 theta = np.linspace(-62, 62, 200)
 model = np.exp(-thickness / (mfp * np.cos(np.deg2rad(theta))))
 predicted = np.exp(-thickness / (mfp * np.cos(np.deg2rad(ang))))

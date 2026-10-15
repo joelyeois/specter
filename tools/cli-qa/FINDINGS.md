@@ -139,6 +139,78 @@ All three were artifacts of the Phase 1 baseline being too sparse, not no-ops:
   19, and `filler_table_max_mw_kda` 100 leaves 9. Phase 1 had the reference
   tables switched off, so there was nothing for the cutoffs to cut.
 
+## 2026-10-15 rerun, after the docs restructure and its fixes
+
+The full Phase 1 sweep of all four commands, run after `potential_scale` was
+removed, a tilt began keeping its FFT margin through the transfer function,
+`Propagation.pad_fft` became a per-path default, and `blob/sign` began to be
+honoured.
+
+| Command | Full sweep | After the spec fixes below |
+|---|---|---|
+| `simulate particles` | 74/76 | 81/81 |
+| `simulate micrograph` | 51/53 | 67/67 |
+| `simulate tiltseries` | 35/37 | 41/41 |
+| `build tomogram` | 17/21 | 21/21 |
+
+Every flag of every command is now covered (`spec does not cover: []`).
+
+**Harness fixes.** Two baselines could not start. `PDB_A`/`PDB_B` named
+`1mbo.cif`, which a cache may hold only as `1mbo-assembly1.cif`, so the
+particle and micrograph baselines were refused ("looks like a path, but no
+such file"); `spec._cached` now takes whichever file the cache holds. With
+`SPECTER_QA_WORKDIR` set, `QA_VOLUME` pointed at the work directory itself
+rather than `tomogram/baseline_a/out.mrc` under it, so the tilt-series
+baseline failed. `--only` now takes a comma-separated list.
+
+**Spec fixes: contexts and perturbations that could not change anything.**
+
+- `simulate micrograph --ice_profile meniscus` and `--ice_hole_radius 3000`
+  had a context that already set both, so each run was identical to its
+  reference by construction (since 2026-08-22). The meniscus now runs against
+  a flat profile with the radius set, and the radius is perturbed to 1500.
+- `simulate particles --potential_method 2d` and `--periodic true` were refused
+  under the defaults (Shtyrov species are not supported by `2d`; `analytic`
+  does not wrap). They run under `--scattering_factors kirkland` and
+  `--potential_method 3d` respectively, the latter in a 48 A box: in the
+  144 A baseline box the molecule's kernel never reaches a face to wrap.
+- `simulate tiltseries --cc`/`--energy_spread`/`--temporal_coherence` move the
+  6 A baseline's expected counts by ~1e-5 relative (measured 1.5e-6 for
+  `--cc 2.0`), which no seeded Poisson count resolves and which sits under the
+  sweep's 5e-3 tolerance; they are not no-ops. They run noiseless at 2 A voxels
+  (`TILT_FINE`), `--cc` perturbed to 5.0 (2.0 gives 3.8e-3), the envelope at
+  120 kV.
+- `build tomogram --filler_table_{min,max}_mw_kda` act on the reference tables
+  `qa_tomogram.toml` switches off; they run under `--filler_from_pei2016 true`.
+  `--membrane_min_transmembrane_spacing` (binds at ~60 copies, a TOML-only
+  count) and `--membrane_region_max_passes` (the gold-bead budget, which a few
+  beads never exhaust) are skipped with that reason.
+- New coverage: particles' absorption, `oversample`, `temporal_coherence`;
+  the micrograph's `bfactor`, `klim`, `oversample`, `temporal_coherence`, the
+  shape packer's knobs and the water-air interface bias; the tilt series'
+  `bfactor`, `klim`, `oversample`; the tomogram's `packing_max_retries`
+  (perturbed to 1, since 20 still placed every instance of the sparse
+  baseline) and `packing_voxel_size`. The micrograph's `packing_max_retries`
+  needs a crowded field (`--n_candidates 400`) to bind. Paths, job tracking
+  and the Monomer Library flags are skipped with reasons.
+
+**Fixed: `simulate micrograph --packing_seed` was ignored whenever `--seed`
+was set.** `Field.draw` overwrote the crowd's `packing_seed` with the per-index
+`derive_seed(seed, index, SEED_STAGE_SPECIMEN)` for the draw and restored it
+after (`imaging/_field.py`, the `seed is not None` branch), so the flag did
+nothing in any seeded run, every QA run included. A set value is now mixed
+into the per-index seed (`imaging._stages.packer_seed`); unset, a seeded
+packing is unchanged. 67/67 after the fix
+(`tests/test_crowding.py::test_a_set_packing_seed_still_changes_a_seeded_packing`).
+
+**Fixed, outside the sweep: `specter reconstruct particle` doubled its output
+directory.** Run from the docs with no `--project` or `--job_id`, it wrote to
+`reconstructions/reconstructions/J001` and created no `.specter` marker:
+`resolve_output_dir` read the unset fields as an untracked run and returned the
+`reconstructions/` default, under which `Job` grew its own
+`reconstructions/J001`. Reconstruction tracks every run, so it now passes
+`tracked=True`.
+
 ## Reproducing
 
 ```bash

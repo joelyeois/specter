@@ -2,7 +2,7 @@
 
 Usage
 -----
-    python tools/cli-qa/sweep.py particles [--workers 12] [--only ice_model]
+    python tools/cli-qa/sweep.py particles [--workers 12] [--only ice_model,dose]
     python tools/cli-qa/sweep.py all
 
 For each command it runs the baseline twice (a determinism check -- if two
@@ -213,7 +213,8 @@ def sweep(spec: CommandSpec, workers: int, only: str | None = None) -> list[RunR
         print(f"  spec fix: {note}")
     todo = [f for f in spec.flags if f.expect != "skip"]
     if only:
-        todo = [f for f in todo if f.name == only]
+        names = set(only.split(","))
+        todo = [f for f in todo if f.name in names]
 
     # A flag that needs `context` to be meaningful must be judged against a run
     # with that context and nothing else -- otherwise the context's own effect

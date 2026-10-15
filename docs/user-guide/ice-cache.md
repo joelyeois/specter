@@ -265,6 +265,27 @@ is the spread of $S(k)$ loss across a library, which the command prints
 when it finishes. An outlier against its own library is meaningful; an
 absolute cutoff is not.
 
+A single small configuration shows what one entry records and how its
+structure compares with the bundled library's:
+
+```bash
+--8<-- "docs-includes/cli-guides/ice_cache-command.txt"
+```
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/ice_cache-summary.txt"
+```
+
+![The Fourier amplitude of a 64 Å configuration's water positions against three bundled configurations.](../assets/images/cli-guides/ice_cache-structure.png){ width="700" style="display:block;margin:1.2em auto;" }
+///caption
+The rotationally averaged Fourier amplitude \(|F(k)|/\sqrt{N}\) of the
+water positions, the square root of their structure factor, for the 64 Å
+configuration above and the first three bundled 256 Å configurations. The
+new configuration samples \(k\) four times more coarsely, since its cell is
+a quarter the size, and follows the bundled curves through the first peak
+at 3.7 Å (dotted) and the second maximum near 0.47 Å⁻¹.
+///
+
 ### Coordinate storage
 
 Every configuration wraps its atoms into $[-L/2, L/2)$ for a cell of side

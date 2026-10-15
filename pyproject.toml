@@ -169,3 +169,4 @@ markers = [
 # script's own plotting code imported the same module earlier.
 "docs-figures/walkthrough/*.py" = ["E402", "F811"]
 "docs-figures/tutorials/*.py" = ["E402", "F811"]
+"docs-figures/cli_guides/*.py" = ["E402", "F811"]

@@ -184,9 +184,35 @@ A gold-standard run writes, into its job directory:
 - `epochs/fsc_<NNN>_A.png` / `epochs/fsc_<NNN>_B.png`: per-epoch
   map-to-model FSC against `--fsc_ref`, if you passed one.
 
-![A gold-standard half-map FSC curve, drawn from a synthetic band-limited pair for illustration, not a real reconstruction.](../assets/images/reconstruction-gold-standard-fsc.png){ width="620" style="display:block;margin:1.2em auto;" }
+The run below reconstructs data whose answer is known.
+`docs-figures/cli_guides/reconstruction.py` writes a 1000-row `.cs` from the
+64-particle EMPIAR-11377 refinement in `docs-figures/data/`, with random
+poses, defoci between 1 and 2 µm and the rows assigned alternately to halves
+A and B. `specter simulate particles` images 8B0X at those poses, and the
+shipped config reconstructs both halves from the stack, with the rendered
+model as `--fsc_ref`:
+
+```bash
+--8<-- "docs-includes/cli-guides/reconstruction-simulate.txt"
+```
+
+```bash
+--8<-- "docs-includes/cli-guides/reconstruction-command.txt"
+```
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/reconstruction-run.txt"
+--8<-- "docs-includes/cli-guides/reconstruction-result.txt"
+```
+
+![The model, the reconstruction, and their Fourier shell correlations.](../assets/images/cli-guides/reconstruction-gold-standard.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-A gold-standard half-map FSC curve, drawn from a synthetic band-limited pair for illustration, not a real reconstruction.
+The model the stack was simulated from and the average of the two
+half-maps, each projected along z, with the FSC curves up to the 5.85 Å
+Nyquist frequency. After five epochs on 500 particles per half, the
+half-maps correlate to 0.143 at 6.6 Å, the `resolution_gold_standard` that
+`job.json` records, and the average of the halves correlates with the model
+to 0.5 at 6.6 Å.
 ///
 
 Reconstruction records four resolution numbers per epoch in `job.json`:

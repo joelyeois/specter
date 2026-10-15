@@ -1,0 +1,47 @@
+────────────────── Building specimen volume (tomogram_config) ──────────────────
+─────────────────────────── Building specimen volume ───────────────────────────
+Volume: (300, 1200, 1200) voxels (Z, Y, X) @ 5.00 A/voxel = 1500 x 6000 x 6000 A
+Device: cuda
+───────────────────────────────── Carbon film ──────────────────────────────────
+Carbon film: 3s
+────────────────────────────────── Membranes ───────────────────────────────────
+─────────────────────────────────   Placement ──────────────────────────────────
+  Placement: 9s
+──────────────────────────   Generation & compositing ──────────────────────────
+  Generation & compositing: 27s
+───────────────────────────   Region classification ────────────────────────────
+  Region classification: 3s
+──────────────────────────────   Shell labelling ───────────────────────────────
+  Shell labelling: 0s
+Membranes (6/6 instance(s) placed): 40s
+────────────────────────────────── Filaments ───────────────────────────────────
+Filaments (825 monomer instance(s), 5 microtubule(s)): 6s
+──────────────────────────── Loading PDB structures ────────────────────────────
+Loaded 26 PDB structure(s): 1s
+─────────────────────────────── Cytosol species ────────────────────────────────
+  Target packing (cytosol): 4s
+  Target rendering (cytosol): 1s
+  Filler packing (cytosol): 10s
+  Filler rendering (cytosol): 6s
+Cytosol species: 24s
+──────────────────────────────── Lumen species ─────────────────────────────────
+  Membrane instances: 6/6 placed
+  Transmembrane: 190 placed
+  Filaments: 825 monomer instance(s) placed (1 species)
+  Microtubules: 5 tube(s), 4745 dimer instance(s) placed
+  Carbon film: generated
+  Cytosol: 90 target(s), 19476 filler placed
+  Occupancy: 37.8% of volume
+──────────────────────────────────── Saving ────────────────────────────────────
+
+Total time: 1m 49s
+───────────── Loading specimen volume from tomograms/tomogram.mrc ──────────────
+  Volume shape: (300, 1200, 1200)  (Z, Y, X)
+────────────────────────── Preparing the tilt series ───────────────────────────
+  Tilt angles: 41 steps from -60.0° to 60.0°
+──────────────────────── Generating tilt series on cuda ────────────────────────
+──────────────────────────────────── Saving ────────────────────────────────────
+  ✓ tiltseries/tilt_series.mrcs
+  ✓ tiltseries/tilt_series.star
+
+Total time: 27m 54s

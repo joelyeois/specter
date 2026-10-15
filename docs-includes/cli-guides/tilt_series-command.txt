@@ -1,0 +1,7 @@
+specter simulate tiltseries \
+    --config configs/tiltseries.toml \
+    --tomogram_config configs/tomogram.toml \
+    --n_tilts 41 \
+    --min_tilt_angle -60 --max_tilt_angle 60 \
+    --seed 0 \
+    --device cuda

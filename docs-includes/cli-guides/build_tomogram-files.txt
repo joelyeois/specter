@@ -1,0 +1,6 @@
+tomogram.mrc  1.73 GB
+tomogram_membrane_labels.mrc  0.86 GB
+tomogram_protein_labels.mrc  0.86 GB
+tomogram_regions.mrc  0.86 GB
+26 species with picks, 21211 instances
+targets: 7VD8 15, 1FA2 15, 6DRV 15, 6QZP 15, 7B75 15, 6N4V 15

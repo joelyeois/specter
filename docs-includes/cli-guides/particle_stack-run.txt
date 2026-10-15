@@ -1,0 +1,9 @@
+─────────────────────── Building 3D scattering potential ───────────────────────
+────────────────── Sampling poses, defocus, and translations ───────────────────
+────────────────────────── Generating images on cuda ───────────────────────────
+─────────────────────────────── Post-processing ────────────────────────────────
+───────────────────────────── Saving .mrcs + .star ─────────────────────────────
+  ✓ particles/particles.mrcs
+  ✓ particles/particles.star
+
+Total time: 9s

@@ -1,0 +1,57 @@
+# Written by `specter match particles`.
+# Run with: specter simulate particles --config matched.toml --n_particles <N>
+# voltage: 300.0 (metadata)
+# pixel_size: 2.924 (metadata)
+# dose: 40.0 (metadata)
+# detector_model: falcon4i_300kv (detector table)
+# coincidence_radius: 0.077 (metadata)
+# dose_envelope: True (fixed)
+# ice_motion_variance: 0.38 (fixed)
+# cc: 2.7 (acquisition card)
+# energy_spread: 0.7 (acquisition card)
+# ice_thickness: 0.0 (probe)
+# crowd_min_distance: 360.8 (probe)
+# bfactor: 0.0 (fixed)
+
+[specimen]
+pdb_source = "8b0x"
+assembly = true
+n_pixels = 128
+ice_thickness = 0.0
+ice_motion_variance = 0.38
+
+[dataset]
+cs_path = "empiar-11377-64particles-pdbframe.cs"
+# n_particles = (unset)
+
+[microscope]
+dose = 40.0
+n_frames = 40
+detector_model = "falcon4i_300kv"
+coincidence_radius = 0.07742292289113982
+dose_envelope = true
+dose_envelope_target = "specimen"
+cc = 2.7
+energy_spread = 0.7
+
+[models]
+scattering_model = "multislice"
+noise_model = "poisson"
+ice_model = "gd"
+
+[crowding]
+crowd_min_distance = 360.8409242275762
+
+[compute]
+device = "cuda"
+
+[advanced]
+pad_fft = true
+normalize_particles = true
+pdb_cache_dir = "~/.cache/specter/pdb"
+# monomer_library_path = (unset)
+absorption_model = "inelastic_mfp"
+# inelastic_mfp_solvent = (unset)
+# inelastic_mfp_specimen = (unset)
+# dose_weights_path = (unset)
+# dose_weights_max_frequency = (unset)

@@ -392,7 +392,11 @@ docs-figures/                  # Tracked scripts that regenerate docs/assets/ima
                               # walkthrough's and redirects output to images/tutorials/ and
                               # docs-includes/tutorials/); walkthrough/gallery.py makes docs/gallery.md's
                               # thumbnails. Theory pages (docs/concepts/) open with an "In code" box linking
-                              # to where the walkthrough or a tutorial uses them.
+                              # to where the walkthrough or a tutorial uses them. cli_guides/ does the same for
+                              # the Command-line guides (docs/user-guide/), running the real `specter` commands.
+                              # tests/test_docs_snippets.py checks every quoted section and image exists;
+                              # check_outputs.py reruns the page scripts before a release and lists every
+                              # number a page quotes that its new output no longer contains.
 docs-includes/                 # Generated Markdown fragments that docs/ pulls in via pymdownx.snippets (base_path is
                               # the repo root). OUTSIDE docs/ on purpose: a .md file inside docs_dir is built as a
                               # page of its own, and a fragment is not a page. Nothing here is edited by hand —

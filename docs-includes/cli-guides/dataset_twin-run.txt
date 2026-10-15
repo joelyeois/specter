@@ -1,0 +1,17 @@
+──────────────────── Reading the refinement and its images ─────────────────────
+64 particles at 2.9240 Å, 128 px box, 300 kV
+probes: 64 particles at 128 px / 2.924 Å (1x binned), 1 worker(s) on cuda
+─────────────── Checking that the poses are aligned to the model ───────────────
+matched 0.327 vs shuffled 0.082, 100% of pairs above, z = 55.6: PASS
+────── Deriving detector and envelope settings from the acquisition card ───────
+──────── Probing ice thickness and neighbour spacing against the images ────────
+─────────── Comparing two seeds with the experiment at matched poses ───────────
+SNR ratio sim/exp per band: 0.97 [0.80, 1.18], 2.21 [2.03, 2.41], 1.34 [1.03, 
+1.76], 12.34 [2.90, 105.84], nan  | twin d = -0.19
+───────────────────── Writing matched.toml and the report ──────────────────────
+✓ match/matched.toml
+✓ match/match_report.md
+✓ match/match_report.png
+match: simulated and experimental SNR agree within 3x at every scale coarser 
+than 6.7 Å.
+Done in 6m 20s

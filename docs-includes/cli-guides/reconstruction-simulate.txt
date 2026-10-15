@@ -1,0 +1,10 @@
+specter simulate particles \
+    --pdb_source 8b0x \
+    --cs_path particles.cs \
+    --n_particles 1000 \
+    --n_pixels 128 \
+    --dose 40 \
+    --batchsize 4 \
+    --seed 0 \
+    --device cuda \
+    --output_dir particles

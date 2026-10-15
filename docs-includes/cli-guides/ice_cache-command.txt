@@ -1,0 +1,1 @@
+specter build ice --n_configs 1 --n 64 --dx 1.0 --device cuda --output_dir ice

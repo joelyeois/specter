@@ -1,0 +1,7 @@
+specter simulate micrograph \
+    --config configs/micrograph.toml \
+    --pdb_source 6bdf \
+    --micrograph_size 1536 \
+    --seed 0 \
+    --device cuda \
+    --output_dir micrographs

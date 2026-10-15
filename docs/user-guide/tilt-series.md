@@ -66,11 +66,13 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
 
 ## Advanced: envelopes, ice, and edge handling
 
-- **Envelopes**: `convergence_angle` (mrad) and `cc` (mm, chromatic
-  aberration coefficient) are both `None`/unset by default, which disables
-  the corresponding Cs (spatial-coherence) and Cc (temporal-coherence)
-  envelopes; set either to enable it. `energy_spread`, `deltaV_V`,
-  `deltaI_I` feed the Cc envelope specifically. `dose_envelope` applies the
+- **Envelopes**: `convergence_angle` (mrad) is unset by default, which
+  disables the spatial-coherence envelope; set it to enable that envelope.
+  `cc` (mm, chromatic aberration coefficient) defaults to 2.7, and with
+  `energy_spread` (0.7 eV FWHM), `deltaV_V` and `deltaI_I` sets the focal
+  spread each tilt image is summed over (`temporal_coherence =
+  "integrated"`; `"envelope"` applies it as an envelope on the CTF
+  instead). `cc = 0` disables it. `dose_envelope` applies the
   Grant & Grigorieff (2015) radiation-damage envelope per tilt: each tilt
   is treated as a plain exposure of `dose_per_tilt` taken after the
   summed dose of the tilts before it, in index order, so supply the tilt
@@ -150,6 +152,33 @@ specter simulate tiltseries --config configs/tiltseries.toml \
     --tomogram_config configs/tomogram.toml \
     --device cuda:0
 ```
+
+With the tilt range of [Basic usage](#basic-usage) and a fixed seed, the
+same command builds the shipped tomogram and images it:
+
+```bash
+--8<-- "docs-includes/cli-guides/tilt_series-command.txt"
+```
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/tilt_series-run.txt"
+```
+
+The `.star` file holds one row per tilt:
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/tilt_series-output.txt"
+```
+
+![Five of the 41 tilts, whole field and central region.](../assets/images/cli-guides/tilt_series-gallery.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Five of the 41 tilts, each at 2.2 µm defocus and 3 e⁻/Å². Top: the whole
+6000 Å field, low-pass filtered to 40 Å, where the membranes are dark
+outlines and the carbon film is the dark region at the right. Bottom: the
+central 2000 Å at 20 Å. A tilted view spans more of the specimen's x extent
+than the volume holds; the volume is reflect-padded to cover it, so at
+±60° the film's edge appears together with its mirror image.
+///
 
 `--tomogram_config` and `--volume_path`/`config.volume_path` are mutually
 exclusive; passing both raises an error rather than silently picking one.

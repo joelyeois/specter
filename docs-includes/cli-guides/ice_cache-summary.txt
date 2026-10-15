@@ -1,0 +1,3 @@
+config_000.pt: 64 Å cell, 8237 water beads
+steps 250 of 250, stopped_early false
+S(k) loss 7.72e-07, ML-BOP energy -0.365 eV/atom

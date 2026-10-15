@@ -1,0 +1,10 @@
+─────────────────────── Building 3D scattering potential ───────────────────────
+──────────────── Sampling defocus, dose, and coincidence radius ────────────────
+──────────────────────────── Building the specimen ─────────────────────────────
+────────────────────── Generating 1 micrograph(s) on cuda ──────────────────────
+─────────────────────────────── Post-processing ────────────────────────────────
+───────────────────────────── Saving .mrcs + .star ─────────────────────────────
+  ✓ micrographs/micrographs.mrcs
+  ✓ micrographs/micrographs.star
+
+Total time: 20s

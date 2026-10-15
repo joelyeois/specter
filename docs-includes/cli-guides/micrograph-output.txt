@@ -1,0 +1,2 @@
+stack (1, 1536, 1536), 1.0 Å/px, mean 14.8 counts
+defocus 9963 Å, dose 20 e-/Å^2

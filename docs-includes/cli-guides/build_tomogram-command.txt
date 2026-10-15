@@ -1,0 +1,6 @@
+specter build tomogram \
+    --config configs/tomogram.toml \
+    --voxel_size 5.0 \
+    --seed 0 \
+    --device cuda \
+    --output_dir tomograms

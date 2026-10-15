@@ -86,6 +86,36 @@ the default uniform-absorption path.
 
 ## Reading the report
 
+The report below comes from 64 particles of EMPIAR-11377, Fourier-cropped
+to a 128 px box at 2.924 Å. With so few particles, `--n_battery 64` keeps
+the two-seed comparison within the set (its default is 200):
+
+```bash
+--8<-- "docs-includes/cli-guides/dataset_twin-command.txt"
+```
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/dataset_twin-run.txt"
+```
+
+![The report figure of a match on 64 EMPIAR-11377 particles](../assets/images/cli-guides/dataset_twin-report.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+The report figure of the run above. The pose check passed with a matched-pair correlation of 0.327 against 0.082
+for shuffled pairs. The per-band SNR ratios are 0.97, 2.21 and 1.34 from
+coarse to 6.7 Å, so the verdict is a match. The 6.7-4 Å ratio of 12.34 has
+a 68% interval of 2.90 to 105.84, since the experiment carries almost no
+signal there. The twin test gives Cohen's d = -0.19. Ice thickness was not
+resolved at 64 particles, and the report keeps the first candidate, 0 Å,
+with a warning.
+///
+
+The `matched.toml` it wrote, which `specter simulate particles --config
+matched.toml` runs as is:
+
+```{ .toml .output }
+--8<-- "docs-includes/cli-guides/dataset_twin-toml.txt"
+```
+
 The figure shows five experimental particles above their simulated twins
 and the mean image of each stack, the overlaid radial power spectra with
 their ratio, the per-band SNR ratio, and the twin-test histograms. The

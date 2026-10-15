@@ -1,0 +1,7 @@
+stack (41, 1200, 1200), 5.0 Å/px
+   specterTiltAngle  rlnDefocusU  specterDosePerAngstrom
+0             -60.0      22000.0                     3.0
+1             -57.0      22000.0                     3.0
+2             -54.0      22000.0                     3.0
+3             -51.0      22000.0                     3.0
+4             -48.0      22000.0                     3.0

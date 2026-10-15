@@ -34,6 +34,27 @@ membranes, filaments, exact-count targets, ratio-based filler); the
 [command reference](../api/cli/build.md#specter-build-tomogram) documents every
 field.
 
+The second command, with a fixed seed, builds the volume below:
+
+```bash
+--8<-- "docs-includes/cli-guides/build_tomogram-command.txt"
+```
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/build_tomogram-run.txt"
+```
+
+![A slab through the built volume, a zoomed region, and a side view.](../assets/images/cli-guides/build_tomogram-volume.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+A 40 Å slab through z = 65 of the 300 slices, the slice that cuts the most
+bilayer, low-pass filtered to 20 Å (top left); the boxed 2000 Å region (top
+right); and a 400 Å slab along the dashed line seen from the side, with z
+running down (bottom). Bilayers are dark rings, the gold beads dark discs,
+and the filaments straight rods, with the protein fill packed around them.
+In the side view the two bilayers on the dashed line run into the slab's
+top face.
+///
+
 ## What you'll usually tune
 
 - **Box size**: `target_shape` (Z, Y, X voxels) and `voxel_size` (Å/voxel).
@@ -307,6 +328,23 @@ Alongside `{filename}.mrc`, by default you get:
   the intended ground truth for membrane geometry: a
   membrane surface has no single natural "position" the way a protein
   does, so it isn't represented in the picks files.
+
+The run in [Basic usage](#basic-usage) wrote these files, with picks for
+every species:
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/build_tomogram-files.txt"
+--8<-- "docs-includes/cli-guides/build_tomogram-labels.txt"
+```
+
+![The three segmentation volumes on one slice.](../assets/images/cli-guides/build_tomogram-labels.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+The three label volumes on the slice shown above: 1939 protein instances,
+each in its own colour; the four bilayers this slice cuts; and the region
+classes. None of this draw's membranes encloses a sealed compartment, so
+their interiors are classified as cytosol and the lumen class rounds to
+0.00% of the volume.
+///
 
 `protein_labels` holds every protein instance on one id counter,
 transmembrane proteins included; `membrane_labels` holds the bilayer they

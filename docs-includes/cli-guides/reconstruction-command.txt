@@ -1,0 +1,8 @@
+specter reconstruct particle \
+    --config configs/reconstruct.toml \
+    --cs_file particles.cs \
+    --mrc_file particles/particles.mrcs \
+    --dose_per_angstrom 40 \
+    --fsc_ref reference.mrc \
+    --device cuda \
+    --output_dir .

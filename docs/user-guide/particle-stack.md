@@ -29,6 +29,26 @@ specter simulate particles \
 for your own runs. See [Configure a run](configuration.md) for the full
 TOML/CLI field reference.
 
+The second command, at 16 particles and with a fixed seed, writes the stack
+below:
+
+```bash
+--8<-- "docs-includes/cli-guides/particle_stack-command.txt"
+```
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/particle_stack-run.txt"
+```
+
+![Sixteen particles written by specter simulate particles with the shipped config, each titled with its defocus.](../assets/images/cli-guides/particle_stack-gallery.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+The 16 particles the command wrote, each titled with its own defocus, drawn
+from the config's 0.5-1.5 µm range. Each particle sits in box-depth ice among
+copies of itself, and the stack is normalized with inverted contrast, so the
+particle is light. At the config's 20 e⁻/Å² the particle is barely visible
+in a single image; each is low-pass filtered to 15 Å for display.
+///
+
 ## What you'll usually tune
 
 - **Data source**: `cs_path` or `star_path`, to take poses and per-particle
@@ -146,7 +166,12 @@ CTF (`rlnVoltage`, `rlnSphericalAberration`, `rlnAmplitudeContrast`,
 physics parameters not covered by the RELION spec
 (`specterDosePerAngstrom`, `specterCoincidenceRadius`). Import the `.star` file directly into RELION, or
 read it with [`starfile`](https://github.com/teamtomo/starfile) /
-[`mrcfile`](https://github.com/ccpem/mrcfile) from Python.
+[`mrcfile`](https://github.com/ccpem/mrcfile) from Python. The first rows of
+the `.star` file the run above wrote:
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/particle_stack-star.txt"
+```
 
 Output batches are copied into preallocated host stacks, and per-particle
 normalization runs in bounded chunks using the same background mask and

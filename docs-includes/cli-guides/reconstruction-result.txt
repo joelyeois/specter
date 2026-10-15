@@ -1,0 +1,3 @@
+reconstructions/J001: ['volume_A.mrc', 'volume_B.mrc']
+half-map FSC = 0.143 at 6.6 Å (job.json: resolution_gold_standard = 6.587 Å)
+average of the halves against the model, FSC = 0.5 at 6.6 Å

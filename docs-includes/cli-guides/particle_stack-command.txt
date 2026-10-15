@@ -1,0 +1,8 @@
+specter simulate particles \
+    --config configs/particle.toml \
+    --pdb_source 6bdf \
+    --n_particles 16 \
+    --batchsize 4 \
+    --seed 0 \
+    --device cuda \
+    --output_dir particles

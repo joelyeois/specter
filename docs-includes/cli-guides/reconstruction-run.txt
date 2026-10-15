@@ -1,0 +1,16 @@
+──────────────────────────────── Reconstruction ────────────────────────────────
+  particles.cs + particles.mrcs  |  halfset gold  |  rytov  |  5 epochs
+Loading particle parameters from particles.cs ...
+  500 particles  |  300 kV  |  2.924 Å/px
+Loading particle stack from particles.mrcs ...
+  500 images  |  box 128×128  |  dtype torch.float32
+Starting reconstruction: 500 particles  |  box 128³  |  rytov  |  5 epochs  |  
+batch 3  |  GPU 0
+Loading particle parameters from particles.cs ...
+  500 particles  |  300 kV  |  2.924 Å/px
+Loading particle stack from particles.mrcs ...
+  500 images  |  box 128×128  |  dtype torch.float32
+Starting reconstruction: 500 particles  |  box 128³  |  rytov  |  5 epochs  |  
+batch 3  |  GPU 0
+───────────────────────────────────── Done ─────────────────────────────────────
+  reconstructions/J001  |  57s

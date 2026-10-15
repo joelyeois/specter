@@ -1,0 +1,43 @@
+─────────────────────────── Building specimen volume ───────────────────────────
+Volume: (300, 1200, 1200) voxels (Z, Y, X) @ 5.00 A/voxel = 1500 x 6000 x 6000 A
+Device: cuda
+───────────────────────────────── Carbon film ──────────────────────────────────
+Carbon film: 1s
+────────────────────────────────── Membranes ───────────────────────────────────
+─────────────────────────────────   Placement ──────────────────────────────────
+  Placement: 7s
+──────────────────────────   Generation & compositing ──────────────────────────
+  Generation & compositing: 8s
+───────────────────────────   Region classification ────────────────────────────
+  Region classification: 2s
+──────────────────────────────   Shell labelling ───────────────────────────────
+  Shell labelling: 0s
+Membranes (6/6 instance(s) placed): 17s
+────────────────────────────────── Filaments ───────────────────────────────────
+Filaments (800 monomer instance(s), 5 microtubule(s)): 1s
+──────────────────────────── Loading PDB structures ────────────────────────────
+Loaded 26 PDB structure(s): 1s
+─────────────────────────────── Cytosol species ────────────────────────────────
+  Target packing (cytosol): 3s
+  Target rendering (cytosol): 0s
+  Filler packing (cytosol): 7s
+  Filler rendering (cytosol): 3s
+Cytosol species: 15s
+──────────────────────────────── Lumen species ─────────────────────────────────
+  Filler packing (lumen): 2s
+  Filler rendering (lumen): 0s
+Lumen species: 2s
+  Membrane instances: 6/6 placed
+  Transmembrane: 165 placed
+  Filaments: 800 monomer instance(s) placed (1 species)
+  Microtubules: 5 tube(s), 4745 dimer instance(s) placed
+  Carbon film: generated
+  Cytosol: 90 target(s), 20156 filler placed
+  Occupancy: 38.5% of volume
+──────────────────────────────────── Saving ────────────────────────────────────
+  ✓ tomograms/tomogram.mrc
+  ✓ tomograms/tomogram_protein_labels.mrc
+  ✓ tomograms/tomogram_membrane_labels.mrc
+  ✓ tomograms/tomogram_regions.mrc
+
+Total time: 1m 1s

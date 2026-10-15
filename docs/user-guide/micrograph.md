@@ -29,6 +29,35 @@ specter simulate micrograph \
 for your own runs. See [Configure a run](configuration.md) for the full
 TOML/CLI field reference.
 
+The shipped config at a 1536 px field, rather than its 4096 px default,
+writes the micrograph below:
+
+```bash
+--8<-- "docs-includes/cli-guides/micrograph-command.txt"
+```
+
+```{ .text .output }
+--8<-- "docs-includes/cli-guides/micrograph-run.txt"
+--8<-- "docs-includes/cli-guides/micrograph-output.txt"
+```
+
+![A 1536 px micrograph written by specter simulate micrograph, a zoomed region, and its power spectrum.](../assets/images/cli-guides/micrograph-image.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+The micrograph low-pass filtered to 15 Å (left), the boxed 400 Å region at
+8 Å (centre), and the power spectrum of the unfiltered image (right). The
+6BDF copies sit in 500 Å of amorphous ice; at 20 e⁻/Å² they are faint in a
+single exposure, while the Thon rings and the ice's 3.7 Å ring are clear in
+the spectrum.
+///
+
+![The rotationally averaged power spectrum of the micrograph with the predicted CTF zeros.](../assets/images/cli-guides/micrograph-spectrum.png){ width="700" style="display:block;margin:1.2em auto;" }
+///caption
+The rotationally averaged power spectrum, with the zeros of
+\(\sin\chi\) for the micrograph's sampled defocus of 1.00 µm and the
+config's 2 mm \(C_s\) (dotted). The minima fall on the predicted zeros,
+and the broad maximum near 0.27 Å⁻¹ is the ice.
+///
+
 ## What you'll usually tune
 
 - **Specimen**: `pdb_source`, `assembly`, `n_pixels` (the 3D particle

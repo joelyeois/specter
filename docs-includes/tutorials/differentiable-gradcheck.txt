@@ -1,8 +1,8 @@
 autograd   df/dscale   = 2893.03
-autograd   df/ddefocus = 0.850085 per Å
-central difference, h = 0.1    df/dscale   = 2893.12
-central difference, h = 0.01   df/dscale   = 2892.19
-central difference, h = 0.001  df/dscale   = 2928.71
-central difference, h = 100    df/ddefocus = 0.807393
-central difference, h = 10     df/ddefocus = 0.85
-central difference, h = 1      df/ddefocus = 0.852539
+autograd   df/ddefocus = 0.850222 per Å
+central difference, h = 0.1    df/dscale   = 2892.76
+central difference, h = 0.01   df/dscale   = 2893.65
+central difference, h = 0.001  df/dscale   = 2871.09
+central difference, h = 100    df/ddefocus = 0.807637
+central difference, h = 10     df/ddefocus = 0.849414
+central difference, h = 1      df/ddefocus = 0.848633

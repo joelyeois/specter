@@ -169,7 +169,7 @@ def test_scalar_per_image_arguments_index_every_image_without_optics(
     from_coordinates: bool,
 ) -> None:
     """
-    Scalar dose, coincidence radius and potential scale apply to every image.
+    Scalar dose and coincidence radius apply to every image.
 
     They are broadcast to one entry per image. The image count once came only
     from ``ctf_params``, so with no optics (no CTF) the scalars stayed length
@@ -197,7 +197,6 @@ def test_scalar_per_image_arguments_index_every_image_without_optics(
             Exposure(40.0),
             voltage=300.0,
             batch_size=2,
-            scatter=dict(potential_scale=1.0),
             camera=dict(noise="none", coincidence_radius=0.0),
         )
     assert images.array.shape == (n_images, 16, 16)

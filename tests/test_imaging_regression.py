@@ -530,63 +530,6 @@ def test_the_dose_envelope_changes_the_image(small_volume, ctf_params):
 
 
 # ---------------------------------------------------------------------------
-# Potential scale
-# ---------------------------------------------------------------------------
-
-
-def test_a_sample_s_potential_scale_changes_the_image(small_volume, ctf_params):
-    """potential_scale multiplies the volume before scattering.
-
-    Regression guard: it was once accepted and stored but never applied to
-    the micrograph's volume, silently a no-op.
-    """
-    sample = Sample.from_volume(small_volume, 2.0)
-    beam = dict(voltage=VOLTAGE, scattering_model="projection")
-    default = sample.scatter(**beam).array
-    scaled = sample.scatter(**beam, potential_scale=2.0).array
-    assert not torch.allclose(default, scaled)
-
-
-def test_a_tilt_s_potential_scale_changes_the_image():
-    """The same guard, for a tilt series."""
-    series, _ = _tilt_series(
-        [-10.0, 0.0, 10.0], propagation=Propagation(scattering_model="projection")
-    )
-    for i in range(3):
-        default = series.scatter(i).array
-        scaled = series.scatter(i, potential_scale=2.0).array
-        assert not torch.allclose(default, scaled)
-
-
-def test_a_unit_potential_scale_skips_the_extra_volume_copy(small_volume, ctf_params):
-    """
-    `potential_scale=1` must not materialise a second copy of the volume.
-
-    `V * scale` allocates another tensor the size of the whole specimen --
-    33.5 GB at the default config, which is what pushed a 4096-pixel
-    micrograph over a 44 GB card even though the volume itself fits. Scaling
-    by 1 is the default and is a no-op, so it is skipped; this pins that
-    skipping it does not change the image.
-    """
-    torch.manual_seed(0)
-    field = Field(
-        small_volume,
-        2.0,
-        32,
-        crowding=Crowding(min_distance=60.0, water_air_interface=True),
-    ).solvate(Ice(model="random"))
-    beam = dict(scattering_model="projection", alpha=0.1)
-    sample = field.draw(voltage=VOLTAGE, **beam)
-
-    def image(scale: float) -> torch.Tensor:
-        waves = sample.scatter(voltage=VOLTAGE, potential_scale=scale, **beam)
-        lens = waves.apply_ctf(CTF(ctf_params))
-        return lens.intensity().detect(Exposure(2.0), noise=None).array
-
-    assert torch.allclose(image(1.0), image(1.0000001), rtol=1e-4, atol=1e-4)
-
-
-# ---------------------------------------------------------------------------
 # The defocus convention
 # ---------------------------------------------------------------------------
 
@@ -949,12 +892,12 @@ def test_a_clean_volume_streams_when_it_does_not_fit(small_volume, monkeypatch):
     assert torch.equal(got.pixels().cpu(), want)
 
 
-def test_a_unit_scale_batch_propagates_once(small_volume, ctf_params, monkeypatch):
+def test_a_micrograph_batch_propagates_once(small_volume, ctf_params, monkeypatch):
     """
-    Every image of a micrograph batch sees one specimen at one pose, so with
-    a unit potential scale the batch's exit waves are identical: the volume
-    is propagated once, and each image still gets its own CTF and noise --
-    bit-identical to propagating B copies.
+    Every image of a micrograph batch sees one specimen at one pose, so the
+    batch's exit waves are identical: the volume is propagated once, and each
+    image still gets its own CTF and noise -- bit-identical to propagating B
+    copies.
     """
     B = 3
     torch.manual_seed(0)

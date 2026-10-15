@@ -41,7 +41,7 @@ def make(exposure="static"):
         )
 
 
-def run(series, device, scale=1.0, exitwaves=False, clean=False):
+def run(series, device, exitwaves=False, clean=False):
     """
     Image every tilt from the global stream at seed 11, collecting the exit
     waves and clean images only when asked. Returns the images, the
@@ -51,7 +51,7 @@ def run(series, device, scale=1.0, exitwaves=False, clean=False):
     images, waves_out, clean_out = [], [], []
     with torch.no_grad(), limited_cpu_threads(1):
         for i in range(len(series)):
-            waves = series.scatter(i, potential_scale=scale, device=device)
+            waves = series.scatter(i, device=device)
             if exitwaves:
                 waves_out.append(waves.pixels())
             intensity = waves.intensity()
@@ -69,34 +69,22 @@ def run(series, device, scale=1.0, exitwaves=False, clean=False):
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("exposure", ["static", "damage", "motion", "both"])
-@pytest.mark.parametrize("scale", [1.0, 1.5])
-def test_volume_guard_preserves_scaled_and_per_tilt_physics(device, exposure, scale):
-    reference = make(exposure)
-
-    def multiply(_module, args):
-        # The unconditional multiply the guard skips at unity.
-        return (args[0] * scale, *args[1:])
-
-    handle = reference.scattering.register_forward_pre_hook(multiply)
-    expected, _, _, _ = run(reference, device)
-    handle.remove()
+def test_every_tilt_propagates_the_series_own_volume(device, exposure):
+    """
+    Each tilt hands the multislice the series' volume itself, never a copy:
+    a second tomogram-sized volume is what pushes a run off the device.
+    """
     model = make(exposure)
     seen = []
 
     def check_volume(_module, args):
-        source = args[0]
-        if scale == 1.0:
-            assert source is model.volume
-        else:
-            assert source is not model.volume
-            torch.testing.assert_close(source, model.volume * scale, rtol=0, atol=0)
-        seen.append(float(source.sum()))
+        assert args[0] is model.volume
+        seen.append(float(args[0].sum()))
 
     handle = model.scattering.register_forward_pre_hook(check_volume)
-    actual, _, _, _ = run(model, device, scale)
+    run(model, device)
     handle.remove()
     assert len(seen) == 3
-    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("device", DEVICES)

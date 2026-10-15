@@ -600,7 +600,6 @@ def _base_settings(
         # decorrelation under the beam is the exposure filter below.
         dose_envelope_target="specimen",
         ice_motion_variance=SOLVENT_MOTION_VARIANCE,
-        potential_scale=1.0,
         pad_fft=True,
         device=config.device,
         # A distinct specimen mean free path makes the absorption a field --

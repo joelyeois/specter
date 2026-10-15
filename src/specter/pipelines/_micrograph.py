@@ -163,7 +163,6 @@ def run_micrograph(config: MicrographConfig) -> None:
     defocus_angstrom = _uniform_sample(config.defocus, n)
     dose = _uniform_sample(config.dose, n)
     coincidence_radius = _uniform_sample(config.coincidence_radius, n)
-    potential_scale = _uniform_sample(config.potential_scale, n)
 
     n_frames = (
         config.n_frames if config.n_frames is not None else int(dose.mean().item())
@@ -280,7 +279,6 @@ def run_micrograph(config: MicrographConfig) -> None:
                 voltage=config.voltage,
                 ids=torch.tensor([i]),
                 exposure=exposure[one],
-                potential_scale=potential_scale[one],
                 device=device,
                 **propagation,
             )
@@ -347,7 +345,6 @@ def run_micrograph(config: MicrographConfig) -> None:
             filename=config.filename,
             dose_per_angstrom=dose,
             coincidence_radius=coincidence_radius,
-            potential_scale=potential_scale,
         )
 
         if exitwaves_t is not None:

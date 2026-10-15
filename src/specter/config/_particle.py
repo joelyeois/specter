@@ -52,7 +52,7 @@ class ParticleStackConfig:
     corresponding fields below, which are unused in that mode. The two are
     mutually exclusive.
 
-    `dose`, `defocus`, `coincidence_radius`, `potential_scale` and the
+    `dose`, `defocus`, `coincidence_radius` and the
     aberration-richness fields each take either a single number (e.g. ``20``,
     constant for every particle) or a ``[low, high]`` pair (e.g.
     ``[5000, 15000]``, sampled uniformly per particle). Comma-separated
@@ -350,15 +350,6 @@ class ParticleStackConfig:
         help="Maximum z-distance between crowded particles in Angstrom.",
         check="non_negative",
     )  # Å
-    potential_scale: ScalarOrRange = setting(
-        1.0,
-        help=(
-            "Potential scale factor (unitless, values < 1 "
-            "approximate thicker ice): a single value for constant scale, or "
-            "'low,high' ([low, high] in TOML) to sample uniformly per particle."
-        ),
-        check="positive_ordered",
-    )  # unitless
     pad_fft: bool = setting(
         True, help="Pad the volume for FFT to avoid edge artifacts."
     )

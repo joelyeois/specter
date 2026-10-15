@@ -46,7 +46,6 @@ def test_bounded_normalization_matches_original_stack(
         0.1,
         torch.ones(n),
         torch.zeros(n),
-        torch.ones(n),
         False,
     )
     torch.testing.assert_close(seen[0], expected, rtol=0, atol=0)

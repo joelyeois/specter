@@ -36,7 +36,7 @@ from ..potential import (
 from ..rotations import VolumeRotator, translate_coordinates
 from ..settings import Camera, Crowding, Ice, Optics, Propagation
 from . import _stages as stages
-from ._data import Exposure, Poses, per_image, settings_group
+from ._data import Exposure, Poses, settings_group
 from ._engines import scattering_engine
 from ._waves import ExitWave
 
@@ -362,7 +362,6 @@ class Specimen:
         exposure: Exposure | None = None,
         seed: int | None = None,
         objective_aperture: float | None = None,
-        potential_scale: float | torch.Tensor = 1.0,
         propagation: Propagation | None = None,
         **settings: Any,
     ) -> torch.Tensor:
@@ -372,9 +371,7 @@ class Specimen:
         Takes :meth:`scatter`'s arguments and draws the same specimens.
         """
         p = settings_group(Propagation, propagation, settings)
-        return self._volume(
-            poses, voltage, exposure, seed, objective_aperture, potential_scale, p
-        )[0]
+        return self._volume(poses, voltage, exposure, seed, objective_aperture, p)[0]
 
     def scatter(
         self,
@@ -384,7 +381,6 @@ class Specimen:
         exposure: Exposure | None = None,
         seed: int | None = None,
         objective_aperture: float | None = None,
-        potential_scale: float | torch.Tensor = 1.0,
         propagation: Propagation | None = None,
         **settings: Any,
     ) -> ExitWave:
@@ -405,9 +401,6 @@ class Specimen:
         objective_aperture : float, optional
             Aperture semi-angle in mrad, charged as absorption; requires
             ``absorption_model="inelastic_mfp"``.
-        potential_scale : float or torch.Tensor, optional
-            Multiplies each image's specimen potential, a contrast setting
-            that leaves the water it displaces unchanged. Default 1.
         propagation : Propagation, optional
             How the exit wave is computed, or its fields as keywords
             (``scattering_model``, ``alpha``, ``absorption_model``,
@@ -443,9 +436,7 @@ class Specimen:
             uniform,
             str(device),
         )
-        V, v_ab = self._volume(
-            poses, voltage, exposure, seed, objective_aperture, potential_scale, p
-        )
+        V, v_ab = self._volume(poses, voltage, exposure, seed, objective_aperture, p)
         wave = scattering(V, absorption_potential=v_ab)
         del V, v_ab
         linear = p.scattering_model == "ctf"
@@ -474,7 +465,6 @@ class Specimen:
         exposure: Exposure | None,
         seed: int | None,
         objective_aperture: float | None,
-        potential_scale: float | torch.Tensor,
         p: Propagation,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
@@ -512,20 +502,16 @@ class Specimen:
         )
         doses = None if exposure is None else exposure.doses(n)
         exposure_filter = self._solvent_exposure_filter(exposure, doses)
-        scale_host = per_image(potential_scale, n, "potential_scale")
-        scale = scale_host.to(device).reshape(-1, 1, 1, 1)
-        reference: list[float] = []  # solved on first use
+        reference: list[torch.Tensor] = []  # solved on first use
 
         def full() -> torch.Tensor:
-            # A voxel reading this many volts of specimen is full; it carries
-            # the scale, so a contrast setting cannot move the water budget.
+            # A voxel reading this many volts of specimen is full.
             if not reference:
-                reference.append(
-                    template_occupancy_reference(
-                        template, self.voxel_size, self.molecular_mass
-                    )
+                volts = template_occupancy_reference(
+                    template, self.voxel_size, self.molecular_mass
                 )
-            return reference[0] * scale
+                reference.append(torch.full((1, 1, 1, 1), volts, device=device))
+            return reference[0]
 
         # With the volume on the device, the CPU work left is the crowd's and
         # the ice's small-op loops, each of which pays torch's per-op sync
@@ -554,9 +540,6 @@ class Specimen:
                 stages.crowd_into(
                     V, crowd, _seeds(seed, poses.ids, stages.SEED_STAGE_CROWD)
                 )
-
-            if not bool(torch.all(scale_host == 1.0)):
-                V = V * scale
 
             v_ab = None
             if rates is not None and rates.inelastic_specimen is not None:

@@ -129,7 +129,6 @@ def test_starfile_still_accepts_scalars_for_the_constant_columns(tmp_path) -> No
         voltage=300.0,
         alpha=0.1,
         dose_per_angstrom=2.0,
-        potential_scale=1.0,
         bfactor=42.0,
         filename="particles",
         output_dir=str(tmp_path),

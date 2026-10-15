@@ -35,7 +35,7 @@ from ..settings import Camera, Crowding, Ice, Optics, Packing, Propagation
 from ..specimen import MicrographSpecimenGenerator
 from ..specimen._single_particle import AbsorptionRates
 from . import _stages as stages
-from ._data import Exposure, Poses, per_image, settings_group
+from ._data import Exposure, Poses, settings_group
 from ._waves import ExitWave
 
 if TYPE_CHECKING:
@@ -356,7 +356,6 @@ class Sample:
         voltage: float,
         ids: torch.Tensor | None = None,
         exposure: Exposure | None = None,
-        potential_scale: float | torch.Tensor = 1.0,
         slice_batchsize: int = 1,
         device: torch.device | str | None = None,
         propagation: Propagation | None = None,
@@ -376,8 +375,6 @@ class Sample:
             The images' exposure, one dose for all of them; must match the
             dose the sample was drawn for, when it was drawn for one, and is
             required to render a damage series (:meth:`prepare`).
-        potential_scale : float or torch.Tensor, optional
-            Multiplies the potential, per image. Default 1.
         slice_batchsize : int, optional
             Slices propagated together. Default 1.
         device : torch.device or str, optional
@@ -432,14 +429,9 @@ class Sample:
             and (self.profile.mode != "flat" or self.profile.tilt != 0.0)
         )
         pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
-        scale_host = per_image(potential_scale, n, "potential_scale")
-        unity = bool(torch.all(scale_host == 1.0))
-        n_propagate = 1 if unity else n
-
-        V = sample.volume.expand(n_propagate, -1, -1, -1)
-        V = pad_volume(V, nxy, nz, None, pad_fft, xy_pad_mode="reflect")
-        if not unity:
-            V = V * scale_host.to(V.device).reshape(-1, 1, 1, 1)
+        # Every view of one sample sees the same specimen, so it is propagated
+        # once and the wave shared between the images.
+        V = pad_volume(sample.volume, nxy, nz, None, pad_fft, xy_pad_mode="reflect")
         scattering = IterativeScattering(
             pad_nxy,
             self.voxel_size,
@@ -464,7 +456,7 @@ class Sample:
                 )
         else:
             absorption = pad_volume(
-                sample.absorption.expand(n_propagate, -1, -1, -1),
+                sample.absorption,
                 nxy,
                 nz,
                 None,

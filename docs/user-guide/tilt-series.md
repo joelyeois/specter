@@ -128,9 +128,9 @@ The CLI collects exit waves only when `save_exitwaves=true` and does not
 retain the additional noiseless image stack. In the Python API the three
 stacks are successive steps of one chain: `TiltSeries.scatter(i)` returns
 tilt `i`'s exit wave, `ExitWave.intensity` its noiseless image, and
-`Image.detect` the detected one, so a caller keeps only what it needs. At a
-potential scale of exactly 1, `TiltSeries.scatter` reuses the padded volume
-rather than allocating a scaled copy.
+`Image.detect` the detected one, so a caller keeps only what it needs.
+`TiltSeries.scatter` propagates the padded volume itself rather than a copy
+of it.
 See the [production comparison](../assets/tiltseries-memory/README.md)
 for measured GPU memory, timings, and matching image/Fourier figures.
 

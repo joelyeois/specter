@@ -246,27 +246,47 @@ def test_the_linear_model_matches_the_generator() -> None:
     )
 
 
-def test_per_image_settings_match_the_generator() -> None:
-    """Potential scale, B-factor, spatial coherence, anisomag and the
-    coincidence radius, each one value per image.
-
-    The reference is the generator's output with the spatial-coherence
-    envelope's sign corrected (2026-10-15); with the old sign restored, the
-    current code reproduces the generator's file exactly.
+def test_per_image_settings_reach_their_own_images() -> None:
     """
-    scale = torch.tensor([0.8, 1.0, 1.2, 1.5])
+    B-factor, coincidence radius and anisomag given one value per image are
+    cut to each batch along with the images: a run in batches of two images
+    exactly as each image run alone with its own values.
+    """
+    poses, ctf = _inputs()
+    bfactor = torch.tensor([10.0, 20.0, 30.0, 40.0])
     radius = torch.tensor([0.0, 0.5, 1.0, 1.5])
     anisomag = torch.tensor([[1.01, 0.002], [0.0, 0.99]]).expand(N, 2, 2).clone()
-    _compare(
-        "per_image",
-        dict(
-            scatter=dict(pad_fft=True, potential_scale=scale),
-            optics=dict(
-                bfactor=torch.tensor([10.0, 20.0, 30.0, 40.0]), convergence_angle=0.05
-            ),
+    anisomag[2] = torch.tensor([[0.99, 0.0], [0.003, 1.02]])
+    specimen = Specimen(_template(), PIXEL)
+    common = dict(voltage=VOLTAGE, scatter=dict(pad_fft=True))
+    with torch.no_grad():
+        batched = simulate_particles(
+            specimen,
+            poses,
+            ctf,
+            Exposure(DOSE),
+            batch_size=2,
+            optics=dict(bfactor=bfactor, convergence_angle=0.05),
             camera=dict(noise=None, coincidence_radius=radius, anisomag=anisomag),
-        ),
-    )
+            **common,
+        )
+        alone = [
+            simulate_particles(
+                specimen,
+                poses[i : i + 1],
+                ctf[i : i + 1],
+                Exposure(DOSE),
+                optics=dict(bfactor=float(bfactor[i]), convergence_angle=0.05),
+                camera=dict(
+                    noise=None,
+                    coincidence_radius=float(radius[i]),
+                    anisomag=anisomag[i : i + 1],
+                ),
+                **common,
+            ).array
+            for i in range(N)
+        ]
+    torch.testing.assert_close(batched.array, torch.cat(alone))
 
 
 def test_material_absorption_and_aperture_match_the_generator() -> None:

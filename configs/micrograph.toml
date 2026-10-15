@@ -126,7 +126,6 @@ packing_backend = "poisson_disk"  # poisson_disk | shape -- 'shape' collides the
 # --- Numerics ---
 # klim = 0.66                   # fraction of Nyquist, Kirkland's anti-aliasing bandlimit;
                                  # unset keeps the full Nyquist range
-potential_scale = 1.0            # unitless; single value, or [low, high] (< 1 approximates thicker ice)
 pad_fft = false                   # real-space FFT headroom: a wider frame, same pixels, so the
                                  # wave cannot wrap at the frame edge
 oversample = 2                  # the Fourier-space counterpart of pad_fft: finer pixels, same

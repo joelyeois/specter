@@ -136,7 +136,6 @@ PARTICLES = CommandSpec(
             "rcut", "8.0"
         ),  # 4.0 would quantize to the same ceil(rcut/dx) as the 3.5 default
         Flag("periodic", "true"),
-        Flag("potential_scale", "0.5"),
         Flag("pad_fft", "false"),
         # --- microscope -------------------------------------------------
         Flag("voltage", "200.0"),
@@ -347,7 +346,6 @@ MICROGRAPH = CommandSpec(
         Flag("crowd_min_distance", "100.0"),
         Flag("crowd_max_distance_z", "50.0", context=CROWD),
         Flag("water_air_interface", "true"),
-        Flag("potential_scale", "0.5"),
         Flag("pad_fft", "false"),
         Flag("detector_model", "perfect"),
         Flag("detector_model", "k3_300kv"),

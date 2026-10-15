@@ -405,7 +405,6 @@ def create_particle_starfile(
     ctf_params: torch.Tensor | dict[str, torch.Tensor] | None = None,
     dose_per_angstrom: torch.Tensor | float | None = None,
     coincidence_radius: torch.Tensor | float | None = None,
-    potential_scale: torch.Tensor | float | None = None,
     bfactor: torch.Tensor | float | None = None,
 ) -> None:
     """
@@ -440,16 +439,14 @@ def create_particle_starfile(
         ``specterDosePerAngstrom``.
     coincidence_radius : torch.Tensor or float, optional
         Coincidence radius per particle in pixels. Saved as ``specterCoincidenceRadius``.
-    potential_scale : torch.Tensor or float, optional
-        Per-particle potential scale factor. Saved as ``specterPotentialScale``.
     bfactor : torch.Tensor or float, optional
         Per-particle B-factor. Saved as ``specterBfactor``.
 
     Notes
     -----
-    ``dose_per_angstrom``, ``coincidence_radius``, ``potential_scale``, and
-    ``bfactor`` are only recorded in the STAR file if explicitly passed here
-    — they are not inferred from anywhere else. Pass them from the objects
+    ``dose_per_angstrom``, ``coincidence_radius`` and ``bfactor`` are only
+    recorded in the STAR file if explicitly passed here — they are not
+    inferred from anywhere else. Pass them from the objects
     the stack was simulated with (``poses.quaternions``, ``poses.shifts``,
     ``ctf.params``, ``exposure.dose``), so the STAR file cannot drift from
     what was simulated.
@@ -471,7 +468,6 @@ def create_particle_starfile(
             "alpha": alpha,
             "dose_per_angstrom": dose_per_angstrom,
             "coincidence_radius": coincidence_radius,
-            "potential_scale": potential_scale,
             "bfactor": bfactor,
         },
     )
@@ -556,8 +552,6 @@ def create_particle_starfile(
         d["specterDosePerAngstrom"] = _scalar_col(dose_per_angstrom, n)
     if coincidence_radius is not None:
         d["specterCoincidenceRadius"] = _scalar_col(coincidence_radius, n)
-    if potential_scale is not None:
-        d["specterPotentialScale"] = _scalar_col(potential_scale, n)
     if bfactor is not None:
         d["specterBfactor"] = _scalar_col(bfactor, n)
 
@@ -578,7 +572,6 @@ def create_micrograph_starfile(
     filename: str = "micrographs",
     dose_per_angstrom: torch.Tensor | float | None = None,
     coincidence_radius: torch.Tensor | float | None = None,
-    potential_scale: torch.Tensor | float | None = None,
     bfactor: torch.Tensor | float | None = None,
     tilt_angles: torch.Tensor | None = None,
 ) -> str:
@@ -607,8 +600,6 @@ def create_micrograph_starfile(
         ``specterDosePerAngstrom``.
     coincidence_radius : torch.Tensor or float, optional
         Coincidence radius per micrograph in pixels. Saved as ``specterCoincidenceRadius``.
-    potential_scale : torch.Tensor or float, optional
-        Potential scale per micrograph. Saved as ``specterPotentialScale``.
     bfactor : torch.Tensor or float, optional
         B-factor per micrograph. Saved as ``specterBfactor``.
     tilt_angles : torch.Tensor, optional
@@ -649,8 +640,6 @@ def create_micrograph_starfile(
         d["specterDosePerAngstrom"] = _scalar_col(dose_per_angstrom, n)
     if coincidence_radius is not None:
         d["specterCoincidenceRadius"] = _scalar_col(coincidence_radius, n)
-    if potential_scale is not None:
-        d["specterPotentialScale"] = _scalar_col(potential_scale, n)
     if bfactor is not None:
         d["specterBfactor"] = _scalar_col(bfactor, n)
     if tilt_angles is not None:

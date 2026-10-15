@@ -17,8 +17,10 @@ Before you start: this tutorial assumes the walkthrough pages
 ## A differentiable image
 
 The setup renders 6BDF at 2 Å voxels and defines the image of 16 random
-poses as a function of two scalars: the potential scale, which multiplies
-the specimen's potential, and the defocus.
+poses as a function of two scalars: a potential scale, which multiplies the
+rendered potential, and the defocus. SPECTER has no setting for the scale;
+the function multiplies the tensor itself, which is all it takes to make any
+quantity differentiable.
 
 ```python
 --8<-- "docs-figures/tutorials/differentiable.py:setup"
@@ -28,10 +30,10 @@ the specimen's potential, and the defocus.
 --8<-- "docs-includes/tutorials/differentiable-setup.txt"
 ```
 
-`image` contains no gradient code. `potential_scale` reaches the potential
-inside `Specimen.scatter`, the defocus reaches the transfer function inside
-`ExitWave.apply_ctf`, and autograd follows both through propagation and
-detection. `intensity(cc=None)` and `noise=None` keep the function
+`image` contains no gradient code. The scale enters the template before
+`Specimen.scatter` rotates it, the defocus reaches the transfer function
+inside `ExitWave.apply_ctf`, and autograd follows both through propagation
+and detection. `intensity(cc=None)` and `noise=None` keep the function
 deterministic: expected counts, with no focal spread and no Poisson draw.
 
 ## Checking the gradient
@@ -110,14 +112,10 @@ optimisation step. Every start converges to the same answer.
 All three starts reach a defocus within 5 Å of the true value and a
 potential scale within 0.002 of it, the precision 16 noisy images allow.
 The landscape is not a simple bowl: the minimum is a narrow well, and on
-either side of it the loss flattens into a shoulder where it does not fall
-monotonically. All three starts crossed the shoulder here, and nothing
+either side of it the loss flattens into a shoulder where it barely falls,
+so the gradient that leads a start into the well nearly vanishes there. All three starts crossed the shoulder here, and nothing
 guarantees that a start further out would. Scanning the loss first, as above,
 is the inexpensive way to choose a start inside the well's reach.
-
-Start the potential scale away from exactly 1. `scatter` skips the
-multiplication when every scale equals 1, so a parameter initialised at 1.0
-receives no gradient and never moves.
 
 ## Fitting atomic coordinates
 

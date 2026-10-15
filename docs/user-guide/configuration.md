@@ -120,11 +120,9 @@ Some fields accept either a constant or a `[low, high]` range sampled per
 particle, micrograph, or bead:
 
 - `specter simulate particles`: `dose`, `defocus`, `coincidence_radius`,
-  `potential_scale`, `astigmatism`, `astigmatism_angle`, `phaseshift`,
-  `tiltx`, `tilty`, `trefoil1`, `trefoil2` and `tetrafoil1` to
-  `tetrafoil4`.
-- `specter simulate micrograph`: `dose`, `defocus`, `coincidence_radius`
-  and `potential_scale`.
+  `astigmatism`, `astigmatism_angle`, `phaseshift`, `tiltx`, `tilty`,
+  `trefoil1`, `trefoil2` and `tetrafoil1` to `tetrafoil4`.
+- `specter simulate micrograph`: `dose`, `defocus` and `coincidence_radius`.
 - `specter build tomogram`: `bead_roughness`.
 
 Two micrograph fields share the same two-number spelling without being

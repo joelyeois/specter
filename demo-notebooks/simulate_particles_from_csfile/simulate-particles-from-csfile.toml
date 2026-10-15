@@ -77,5 +77,4 @@ ice_model = "gd"                 # gd | random | none
 # crowd_max_distance_z = 50.0     # Å
 
 # --- Numerics ---
-# potential_scale = 0.5           # unitless, uncomment to scale the potential before scattering
 pad_fft = true

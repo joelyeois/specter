@@ -36,7 +36,7 @@ from specter.options import (
 class MicrographConfig:
     """Parameters for micrograph generation, loaded from a TOML config file.
 
-    `dose`, `defocus`, `coincidence_radius`, and `potential_scale` each take
+    `dose`, `defocus` and `coincidence_radius` each take
     either a single number (e.g. ``20``, constant for every micrograph) or a
     ``[low, high]`` pair (e.g. ``[5000, 15000]``, sampled uniformly per
     micrograph) -- the same scalar-or-range convention as
@@ -436,15 +436,6 @@ class MicrographConfig:
             "from grid and footprint volume. packing_backend='shape' only."
         ),
     )  # shape backend only; None = auto-estimated
-    potential_scale: ScalarOrRange = setting(
-        1.0,
-        help=(
-            "Potential scale factor (unitless, values < 1 "
-            "approximate thicker ice): a single value for constant scale, or "
-            "'low,high' ([low, high] in TOML) to sample uniformly per micrograph."
-        ),
-        check="positive_ordered",
-    )  # unitless
     # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
     # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
     # that costs real spatial resolution, so the default keeps the full range

@@ -69,7 +69,6 @@ these objects:
 | `Poses` | Orientation (unit quaternion), in-plane shift in Å | `Poses.random(n, shift=)` |
 | `CTF` | Defocus, astigmatism and its angle, phase shift; Cs | `CTF.sample(n, defocus=[low, high], ...)`, `CTF.from_values(...)` |
 | `Exposure` | Dose, pre-exposure | `Exposure(dose=tensor)` |
-| `scatter={"potential_scale": ...}` | Specimen contrast | a tensor of length `n` |
 | `camera={"coincidence_radius": ...}` | Coincidence radius | a tensor of length `n` |
 
 `CTF.sample` draws each term uniformly from a `[low, high]` range, or takes a

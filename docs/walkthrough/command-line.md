@@ -35,8 +35,8 @@ particle, into `particles/` under the current directory:
 The star file records each particle's pose (`rlnAngleRot`, `rlnAngleTilt`,
 `rlnAnglePsi`, `rlnOriginXAngst`, `rlnOriginYAngst`) and transfer function
 (`rlnDefocusU`, `rlnDefocusV`, `rlnDefocusAngle`, `rlnPhaseShift`, voltage,
-\(C_s\) and amplitude contrast), plus the SPECTER-specific dose, coincidence
-radius and potential scale. It imports into RELION as it is;
+\(C_s\) and amplitude contrast), plus the SPECTER-specific dose and
+coincidence radius. It imports into RELION as it is;
 [Output: .mrcs + .star](../user-guide/particle-stack.md#output-mrcs-star)
 lists every column.
 

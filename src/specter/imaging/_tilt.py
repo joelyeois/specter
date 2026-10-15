@@ -674,7 +674,6 @@ class TiltSeries:
         i: int,
         *,
         series: int = 0,
-        potential_scale: float = 1.0,
         slice_batchsize: int = 1,
         device: torch.device | str | None = None,
     ) -> ExitWave:
@@ -688,8 +687,6 @@ class TiltSeries:
         series : int, optional
             Which series of the run this is; the noise is drawn from
             ``(seed, series, detector stage, i)``. Default 0.
-        potential_scale : float, optional
-            Multiplies the potential. Default 1.
         slice_batchsize : int, optional
             Slices propagated together. Default 1.
         device : torch.device or str, optional
@@ -707,9 +704,7 @@ class TiltSeries:
             self._render_solvent(float(self.doses[i]))
         if self._spectrum is not None:
             self._render_exposure(float(self.doses[i]), float(self.pre_exposure[i]))
-        volume = (
-            self.volume if potential_scale == 1.0 else self.volume * potential_scale
-        )
+        volume = self.volume
 
         theta = tilt_theta(
             self.poses.quaternions[i].unsqueeze(0).to(device),

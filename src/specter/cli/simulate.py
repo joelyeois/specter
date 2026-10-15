@@ -104,7 +104,6 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "ice_cache_dir",
             "crowd_min_distance",
             "crowd_max_distance_z",
-            "potential_scale",
             "pad_fft",
             "oversample",
             "scattering_factors",
@@ -309,7 +308,6 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "packing_seed",
             "n_candidates",
             # Numerics
-            "potential_scale",
             "pad_fft",
             "oversample",
             # Diagnostics and reproducibility

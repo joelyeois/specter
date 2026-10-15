@@ -36,11 +36,7 @@ the underlying math.
    rigid-transformed duplicates of the same volume around the primary
    instance and sums them in, before ice. See
    [Pose & crowding](pose-crowding.md#crowding).
-4. **Potential scaling.** SPECTER multiplies each instance's volume by a
-   per-image scalar, `potential_scale`, before propagation. Together with
-   dose, `potential_scale` lets a batch mix imaging conditions in one
-   forward pass.
-5. **Absorption field** *(optional)*. Under
+4. **Absorption field** *(optional)*. Under
    `absorption_model="inelastic_mfp"` with a specimen mean free path,
    SPECTER reads the imaginary potential off the specimen before any ice is
    added, since the material fraction of a voxel is only defined while the
@@ -48,12 +44,12 @@ the underlying math.
    absorption is uniform, and `Scattering` applies it as a scalar instead
    of a field. See
    [Scattering](scattering/index.md#mean-free-path-absorption-support).
-6. **Specimen radiation damage** *(optional)*. Under
+5. **Specimen radiation damage** *(optional)*. Under
    `dose_envelope_target="specimen"`, SPECTER applies the dose envelope to
    the specimen's 3D potential, crowding neighbours included, before the
    ice is added. The occupancy that weights the ice is read from the
    undamaged specimen. See [Aberrations](aberrations.md#envelopes).
-7. **Ice (solvation)** *(optional)*. SPECTER adds an amorphous ice
+6. **Ice (solvation)** *(optional)*. SPECTER adds an amorphous ice
    volume, weighting it in each voxel by the fraction that the specimen
    leaves free: \(1 - \mathrm{clamp}(\bar V / 7.0\,\mathrm{V}, 0, 1)\),
    where \(\bar V\) is the specimen potential coarse-grained by a 2 Å
@@ -61,19 +57,19 @@ the underlying math.
    `Ice(motion_variance=...)` the ice fluctuation is first filtered to what
    survives the summed exposure, with its mean kept. See
    [Ice structure](ice.md).
-8. **Objective aperture** *(optional)*. When `objective_aperture` is set,
+7. **Objective aperture** *(optional)*. When `objective_aperture` is set,
    the potential is low-passed at the aperture's cut-off, since the
    scattering beyond it is charged as absorption rather than propagated.
    This has no effect at 1 Å/px and coarser.
-9. **Scattering.** `Scattering` propagates the electron wave through the
+8. **Scattering.** `Scattering` propagates the electron wave through the
    finished volume to a complex exit wave \(\psi(x,y)\). See
    [Scattering](scattering/index.md).
-10. **Aberrations.** `Aberration` applies the microscope's transfer
+9. **Aberrations.** `Aberration` applies the microscope's transfer
     function (defocus, spherical aberration, astigmatism, and
     coherence/dose envelopes) to the exit wave, through
     `ExitWave.apply_ctf`. An exit wave turned into an intensity without it
     skips this stage. See [Aberrations](aberrations.md).
-11. **Detector.** `Detector` turns the aberrated wave into expected
+10. **Detector.** `Detector` turns the aberrated wave into expected
     electron counts per pixel, modelling MTF, DQE(0), shot noise, and (for
     direct electron detectors) coincidence loss. See
     [Detector](detector.md).

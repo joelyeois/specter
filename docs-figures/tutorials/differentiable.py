@@ -16,6 +16,8 @@ transcript = Transcript("differentiable")
 
 transcript.start("setup")
 # --8<-- [start:setup]
+from dataclasses import replace
+
 import torch
 
 from specter.imaging import CTF, Exposure, Poses, Structure
@@ -27,7 +29,8 @@ exposure = Exposure(dose=20.0)
 
 def image(scale: torch.Tensor, defocus: torch.Tensor) -> torch.Tensor:
     """Expected counts for every pose, a differentiable function of both."""
-    waves = specimen.scatter(poses, voltage=300.0, potential_scale=scale)
+    scaled = replace(specimen, potential=specimen.potential * scale)
+    waves = scaled.scatter(poses, voltage=300.0)
     ctf = CTF.from_values(defocus, n=len(poses))
     images = waves.apply_ctf(ctf).intensity(cc=None)
     return images.detect(exposure, noise=None).array
@@ -95,7 +98,8 @@ transcript.start("data")
 true_scale, true_defocus = 0.85, 15000.0
 with torch.no_grad():
     data = (
-        specimen.scatter(poses, voltage=300.0, potential_scale=true_scale)
+        replace(specimen, potential=specimen.potential * true_scale)
+        .scatter(poses, voltage=300.0)
         .apply_ctf(CTF.from_values(true_defocus, n=len(poses)))
         .intensity(cc=None)
         .detect(exposure, seed=0)  # Poisson counts

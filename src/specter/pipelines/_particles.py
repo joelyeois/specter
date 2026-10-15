@@ -207,7 +207,6 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     )
     dose = _uniform_sample(config.dose, n)
     coincidence_radius = _uniform_sample(config.coincidence_radius, n)
-    potential_scale = _uniform_sample(config.potential_scale, n)
     n_frames = (
         config.n_frames if config.n_frames is not None else int(dose.mean().item())
     )
@@ -231,7 +230,6 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             weights=weights,
             weights_max_frequency=weights_max_frequency,
         ),
-        potential_scale=potential_scale,
         coincidence_radius=coincidence_radius,
         anisomag=anisomag,
         seed=run_seed,
@@ -263,7 +261,6 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             alpha,
             dose,
             coincidence_radius,
-            potential_scale,
             True,
         )
 
@@ -289,7 +286,6 @@ class _ParticleRun:
     poses: Poses
     ctf: CTF
     exposure: Exposure
-    potential_scale: torch.Tensor
     coincidence_radius: torch.Tensor
     anisomag: torch.Tensor | None
     seed: int
@@ -363,7 +359,6 @@ class _ParticleRun:
                     exposure=exposure,
                     seed=self.seed,
                     objective_aperture=config.objective_aperture,
-                    potential_scale=self.potential_scale[i],
                     **propagation,
                 )
                 waves = specimen.scatter(self.poses[i], **beam)
@@ -726,7 +721,6 @@ def _save_stack(
     alpha: float,
     dose: torch.Tensor,
     coincidence_radius: torch.Tensor,
-    potential_scale: torch.Tensor,
     is_main: bool,
 ) -> None:
     """Normalise the images if asked, then write the ``.mrcs``/``.star`` pair and any exit waves."""
@@ -759,7 +753,6 @@ def _save_stack(
         output_dir=output_dir,
         dose_per_angstrom=dose,
         coincidence_radius=coincidence_radius,
-        potential_scale=potential_scale,
     )
 
     if is_main:

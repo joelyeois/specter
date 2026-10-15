@@ -417,12 +417,12 @@ def free_fraction(
     Parameters
     ----------
     V : torch.Tensor
-        Specimen potential, ``(B, Z, Y, X)``, already scaled.
+        Specimen potential, ``(B, Z, Y, X)``.
     pixel_size : float
         Voxel size in Angstrom.
     full : torch.Tensor
-        Occupancy reference per item, ``(B or 1, 1, 1, 1)``, with the
-        potential scale folded in.
+        Occupancy reference per item, ``(B or 1, 1, 1, 1)``: the potential, in
+        volts, of a voxel the specimen fills.
 
     Returns
     -------
@@ -500,7 +500,7 @@ def solvate(
     Parameters
     ----------
     V : torch.Tensor
-        ``(B, Z, Y, X)`` volume, already scaled; modified in place.
+        ``(B, Z, Y, X)`` volume; modified in place.
     icemaker : IceBank or RandomIcemaker
         Draws each item's ``(1, Z, nxy, nxy)`` ice canvas (:func:`draw_ice`).
     pixel_size : float
@@ -510,9 +510,9 @@ def solvate(
     pad : int
         FFT margin on each side of the box, 0 for none.
     full : torch.Tensor
-        Occupancy reference per item, ``(B or 1, 1, 1, 1)``, potential scale
-        folded in. Divided in HERE: the occupancy clamps to [0, 1] against
-        whatever reference it is given.
+        Occupancy reference per item, ``(B or 1, 1, 1, 1)``. Divided in HERE:
+        the occupancy clamps to [0, 1] against whatever reference it is
+        given.
     relax_steps : int, optional
         Seam relaxation steps for a tiled IceBank draw. Default 0.
     free : torch.Tensor, optional

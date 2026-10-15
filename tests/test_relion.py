@@ -37,9 +37,7 @@ def test_a_stack_from_the_chain_records_its_own_parameters(tmp_path) -> None:
     )
     exposure = Exposure(2.0)
     with torch.no_grad():
-        waves = Specimen(volume, 2.0).scatter(
-            poses, voltage=300.0, alpha=0.1, potential_scale=0.75
-        )
+        waves = Specimen(volume, 2.0).scatter(poses, voltage=300.0, alpha=0.1)
         assert waves.defocus_shift != 0.0
         particles = (
             waves.apply_ctf(ctf, bfactor=42.0)
@@ -58,7 +56,6 @@ def test_a_stack_from_the_chain_records_its_own_parameters(tmp_path) -> None:
         alpha=0.1,
         dose_per_angstrom=exposure.dose,
         coincidence_radius=_CR,
-        potential_scale=0.75,
         bfactor=42.0,
         output_dir=str(tmp_path),
         filename="particles",
@@ -67,7 +64,6 @@ def test_a_stack_from_the_chain_records_its_own_parameters(tmp_path) -> None:
     df = starfile.read(tmp_path / "particles.star")
     df = df["particles"] if isinstance(df, dict) else df
     assert (df["specterBfactor"] == 42.0).all()
-    assert (df["specterPotentialScale"] == 0.75).all()
     assert df["specterCoincidenceRadius"].to_numpy() == pytest.approx(_CR)
     assert (df["specterDosePerAngstrom"] == 2.0).all()
     assert (df["rlnDefocusU"] == 5000.0).all()

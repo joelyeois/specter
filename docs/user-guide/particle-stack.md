@@ -60,7 +60,7 @@ documents it field-by-field.
 
 ## Per-particle sampling ranges
 
-`dose`, `defocus`, `coincidence_radius`, `potential_scale`, `astigmatism`,
+`dose`, `defocus`, `coincidence_radius`, `astigmatism`,
 `astigmatism_angle`, `phaseshift`, the beam tilts `tiltx`/`tilty`, and the
 higher-order aberrations `trefoil1`/`trefoil2` and
 `tetrafoil1`-`tetrafoil4` each take either a single number (constant for
@@ -144,8 +144,7 @@ pose (`rlnAngleRot`/`rlnAngleTilt`/`rlnAnglePsi`, `rlnOrigin{X,Y}Angst`),
 CTF (`rlnVoltage`, `rlnSphericalAberration`, `rlnAmplitudeContrast`,
 `rlnDefocus{U,V}`, `rlnDefocusAngle`, `rlnPhaseShift`), plus SPECTER-specific
 physics parameters not covered by the RELION spec
-(`specterDosePerAngstrom`, `specterCoincidenceRadius`,
-`specterPotentialScale`). Import the `.star` file directly into RELION, or
+(`specterDosePerAngstrom`, `specterCoincidenceRadius`). Import the `.star` file directly into RELION, or
 read it with [`starfile`](https://github.com/teamtomo/starfile) /
 [`mrcfile`](https://github.com/ccpem/mrcfile) from Python.
 

@@ -83,6 +83,14 @@ class TransferFunction(nn.Module):
         Whether the image stands for an exposure-filtered movie sum (True,
         default) or a plain sum of frames (False). See
         :func:`specter.aberrations.dose_envelope`.
+
+    References
+    ----------
+    .. [1] torch-ctf (v0.5.2): CTF functions for cryo-EM in torch. teamtomo.
+       https://github.com/teamtomo/torch-ctf
+    .. [2] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
 
     def __init__(

@@ -7,11 +7,13 @@ that can be multiplied into a transfer function. Math ported from
 teamtomo's torch_fourier_filter.envelopes, adapted to specter's existing
 unit conventions (wavelength/cs/defocus/cc in Å, angles in mrad).
 
-Notes
------
-.. [1] T. Grant and N. Grigorieff, "Measuring the optimal exposure for
-   single particle cryo-EM using a 2.6 A reconstruction of rotavirus
-   VP6," eLife 4, e06980 (2015).
+References
+----------
+.. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+   single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+   *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
+.. [2] torch-fourier-filter, ``torch_fourier_filter.envelopes``. teamtomo.
+   https://github.com/teamtomo/torch-fourier-filter
 """
 
 from __future__ import annotations
@@ -42,6 +44,13 @@ def b_envelope(k2: torch.Tensor, bfactor: torch.Tensor) -> torch.Tensor:
     -------
     envelope : torch.Tensor
         Amplitude envelope, exp(-B * k^2 / 4).
+
+    References
+    ----------
+    .. [1] Rosenthal, P. B., & Henderson, R. (2003). Optimal determination of
+       particle orientation, absolute hand, and contrast loss in
+       single-particle electron cryomicroscopy. *Journal of Molecular
+       Biology*, 333(4), 721–745. https://doi.org/10.1016/j.jmb.2003.07.013
     """
     return torch.exp(-bfactor * k2 / 4)
 
@@ -85,6 +94,14 @@ def cs_envelope(
     positive for underfocus, as in `_functions`), ``grad chi = 2 pi (Cs
     lambda^3 k^3 - df lambda k)``: for underfocus the two terms partly
     cancel. Writing ``alpha = sqrt(2) sigma`` gives the form below.
+
+    References
+    ----------
+    .. [1] Frank, J. (1973). The envelope of electron microscopic transfer
+       functions for partially coherent illumination. *Optik*, 38, 519–536.
+       Reprinted in J. Frank, *Single-particle cryo-electron microscopy*
+       (pp. 51–68), World Scientific, 2018.
+       https://doi.org/10.1142/9789813234864_0003
     """
     half_angle = convergence_angle / 1000  # mrad -> rad
     return torch.exp(
@@ -143,6 +160,18 @@ def cc_envelope(
     width form is the same Gaussian with ``Delta = sqrt(2) sigma_f``.
     ``tests/test_aberrations_envelopes.py`` pins this against an explicit
     weighted integration over defocus.
+
+    References
+    ----------
+    .. [1] Hanszen, K. J., & Trepte, L. (1971). Der Einfluß von Strom- und
+       Spannungsschwankungen sowie der Energiebreite der Strahlelektronen auf
+       Kontrastübertragung und Auflösung des Elektronenmikroskopes. *Optik*,
+       32, 519–538.
+    .. [2] Wade, R. H., & Frank, J. (1977). Electron microscope transfer
+       functions for partially coherent axial illumination and chromatic
+       defocus spread. *Optik*, 49, 81–92.
+    .. [3] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     focus_spread = focal_spread_sigma(cc, voltage, energy_spread, deltaV_V, deltaI_I)
     return torch.exp(-0.5 * (torch.pi * wavelength * focus_spread * k2) ** 2)
@@ -180,6 +209,13 @@ def focal_spread_sigma(
     -------
     float
         ``sigma_f`` in Angstrom.
+
+    References
+    ----------
+    .. [1] Hanszen, K. J., & Trepte, L. (1971). Der Einfluß von Strom- und
+       Spannungsschwankungen sowie der Energiebreite der Strahlelektronen auf
+       Kontrastübertragung und Auflösung des Elektronenmikroskopes. *Optik*,
+       32, 519–538.
     """
     sigma_e = energy_spread / FWHM_TO_SIGMA
     return cc * ((sigma_e / voltage) ** 2 + deltaV_V**2 + (2 * deltaI_I) ** 2) ** 0.5
@@ -220,6 +256,12 @@ def critical_exposure(
     -------
     torch.Tensor
         Critical exposure in e⁻/Å², same shape as ``k`` (times the batch).
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
     ne = a * torch.pow(k, b) + c
     if voltage is None:
@@ -297,6 +339,12 @@ def dose_envelope(
     -------
     envelope : torch.Tensor
         Amplitude envelope in (0, 1], broadcast shape of ``k`` and ``dose``.
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
     ne = critical_exposure(k, a, b, c, voltage)
     pre = torch.as_tensor(pre_exposure, dtype=ne.dtype, device=ne.device)

@@ -254,6 +254,15 @@ class LegacyAberrationAdapter(nn.Module):
         a single shared laser-instrument config, never per-particle. If
         set, overrides ``ctf_params["phaseshift"]`` on every call (see
         :func:`ctf_params_dict_to_parameters`).
+
+    References
+    ----------
+    .. [1] torch-ctf (v0.5.2): CTF functions for cryo-EM in torch. teamtomo.
+       https://github.com/teamtomo/torch-ctf
+    .. [2] Schwartz, O., Axelrod, J. J., Campbell, S. L., Turnbaugh, C., Glaeser,
+       R. M., & Müller, H. (2019). Laser phase plate for transmission electron
+       microscopy. *Nature Methods*, 16(10), 1016–1020.
+       https://doi.org/10.1038/s41592-019-0552-2
     """
 
     def __init__(

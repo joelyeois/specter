@@ -17,14 +17,14 @@ contrast. The lens acts on the wave as a multiplication in Fourier space,
 where \(\lambda\) is the electron wavelength, \(C_s\) the spherical aberration
 and \(\Delta f\) the defocus, positive for underfocus. For a weak phase object
 the image contrast at frequency \(k\) is proportional to \(\sin\chi(k)\), the
-oscillating *contrast transfer function* (CTF). This page applies it with
+oscillating *contrast transfer function* (CTF; Erickson & Klug 1971). This page applies it with
 `ExitWave.apply_ctf`. The sign conventions are set out in
 [Optical sign conventions](../concepts/conventions.md#optical-sign-conventions),
 and every term of \(\chi\) in [The transfer function](../concepts/aberrations.md#the-transfer-function).
 
 ## Setup
 
-One particle of 6BDF in a box of ice, scattered once:
+One particle of 6BDF (Campbell et al. 2015) in a box of ice, scattered once:
 
 ```python
 --8<-- "docs-figures/walkthrough/ctf.py:setup"
@@ -69,7 +69,7 @@ faster, so the rings in the power spectrum crowd together.
 
 ## Thon rings
 
-The rings are the zeros of \(\sin\chi\). Neglecting \(C_s\), the \(n\)-th
+The rings are the zeros of \(\sin\chi\) (Thon 1966). Neglecting \(C_s\), the \(n\)-th
 zero falls at \(k_n = \sqrt{n/(\lambda\Delta f)}\):
 
 ```python
@@ -88,8 +88,9 @@ zeros printed above; the spectrum's minima fall on them.
 ///
 
 The broad rise in power towards 0.27 Å⁻¹ is the 3.7 Å ring of the amorphous
-ice, which every image of vitreous ice carries. Fitting these minima is how
-CTF estimation programs measure the defocus of a real micrograph.
+ice, which every image of vitreous ice carries (McMullan et al. 2015).
+Fitting these minima is how CTF estimation programs measure the defocus of a
+real micrograph (Rohou & Grigorieff 2015; Zhang 2016).
 
 ## Astigmatism
 
@@ -124,7 +125,8 @@ arrives in the same form; see [Particle stacks](particle-stacks.md).
 
 At zero defocus, \(\chi\) is close to zero over the low frequencies, and a
 phase object shows no contrast there. A phase plate shifts the scattered wave
-by a constant phase \(\phi_0\) relative to the unscattered beam, which enters
+by a constant phase \(\phi_0\) relative to the unscattered beam (Danev &
+Nagayama 2001; Danev et al. 2014), which enters
 the wave aberration as \(\chi \to \chi - \phi_0\) (see
 [Phase shift and amplitude contrast](../concepts/aberrations.md#phase-shift-and-amplitude-contrast)).
 At \(\phi_0 = 90°\) the transfer at the lowest frequencies is at its
@@ -146,8 +148,8 @@ All three are low-pass filtered to 5 Å and share one grey scale.
 ## B-factor
 
 `apply_ctf(bfactor=...)` multiplies the transfer function by the Gaussian
-envelope \(E_B(k) = e^{-Bk^2/4}\), a single empirical term for every
-blurring the rest of the model leaves out. It takes one value, or one per
+envelope \(E_B(k) = e^{-Bk^2/4}\) (Rosenthal & Henderson 2003), a single
+empirical term for every blurring the rest of the model leaves out. It takes one value, or one per
 image:
 
 ```python
@@ -214,7 +216,7 @@ the 25 Å search step. The power spectrum of a uniform slab of ice agrees: its
 minima sit at the zeros for the nominal defocus, not at those for either
 face. For a slab of uniform density, and for a particle centred in its box,
 the midplane is the scattering centroid, the plane whose defocus the Thon
-rings report. [The defocus reference plane](../concepts/conventions.md#the-defocus-reference-plane)
+rings report (Balakrishnan et al. 2023). [The defocus reference plane](../concepts/conventions.md#the-defocus-reference-plane)
 discusses the convention, including where it fails for a specimen whose
 scattering is not centred in depth. The `projection` and linear `ctf`
 models have no depth, and their `defocus_shift` is zero.
@@ -248,3 +250,46 @@ stack. A `CTF` must have as many entries as the wave has images, and
 
 [Partial coherence](coherence.md) replaces the perfectly coherent beam
 assumed on this page with a real source's spread of energies and angles.
+
+## References
+
+- Balakrishnan, D., Chee, S. W., Baraissov, Z., Bosman, M., Mirsaidov, U.,
+  & Loh, N. D. (2023). Single-shot, coherent, pop-out 3D metrology.
+  *Communications Physics*, 6(1), 321.
+  [doi:10.1038/s42005-023-01431-6](https://doi.org/10.1038/s42005-023-01431-6)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Danev, R., Buijsse, B., Khoshouei, M., Plitzko, J. M., & Baumeister, W.
+  (2014). Volta potential phase plate for in-focus phase contrast
+  transmission electron microscopy. *Proceedings of the National Academy of
+  Sciences*, 111(44), 15635–15640.
+  [doi:10.1073/pnas.1418377111](https://doi.org/10.1073/pnas.1418377111)
+- Danev, R., & Nagayama, K. (2001). Transmission electron microscopy with
+  Zernike phase plate. *Ultramicroscopy*, 88(4), 243–252.
+  [doi:10.1016/S0304-3991(01)00088-2](https://doi.org/10.1016/S0304-3991(01)00088-2)
+- Erickson, H. P., & Klug, A. (1971). Measurement and compensation of
+  defocusing and aberrations by Fourier processing of electron micrographs.
+  *Philosophical Transactions of the Royal Society of London. B, Biological
+  Sciences*, 261(837), 105–118.
+  [doi:10.1098/rstb.1971.0040](https://doi.org/10.1098/rstb.1971.0040)
+- McMullan, G., Vinothkumar, K. R., & Henderson, R. (2015). Thon rings from
+  amorphous ice and implications of beam-induced Brownian motion in single
+  particle electron cryo-microscopy. *Ultramicroscopy*, 158, 26–32.
+  [doi:10.1016/j.ultramic.2015.05.017](https://doi.org/10.1016/j.ultramic.2015.05.017)
+- Rohou, A., & Grigorieff, N. (2015). CTFFIND4: Fast and accurate defocus
+  estimation from electron micrographs. *Journal of Structural Biology*,
+  192(2), 216–221.
+  [doi:10.1016/j.jsb.2015.08.008](https://doi.org/10.1016/j.jsb.2015.08.008)
+- Rosenthal, P. B., & Henderson, R. (2003). Optimal determination of
+  particle orientation, absolute hand, and contrast loss in single-particle
+  electron cryomicroscopy. *Journal of Molecular Biology*, 333(4), 721–745.
+  [doi:10.1016/j.jmb.2003.07.013](https://doi.org/10.1016/j.jmb.2003.07.013)
+- Thon, F. (1966). Zur Defokussierungsabhängigkeit des Phasenkontrastes bei
+  der elektronenmikroskopischen Abbildung. *Zeitschrift für Naturforschung
+  A*, 21(4), 476–478.
+  [doi:10.1515/zna-1966-0417](https://doi.org/10.1515/zna-1966-0417)
+- Zhang, K. (2016). Gctf: Real-time CTF determination and correction.
+  *Journal of Structural Biology*, 193(1), 1–12.
+  [doi:10.1016/j.jsb.2015.11.003](https://doi.org/10.1016/j.jsb.2015.11.003)

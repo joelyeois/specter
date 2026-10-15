@@ -7,8 +7,8 @@ another package. Both fail silently if you mismatch a convention: a
 wrong sign or a wrong axis produces a plausible image, not an error.
 
 This page does not repeat definitions that belong to the file formats
-themselves, such as the meaning of RELION's Euler angles or the layout of
-a STAR file; see
+themselves, such as the meaning of the Euler angles of RELION (Scheres
+2012) or the layout of a STAR file; see
 [RELION's conventions page](https://relion.readthedocs.io/en/release-3.1/Reference/Conventions.html).
 
 !!! example "In code"
@@ -41,7 +41,8 @@ without conversion at the boundary.
 
 The mixed degrees/radians row is the one to watch: within a single
 `ctf_params` dict, `dfang` is in degrees while `phaseshift`, `tiltx`, and
-`tilty` are in radians. This matches [CryoSPARC](https://cryosparc.com/):
+`tilty` are in radians. This matches [CryoSPARC](https://cryosparc.com/)
+(Punjani et al. 2017):
 its `.cs` files store `ctf/df_angle_rad` in radians, and `io/_cryosparc.py`
 converts it to degrees on the way in.
 
@@ -57,7 +58,8 @@ millimetres for \(C_s\), and dimensionless Zernike coefficients.
 
 Volumes are `(B, Z, Y, X)` and images are `(B, Y, X)`. \(Z\) is the beam
 direction, the second-to-last axis is \(y\) (rows), and the last axis is
-\(x\) (columns). This is the same order MRC uses on disk, so writing
+\(x\) (columns). This is the same order the MRC format (Cheng et al. 2015)
+uses on disk, so writing
 volumes and image stacks needs no transposition.
 
 ## Fourier conventions
@@ -81,8 +83,8 @@ corners.
 
 ## Poses
 
-Rotations are unit quaternions in `roma`'s scalar-last \((x, y, z, w)\)
-ordering. Translations are in Å.
+Rotations are unit quaternions in the scalar-last \((x, y, z, w)\)
+ordering of `roma` (Bregier 2021). Translations are in Å.
 
 **A quaternion \(Q\) rotates the density by \(R(Q)^{-1}\).** Rotate a
 feature at \(+x\) by \(+90^\circ\) about \(z\) and it lands at \(-y\).
@@ -204,8 +206,9 @@ the energy-dependent interaction parameter from
 `scattering.interaction_parameter`, in 1/(V·Å).
 
 **Positive defocus is underfocus**, the standard cryo-EM convention:
-RELION defines `rlnDefocusU` as positive for underfocus, and CTFFIND,
-Gctf, and CryoSPARC report the same sense. In `specter` this produces the
+RELION defines `rlnDefocusU` as positive for underfocus, and CTFFIND
+(Rohou & Grigorieff 2015), Gctf (Zhang 2016), and CryoSPARC report the
+same sense. In `specter` this produces the
 expected phase contrast. At 300 kV with \(\Delta f = +1\) µm, a weak
 positive potential appears dark, its first CTF zero falling at
 \(0.070\) Å⁻¹ against the \(\sqrt{1/\lambda\Delta f} = 0.071\) Å⁻¹
@@ -214,9 +217,9 @@ appears bright.
 
 The **overall sign of \(\chi\) is not universal**, and this is the usual
 source of confusion when porting an equation. `specter` follows
-Kirkland's form, with \(\chi\) as written above and a transfer function
-\(\exp(-i\chi)\). The 3DEM convention of Heymann et al., which Gctf
-follows, uses \(\gamma = -\chi\). The two describe identical physics with
+the form of Kirkland (2010), with \(\chi\) as written above and a transfer function
+\(\exp(-i\chi)\). The 3DEM convention of Heymann et al. (2005), which
+Gctf follows, uses \(\gamma = -\chi\). The two describe identical physics with
 mirrored bookkeeping, so check an imported expression as a whole rather
 than term by term.
 
@@ -230,8 +233,8 @@ amplitude contrast (`alpha`), both under
 A thick specimen has no single defocus: each plane at height \(z\) is imaged
 at its own, and the defocus increases by one ångström for every ångström
 towards the entry face. The defocus a CTF fit reports is that of the
-specimen's centre of scattering mass, which Balakrishnan et al. established
-and used to recover depth from a single shot. For a particle centred in its
+specimen's centre of scattering mass, which Balakrishnan et al. (2023)
+established and used to recover depth from a single shot. For a particle centred in its
 box, or a uniform slab of ice, that is the box's midplane, and it is the value
 a `.cs` or `.star` file records.
 
@@ -276,7 +279,7 @@ isolated-atom superposition cannot represent bonding and is expected to
 sit above such a measurement. The scattering factors returned
 by the `*_fourier` functions in `atom/_atomic_potentials.py` are in Å;
 multiplying by \(c_1 = 2\pi a_0 e = 47.9\) V·Å² converts them to the
-V·Å³ Fourier-space potential; `PotentialBuilder` applies this factor.
+V·Å³ Fourier-space potential (Kirkland 2010); `PotentialBuilder` applies this factor.
 Projected (2D) potentials are in V·Å.
 
 Detector output is in **expected electron counts per pixel**,
@@ -338,11 +341,10 @@ and never copies it into the cache, which is what makes `specter cache
 clean` safe: the cache holds only files you can fetch again.
 
 `specter` writes particle stacks, micrographs, and tilt series as float32
-`.mrcs` paired with a `.star` file. **`specter` records the pixel size in
-the STAR file as `rlnImagePixelSize`, not in the MRC header**, so a
-consumer reading the `.mrcs` alone finds no voxel size. Tomogram volumes,
-which `specter build tomogram` writes, do set `voxel_size` in the MRC
-header, since they have no accompanying STAR file.
+`.mrcs` paired with a `.star` file, and records the pixel size in both: in
+the STAR file as `rlnImagePixelSize` and in the MRC header as `voxel_size`.
+Tomogram volumes, which `specter build tomogram` writes, have no
+accompanying STAR file and carry `voxel_size` in the MRC header alone.
 
 ## Reproducibility
 
@@ -374,25 +376,44 @@ as well.
 
 ## References
 
-- Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*,
-  2nd ed. Springer.
 - Balakrishnan, D., Chee, S. W., Baraissov, Z., Bosman, M., Mirsaidov, U.,
   & Loh, N. D. (2023). Single-shot, coherent, pop-out 3D metrology.
-  *Communications Physics* **6**, 321.
+  *Communications Physics*, 6(1), 321.
   [doi:10.1038/s42005-023-01431-6](https://doi.org/10.1038/s42005-023-01431-6)
+- Bregier, R. (2021). Deep regression on manifolds: A 3D rotation case
+  study. In *2021 International Conference on 3D Vision (3DV)* (pp.
+  166–174). IEEE.
+  [doi:10.1109/3DV53792.2021.00027](https://doi.org/10.1109/3DV53792.2021.00027)
+- Cheng, A., Henderson, R., Mastronarde, D., Ludtke, S. J., Schoenmakers,
+  R. H. M., Short, J., Marabini, R., Dallakyan, S., Agard, D., & Winn, M.
+  (2015). MRC2014: Extensions to the MRC format header for electron
+  cryo-microscopy and tomography. *Journal of Structural Biology*, 192(2),
+  146–150.
+  [doi:10.1016/j.jsb.2015.04.002](https://doi.org/10.1016/j.jsb.2015.04.002)
 - Heymann, J. B., Chagoyen, M., & Belnap, D. M. (2005). Common conventions
   for interchange and archiving of three-dimensional electron microscopy
-  information in structural biology. *Journal of Structural Biology*
-  **151**(2), 196–207.
+  information in structural biology. *Journal of Structural Biology*,
+  151(2), 196–207.
   [doi:10.1016/j.jsb.2005.06.001](https://doi.org/10.1016/j.jsb.2005.06.001)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
+  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
+  determination. *Nature Methods*, 14(3), 290–296.
+  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)
 - Rohou, A., & Grigorieff, N. (2015). CTFFIND4: Fast and accurate defocus
-  estimation from electron micrographs. *Journal of Structural Biology*
-  **192**(2), 216–221.
+  estimation from electron micrographs. *Journal of Structural Biology*,
+  192(2), 216–221.
   [doi:10.1016/j.jsb.2015.08.008](https://doi.org/10.1016/j.jsb.2015.08.008)
-- Yesibolati, M. N., Laganá, S., Sun, H., Beleggia, M., Kathmann, S. M.,
+- Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian approach to
+  cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
+  519–530.
+  [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)
+- Yesibolati, M. N., Laganà, S., Sun, H., Beleggia, M., Kathmann, S. M.,
   Kasama, T., & Mølhave, K. (2020). Mean inner potential of liquid water.
-  *Physical Review Letters* **124**(6), 065502.
+  *Physical Review Letters*, 124(6), 065502.
   [doi:10.1103/PhysRevLett.124.065502](https://doi.org/10.1103/PhysRevLett.124.065502)
 - Zhang, K. (2016). Gctf: Real-time CTF determination and correction.
-  *Journal of Structural Biology* **193**(1), 1–12.
+  *Journal of Structural Biology*, 193(1), 1–12.
   [doi:10.1016/j.jsb.2015.11.003](https://doi.org/10.1016/j.jsb.2015.11.003)

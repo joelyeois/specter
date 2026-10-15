@@ -6,7 +6,8 @@ the microscope's optical transfer function to the exit wave produced by
 astigmatism, higher-order aberration terms, and the envelope functions
 that set a practical information limit. `Aberration` builds the total
 wavefront aberration phase \(\chi(k)\) term by term from a per-image
-`ctf_params` dict, following the conventions of Kirkland and Penczek.
+`ctf_params` dict, following the conventions of Kirkland (2010) and
+Penczek (2010).
 
 !!! example "In code"
     This page is the theory behind [Contrast transfer function](../walkthrough/ctf.md) and [Partial coherence](../walkthrough/coherence.md), which show it step by step with code and figures.
@@ -67,7 +68,7 @@ and a propagated exit wave requires a midplane correction; see
 
 the \(k^4\) term responsible for the CTF's envelope-like falloff at high
 resolution even before any explicit envelope is applied, and for coupling
-to defocus in the Scherzer-condition optimum.
+to defocus in the Scherzer-condition optimum (Scherzer 1949).
 
 ### Higher-order, non-rotationally-symmetric terms
 
@@ -75,7 +76,8 @@ Beam tilt, trefoil (3-fold astigmatism), and tetrafoil (a combination of
 4-fold astigmatism, \(n{=}4,\ m{=}{\pm}2\), and true 4-fold tetrafoil,
 \(n{=}4,\ m{=}{\pm}4\); spherical aberration itself is the \(m{=}0\)
 member of the same \(n{=}4\) family, and `fn.cs` handles it separately)
-break the radial symmetry defocus and Cs share on their own:
+break the radial symmetry defocus and Cs share on their own (Zemlin et al.
+1978; Zivanov et al. 2020):
 
 \[
 \chi_{\mathrm{tilt}} = -2\pi\lambda^2 C_s k^2\big(\sin\phi_y\, k_y + \sin\phi_x\, k_x\big)
@@ -89,7 +91,8 @@ break the radial symmetry defocus and Cs share on their own:
 
 The figure below isolates each rotationally-asymmetric term against
 isotropic defocus, plotting \(\mathrm{Im}[T(k)]\) (the phase-contrast
-transfer, i.e. what makes a Thon ring pattern in a power spectrum) over
+transfer, i.e. what makes a Thon ring pattern in a power spectrum; Thon
+1966) over
 the full 2D frequency plane:
 
 ![Im[T(k)] over the 2D frequency plane for isotropic defocus, astigmatism, trefoil, and tetrafoil, each isolated.](../assets/images/aberrations-modes-2d.png){ width="900" style="display:block;margin:1.2em auto;" }
@@ -106,12 +109,13 @@ on \(|k|\).
 
 ### Phase shift and amplitude contrast
 
-A constant phase offset, e.g. from a Volta phase plate, enters as
+A constant phase offset, e.g. from a Volta phase plate (Danev et al. 2014),
+enters as
 \(\chi_{\mathrm{phaseshift}} = -\phi_0\). For `aberration_model="linear"`
 with `specimen_absorption=False` (see below), amplitude contrast is also
 represented here rather than in the exit wave itself, as
-\(-\arccos(\alpha)\) added to \(\phi_0\), matching CryoSPARC's
-convention (`phase_shift - arccos(amp_contrast)`).
+\(-\arccos(\alpha)\) added to \(\phi_0\), matching the convention of
+CryoSPARC (Punjani et al. 2017), `phase_shift - arccos(amp_contrast)`.
 
 ### The isotropic 1D curve
 
@@ -141,7 +145,7 @@ Amplitude contrast has nowhere else to live, so `Aberration` folds it
 into \(\chi\) via `specimen_absorption=False`. `"linear"` instead takes the
 real part of the aberrated field, matching `Scattering.ctf`'s projected
 potential input -- a weak-phase-object, linear-in-potential image
-formation model, as opposed to `"nonlinear"`'s full wave-optics
+formation model (Erickson & Klug 1971), as opposed to `"nonlinear"`'s full wave-optics
 propagation (`image = |exitwave|^2` is nonlinear in the specimen
 potential; `image = 1 + 2 \cdot \mathrm{CTF} \otimes \mathrm{potential}` is
 linear in it). `specimen_absorption=True` (default) assumes amplitude
@@ -179,9 +183,9 @@ below.
 
 | Envelope | Physical cause | Parameter |
 |---|---|---|
-| B-factor | Specimen/detector-side blurring, lumped into one empirical Gaussian | `bfactor` (Å²) |
-| Spatial coherence | Finite beam convergence semi-angle | `convergence_angle` (mrad) |
-| Temporal coherence | Chromatic aberration from energy spread, HT and lens-current instability | `cc` (Å), `energy_spread`, `deltaV_V`, `deltaI_I` |
+| B-factor | Specimen/detector-side blurring, lumped into one empirical Gaussian (Rosenthal & Henderson 2003) | `bfactor` (Å²) |
+| Spatial coherence | Finite beam convergence semi-angle (Frank 1973) | `convergence_angle` (mrad) |
+| Temporal coherence | Chromatic aberration from energy spread, HT and lens-current instability (Hanszen & Trepte 1971; Wade & Frank 1977) | `cc` (Å), `energy_spread`, `deltaV_V`, `deltaI_I` |
 | Dose | Cumulative radiation damage (Grant & Grigorieff 2015) | `dose_envelope=True`, per-image `dose` |
 
 \[
@@ -194,11 +198,11 @@ where \(\alpha_c\) is the convergence semi-angle, \(\bar d\) the mean
 defocus (positive for underfocus, so the two terms of the spatial envelope
 partly cancel), and \(\sigma_f = C_c\sqrt{(\sigma_E/U)^2 + (\Delta V/V)^2 + (2\Delta I/I)^2}\)
 the standard deviation of the focal spread from energy spread and HT/lens
-instabilities. `energy_spread` is the FWHM a source is quoted with; it
+instabilities (Hanszen & Trepte 1971). `energy_spread` is the FWHM a source is quoted with; it
 enters as \(\sigma_E = \mathrm{FWHM}/2\sqrt{2\ln 2}\), and \(\Delta V/V\),
 \(\Delta I/I\) are rms values.
-The dose envelope follows Grant & Grigorieff's empirically fitted critical
-exposure \(N_e(k) = a k^b + c\), the exposure after which the diffracted
+The dose envelope follows the empirically fitted critical exposure of
+Grant & Grigorieff (2015), \(N_e(k) = a k^b + c\), the exposure after which the diffracted
 intensity at frequency \(k\) has fallen to \(1/e\). A frame recorded at
 cumulative exposure \(N\) therefore carries \(\exp(-N/2N_e)\) of its
 undamaged amplitude, and the envelope of an image is that decay averaged
@@ -232,7 +236,8 @@ filter on the projected specimen, but the ice blended in afterwards is left
 undamaged, with occupancy read from the undamaged specimen: the envelope
 conserves the potential's integral while spreading it, and a molecule does not
 displace less water for having been irradiated. The distinction is measurable.
-On raw EER movies of EMPIAR-11461 and EMPIAR-11377, the power of the 3.7 Å
+On raw EER movies of EMPIAR-11461 (Harder et al. 2023) and EMPIAR-11377
+(Fromm et al. 2023), the power of the 3.7 Å
 water ring per fraction is constant to within about 10 % across 40 to
 50 e⁻/Å², where the protein-calibrated critical exposure (about 5 e⁻/Å² at
 3.7 Å) would leave under 2 % of the ring amplitude by the final fraction. The
@@ -334,13 +339,13 @@ inverse FFT of the wave. `Envelopes(temporal_coherence="envelope")`
 `scattering_model = "ctf"`, is linear in the transfer function, so the
 envelope is that sum, and it keeps the envelope either way.
 
-Measured on 6bdf at 1 Å/px against the integrated image, with
+Measured on 6bdf (Campbell et al. 2015) at 1 Å/px against the integrated image, with
 \(C_c = 2.7\) mm and a 0.7 eV source: in 2000 Å of ice at 300 kV the
 envelope is 0.4% low in mean intensity and 0.7% low in image power below
 10 Å; in box-depth ice both differences are below 0.05%; at 120 kV the
 envelope is 5.1% low in mean intensity and 4-14% off in image power across
-the band. The integration agrees with abTEM's own weighted ensemble over a
-Gaussian defocus distribution to \(8\times10^{-10}\) of the image contrast.
+the band. The integration agrees with abTEM's own weighted ensemble (Madsen & Susi
+2021) over a Gaussian defocus distribution to \(8\times10^{-10}\) of the image contrast.
 
 The forward simulators therefore apply it by default: `cc` is 2.7 mm (the
 Titan Krios objective) in `Envelopes` and in every simulation config, with
@@ -388,8 +393,8 @@ dimensionless) and there is no converter from RELION's convention; see
 [Limitations](#limitations). Full API detail for both classes is in
 [specter.ctf](../api/ctf.md).
 
-`torch_ctf` also exposes a laser-phase-plate model (`lpp_params`), a
-`LegacyAberrationAdapter` constructor argument rather than a `ctf_params`
+`torch_ctf` also exposes a model of the laser phase plate (Schwartz et al.
+2019), `lpp_params`, a `LegacyAberrationAdapter` constructor argument rather than a `ctf_params`
 key, since it describes one shared instrument configuration rather than a
 per-particle quantity; `"legacy"` has no equivalent.
 
@@ -428,17 +433,85 @@ per-particle quantity; `"legacy"` has no equivalent.
 
 ## References
 
-- Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*,
-  2nd Edition. Springer.
-- Ishizuka, K. (1980). Contrast transfer of crystal images in TEM.
-  *Ultramicroscopy*, 5, 55-65.
-  [doi:10.1016/0304-3991(80)90011-X](https://doi.org/10.1016/0304-3991(80)90011-X)
-- Penczek, P. A. (2010). Image Restoration in Cryo-Electron Microscopy.
-  *Methods in Enzymology*, 482, 35-72.
-- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
-  formation. In *Current Approaches to Cryo-Electron Microscopy*,
-  *Progress in Molecular Biology and Translational Science*. Elsevier.
-  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Danev, R., Buijsse, B., Khoshouei, M., Plitzko, J. M., & Baumeister, W.
+  (2014). Volta potential phase plate for in-focus phase contrast
+  transmission electron microscopy. *Proceedings of the National Academy of
+  Sciences*, 111(44), 15635–15640.
+  [doi:10.1073/pnas.1418377111](https://doi.org/10.1073/pnas.1418377111)
+- Erickson, H. P., & Klug, A. (1971). Measurement and compensation of
+  defocusing and aberrations by Fourier processing of electron micrographs.
+  *Philosophical Transactions of the Royal Society of London. B, Biological
+  Sciences*, 261(837), 105–118.
+  [doi:10.1098/rstb.1971.0040](https://doi.org/10.1098/rstb.1971.0040)
+- Frank, J. (1973). The envelope of electron microscopic transfer functions
+  for partially coherent illumination. *Optik*, 38, 519–536. Reprinted in
+  J. Frank, *Single-particle cryo-electron microscopy* (pp. 51–68), World
+  Scientific, 2018.
+  [doi:10.1142/9789813234864_0003](https://doi.org/10.1142/9789813234864_0003)
+- Fromm, S. A., O'Connor, K. M., Purdy, M., Bhatt, P. R., Loughran, G.,
+  Atkins, J. F., Jomaa, A., & Mattei, S. (2023). The translating bacterial
+  ribosome at 1.55 Å resolution generated by cryo-EM imaging services.
+  *Nature Communications*, 14(1), 1095.
+  [doi:10.1038/s41467-023-36742-3](https://doi.org/10.1038/s41467-023-36742-3)
 - Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
   single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
-  *eLife*, 4, e06980. [doi:10.7554/eLife.06980](https://doi.org/10.7554/eLife.06980)
+  *eLife*, 4, e06980.
+  [doi:10.7554/eLife.06980](https://doi.org/10.7554/eLife.06980)
+- Hanszen, K. J., & Trepte, L. (1971). Der Einfluß von Strom- und
+  Spannungsschwankungen sowie der Energiebreite der Strahlelektronen auf
+  Kontrastübertragung und Auflösung des Elektronenmikroskopes. *Optik*, 32,
+  519–538.
+- Harder, O. F., Barrass, S. V., Drabbels, M., & Lorenz, U. J. (2023). Fast
+  viral dynamics revealed by microsecond time-resolved cryo-EM. *Nature
+  Communications*, 14(1), 5649.
+  [doi:10.1038/s41467-023-41444-x](https://doi.org/10.1038/s41467-023-41444-x)
+- Ishizuka, K. (1980). Contrast transfer of crystal images in TEM.
+  *Ultramicroscopy*, 5(1–3), 55–65.
+  [doi:10.1016/0304-3991(80)90011-X](https://doi.org/10.1016/0304-3991(80)90011-X)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Madsen, J., & Susi, T. (2021). The abTEM code: Transmission electron
+  microscopy from first principles. *Open Research Europe*, 1, 24.
+  [doi:10.12688/openreseurope.13015.2](https://doi.org/10.12688/openreseurope.13015.2)
+- Penczek, P. A. (2010). Image restoration in cryo-electron microscopy.
+  *Methods in Enzymology*, 482, 35–72.
+  [doi:10.1016/S0076-6879(10)82002-6](https://doi.org/10.1016/S0076-6879(10)82002-6)
+- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
+  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
+  determination. *Nature Methods*, 14(3), 290–296.
+  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)
+- Rosenthal, P. B., & Henderson, R. (2003). Optimal determination of
+  particle orientation, absolute hand, and contrast loss in single-particle
+  electron cryomicroscopy. *Journal of Molecular Biology*, 333(4), 721–745.
+  [doi:10.1016/j.jmb.2003.07.013](https://doi.org/10.1016/j.jmb.2003.07.013)
+- Scherzer, O. (1949). The theoretical resolution limit of the electron
+  microscope. *Journal of Applied Physics*, 20(1), 20–29.
+  [doi:10.1063/1.1698233](https://doi.org/10.1063/1.1698233)
+- Schwartz, O., Axelrod, J. J., Campbell, S. L., Turnbaugh, C., Glaeser,
+  R. M., & Müller, H. (2019). Laser phase plate for transmission electron
+  microscopy. *Nature Methods*, 16(10), 1016–1020.
+  [doi:10.1038/s41592-019-0552-2](https://doi.org/10.1038/s41592-019-0552-2)
+- Thon, F. (1966). Zur Defokussierungsabhängigkeit des Phasenkontrastes bei
+  der elektronenmikroskopischen Abbildung. *Zeitschrift für Naturforschung
+  A*, 21(4), 476–478.
+  [doi:10.1515/zna-1966-0417](https://doi.org/10.1515/zna-1966-0417)
+- Wade, R. H., & Frank, J. (1977). Electron microscope transfer functions
+  for partially coherent axial illumination and chromatic defocus spread.
+  *Optik*, 49, 81–92.
+- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
+  formation. In *Current approaches to cryo-electron microscopy* (Progress in
+  Molecular Biology and Translational Science, pp. 41–69). Elsevier.
+  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+- Zemlin, F., Weiss, K., Schiske, P., Kunath, W., & Herrmann, K.-H. (1978).
+  Coma-free alignment of high resolution electron microscopes with the aid of
+  optical diffractograms. *Ultramicroscopy*, 3, 49–60.
+  [doi:10.1016/S0304-3991(78)80006-0](https://doi.org/10.1016/S0304-3991(78)80006-0)
+- Zivanov, J., Nakane, T., & Scheres, S. H. W. (2020). Estimation of
+  high-order aberrations and anisotropic magnification from cryo-EM data sets
+  in *RELION*-3.1. *IUCrJ*, 7(2), 253–267.
+  [doi:10.1107/S2052252520000081](https://doi.org/10.1107/S2052252520000081)

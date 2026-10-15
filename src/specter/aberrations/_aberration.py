@@ -123,10 +123,13 @@ class Aberration(L.LightningModule):
     it gets the same constructor-level convenience as ``dose_per_angstrom``
     one level up, rather than requiring a hand-built per-particle tensor.
 
-    .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
-       US, Boston, MA, 2010).
-    .. [2] P. A. Penczek, “Image Restoration in Cryo-Electron Microscopy” in
-       Methods in Enzymology (Academic Press Inc., 2010) volume. 482, pp. 35–72.
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
+    .. [2] Penczek, P. A. (2010). Image restoration in cryo-electron
+       microscopy. *Methods in Enzymology*, 482, 35–72.
+       https://doi.org/10.1016/S0076-6879(10)82002-6
     """
 
     def __init__(

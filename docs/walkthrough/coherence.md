@@ -21,8 +21,8 @@ One particle in a box of ice at 1 µm underfocus, as on the previous page:
 ## The focal spread
 
 An energy spread \(\sigma_E\) about the beam energy \(U\), together with
-fluctuations of the high tension and the lens current, spreads the defocus by
-a standard deviation
+fluctuations of the high tension and the lens current, spreads the defocus
+(Hanszen & Trepte 1971) by a standard deviation
 
 \[
 \sigma_f = C_c\sqrt{\left(\frac{\sigma_E}{U}\right)^2
@@ -95,7 +95,7 @@ electrons, a different population; see
 ## Integrated or enveloped
 
 The usual shortcut multiplies the wave by the Gaussian average of the defocus
-phase,
+phase (Wade & Frank 1977),
 
 \[
 E_{C_c}(k) = \exp\!\left[-\tfrac{1}{2}\left(\pi\lambda\sigma_f k^2\right)^2\right],
@@ -107,7 +107,7 @@ and that is why the measured ratio above follows \(E_{C_c}^2\). It is not
 exact for the part that is quadratic: two scattered beams interfere into
 intensity at their difference frequency, and the focal spread damps that term
 by how far apart the two beams' defocus phases are, not by the product of
-their envelopes. The quadratic part grows with the amount of material the
+their envelopes (Ishizuka 1980). The quadratic part grows with the amount of material the
 beam crosses. `temporal_coherence="envelope"` selects the shortcut, which you
 can compare against the sum in 2000 Å of ice:
 
@@ -138,7 +138,7 @@ part, so for it the envelope is exact and always used.
 
 Illumination arriving over a cone of semi-angle \(\alpha\) shifts each
 frequency's wave aberration by an amount proportional to its gradient, and
-averaging over the cone damps the transfer function by
+averaging over the cone damps the transfer function (Frank 1973) by
 
 \[
 E_s(k) = \exp\!\left[-\left(\frac{\pi\alpha}{\lambda}\right)^2
@@ -180,3 +180,21 @@ reconstructed map rather than restored by assuming values for them. See
 
 [Detection](detection.md) turns the intensity into the electron counts a
 camera records, with dose, shot noise and the detector's own response.
+
+## References
+
+- Frank, J. (1973). The envelope of electron microscopic transfer functions
+  for partially coherent illumination. *Optik*, 38, 519–536. Reprinted in
+  J. Frank, *Single-particle cryo-electron microscopy* (pp. 51–68), World
+  Scientific, 2018.
+  [doi:10.1142/9789813234864_0003](https://doi.org/10.1142/9789813234864_0003)
+- Hanszen, K. J., & Trepte, L. (1971). Der Einfluß von Strom- und
+  Spannungsschwankungen sowie der Energiebreite der Strahlelektronen auf
+  Kontrastübertragung und Auflösung des Elektronenmikroskopes. *Optik*, 32,
+  519–538.
+- Ishizuka, K. (1980). Contrast transfer of crystal images in TEM.
+  *Ultramicroscopy*, 5(1–3), 55–65.
+  [doi:10.1016/0304-3991(80)90011-X](https://doi.org/10.1016/0304-3991(80)90011-X)
+- Wade, R. H., & Frank, J. (1977). Electron microscope transfer functions
+  for partially coherent axial illumination and chromatic defocus spread.
+  *Optik*, 49, 81–92.

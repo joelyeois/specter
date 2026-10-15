@@ -12,6 +12,12 @@ interfere into low-frequency intensity and which the envelope suppresses
 even though the focal spread cannot. :class:`FocalSpread` forms the image as
 the sum it physically is, ``sum_i w_i |psi * exp(i pi lambda k^2 d_i)|^2``,
 over a Gauss-Hermite quadrature of the focal spread.
+
+References
+----------
+.. [1] Ishizuka, K. (1980). Contrast transfer of crystal images in TEM.
+   *Ultramicroscopy*, 5(1–3), 55–65.
+   https://doi.org/10.1016/0304-3991(80)90011-X
 """
 
 from __future__ import annotations
@@ -91,6 +97,12 @@ class FocalSpread:
     0.7% low in low-frequency image power at 2000 A of ice, 0.04% and
     under 0.1% in thin ice; at 120 kV the envelope is 5.1% low in mean
     intensity and 4-14% off in image power. dev/tcc_experiment.py.
+
+    References
+    ----------
+    .. [1] Ishizuka, K. (1980). Contrast transfer of crystal images in TEM.
+       *Ultramicroscopy*, 5(1–3), 55–65.
+       https://doi.org/10.1016/0304-3991(80)90011-X
     """
 
     def __init__(self, sigma_f: float, wavelength: float, tol: float = 1e-6):

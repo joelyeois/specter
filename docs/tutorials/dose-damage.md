@@ -20,7 +20,8 @@ support, are still being validated.
 
 ## Setup
 
-Four particles of 6BDF in a box of ice, imaged at 1.5 µm underfocus:
+Four particles of 6BDF (Campbell et al. 2015) in a box of ice, imaged at
+1.5 µm underfocus:
 
 ```python
 --8<-- "docs-figures/tutorials/dose_damage.py:setup"
@@ -32,7 +33,7 @@ Four particles of 6BDF in a box of ice, imaged at 1.5 µm underfocus:
 
 ## The damage envelope
 
-Grant and Grigorieff measured that the signal at spatial frequency \(k\)
+Grant & Grigorieff (2015) measured that the signal at spatial frequency \(k\)
 decays with exposure \(N\) as \(e^{-N/N_e(k)}\), with a *critical exposure*
 \(N_e(k) = a k^{b} + c\) that is shorter for finer detail. A frame recorded at
 accumulated exposure \(N\) carries \(e^{-N/2N_e}\) of its undamaged amplitude,
@@ -136,8 +137,8 @@ with the equilibrium structure, but successive frames hold different
 arrangements of it, so the ice's Fourier amplitudes lose correlation with dose.
 A summed image keeps only the fraction \(\mathcal S(k)\) of a frozen ice's
 power that survives that averaging. `Ice(motion_variance=...)` applies it as
-a filter on the ice, parameterized by McMullan et al.'s \(\sigma_0^2\), the
-per-axis displacement variance per e⁻/Å² measured from the decorrelation of
+a filter on the ice, parameterized by the \(\sigma_0^2\) of McMullan et al.
+(2015), the per-axis displacement variance per e⁻/Å² measured from the decorrelation of
 the 3.7 Å ring (0.38 Å² for their 300 kV exposure):
 
 ```python
@@ -209,3 +210,18 @@ frame weights with a motion-correction job's own.
   closed forms and where it acts.
 - [Specimens: crowding and ice](../walkthrough/specimens.md#radiation-damage):
   `damage()` in the order a specimen is built.
+
+## References
+
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+  single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+  *eLife*, 4, e06980.
+  [doi:10.7554/eLife.06980](https://doi.org/10.7554/eLife.06980)
+- McMullan, G., Vinothkumar, K. R., & Henderson, R. (2015). Thon rings from
+  amorphous ice and implications of beam-induced Brownian motion in single
+  particle electron cryo-microscopy. *Ultramicroscopy*, 158, 26–32.
+  [doi:10.1016/j.ultramic.2015.05.017](https://doi.org/10.1016/j.ultramic.2015.05.017)

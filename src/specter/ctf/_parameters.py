@@ -215,6 +215,18 @@ class CTFParameters(nn.Module):
         across a group of particles (e.g.
         ``{"astigmatism": micrograph_id}``) rather than fully per-particle
         or fully global.
+
+    References
+    ----------
+    .. [1] torch-ctf (v0.5.2): CTF functions for cryo-EM in torch. teamtomo.
+       https://github.com/teamtomo/torch-ctf
+    .. [2] Schwartz, O., Axelrod, J. J., Campbell, S. L., Turnbaugh, C., Glaeser,
+       R. M., & Müller, H. (2019). Laser phase plate for transmission electron
+       microscopy. *Nature Methods*, 16(10), 1016–1020.
+       https://doi.org/10.1038/s41592-019-0552-2
+    .. [3] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
 
     def __init__(

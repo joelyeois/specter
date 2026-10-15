@@ -721,6 +721,13 @@ def matched_pose_snr(
     Returns
     -------
     MatchedPoseSNR
+
+    References
+    ----------
+    .. [1] Rosenthal, P. B., & Henderson, R. (2003). Optimal determination of
+       particle orientation, absolute hand, and contrast loss in
+       single-particle electron cryomicroscopy. *Journal of Molecular
+       Biology*, 333(4), 721–745. https://doi.org/10.1016/j.jmb.2003.07.013
     """
     terms = _band_spectra(sim, sim2, exp, pixel_size)
     snr_s, snr_e, ratio = _band_snr(terms)

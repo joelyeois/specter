@@ -242,6 +242,15 @@ class ExitWave:
         -------
         Image
             On the wave's grid.
+
+        References
+        ----------
+        .. [1] Ishizuka, K. (1980). Contrast transfer of crystal images in TEM.
+           *Ultramicroscopy*, 5(1–3), 55–65.
+           https://doi.org/10.1016/0304-3991(80)90011-X
+        .. [2] Wade, R. H., & Frank, J. (1977). Electron microscope transfer
+           functions for partially coherent axial illumination and chromatic
+           defocus spread. *Optik*, 49, 81–92.
         """
         grid = self.array.shape[-1] // self.pad_nxy
         dx = self.pixel_size / grid

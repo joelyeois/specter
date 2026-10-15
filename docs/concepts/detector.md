@@ -51,18 +51,19 @@ data binned back to physical pixels. It falls to 0.86 at half Nyquist and
 0.61 at Nyquist. The Falcon 4i (a
 [Thermo Fisher Scientific](https://www.thermofisher.com/) detector) curves
 are derived instead from three published DQE points (0,
-0.5, and 1x Nyquist) under the white-noise approximation
-\(\mathrm{DQE}(k) \approx \mathrm{MTF}(k)^2\), so SPECTER recovers the
+0.5, and 1x Nyquist; Thermo Fisher Scientific 2022) under the white-noise
+approximation \(\mathrm{DQE}(k) \approx \mathrm{MTF}(k)^2\) (McMullan et
+al. 2009), so SPECTER recovers the
 *shape* as \(\mathrm{MTF}(k) = \sqrt{\mathrm{DQE}(k)/\mathrm{DQE}(0)}\),
 normalized by the zero-frequency value so it comes out as a proper MTF,
 with quadratic interpolation between the three points. The Falcon 3EC
 (`falcon3ec_300kv`, High Quality electron-counting mode at 300 kV) uses the same
 conversion on a full DQE curve rather than three points: the curve measured by
-McMullan and Henderson and published in Thermo Fisher's Falcon 3EC datasheet,
-digitised onto the K3 frequency grid. It falls steeply over the last fifth of
-the Nyquist range, which three points would not capture. `"perfect"`
+McMullan and Henderson and published in Thermo Fisher's Falcon 3EC datasheet
+(Thermo Fisher Scientific 2018), digitised onto the K3 frequency grid. It
+falls steeply over the last fifth of the Nyquist range, which three points would not capture. `"perfect"`
 is the ideal pixel-integration limit, \(\mathrm{sinc}(\pi k / 2 k_{Nyq})\),
-limited only by the finite pixel aperture.
+limited only by the finite pixel aperture (McMullan et al. 2009).
 
 ### Images resampled after recording
 
@@ -99,11 +100,13 @@ DQE(0) per detector model.
 ///
 
 Falcon 4i, Falcon 3EC and K2 have traceable low-dose-rate published values
-(0.92, 0.95 and 0.80 at 300 kV); K3's datasheet publishes an MTF with no
+(0.92, 0.95 and 0.80 at 300 kV; Thermo Fisher Scientific 2022, 2018;
+McMullan et al. 2014); K3's datasheet publishes an MTF with no
 accompanying DQE(0) figure, so it defaults to 1.0 (an ideal counter) rather
 than guessing. These values
 must be *low-dose-rate* DQE(0): published DQE falls with dose rate
-largely because of coincidence loss, which SPECTER already models
+largely because of coincidence loss (Li et al. 2013; McMullan et al. 2014),
+which SPECTER already models
 separately (below). Using a high-flux figure here would count that
 loss twice.
 
@@ -136,7 +139,8 @@ against real beam-only micrographs spanning 0.15-31.29 e⁻/px/s, with the
 counting efficiency DQE(0) = 0.92 modelled explicitly, reproducing the
 measured detected-electron yield to ~3% RMSE. The K2 Summit's 2.54 physical
 pixels is obtained by inverting the same model against Campbell et al.
-(2015)'s measurement of a 25% loss at ~12 e⁻/px/s and 400 frames per second.
+(2015)'s measurement of a 25% loss at ~12 e⁻/px/s and 400 frames per second
+(Li et al. 2013).
 Both values are listed in `detectors.EXCLUSION_RADIUS_PX`; a radius belongs
 to the camera unit and its counting configuration, so it is a prior for
 other cameras of the same model, not a constant. On the right, the exclusion
@@ -145,16 +149,22 @@ spectrum relative to plain Poisson: an electron's presence excludes its
 own neighborhood for an instant, which suppresses variance at scales
 larger than the exclusion radius while leaving the high-frequency
 (per-pixel) noise floor nearly untouched. That matches the signature
-reported for real DED coincidence loss.
+reported for real DED coincidence loss (Li et al. 2013; McMullan et al.
+2014). Zambon (2024) gives a closed-form treatment of the same phenomenon
+(Roach's statistical-overlap model), which `Detector.apply_coincidence`'s
+spatial simulation does not itself implement. It is useful for the DQE/SNR
+consequences of coincidence loss at the per-pixel statistics level, though
+closed-form per-pixel statistics alone do not reproduce the spatially
+correlated low-frequency power-spectrum dip shown above.
 
 ### From a detector radius to a simulation radius
 
 The calibrated radius and the `coincidence_radius` setting are in different
 units. `EXCLUSION_RADIUS_PX` is in physical detector pixels and applies per
 *hardware* frame, the rate at which the camera counts
-(`detectors.HARDWARE_FRAME_RATE_HZ`: 320 Hz for the Falcon 4i, 400 Hz for the
-K2, 1500 Hz for the K3). `coincidence_radius` is in pixels of the simulated
-image and applies per simulated frame, of which there are `n_frames`. A
+(`detectors.HARDWARE_FRAME_RATE_HZ`: 320 Hz for the Falcon 4i (Thermo Fisher
+Scientific 2022), 400 Hz for the K2 (Li et al. 2013), 1500 Hz for the K3).
+`coincidence_radius` is in pixels of the simulated image and applies per simulated frame, of which there are `n_frames`. A
 simulation usually runs at a coarser pixel and with far fewer frames than the
 camera recorded, so the radius is converted at constant occupancy, the mean
 number of electrons per exclusion cell per frame, on which the mean loss
@@ -187,21 +197,33 @@ weights were computed for; a mismatch is reported with a warning.
 
 ## References
 
-- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
-  formation. In *Current Approaches to Cryo-Electron Microscopy*,
-  *Progress in Molecular Biology and Translational Science*. Elsevier.
-  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
 - Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
   (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
   20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
   [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
-- Zambon, P. (2024). Modeling the impact of coincidence loss on count
-  rate statistics and noise performance in counting detectors for imaging
+- Li, X., Zheng, S. Q., Egami, K., Agard, D. A., & Cheng, Y. (2013).
+  Influence of electron dose rate on electron counting images recorded with
+  the K2 camera. *Journal of Structural Biology*, 184(2), 251–260.
+  [doi:10.1016/j.jsb.2013.08.005](https://doi.org/10.1016/j.jsb.2013.08.005)
+- McMullan, G., Chen, S., Henderson, R., & Faruqi, A. R. (2009). Detective
+  quantum efficiency of electron area detectors in electron microscopy.
+  *Ultramicroscopy*, 109(9), 1126–1143.
+  [doi:10.1016/j.ultramic.2009.04.002](https://doi.org/10.1016/j.ultramic.2009.04.002)
+- McMullan, G., Faruqi, A. R., Clare, D., & Henderson, R. (2014). Comparison
+  of optimal performance at 300 keV of three direct electron detectors for
+  use in low dose electron microscopy. *Ultramicroscopy*, 147, 156–163.
+  [doi:10.1016/j.ultramic.2014.08.002](https://doi.org/10.1016/j.ultramic.2014.08.002)
+- Thermo Fisher Scientific. (2018). *Falcon 3EC Direct Electron Detector*
+  (Datasheet DS0236-EN-10-2018).
+  [documents.thermofisher.com](https://documents.thermofisher.com/TFS-Assets/MSD/Technical-Notes/Falcon-3EC-Datasheet.pdf)
+- Thermo Fisher Scientific. (2022). *Falcon 4i Direct Electron Detector*
+  (Datasheet DS0371-EN-01-2022).
+  [documents.thermofisher.com](https://documents.thermofisher.com/TFS-Assets/MSD/Datasheets/falcon-detector-datasheet-ds0371.pdf)
+- Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
+  formation. In *Current approaches to cryo-electron microscopy* (Progress in
+  Molecular Biology and Translational Science, pp. 41–69). Elsevier.
+  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
+- Zambon, P. (2024). Modeling the impact of coincidence loss on count rate
+  statistics and noise performance in counting detectors for imaging
   applications. *Frontiers in Physics*, 12, 1408430.
-  [doi:10.3389/fphy.2024.1408430](https://doi.org/10.3389/fphy.2024.1408430).
-  This is a closed-form treatment of the same phenomenon (Roach's
-  statistical-overlap model), which `Detector.apply_coincidence`'s
-  spatial simulation does not itself implement. It is useful for the
-  DQE/SNR consequences of coincidence loss at the per-pixel statistics
-  level, though closed-form per-pixel statistics alone do not reproduce
-  the spatially correlated low-frequency power-spectrum dip shown above.
+  [doi:10.3389/fphy.2024.1408430](https://doi.org/10.3389/fphy.2024.1408430)

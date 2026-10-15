@@ -6,12 +6,13 @@ dependence on a class instance. Each function returns the phase contribution
 function chi(k), following the conventions of Kirkland [1]_ and
 Penczek [2]_.
 
-Notes
------
-.. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy (Springer
-   US, Boston, MA, 2010).
-.. [2] P. A. Penczek, "Image Restoration in Cryo-Electron Microscopy" in
-   Methods in Enzymology (Academic Press Inc., 2010) volume. 482, pp. 35-72.
+References
+----------
+.. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+   (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
+.. [2] Penczek, P. A. (2010). Image restoration in cryo-electron microscopy.
+   *Methods in Enzymology*, 482, 35–72.
+   https://doi.org/10.1016/S0076-6879(10)82002-6
 """
 
 from __future__ import annotations
@@ -111,6 +112,13 @@ def beamtilt(
     -------
     chi_tilt : torch.Tensor
         Phase contribution from beam tilt.
+
+    References
+    ----------
+    .. [1] Zemlin, F., Weiss, K., Schiske, P., Kunath, W., & Herrmann, K.-H.
+       (1978). Coma-free alignment of high resolution electron microscopes with
+       the aid of optical diffractograms. *Ultramicroscopy*, 3, 49–60.
+       https://doi.org/10.1016/S0304-3991(78)80006-0
     """
     tilts = torch.sin(tilty) * KY + torch.sin(tiltx) * KX
     return -2 * torch.pi * wavelength**2 * cs * k2 * tilts
@@ -140,6 +148,13 @@ def trefoil(
     -------
     chi_trefoil : torch.Tensor
         Phase contribution from trefoil aberration.
+
+    References
+    ----------
+    .. [1] Zivanov, J., Nakane, T., & Scheres, S. H. W. (2020). Estimation of
+       high-order aberrations and anisotropic magnification from cryo-EM data
+       sets in *RELION*-3.1. *IUCrJ*, 7(2), 253–267.
+       https://doi.org/10.1107/S2052252520000081
     """
     return trefoil1 * k**3 * torch.sin(3 * radian) + trefoil2 * k**3 * torch.cos(
         3 * radian
@@ -182,6 +197,13 @@ def tetrafoil(
     -------
     chi_tetrafoil : torch.Tensor
         Phase contribution from tetrafoil aberration.
+
+    References
+    ----------
+    .. [1] Zivanov, J., Nakane, T., & Scheres, S. H. W. (2020). Estimation of
+       high-order aberrations and anisotropic magnification from cryo-EM data
+       sets in *RELION*-3.1. *IUCrJ*, 7(2), 253–267.
+       https://doi.org/10.1107/S2052252520000081
     """
     k4 = k**4
     return (
@@ -229,6 +251,19 @@ def phaseshift(
     chi_phaseshift : torch.Tensor
         Phase shift contribution. For the nonlinear model, DC component is
         set to zero to maintain Fourier optics validity.
+
+    References
+    ----------
+    .. [1] Danev, R., Buijsse, B., Khoshouei, M., Plitzko, J. M., & Baumeister,
+       W. (2014). Volta potential phase plate for in-focus phase contrast
+       transmission electron microscopy. *Proceedings of the National Academy
+       of Sciences*, 111(44), 15635–15640.
+       https://doi.org/10.1073/pnas.1418377111
+    .. [2] Erickson, H. P., & Klug, A. (1971). Measurement and compensation of
+       defocusing and aberrations by Fourier processing of electron
+       micrographs. *Philosophical Transactions of the Royal Society of
+       London. B, Biological Sciences*, 261(837), 105–118.
+       https://doi.org/10.1098/rstb.1971.0040
     """
     if aberration_model == "linear" and alpha is not None:
         phaseshift = phaseshift - torch.acos(alpha)
@@ -289,6 +324,13 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     -------
     float
         Shift in Å.
+
+    References
+    ----------
+    .. [1] Balakrishnan, D., Chee, S. W., Baraissov, Z., Bosman, M., Mirsaidov,
+       U., & Loh, N. D. (2023). Single-shot, coherent, pop-out 3D metrology.
+       *Communications Physics*, 6(1), 321.
+       https://doi.org/10.1038/s42005-023-01431-6
     """
     return (nz * pixel_size) / 2
 

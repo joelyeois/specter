@@ -118,6 +118,12 @@ class Poses:
         seed : int, optional
             Draw from this seed rather than the global generator, which is
             left untouched. Default None.
+
+        References
+        ----------
+        .. [1] Shoemake, K. (1992). Uniform random rotations. In *Graphics
+           Gems III* (pp. 124–132). Elsevier.
+           https://doi.org/10.1016/B978-0-08-050755-2.50036-1
         """
         with _drawn(seed, _SEED_POSES):
             quaternions = rotations.random_quaternion(n).reshape(n, 4)
@@ -297,6 +303,12 @@ class Exposure:
         as single-particle images and micrographs are, rather than a plain
         sum of its frames, as a tilt is. Sets the dose envelope's form.
         Default True.
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure
+       for single particle cryo-EM using a 2.6 Å reconstruction of rotavirus
+       VP6. *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
 
     dose: torch.Tensor | float

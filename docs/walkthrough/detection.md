@@ -11,14 +11,15 @@ the expected number of electrons recorded in a pixel is
 
 where \(I\) is the intensity relative to the unscattered beam, the MTF is the
 detector's blur and \(\mathrm{DQE}(0)\) the fraction of electrons it counts at
-all. The recorded count is drawn from a Poisson distribution with that mean.
+all (McMullan et al. 2009). The recorded count is drawn from a Poisson distribution with that mean.
 `Image.detect` performs these steps. This page records one particle at
 several doses, compares the bundled detector models, and shows how
 coincidence loss changes the noise of a counting detector.
 
 ## Setup
 
-The example is one 6BDF particle in vacuum at 1.5 µm underfocus, so the only
+The example is one 6BDF particle (Campbell et al. 2015) in vacuum at 1.5 µm
+underfocus, so the only
 structure in the image is the particle itself:
 
 ```python
@@ -102,7 +103,7 @@ records every electron in the pixel it lands in.
 ```
 
 `perfect` is the limit set by the pixel's own aperture, a sinc that falls to
-0.64 at Nyquist. The others are measured or published curves for real
+0.64 at Nyquist (McMullan et al. 2009). The others are measured or published curves for real
 cameras at 300 kV ([MTF: a pure blur](../concepts/detector.md#mtf-a-pure-blur)).
 K3's datasheet gives an MTF without a \(\mathrm{DQE}(0)\), so `k3_300kv`
 counts every electron
@@ -121,21 +122,22 @@ together; the SNR falls by the factor \(\mathrm{DQE}(0)\). The MTF blurs the
 expected counts before the Poisson draw, so the signal loses power at high
 frequency while the noise stays white, because each counted electron still
 lands in one pixel. The SNR relative to an ideal counter is therefore
-\(\mathrm{DQE}(0)\,\mathrm{MTF}(k)^2\), the detector's DQE, and the measured
-curves follow it. Folding \(\mathrm{DQE}(0)\) into the MTF instead would get
+\(\mathrm{DQE}(0)\,\mathrm{MTF}(k)^2\), the detector's DQE (McMullan et al.
+2009), and the measured curves follow it. Folding \(\mathrm{DQE}(0)\) into the MTF instead would get
 the noise wrong, which is why the two are kept apart.
 
 Two further `detect` arguments describe the camera geometry.
 `detector_pixel_size` names the physical pixel when the images were binned or
 Fourier-cropped after recording, so the MTF is read at the right frequencies
 ([Images resampled after recording](../concepts/detector.md#images-resampled-after-recording)).
-`anisomag` applies an anisotropic magnification, one 2 × 2 matrix per image.
+`anisomag` applies an anisotropic magnification, one 2 × 2 matrix per image
+(Zivanov et al. 2020).
 
 ## Coincidence loss
 
 A counting detector finds electrons as events within each readout frame. Two
 electrons that land close together in the same frame register as one, so at
-high dose rates the camera loses counts. `coincidence_radius` sets the
+high dose rates the camera loses counts (Li et al. 2013). `coincidence_radius` sets the
 exclusion radius in pixels of the simulated image, and `Exposure(n_frames=)`
 the number of frames the dose is split across. The radius for a real camera
 follows from its calibrated exclusion radius in physical pixels, its hardware
@@ -166,7 +168,8 @@ counts more even than independent arrivals would be. The noise therefore
 falls below the Poisson level, and falls furthest at low spatial frequency:
 at 16 e⁻/px/s, from about 0.8 of the mean count at Nyquist to about 0.5 at
 the lowest frequencies. Real counting detectors show the same low-frequency
-suppression ([Coincidence loss](../concepts/detector.md#coincidence-loss)).
+suppression (Li et al. 2013; McMullan et al. 2014; see
+[Coincidence loss](../concepts/detector.md#coincidence-loss)).
 A coincidence radius above zero requires `n_frames`.
 
 ## Noiseless images and saving
@@ -190,3 +193,26 @@ header:
 
 [Particle stacks](particle-stacks.md) runs every stage so far for a whole
 stack of particles, each with its own pose, defocus and draw of ice.
+
+## References
+
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Li, X., Zheng, S. Q., Egami, K., Agard, D. A., & Cheng, Y. (2013).
+  Influence of electron dose rate on electron counting images recorded with
+  the K2 camera. *Journal of Structural Biology*, 184(2), 251–260.
+  [doi:10.1016/j.jsb.2013.08.005](https://doi.org/10.1016/j.jsb.2013.08.005)
+- McMullan, G., Chen, S., Henderson, R., & Faruqi, A. R. (2009). Detective
+  quantum efficiency of electron area detectors in electron microscopy.
+  *Ultramicroscopy*, 109(9), 1126–1143.
+  [doi:10.1016/j.ultramic.2009.04.002](https://doi.org/10.1016/j.ultramic.2009.04.002)
+- McMullan, G., Faruqi, A. R., Clare, D., & Henderson, R. (2014). Comparison
+  of optimal performance at 300 keV of three direct electron detectors for
+  use in low dose electron microscopy. *Ultramicroscopy*, 147, 156–163.
+  [doi:10.1016/j.ultramic.2014.08.002](https://doi.org/10.1016/j.ultramic.2014.08.002)
+- Zivanov, J., Nakane, T., & Scheres, S. H. W. (2020). Estimation of
+  high-order aberrations and anisotropic magnification from cryo-EM data sets
+  in *RELION*-3.1. *IUCrJ*, 7(2), 253–267.
+  [doi:10.1107/S2052252520000081](https://doi.org/10.1107/S2052252520000081)

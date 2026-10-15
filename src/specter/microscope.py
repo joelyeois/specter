@@ -13,10 +13,10 @@ loss imprints on a power spectrum.
 
 References
 ----------
-Zambon, P. (2024). Modeling the impact of coincidence loss on count rate
-statistics and noise performance in counting detectors for imaging
-applications. Frontiers in Physics, 12, 1408430.
-https://doi.org/10.3389/fphy.2024.1408430
+.. [1] Zambon, P. (2024). Modeling the impact of coincidence loss on count
+   rate statistics and noise performance in counting detectors for imaging
+   applications. *Frontiers in Physics*, 12, 1408430.
+   https://doi.org/10.3389/fphy.2024.1408430
 """
 
 from __future__ import annotations
@@ -96,6 +96,13 @@ class Detector(L.LightningModule):
     be taken from the same detector: ``dqe0 = DQE(0)`` and
     ``MTF(k) = sqrt(DQE(k)/DQE(0))``. Setting one without the other silently
     mis-models the detector.
+
+    References
+    ----------
+    .. [1] McMullan, G., Chen, S., Henderson, R., & Faruqi, A. R. (2009). Detective
+       quantum efficiency of electron area detectors in electron microscopy.
+       *Ultramicroscopy*, 109(9), 1126–1143.
+       https://doi.org/10.1016/j.ultramic.2009.04.002
     """
 
     def __init__(
@@ -233,6 +240,13 @@ class Detector(L.LightningModule):
         -------
         magnified_images : torch.Tensor
             Images after anisotropic magnification, shape (B, H, W).
+
+        References
+        ----------
+        .. [1] Zivanov, J., Nakane, T., & Scheres, S. H. W. (2020). Estimation of
+           high-order aberrations and anisotropic magnification from cryo-EM data
+           sets in *RELION*-3.1. *IUCrJ*, 7(2), 253–267.
+           https://doi.org/10.1107/S2052252520000081
         """
         images = images.unsqueeze(1)
         B = len(images)
@@ -647,6 +661,21 @@ class Detector(L.LightningModule):
         side is ``r * sqrt(pi)``, so the cell area, and with it the effective
         exclusion area, is ``pi * r**2`` (see
         :meth:`apply_detector_physics`).
+
+        References
+        ----------
+        .. [1] Li, X., Zheng, S. Q., Egami, K., Agard, D. A., & Cheng, Y. (2013).
+           Influence of electron dose rate on electron counting images recorded
+           with the K2 camera. *Journal of Structural Biology*, 184(2), 251–260.
+           https://doi.org/10.1016/j.jsb.2013.08.005
+        .. [2] McMullan, G., Faruqi, A. R., Clare, D., & Henderson, R. (2014).
+           Comparison of optimal performance at 300 keV of three direct electron
+           detectors for use in low dose electron microscopy. *Ultramicroscopy*,
+           147, 156–163. https://doi.org/10.1016/j.ultramic.2014.08.002
+        .. [3] Zambon, P. (2024). Modeling the impact of coincidence loss on count rate
+           statistics and noise performance in counting detectors for imaging
+           applications. *Frontiers in Physics*, 12, 1408430.
+           https://doi.org/10.3389/fphy.2024.1408430
         """
         if self.noise_model != "poisson":
             return img

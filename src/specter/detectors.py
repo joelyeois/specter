@@ -296,6 +296,13 @@ def perfect_detector(
     mtf : torch.Tensor
         - If return1d=False: 2D NxN MTF array (radially symmetric).
         - If return1d=True: Tuple (k_data, mtf_1d) for 1D MTF along a radial line.
+
+    References
+    ----------
+    .. [1] McMullan, G., Chen, S., Henderson, R., & Faruqi, A. R. (2009). Detective
+       quantum efficiency of electron area detectors in electron microscopy.
+       *Ultramicroscopy*, 109(9), 1126–1143.
+       https://doi.org/10.1016/j.ultramic.2009.04.002
     """
     k = torch.fft.fftfreq(n, d=dx, device=device)
 
@@ -464,8 +471,14 @@ def falcon3ec_300kv(
 
     References
     ----------
-    Thermo Fisher Scientific, Falcon 3EC Direct Electron Detector datasheet,
-    DS0236-EN-10-2018, Fig. 3 (measurement by G. McMullan and R. Henderson).
+    .. [1] Thermo Fisher Scientific. (2018). *Falcon 3EC Direct Electron Detector*
+       (Datasheet DS0236-EN-10-2018), Fig. 3 (measurement by G. McMullan and
+       R. Henderson).
+       https://documents.thermofisher.com/TFS-Assets/MSD/Technical-Notes/Falcon-3EC-Datasheet.pdf
+    .. [2] McMullan, G., Chen, S., Henderson, R., & Faruqi, A. R. (2009). Detective
+       quantum efficiency of electron area detectors in electron microscopy.
+       *Ultramicroscopy*, 109(9), 1126–1143.
+       https://doi.org/10.1016/j.ultramic.2009.04.002
     """
     dqe0 = _FALCON3EC_300KV_DQE[0]
     mtf = [math.sqrt(d / dqe0) for d in _FALCON3EC_300KV_DQE]
@@ -500,7 +513,15 @@ def falcon4i_300kv(
 
     References
     ----------
-    https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
+    .. [1] Thermo Fisher Scientific. (2022). *Falcon 4i Direct Electron Detector*
+       (Datasheet DS0371-EN-01-2022).
+       https://documents.thermofisher.com/TFS-Assets/MSD/Datasheets/falcon-detector-datasheet-ds0371.pdf
+    .. [2] Thermo Fisher Scientific. Falcon 4i Direct Electron Detector.
+       https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
+    .. [3] McMullan, G., Chen, S., Henderson, R., & Faruqi, A. R. (2009). Detective
+       quantum efficiency of electron area detectors in electron microscopy.
+       *Ultramicroscopy*, 109(9), 1126–1143.
+       https://doi.org/10.1016/j.ultramic.2009.04.002
     """
     return _falcon4i_mtf(n, dx, device, return1d, _FALCON4I_300KV_DQE)
 
@@ -533,7 +554,15 @@ def falcon4i_200kv(
 
     References
     ----------
-    https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
+    .. [1] Thermo Fisher Scientific. (2022). *Falcon 4i Direct Electron Detector*
+       (Datasheet DS0371-EN-01-2022).
+       https://documents.thermofisher.com/TFS-Assets/MSD/Datasheets/falcon-detector-datasheet-ds0371.pdf
+    .. [2] Thermo Fisher Scientific. Falcon 4i Direct Electron Detector.
+       https://www.thermofisher.com/sg/en/home/electron-microscopy/products/accessories-em/falcon-detector.html
+    .. [3] McMullan, G., Chen, S., Henderson, R., & Faruqi, A. R. (2009). Detective
+       quantum efficiency of electron area detectors in electron microscopy.
+       *Ultramicroscopy*, 109(9), 1126–1143.
+       https://doi.org/10.1016/j.ultramic.2009.04.002
     """
     return _falcon4i_mtf(n, dx, device, return1d, _FALCON4I_200KV_DQE)
 
@@ -672,6 +701,20 @@ def dqe0_for_detector(detector_model: str | None) -> float:
     measured MTF (already normalised to 1 at DC) with no accompanying DQE(0)
     figure in the same datasheet, so assuming one would be inventing physics.
     They therefore behave as ideal counters until a sourced value is added.
+
+    References
+    ----------
+    .. [1] Thermo Fisher Scientific. (2022). *Falcon 4i Direct Electron Detector*
+       (Datasheet DS0371-EN-01-2022).
+       https://documents.thermofisher.com/TFS-Assets/MSD/Datasheets/falcon-detector-datasheet-ds0371.pdf
+    .. [2] Thermo Fisher Scientific. (2018). *Falcon 3EC Direct Electron Detector*
+       (Datasheet DS0236-EN-10-2018), Fig. 3 (measurement by G. McMullan and
+       R. Henderson).
+       https://documents.thermofisher.com/TFS-Assets/MSD/Technical-Notes/Falcon-3EC-Datasheet.pdf
+    .. [3] McMullan, G., Faruqi, A. R., Clare, D., & Henderson, R. (2014).
+       Comparison of optimal performance at 300 keV of three direct electron
+       detectors for use in low dose electron microscopy. *Ultramicroscopy*,
+       147, 156–163. https://doi.org/10.1016/j.ultramic.2014.08.002
     """
     if detector_model is None:
         return 1.0

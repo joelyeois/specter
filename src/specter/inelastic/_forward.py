@@ -60,6 +60,12 @@ class FrozenPlasmonForward(nn.Module):
 
     With ``plasmon_filter=None``, sources are interpreted as direct imaginary
     potentials, providing the MFP comparison path through identical operators.
+
+    References
+    ----------
+    .. [1] Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+       radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+       8(6), 943–953. https://doi.org/10.1107/S2052252521008538
     """
 
     def __init__(

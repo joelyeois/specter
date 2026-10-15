@@ -83,9 +83,16 @@ class Structure:
         """
         Read a model from an accession code or a local file.
 
-        Shtyrov factors are fitted per bonded species, so the model is typed
-        from its bond topology only when they are asked for; the other
+        Shtyrov factors [1]_ are fitted per bonded species, so the model is
+        typed from its bond topology only when they are asked for; the other
         parameterizations are per element.
+
+        References
+        ----------
+        .. [1] Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+           et al. (2026). Measurement of atomic scattering factors by cryoelectron
+           microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+           e2528758123. https://doi.org/10.1073/pnas.2528758123
         """
         pdb = PDB(
             source,
@@ -305,7 +312,15 @@ class Specimen:
         return replace(specimen, icemaker=maker)
 
     def damage(self) -> Specimen:
-        """Apply each exposure's dose envelope to the specimen, before the ice."""
+        """
+        Apply each exposure's dose envelope to the specimen, before the ice.
+
+        References
+        ----------
+        .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+           single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+           *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
+        """
         return replace(self, damaged=True)
 
     def dry(self) -> Specimen:

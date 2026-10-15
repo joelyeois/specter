@@ -235,6 +235,18 @@ def resolve_removal_mfps(
     RemovalMFPs or None
         The resolved mean free paths, or None when
         ``absorption_model != "inelastic_mfp"``.
+
+    References
+    ----------
+    .. [1] Rice, W. J., Cheng, A., Noble, A. J., Eng, E. T., Kim, L. Y.,
+       Carragher, B., & Potter, C. S. (2018). Routine determination of ice
+       thickness for cryo-EM grids. *Journal of Structural Biology*, 204(1),
+       38–44. https://doi.org/10.1016/j.jsb.2018.06.007
+    .. [2] Grimm, R., Typke, D., Bärmann, M., & Baumeister, W. (1996).
+       Determination of the inelastic mean free path in ice by examination of
+       tilted vesicles and automated most probable loss imaging.
+       *Ultramicroscopy*, 63(3–4), 169–179.
+       https://doi.org/10.1016/0304-3991(96)00035-6
     """
     if propagation.absorption_model != "inelastic_mfp":
         return None
@@ -287,6 +299,13 @@ def mfp_absorption_field(
     torch.Tensor
         Absorption potential in volts, same shape as `specimen`. Uniform when
         `removal_mfps` has no specimen mean free path.
+
+    References
+    ----------
+    .. [1] Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J.,
+       Lazić, I., Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image
+       formation modeling in cryo-electron microscopy. *Journal of Structural
+       Biology*, 183(1), 19–32. https://doi.org/10.1016/j.jsb.2013.05.008
     """
     return inelastic_absorption_potential(
         specimen,

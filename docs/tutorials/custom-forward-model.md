@@ -24,7 +24,7 @@ Before you start: this tutorial follows the chain of
 
 ## The reference
 
-One particle of 6BDF at 2 Å voxels, imaged at 1.5 µm underfocus with the
+One particle of 6BDF (Campbell et al. 2015) at 2 Å voxels, imaged at 1.5 µm underfocus with the
 chromatic focal spread on, and recorded on a K3 without noise, so that the two
 routes can be compared exactly:
 
@@ -50,7 +50,8 @@ an affine matrix built from the quaternion and from the shift, converted from
 --8<-- "docs-includes/tutorials/custom_forward_model-rotate.txt"
 ```
 
-`origin="relion"` puts the rotation centre where RELION and CryoSPARC put it,
+`origin="relion"` puts the rotation centre where RELION (Scheres 2012) and
+CryoSPARC (Punjani et al. 2017) put it,
 so a pose read from a particle file means the same here as there
 ([Poses](../concepts/conventions.md#poses)). A specimen with neighbours or ice
 would add them now, around the rotated particle, with
@@ -58,8 +59,8 @@ would add them now, around the rotated particle, with
 
 ## Propagating the wave
 
-`Scattering` runs multislice through the volume and returns the wave at its
-exit face:
+`Scattering` runs multislice (Cowley & Moodie 1957) through the volume and
+returns the wave at its exit face:
 
 ```python
 --8<-- "docs-figures/tutorials/custom_forward_model.py:scatter"
@@ -140,7 +141,8 @@ lists the engine behind each verb.
 The built-in `phase_shift` term shifts every scattered beam by the same phase
 relative to the unscattered one, which is an ideal phase plate
 ([Phase shift and amplitude contrast](../concepts/aberrations.md#phase-shift-and-amplitude-contrast)).
-A real Zernike plate has a hole for the unscattered beam, and the scattered
+A real Zernike plate has a hole for the unscattered beam (Danev & Nagayama
+2001), and the scattered
 beams that pass through the hole, those below a cut-on frequency, are not
 shifted. That is a new transfer function, and a few lines express it as a
 stage of its own, applied after the lens:
@@ -179,7 +181,7 @@ wave exactly as the ideal plate does, and the image power is still 1.3 to 1.6
 times the ideal plate's up to 0.2 Å⁻¹: an image is quadratic in the wave, and
 its scattered-times-scattered terms now pair the unshifted frequencies inside
 the hole with the shifted ones outside it, which the ideal plate shifts
-together. The halo is the artifact known from real Zernike plates, and the
+together. The halo is the artifact known from real Zernike plates (Edgcombe 2014), and the
 model produces it without its being put in by hand.
 
 The same pattern replaces any other stage: a function from a wave (or an
@@ -196,3 +198,28 @@ acts. A custom detector, for instance, takes the expected counts in place of
   the two conventions a hand-built chain must reproduce.
 - [Temporal coherence is integrated, not enveloped](../concepts/aberrations.md#temporal-coherence-is-integrated-not-enveloped):
   the focal-spread sum.
+
+## References
+
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Cowley, J. M., & Moodie, A. F. (1957). The scattering of electrons by atoms
+  and crystals. I. A new theoretical approach. *Acta Crystallographica*,
+  10(10), 609–619.
+  [doi:10.1107/S0365110X57002194](https://doi.org/10.1107/S0365110X57002194)
+- Danev, R., & Nagayama, K. (2001). Transmission electron microscopy with
+  Zernike phase plate. *Ultramicroscopy*, 88(4), 243–252.
+  [doi:10.1016/S0304-3991(01)00088-2](https://doi.org/10.1016/S0304-3991(01)00088-2)
+- Edgcombe, C. J. (2014). Imaging of weak phase objects by a Zernike phase
+  plate. *Ultramicroscopy*, 136, 154–159.
+  [doi:10.1016/j.ultramic.2013.09.004](https://doi.org/10.1016/j.ultramic.2013.09.004)
+- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
+  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
+  determination. *Nature Methods*, 14(3), 290–296.
+  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)
+- Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian approach to
+  cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
+  519–530.
+  [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)

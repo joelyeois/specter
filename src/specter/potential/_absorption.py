@@ -74,6 +74,35 @@ gives Lambda(300)/Lambda(120) = 1.39 where measurement gives 1.70 (partial,
 120 kV, and Yesibolati et al. (2020) find the standard models underestimate
 lambda for water outright. Another voltage needs its own measurement; the
 measured values are collected in :data:`INELASTIC_MFP_ICE_BY_KV`.
+
+References
+----------
+.. [1] Rice, W. J., Cheng, A., Noble, A. J., Eng, E. T., Kim, L. Y.,
+   Carragher, B., & Potter, C. S. (2018). Routine determination of ice
+   thickness for cryo-EM grids. *Journal of Structural Biology*, 204(1),
+   38–44. https://doi.org/10.1016/j.jsb.2018.06.007
+.. [2] Yonekura, K., Braunfeld, M. B., Maki-Yonekura, S., & Agard, D. A.
+   (2006). Electron energy filtering significantly improves amplitude
+   contrast of frozen-hydrated protein at 300 kV. *Journal of Structural
+   Biology*, 156(3), 524–536. https://doi.org/10.1016/j.jsb.2006.07.016
+.. [3] Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+   radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+   8(6), 943–953. https://doi.org/10.1107/S2052252521008538
+.. [4] Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J.,
+   Lazić, I., Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image
+   formation modeling in cryo-electron microscopy. *Journal of Structural
+   Biology*, 183(1), 19–32. https://doi.org/10.1016/j.jsb.2013.05.008
+.. [5] Langmore, J. P., & Smith, M. F. (1992). Quantitative energy-filtered
+   electron microscopy of biological molecules in ice. *Ultramicroscopy*,
+   46(1–4), 349–373. https://doi.org/10.1016/0304-3991(92)90024-E
+.. [6] Feja, B., & Aebi, U. (1999). Determination of the inelastic mean free
+   path of electrons in vitrified ice layers for on-line thickness
+   measurements by zero-loss imaging. *Journal of Microscopy*, 193(1), 15–19.
+   https://doi.org/10.1046/j.1365-2818.1999.00436.x
+.. [7] Yesibolati, M. N., Laganá, S., Kadkhodazadeh, S., Mikkelsen, E. K.,
+   Sun, H., Kasama, T., Hansen, O., Zaluzec, N. J., & Mølhave, K. (2020).
+   Electron inelastic mean free path in water. *Nanoscale*, 12(40),
+   20649–20657. https://doi.org/10.1039/D0NR04352D
 """
 
 INELASTIC_MFP_ICE_BY_KV: dict[float, float] = {
@@ -95,6 +124,22 @@ No energy-filtered measurement of ice has been found at 200 kV or 100 kV. The
 200 kV figures in Rice et al. (2018) are for elastic scattering beyond the
 objective aperture, a different quantity (see :func:`aperture_mfp_ice`). Add
 an entry only with a measurement behind it; it then replaces the estimate.
+
+References
+----------
+.. [1] Grimm, R., Typke, D., Bärmann, M., & Baumeister, W. (1996).
+   Determination of the inelastic mean free path in ice by examination of
+   tilted vesicles and automated most probable loss imaging.
+   *Ultramicroscopy*, 63(3–4), 169–179.
+   https://doi.org/10.1016/0304-3991(96)00035-6
+.. [2] Feja, B., & Aebi, U. (1999). Determination of the inelastic mean free
+   path of electrons in vitrified ice layers for on-line thickness
+   measurements by zero-loss imaging. *Journal of Microscopy*, 193(1), 15–19.
+   https://doi.org/10.1046/j.1365-2818.1999.00436.x
+.. [3] Rice, W. J., Cheng, A., Noble, A. J., Eng, E. T., Kim, L. Y.,
+   Carragher, B., & Potter, C. S. (2018). Routine determination of ice
+   thickness for cryo-EM grids. *Journal of Structural Biology*, 204(1),
+   38–44. https://doi.org/10.1016/j.jsb.2018.06.007
 """
 
 #: One-sigma relative uncertainty of each entry of INELASTIC_MFP_ICE_BY_KV.
@@ -146,6 +191,18 @@ def ice_inelastic_mfp(voltage_kv: float) -> float:
     -----
     UserWarning
         When `voltage_kv` has no measurement and the value is estimated.
+
+    References
+    ----------
+    .. [1] Rice, W. J., Cheng, A., Noble, A. J., Eng, E. T., Kim, L. Y.,
+       Carragher, B., & Potter, C. S. (2018). Routine determination of ice
+       thickness for cryo-EM grids. *Journal of Structural Biology*, 204(1),
+       38–44. https://doi.org/10.1016/j.jsb.2018.06.007
+    .. [2] Grimm, R., Typke, D., Bärmann, M., & Baumeister, W. (1996).
+       Determination of the inelastic mean free path in ice by examination of
+       tilted vesicles and automated most probable loss imaging.
+       *Ultramicroscopy*, 63(3–4), 169–179.
+       https://doi.org/10.1016/0304-3991(96)00035-6
     """
     for kv, mfp in INELASTIC_MFP_ICE_BY_KV.items():
         if abs(voltage_kv - kv) < 0.5:
@@ -188,7 +245,7 @@ Inelastic mean free path of protein at 300 kV, in Angstrom. Provisional.
 Derived, not measured: ``nu = sigma_inel/sigma_el = 20/Z`` per element
 (Reimer & Ross-Messemer, 1990) against isolated-atom elastic cross sections,
 evaluated for protein's composition (H 0.492, C 0.313, N 0.094, O 0.101 by
-atom fraction at 1.35 g/cm^3, Vulović et al. 2013) and for water, with the
+atom fraction, Vulović et al. 2013; taken at 1.35 g/cm^3) and for water, with the
 ratio anchored to :data:`INELASTIC_MFP_ICE_A` so the absolute normalisation
 of ``nu`` never has to be trusted. That gives 0.62 x ice.
 
@@ -240,6 +297,20 @@ aperture, measured from a simulated defocus series at this value, is 0.070
 of their own measurement, filament in ice imaged at overfocus with the
 amplitude contrast read from the first zero, would still be the cleaner test
 of the two readings above.
+
+References
+----------
+.. [1] Reimer, L., & Ross-Messemer, M. (1990). Contrast in the electron
+   spectroscopic imaging mode of a TEM. *Journal of Microscopy*, 159(2),
+   143–160. https://doi.org/10.1111/j.1365-2818.1990.tb04772.x
+.. [2] Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J.,
+   Lazić, I., Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image
+   formation modeling in cryo-electron microscopy. *Journal of Structural
+   Biology*, 183(1), 19–32. https://doi.org/10.1016/j.jsb.2013.05.008
+.. [3] Yonekura, K., Braunfeld, M. B., Maki-Yonekura, S., & Agard, D. A.
+   (2006). Electron energy filtering significantly improves amplitude
+   contrast of frozen-hydrated protein at 300 kV. *Journal of Structural
+   Biology*, 156(3), 524–536. https://doi.org/10.1016/j.jsb.2006.07.016
 """
 
 #: Amorphous ice for the aperture cross section: the density at which this
@@ -302,6 +373,13 @@ def absorption_potential(mfp_A: float, voltage_kv: float) -> float:
     ------
     ValueError
         If `mfp_A` is not positive.
+
+    References
+    ----------
+    .. [1] Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J.,
+       Lazić, I., Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image
+       formation modeling in cryo-electron microscopy. *Journal of Structural
+       Biology*, 183(1), 19–32. https://doi.org/10.1016/j.jsb.2013.05.008
     """
     if mfp_A <= 0.0:
         raise ValueError(f"mfp_A={mfp_A} must be positive")
@@ -388,6 +466,11 @@ def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
     -------
     float
         Mean free path in Angstrom. At 300 kV and 12 mrad, ~14,400 A.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     k_ap = _aperture_k(aperture_mrad, voltage_kv)
     k = _K_GRID
@@ -430,6 +513,15 @@ def aperture_mfp_protein(aperture_mrad: float, voltage_kv: float) -> float:
     -------
     float
         Mean free path in Angstrom. At 300 kV and 12 mrad, ~10,400 A.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
+    .. [2] Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J.,
+       Lazić, I., Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image
+       formation modeling in cryo-electron microscopy. *Journal of Structural
+       Biology*, 183(1), 19–32. https://doi.org/10.1016/j.jsb.2013.05.008
     """
     k_ap = _aperture_k(aperture_mrad, voltage_kv)
     k = _K_GRID
@@ -714,6 +806,13 @@ def inelastic_absorption_potential(
     plasmon's transverse point spread function, which is defined by the beam
     direction and must be applied after the pose rotation.
 
+    References
+    ----------
+    .. [1] Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J.,
+       Lazić, I., Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image
+       formation modeling in cryo-electron microscopy. *Journal of Structural
+       Biology*, 183(1), 19–32. https://doi.org/10.1016/j.jsb.2013.05.008
+
     Examples
     --------
     >>> import torch
@@ -751,8 +850,10 @@ def apply_amplitude_contrast(v: torch.Tensor, alpha: float = 0.1) -> torch.Tenso
     :func:`inelastic_absorption_potential` is the sibling that separates the
     routes instead, and is preferred wherever a mean free path is known.
 
-    **``alpha`` is not a measurement of absorption, and 0.07-0.10 is not a
-    measured range.** CTF estimation takes amplitude contrast as an *input*
+    **``alpha`` is not a measurement of absorption, and 0.07-0.10 is not
+    measured for the data it is used with.** The 0.07 is a fit to unfiltered
+    images of frozen-hydrated specimens [1]_, carried over by convention; CTF
+    estimation takes amplitude contrast as an *input*
     (it sits beside voltage and Cs in ctffind's parameter list) and never fits
     it; real metadata carries one value for a whole dataset next to Cs while
     defocus varies per particle; and the fitting objective is nearly flat in
@@ -785,6 +886,13 @@ def apply_amplitude_contrast(v: torch.Tensor, alpha: float = 0.1) -> torch.Tenso
         imaginary part by ``alpha``. Returned unchanged when ``alpha`` is
         zero, which keeps a purely phase-contrast run exactly real, and when
         `v` is already complex.
+
+    References
+    ----------
+    .. [1] Toyoshima, C., & Unwin, N. (1988). Contrast transfer for
+       frozen-hydrated specimens: Determination from pairs of defocused
+       images. *Ultramicroscopy*, 25(4), 279–291.
+       https://doi.org/10.1016/0304-3991(88)90003-4
     """
     if alpha == 0.0 or v.is_complex():
         return v

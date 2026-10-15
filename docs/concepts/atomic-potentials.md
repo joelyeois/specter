@@ -7,7 +7,8 @@ the 3D volume that `Scattering` then propagates the electron wave through.
 This page traces those single-atom kernels back to their source, works
 through the math behind SPECTER's three parameterizations (Kirkland,
 Lobato, Shtyrov), and checks the Kirkland ones against the worked
-examples in Kirkland's *Advanced Computing in Electron Microscopy*.
+examples in Kirkland's *Advanced Computing in Electron Microscopy*
+(Kirkland 2010).
 
 !!! example "In code"
     This page is the theory behind [Structures and potentials](../walkthrough/potentials.md), which shows it step by step with code and figures.
@@ -39,7 +40,7 @@ which elementary functions they sum:
 
 ## Kirkland: Lorentzian + Gaussian sum
 
-Kirkland's fit (`load_kirkland_parameters`, `kirkland_atomic_potential_*`)
+Kirkland's (2010) fit (`load_kirkland_parameters`, `kirkland_atomic_potential_*`)
 uses three Lorentzian terms plus three Gaussian terms in Fourier space:
 12 parameters \((a_i, b_i, c_i, d_i)\) per element.
 
@@ -47,7 +48,7 @@ uses three Lorentzian terms plus three Gaussian terms in Fourier space:
 f_e(k) = \sum_{i=1}^{3} \frac{a_i}{k^2 + b_i} \;+\; \sum_{i=1}^{3} c_i\, e^{-d_i k^2}
 \]
 
-(`kirkland_atomic_potential_3d_fourier`, Kirkland Eq. C.15.) Each
+(`kirkland_atomic_potential_3d_fourier`; Kirkland 2010, Eq. C.15.) Each
 Lorentzian term is a [Lorentzian
 lineshape](https://en.wikipedia.org/wiki/Cauchy_distribution) in \(|k|\);
 its inverse Fourier transform is a screened Coulomb / [Yukawa
@@ -55,8 +56,8 @@ potential](https://en.wikipedia.org/wiki/Yukawa_potential), the
 \(a/r\cdot e^{-r}\) form that dominates close to the nucleus. The Gaussian
 terms are self-dual under the Fourier transform (Gaussian in, Gaussian
 out) and contribute a softer correction. Inverse-transforming term by term
-gives the real-space potential (`kirkland_atomic_potential_3d`, Kirkland
-Eq. C.19):
+gives the real-space potential (`kirkland_atomic_potential_3d`; Kirkland
+2010, Eq. C.19):
 
 \[
 V(r) = 2\pi^2 a_0 e \sum_{i=1}^{3} \frac{a_i}{r}\, e^{-2\pi r \sqrt{b_i}}
@@ -98,7 +99,7 @@ angle) more tightly than Kirkland's Lorentzian+Gaussian sum:
 f_e(k) = \sum_{i=1}^{5} a_i\, \frac{2 + b_i k^2}{(1 + b_i k^2)^2}
 \]
 
-(`lobato_atomic_potential_3d_fourier`, Lobato Eq. 56.) Each rational term
+(`lobato_atomic_potential_3d_fourier`; Lobato & Van Dyck 2014, Eq. 56.) Each rational term
 inverts to an elementary real-space function, a screened Coulomb term
 \(e^{-2\pi r/\sqrt{b_i}}/r\) plus a bare exponential
 (`lobato_atomic_potential_3d`):
@@ -147,8 +148,9 @@ V(r) = 2\pi e\, a_0 \sum_{i=1}^{5} a_i \left(\frac{4\pi}{b_i}\right)^{3/2} e^{-4
 \]
 
 Atoms whose bonded species isn't in the bundled table fall back to
-`peng_atomic_potential_3d`, [gemmi](https://gemmi.readthedocs.io/)'s
-built-in per-element independent-atom scattering factors (Peng et al. 1996). SPECTER evaluates it with the same
+`peng_atomic_potential_3d`, the per-element independent-atom scattering
+factors (Peng et al. 1996) built into [gemmi](https://gemmi.readthedocs.io/)
+(Wojdyr 2022). SPECTER evaluates it with the same
 closed form, so it combines coherently (same units, same functional form)
 with matched-species Shtyrov kernels in one potential volume. `PotentialBuilder`
 and `MicrographSpecimenGenerator`/`TomogramSpecimenGenerator` default to
@@ -159,10 +161,10 @@ tabulated species name a hydrogen neighbour, and a species descriptor is built
 from the atoms present in the model, so a methyl carbon in a
 structure without hydrogens is described as `C(C)` rather than `C(HHHC)` and
 matches nothing. Deposited structures rarely carry hydrogens, and supplying
-them requires a Monomer Library (see
+them requires a Monomer Library (Vagin et al. 2004; see
 [Installation](../installation.md#monomer-library-for-shtyrov-scattering-factors)).
 Without one, around 44% of a protein's atoms fall back to Peng, measured on
-myoglobin, where coverage rises from 56% to 99% once a library is available.
+myoglobin (PDB 1A6M; Vojtěchovský et al. 1999), where coverage rises from 56% to 99% once a library is available.
 The atoms that still resolve are those whose neighbours are all heavy:
 carbonyl and carboxyl carbons and oxygens, aromatic ring junctions, proline's
 nitrogen, disulfides, and the nucleic-acid phosphate backbone.
@@ -197,7 +199,7 @@ provides, so moving them gains nothing.
 |---|---:|---:|---:|
 | **1A6M** — no deposited H, no library | 1,445 | 0 | 56% |
 | 1A6M — `"auto"` (adds them) | 2,668 | 1,223 | 99.6% |
-| **7a4m** — deposited H, `"auto"` (keeps them) | 2,862 | 1,341 | 99.4% |
+| **7a4m** (Nakane et al. 2020) — deposited H, `"auto"` (keeps them) | 2,862 | 1,341 | 99.4% |
 | 7a4m — `readd_hydrogens=True` (replaces them) | 2,848 | 1,327 | 99.9% |
 
 The two explicit settings remain available:
@@ -234,10 +236,11 @@ under two configuration fields:
 
 Measured against electron holography, the split is justified rather than
 stylistic. Amorphous ice at SPECTER's number density is expected near 4.21 V,
-scaled from liquid water's 4.48 ± 0.19 V; Kirkland gives 4.55 V and the
+scaled from liquid water's 4.48 ± 0.19 V (Yesibolati et al. 2020); Kirkland gives 4.55 V and the
 Shtyrov water species 3.67 V. For amorphous carbon, Kirkland, Lobato and Peng
 agree with each other to 0.5%, while the `C(CCC)` proxy sits around 40% above
-all three per unit density against a measured 5.19 V per g/cm³.
+all three per unit density against a measured 5.19 V per g/cm³ (Wanner et
+al. 2006).
 
 A membrane's bilayer is unaffected by either field: it is built from bare
 lipid coordinates with no bond topology, so every atom takes the Peng
@@ -350,7 +353,7 @@ derived for static atoms and the damped tail reaches further.
 ## Worked example: reproducing Kirkland's textbook figures
 
 SPECTER validates the atomic potential and imaging code against the
-worked examples in Kirkland Ch. 5, using the standard five-element test
+worked examples in Kirkland (2010, Ch. 5), using the standard five-element test
 row (C, Si, Cu, Au, U).
 `demo-notebooks/compare-atomic-potentials-with-kirkland.ipynb` walks
 through the same four steps as `docs-figures/atomic_potentials.py`:
@@ -363,8 +366,8 @@ through the same four steps as `docs-figures/atomic_potentials.py`:
    for all five atoms placed in a row (Kirkland Fig. 5.11), where
    \(\sigma\) is the interaction parameter at 200 kV.
 4. **Coherent bright-field phase-contrast image** (Kirkland Fig. 5.12): the
-   transmission function propagated through a Scherzer-condition CTF
-   (\(C_s=1.3\) mm, \(\Delta f=700\) Å, 10.37 mrad aperture), and its line
+   transmission function propagated through a Scherzer-condition (Scherzer
+   1949) CTF (\(C_s=1.3\) mm, \(\Delta f=700\) Å, 10.37 mrad aperture), and its line
    scan through the atom centers (Kirkland Fig. 5.13).
 
 Each figure below places SPECTER's own output beside a scan of the
@@ -417,31 +420,53 @@ SPECTER's bright-field line scan through C, Si, Cu, Au and U, compared against K
 
 ## References
 
-- Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*, 2nd
-  Edition. Springer. Appendix C, Chapter 5.
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+  Ch. 5, Appendix C.
 - Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
   scattering factors, electron densities and electrostatic potentials for
   neutral atoms that obey all physical constraints. *Acta Crystallographica
-  Section A: Foundations and Advances*, 70(6), 636-649.
+  Section A: Foundations and Advances*, 70(6), 636–649.
   [doi:10.1107/S205327331401643X](https://doi.org/10.1107/S205327331401643X)
-- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
-  Chen, S., McMullan, G., Short, J. M., Russo, C. J., Henderson, R., &
-  Murshudov, G. N. (2026). Measurement of atomic scattering factors by
-  cryoelectron microscopy. *Proceedings of the National Academy of
-  Sciences*, 123(19), e2528758123.
-  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123).
-  Bonded-species parameterization used here as implemented by
-  [`sffit`](https://github.com/as2875/sffit).
+- Nakane, T., Kotecha, A., Sente, A., McMullan, G., Masiulis, S., Brown,
+  P. M. G. E., et al. (2020). Single-particle cryo-EM at atomic resolution.
+  *Nature*, 587(7832), 152–156.
+  [doi:10.1038/s41586-020-2829-0](https://doi.org/10.1038/s41586-020-2829-0)
 - Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
   parameterization of elastic and absorptive electron atomic scattering
-  factors. *Acta Crystallographica Section A*, 52(2), 257-276. (gemmi's
-  `c4322` table, used as SPECTER's per-element fallback.)
-- Yesibolati, M. N., Laganá, S., Sun, H., Beleggia, M., Kathmann, S. M.,
+  factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+  [doi:10.1107/S0108767395014371](https://doi.org/10.1107/S0108767395014371)
+  (gemmi's `c4322` table, used as SPECTER's per-element fallback.)
+- Scherzer, O. (1949). The theoretical resolution limit of the electron
+  microscope. *Journal of Applied Physics*, 20(1), 20–29.
+  [doi:10.1063/1.1698233](https://doi.org/10.1063/1.1698233)
+- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+  et al. (2026). Measurement of atomic scattering factors by cryoelectron
+  microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+  e2528758123.
+  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123)
+  (Bonded-species parameterization, as implemented by
+  [`sffit`](https://github.com/as2875/sffit).)
+- Vagin, A. A., Steiner, R. A., Lebedev, A. A., Potterton, L., McNicholas,
+  S., Long, F., & Murshudov, G. N. (2004). REFMAC5 dictionary: Organization
+  of prior chemical knowledge and guidelines for its use. *Acta
+  Crystallographica Section D: Biological Crystallography*, 60(12),
+  2184–2195.
+  [doi:10.1107/S0907444904023510](https://doi.org/10.1107/S0907444904023510)
+- Vojtěchovský, J., Chu, K., Berendzen, J., Sweet, R. M., & Schlichting, I.
+  (1999). Crystal structures of myoglobin-ligand complexes at near-atomic
+  resolution. *Biophysical Journal*, 77(4), 2153–2174.
+  [doi:10.1016/S0006-3495(99)77056-6](https://doi.org/10.1016/S0006-3495(99)77056-6)
+- Wanner, M., Bach, D., Gerthsen, D., Werner, R., & Tesche, B. (2006).
+  Electron holography of thin amorphous carbon films: Measurement of the mean
+  inner potential and a thickness-independent phase shift. *Ultramicroscopy*,
+  106(4–5), 341–345.
+  [doi:10.1016/j.ultramic.2005.10.004](https://doi.org/10.1016/j.ultramic.2005.10.004)
+- Wojdyr, M. (2022). GEMMI: A library for structural biology. *Journal of
+  Open Source Software*, 7(73), 4200.
+  [doi:10.21105/joss.04200](https://doi.org/10.21105/joss.04200)
+- Yesibolati, M. N., Laganà, S., Sun, H., Beleggia, M., Kathmann, S. M.,
   Kasama, T., & Mølhave, K. (2020). Mean inner potential of liquid water.
   *Physical Review Letters*, 124(6), 065502.
   [doi:10.1103/PhysRevLett.124.065502](https://doi.org/10.1103/PhysRevLett.124.065502)
-- Wanner, M., Bach, D., Gerthsen, D., Werner, R., & Tesche, B. (2006).
-  Electron holography of thin amorphous carbon films: measurement of the mean
-  inner potential and a thickness-independent phase shift. *Ultramicroscopy*,
-  106(4-5), 341-345.
-  [doi:10.1016/j.ultramic.2005.10.005](https://doi.org/10.1016/j.ultramic.2005.10.005)

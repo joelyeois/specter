@@ -58,9 +58,9 @@ def electron_charge_volt_angstrom() -> float:
     -------
     float
         ``e / (4 pi eps0)`` in V·Å, from CODATA e and eps0 (~14.3996 V·Å).
-        Together with `bohr_radius` it gives the Mott-Bethe prefactor
-        ``2 pi a0 e`` (~47.8776 V·Å²) that turns an electron scattering
-        factor into a potential.
+        Together with `bohr_radius` it gives the prefactor ``2 pi a0 e``
+        (~47.8776 V·Å²) that turns an electron scattering factor into a
+        potential.
     """
     return _sc.e / (4.0 * _sc.pi * _sc.epsilon_0) * 1.0e10
 
@@ -92,7 +92,12 @@ def energy_to_wavelength(voltage: float | torch.Tensor) -> float | torch.Tensor:
     λ = hc / sqrt(E * (E + 2*m_e*c²))
     where E is the electron's kinetic energy (numerically equal to the
     accelerating voltage in eV) and m_e*c² = 511 keV (rest mass energy of
-    electron).
+    electron), as in Kirkland [1]_, Ch. 2.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     ev = voltage * 1.0e3  # [eV]
     return hc() / (ev * (ev + 2.0 * rest_mass_energy())) ** 0.5
@@ -117,8 +122,8 @@ def interaction_parameter(voltage: float) -> float:
 
     References
     ----------
-    .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy,
-       Eq. (5.6), Springer US, Boston, MA, 2010.
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2 Eq. (5.6).
     """
     w = energy_to_wavelength(voltage)
     ev = voltage * 1e3

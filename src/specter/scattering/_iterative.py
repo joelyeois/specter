@@ -36,6 +36,23 @@ class IterativeScattering(L.LightningModule):
     Scattering module that computes the 2D exitwave from a 3D scattering
     potential using on-the-fly slice sampling. This is highly memory efficient
     as it avoids rotating the entire 3D volume.
+
+    The models and their formulas are those of
+    :class:`~specter.scattering.Scattering`: the multislice method of Cowley &
+    Moodie [1]_ in the FFT form of Ishizuka & Uyeda [2]_, as presented by
+    Kirkland [3]_.
+
+    References
+    ----------
+    .. [1] Cowley, J. M., & Moodie, A. F. (1957). The scattering of electrons by
+       atoms and crystals. I. A new theoretical approach. *Acta
+       Crystallographica*, 10(10), 609–619.
+       https://doi.org/10.1107/S0365110X57002194
+    .. [2] Ishizuka, K., & Uyeda, N. (1977). A new theoretical and practical
+       approach to the multislice method. *Acta Crystallographica Section A*,
+       33(5), 740–749. https://doi.org/10.1107/S0567739477001879
+    .. [3] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
 
     def __init__(

@@ -47,7 +47,8 @@ class Scattering(L.LightningModule):
         """
         A scattering module to compute the 2D exitwave from a 3D scattering
         potential. Various scattering modes are available, following the
-        multislice formalism of Kirkland [1]_.
+        multislice formalism of Kirkland [1]_, after Cowley & Moodie [2]_
+        and Ishizuka & Uyeda [3]_.
 
         Parameters
         ----------
@@ -119,10 +120,17 @@ class Scattering(L.LightningModule):
             volume grid either way (nothing above Nyquist to keep); the
             imager interpolates those before the transfer function.
 
-        Notes
-        -----
-        .. [1] E. J. Kirkland, Advanced Computing in Electron Microscopy,
-           Springer US, Boston, MA, 2010.
+        References
+        ----------
+        .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+           (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
+        .. [2] Cowley, J. M., & Moodie, A. F. (1957). The scattering of electrons
+           by atoms and crystals. I. A new theoretical approach. *Acta
+           Crystallographica*, 10(10), 609–619.
+           https://doi.org/10.1107/S0365110X57002194
+        .. [3] Ishizuka, K., & Uyeda, N. (1977). A new theoretical and practical
+           approach to the multislice method. *Acta Crystallographica Section
+           A*, 33(5), 740–749. https://doi.org/10.1107/S0567739477001879
         """
         super().__init__()
         if not isinstance(oversample, int) or oversample < 1:
@@ -449,11 +457,20 @@ class Scattering(L.LightningModule):
         where F(z) is the Fresnel propagator from slice z to the exit plane
         and ★ denotes convolution (Fourier-domain multiplication).
 
-        This is the exponentiated Born series, reducing to the first Born
-        approximation for small V. The sum over slices is taken in Fourier
-        space and inverse-transformed once (the inverse FFT is linear, so it
-        commutes with the sum), a z-chunk at a time; see
+        This is the exponentiated Born series [1]_, [2]_, reducing to the
+        first Born approximation for small V. The sum over slices is taken in
+        Fourier space and inverse-transformed once (the inverse FFT is linear,
+        so it commutes with the sum), a z-chunk at a time; see
         :meth:`_fourier_slice_sum`.
+
+        References
+        ----------
+        .. [1] Keller, J. B. (1969). Accuracy and validity of the Born and
+           Rytov approximations. *Journal of the Optical Society of America*,
+           59(8), 1003–1004. https://doi.org/10.1364/JOSA.59.001003
+        .. [2] Devaney, A. J. (1981). Inverse-scattering theory within the
+           Rytov approximation. *Optics Letters*, 6(8), 374–376.
+           https://doi.org/10.1364/OL.6.000374
         """
         scattered_k = self._fourier_slice_sum(V, None)
         exitwave = oversampled_exp(
@@ -490,8 +507,13 @@ class Scattering(L.LightningModule):
         ψ = 1 + iσ Σ_z [F(z) ★ V(z)]
 
         Valid only for weak scatterers where multiple scattering is
-        negligible. Same slice sum as :meth:`rytov`, with the exponent
+        negligible [1]_. Same slice sum as :meth:`rytov`, with the exponent
         linearised.
+
+        References
+        ----------
+        .. [1] Born, M. (1926). Quantenmechanik der Stoßvorgänge. *Zeitschrift
+           für Physik*, 38(11–12), 803–827. https://doi.org/10.1007/BF01397184
         """
         scattered_k = self._fourier_slice_sum(V, None)
         return (

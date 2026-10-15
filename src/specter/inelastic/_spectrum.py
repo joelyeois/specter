@@ -2,6 +2,12 @@
 
 The kernel sets spectral shape only. Source strengths, in V Å³ per centre,
 set absorption; a DC-normalized kernel cannot predict a mean free path.
+
+References
+----------
+.. [1] Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+   radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+   8(6), 943–953. https://doi.org/10.1107/S2052252521008538
 """
 
 from __future__ import annotations
@@ -27,6 +33,12 @@ class PlasmonFilter(nn.Module):
     Padding is vacuum (zero source). For bulk periodic specimens, set
     ``padding=0`` and supply a sufficiently large periodic transverse cell.
     Convergence in padding must be checked for each physical geometry.
+
+    References
+    ----------
+    .. [1] Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+       radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+       8(6), 943–953. https://doi.org/10.1107/S2052252521008538
     """
 
     def __init__(

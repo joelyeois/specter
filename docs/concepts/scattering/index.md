@@ -24,14 +24,14 @@ physical quantities.
 ## Two numbers set the whole propagation problem
 
 An electron accelerated through voltage \(U\) (kV) has a relativistic de
-Broglie wavelength (`energy_to_wavelength`, Kirkland Ch. 2):
+Broglie wavelength (`energy_to_wavelength`; Kirkland 2010, Ch. 2):
 
 \[
 \lambda = \frac{hc}{\sqrt{eU\,(eU + 2 m_e c^2)}}
 \]
 
 and interacts with the specimen's electrostatic potential through the
-interaction parameter (`interaction_parameter`, Kirkland Eq. 5.6):
+interaction parameter (`interaction_parameter`; Kirkland 2010, Eq. 5.6):
 
 \[
 \sigma = \frac{2\pi}{\lambda\, eU}\cdot\frac{eU + m_e c^2}{eU + 2 m_e c^2}
@@ -76,12 +76,13 @@ modes](other-modes.md#accuracy-vs-thickness) for the measured error curves.
 ## Two conventions shared by every model
 
 **Ewald sphere curvature sign.** Before propagation, `ews_curvature_sign`
-(`"negative"` by default, `"positive"` to match [CryoSPARC](https://cryosparc.com/)) determines
+(`"negative"` by default, `"positive"` to match [CryoSPARC](https://cryosparc.com/);
+Punjani et al. 2017) determines
 the order in which the beam traverses the volume's Z-slices. Under
 `"positive"` the beam enters at slice 0 and exits after the last slice;
 under `"negative"` it enters at the last slice and exits after slice 0.
 Multislice, Rytov, and first Born each propagate a slice's contribution a
-different net distance to the exit plane, so reversing the traversal order
+different net distance to the exit plane (DeRosier 2000), so reversing the traversal order
 changes which face of the specimen accumulates the least propagation and
 which the most.
 
@@ -108,7 +109,7 @@ the source of each Z-slice differs.
 ## Mean-free-path absorption support
 
 For particle generators, `Propagation(absorption_model="inelastic_mfp")`
-uses a calibrated imaginary potential instead of `alpha`. Set `alpha=0`
+uses a calibrated imaginary potential (Vulović et al. 2013) instead of `alpha`. Set `alpha=0`
 when constructing `Propagation` directly. Without `inelastic_mfp_specimen`,
 the solvent-present case uses uniform absorption; specifying a specimen MFP
 builds a material-dependent field before solvent blending. With no solvent
@@ -131,13 +132,14 @@ take effect only under `absorption_model="inelastic_mfp"`.
 
 The solvent mean free path defaults to the value for amorphous ice at the
 generator's accelerating voltage, from `potential.ice_inelastic_mfp`. Two
-voltages are measured: 3950 Å at 300 kV (Rice et al., 2018) and 2030 Å at
-120 kV (Grimm et al., 1996). No energy-filtered measurement of ice has been
+voltages are measured: 3950 Å at 300 kV (Rice et al. 2018) and 2030 Å at
+120 kV (Grimm et al. 1996). No energy-filtered measurement of ice has been
 found at 200 kV or 100 kV. At those and any other voltage the value is a power
 law in \(\beta^2\) through the two measurements, 3040 Å ± 7% at 200 kV and
 1730 Å ± 20% at 100 kV, and a warning reports it as an estimate. The standard
-cross-section formulas depart from the measured energy dependence by up to a
-factor of 1.8, but that error lies in the overall slope, which the two
+cross-section formulas (Langmore & Smith 1992; Vulović et al. 2013) depart
+from the measured energy dependence (Feja & Aebi 1999; Rice et al. 2018) by
+up to a factor of 1.8, but that error lies in the overall slope, which the two
 measurements fix; only the shape of the curve between them is assumed.
 `INELASTIC_MFP_PROTEIN_A` is a 300 kV value; at another voltage the same
 protein-to-ice ratio, 0.62, applies to the ice value there, with the caveat
@@ -216,7 +218,7 @@ cross section integrated beyond the aperture,
     \int_{k_{ap}}^{\infty} \overline{|f(k)|^2}\,2\pi k\,dk ,
 \]
 
-evaluated with Kirkland factors for water (including its intramolecular
+evaluated with Kirkland (2010) factors for water (including its intramolecular
 interference) and for the standard protein composition
 (`potential.aperture_mfp_ice`, `potential.aperture_mfp_protein`). At 300 kV and
 12 mrad, \(\Lambda_{ap}\) is 14,400 Å for ice and 10,400 Å for protein. The
@@ -233,7 +235,7 @@ commutes with rotation. On the Ewald sphere the two filters coincide to within
 the same first-order scattering. The aperture requires `absorption_model="inelastic_mfp"`,
 because the `alpha` model's fitted constant already represents this loss.
 
-On a 6BDF particle in 400 Å of ice at 300 kV, a 12 mrad aperture raises the
+On a 6BDF particle (Campbell et al. 2015) in 400 Å of ice at 300 kV, a 12 mrad aperture raises the
 effective amplitude contrast measured from a defocus series by 0.0075, from
 0.063 to 0.070 at the provisional protein mean free path. Yonekura et al.
 (2006) measured 6.9 ± 1.9% on energy-filtered images under the same aperture
@@ -241,20 +243,60 @@ and voltage.
 
 ### Frozen-plasmon exposure simulation
 
-The [frozen-plasmon Python API](frozen-plasmon.md) adds separate spectral
+The [frozen-plasmon Python API](frozen-plasmon.md), following Himes &
+Grigorieff (2021), adds separate spectral
 absorption sources, explicit solvent trajectories, paired slice propagation
 and incoherent exposure integration. It requires explicit source calibration;
 the included Drude spectrum is a development approximation.
 
 ## References
 
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- DeRosier, D. J. (2000). Correction of high-resolution data for curvature of
+  the Ewald sphere. *Ultramicroscopy*, 81(2), 83–98.
+  [doi:10.1016/S0304-3991(99)00120-5](https://doi.org/10.1016/S0304-3991(99)00120-5)
+- Feja, B., & Aebi, U. (1999). Determination of the inelastic mean free path
+  of electrons in vitrified ice layers for on-line thickness measurements by
+  zero-loss imaging. *Journal of Microscopy*, 193(1), 15–19.
+  [doi:10.1046/j.1365-2818.1999.00436.x](https://doi.org/10.1046/j.1365-2818.1999.00436.x)
+- Grimm, R., Typke, D., Bärmann, M., & Baumeister, W. (1996). Determination
+  of the inelastic mean free path in ice by examination of tilted vesicles
+  and automated most probable loss imaging. *Ultramicroscopy*, 63(3–4),
+  169–179.
+  [doi:10.1016/0304-3991(96)00035-6](https://doi.org/10.1016/0304-3991(96)00035-6)
+- Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+  radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+  8(6), 943–953.
+  [doi:10.1107/S2052252521008538](https://doi.org/10.1107/S2052252521008538)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Langmore, J. P., & Smith, M. F. (1992). Quantitative energy-filtered
+  electron microscopy of biological molecules in ice. *Ultramicroscopy*,
+  46(1–4), 349–373.
+  [doi:10.1016/0304-3991(92)90024-E](https://doi.org/10.1016/0304-3991(92)90024-E)
+- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
+  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
+  determination. *Nature Methods*, 14(3), 290–296.
+  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)
+- Rice, W. J., Cheng, A., Noble, A. J., Eng, E. T., Kim, L. Y., Carragher,
+  B., & Potter, C. S. (2018). Routine determination of ice thickness for
+  cryo-EM grids. *Journal of Structural Biology*, 204(1), 38–44.
+  [doi:10.1016/j.jsb.2018.06.007](https://doi.org/10.1016/j.jsb.2018.06.007)
+- Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J., Lazić, I.,
+  Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image formation
+  modeling in cryo-electron microscopy. *Journal of Structural Biology*,
+  183(1), 19–32.
+  [doi:10.1016/j.jsb.2013.05.008](https://doi.org/10.1016/j.jsb.2013.05.008)
 - Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
-  formation. In *Current Approaches to Cryo-Electron Microscopy*,
-  *Progress in Molecular Biology and Translational Science*. Elsevier.
+  formation. In *Current approaches to cryo-electron microscopy* (Progress
+  in Molecular Biology and Translational Science, pp. 41–69). Elsevier.
   [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)
 - Yonekura, K., Braunfeld, M. B., Maki-Yonekura, S., & Agard, D. A. (2006).
   Electron energy filtering significantly improves amplitude contrast of
-  frozen-hydrated protein at 300 kV. *Journal of Structural Biology*, 156,
-  524–536. [doi:10.1016/j.jsb.2006.07.016](https://doi.org/10.1016/j.jsb.2006.07.016)
-- Langmore, J. P., & Smith, M. F. (1992). Quantitative energy-filtered electron
-  microscopy of biological molecules in ice. *Ultramicroscopy*, 46, 349–373.
+  frozen-hydrated protein at 300 kV. *Journal of Structural Biology*,
+  156(3), 524–536.
+  [doi:10.1016/j.jsb.2006.07.016](https://doi.org/10.1016/j.jsb.2006.07.016)

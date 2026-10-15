@@ -1,8 +1,9 @@
 # Multislice
 
 `scattering_model="multislice"` is the default and most accurate
-propagation model. It follows Kirkland's multislice formalism (Kirkland,
-Ch. 6; see References): alternate multiplying the wave by each slice's
+propagation model. It follows the multislice method of Cowley & Moodie
+(1957), in the FFT formulation of Ishizuka & Uyeda (1977) as presented by
+Kirkland (2010, Ch. 6): alternate multiplying the wave by each slice's
 transmission function with propagating it a fixed distance (one voxel of
 Z) via a Fresnel propagator, repeated once per Z-slice of the potential
 volume.
@@ -96,7 +97,7 @@ left 1.2e-3 of the image power in error at low frequencies and 1.8e-2 near
 Nyquist, the same size as the aliasing itself. The first-Born exit wave,
 linear in the potential and so already band-limited to the volume grid, is
 interpolated onto the image grid for the same reason. The product then has room to exist, and the
-result is converged: measured against a 4x reference on a 6bdf particle at
+result is converged: measured against a 4x reference on a 6bdf particle (Campbell et al. 2015) at
 1 Å/px, the 2x grid agrees to 3e-7 of the scattered power, the float32
 noise floor, with no bandlimit applied at all. On the volume's own grid
 (`oversample = 1`) the wrapped content costs 0.2% of the scattered power
@@ -115,7 +116,7 @@ but leaves the \(k\)-sampling alone, and so prevents the product wrapping
 at Nyquist. Neither does the other's job. The errors quoted above were
 measured with `pad_fft` on.
 
-`klim` is the older remedy, Kirkland's: zero the outer fraction of
+`klim` is the older remedy, Kirkland's (2010): zero the outer fraction of
 \(k\)-space after every propagation step so that nothing can wrap into the
 retained band. It is kept for comparison, and its cutoff is a fraction of
 the volume's Nyquist on whichever grid the recursion runs on. It is more
@@ -148,9 +149,9 @@ is left on the volume grid.
 used elsewhere in this documentation) reverses the Z-slice traversal
 order: the beam enters at the volume's last Z-slice and leaves through
 slice 0, which is therefore the face adjacent to the exit plane.
-`"positive"` matches [CryoSPARC](https://cryosparc.com/)'s own convention instead. Because each
-slice propagates a different net distance to the exit plane, the
-traversal order changes the result. A projection-only model has no such
+`"positive"` matches the convention of [CryoSPARC](https://cryosparc.com/) (Punjani et al. 2017)
+instead. Because each slice propagates a different net distance to the
+exit plane (DeRosier 2000), the traversal order changes the result. A projection-only model has no such
 asymmetry: summing a volume's slices is commutative regardless of order.
 
 ## `IterativeScattering` and tilted volumes
@@ -187,5 +188,26 @@ rather than indexing directly into `V`. Two further mechanisms apply:
 
 ## References
 
-- Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*, 2nd
-  Edition. Springer. Ch. 6.
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Cowley, J. M., & Moodie, A. F. (1957). The scattering of electrons by atoms
+  and crystals. I. A new theoretical approach. *Acta Crystallographica*,
+  10(10), 609–619.
+  [doi:10.1107/S0365110X57002194](https://doi.org/10.1107/S0365110X57002194)
+- DeRosier, D. J. (2000). Correction of high-resolution data for curvature of
+  the Ewald sphere. *Ultramicroscopy*, 81(2), 83–98.
+  [doi:10.1016/S0304-3991(99)00120-5](https://doi.org/10.1016/S0304-3991(99)00120-5)
+- Ishizuka, K., & Uyeda, N. (1977). A new theoretical and practical approach
+  to the multislice method. *Acta Crystallographica Section A*, 33(5),
+  740–749.
+  [doi:10.1107/S0567739477001879](https://doi.org/10.1107/S0567739477001879)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+  Ch. 6.
+- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
+  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
+  determination. *Nature Methods*, 14(3), 290–296.
+  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)

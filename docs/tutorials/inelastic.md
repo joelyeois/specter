@@ -7,8 +7,8 @@ electrons that lost no energy, the *zero-loss* beam. To a simulation, losing tho
 absorption: an imaginary part of the potential, under which the wave's
 intensity decays as it crosses the specimen. This tutorial compares the two
 ways SPECTER assigns that absorption, adds the objective aperture, and shows
-the frozen-plasmon model, in which the absorption is spread laterally the way
-inelastic scattering is.
+the frozen-plasmon model of Himes & Grigorieff (2021), in which the absorption
+is spread laterally the way inelastic scattering is.
 
 Before you start: this tutorial assumes
 [Scattering](../walkthrough/scattering.md) and [Contrast transfer
@@ -18,7 +18,8 @@ function](../walkthrough/ctf.md).
 
 The inelastic mean free path \(\lambda\) is the distance over which a beam
 loses a fraction \(1 - 1/e\) of its zero-loss electrons. SPECTER carries
-measured values for amorphous ice and a derived value for protein:
+measured values for amorphous ice (Grimm et al. 1996; Rice et al. 2018) and a
+derived value for protein:
 
 ```python
 --8<-- "docs-figures/tutorials/inelastic.py:setup"
@@ -59,8 +60,8 @@ is lost at 300 kV and 63% at 120 kV.
 The default model, `absorption_model="alpha"`, takes its imaginary potential
 from the amplitude-contrast ratio instead: every voxel absorbs in proportion
 to its own potential, with the ratio `alpha` the same in ice and protein.
-`alpha` is the constant a CTF estimation program assumes, typically 0.07 to
-0.1 for cryo-EM data, not a measured absorption. Read as one, it absorbs far too
+`alpha` is the constant a CTF estimation program assumes, typically 0.07 (Toyoshima & Unwin 1988)
+to 0.1 for cryo-EM data, not a measured absorption. Read as one, it absorbs far too
 much:
 
 ```python
@@ -163,7 +164,8 @@ under `alpha` the fitted constant already stands in for that loss.
 ## Delocalised absorption: the frozen-plasmon model
 
 An inelastic event is not confined to the atom it happens at. A plasmon is a
-collective excitation of the valence electrons over a nanometre or more, so
+collective excitation of the valence electrons over a nanometre or more
+(Egerton 2011), so
 the map of where zero-loss electrons are removed is a blurred copy of the
 map of material. `specter.imaging.simulate_frozen` propagates a specimen
 state with a separate *absorption source*, spread laterally by a
@@ -228,3 +230,26 @@ since it needs explicit source and spectrum data a config cannot carry.
 - [Phase shift and amplitude
   contrast](../concepts/aberrations.md#phase-shift-and-amplitude-contrast):
   amplitude contrast in the transfer function.
+
+## References
+
+- Egerton, R. F. (2011). *Electron energy-loss spectroscopy in the electron
+  microscope* (3rd ed.). Springer.
+  [doi:10.1007/978-1-4419-9583-4](https://doi.org/10.1007/978-1-4419-9583-4)
+- Grimm, R., Typke, D., Bärmann, M., & Baumeister, W. (1996). Determination
+  of the inelastic mean free path in ice by examination of tilted vesicles
+  and automated most probable loss imaging. *Ultramicroscopy*, 63(3–4),
+  169–179.
+  [doi:10.1016/0304-3991(96)00035-6](https://doi.org/10.1016/0304-3991(96)00035-6)
+- Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+  radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+  8(6), 943–953.
+  [doi:10.1107/S2052252521008538](https://doi.org/10.1107/S2052252521008538)
+- Rice, W. J., Cheng, A., Noble, A. J., Eng, E. T., Kim, L. Y., Carragher,
+  B., & Potter, C. S. (2018). Routine determination of ice thickness for
+  cryo-EM grids. *Journal of Structural Biology*, 204(1), 38–44.
+  [doi:10.1016/j.jsb.2018.06.007](https://doi.org/10.1016/j.jsb.2018.06.007)
+- Toyoshima, C., & Unwin, N. (1988). Contrast transfer for frozen-hydrated
+  specimens: Determination from pairs of defocused images.
+  *Ultramicroscopy*, 25(4), 279–291.
+  [doi:10.1016/0304-3991(88)90003-4](https://doi.org/10.1016/0304-3991(88)90003-4)

@@ -8,11 +8,11 @@ spread while crossing it, the wave leaving the far face is
 \psi(x, y) = \exp\!\Big(i\sigma \int V(x, y, z)\,dz\Big),
 \]
 
-the *phase-object approximation*: the projected potential of the previous
+the *phase-object approximation* (Kirkland 2010, Ch. 5): the projected potential of the previous
 pages, multiplied by the interaction parameter \(\sigma\). A real specimen
 plus its ice is hundreds to thousands of ångströms thick, and over that
 depth the wave diffracts as it goes. `Specimen.scatter` therefore propagates
-the wave through the full volume, slice by slice, and returns the result as
+the wave through the full volume, slice by slice (Cowley & Moodie 1957), and returns the result as
 an `ExitWave`. This page covers the two physical constants that set the
 interaction, the poses that orient each particle, the exit wave itself, the
 propagation models, and the grid the propagation runs on.
@@ -38,7 +38,7 @@ are in [Two numbers set the whole propagation problem](../concepts/scattering/in
 
 ## Orienting the particle
 
-The setup is the rendered 6BDF potential from
+The setup is the rendered 6BDF (Campbell et al. 2015) potential from
 [Structures and potentials](potentials.md):
 
 ```python
@@ -57,8 +57,9 @@ shifts uniformly within `±shift` Å along each axis:
 --8<-- "docs-includes/walkthrough/scattering-poses.txt"
 ```
 
-Orientations are unit quaternions in `roma`'s scalar-last \((x, y, z, w)\)
-order, and shifts are in ångströms with RELION's origin-offset sign. `ids`
+Orientations are unit quaternions in the scalar-last \((x, y, z, w)\) order
+of `roma` (Bregier 2021), and shifts are in ångströms with the origin-offset
+sign of RELION (Scheres 2012). `ids`
 numbers the images within their stack. When you pass a seed, every
 per-image random draw (the neighbours, the ice, the detector noise) is
 derived from it and the image's id, which
@@ -234,7 +235,7 @@ The rotationally averaged power spectrum of the exit-wave intensity in
 On the volume's own grid the wrapped content is 2% of the image's contrast
 power, and its power grows with frequency. At `oversample=2` the error falls to
 4.2e-7, the float32 noise floor, with no bandlimit needed. Two is the default
-because it is converged; the cost and the comparison with Kirkland's `klim`
+because it is converged; the cost and the comparison with Kirkland's (2010) `klim`
 bandlimit are in
 [Grid aliasing](../concepts/scattering/multislice.md#grid-aliasing-oversample-and-klim).
 
@@ -287,3 +288,25 @@ the API reference.
 
 [Contrast transfer function](ctf.md) passes the exit wave through the
 objective lens: defocus, astigmatism and spherical aberration.
+
+## References
+
+- Bregier, R. (2021). Deep regression on manifolds: A 3D rotation case
+  study. In *2021 International Conference on 3D Vision (3DV)* (pp.
+  166–174). IEEE.
+  [doi:10.1109/3DV53792.2021.00027](https://doi.org/10.1109/3DV53792.2021.00027)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Cowley, J. M., & Moodie, A. F. (1957). The scattering of electrons by atoms
+  and crystals. I. A new theoretical approach. *Acta Crystallographica*,
+  10(10), 609–619.
+  [doi:10.1107/S0365110X57002194](https://doi.org/10.1107/S0365110X57002194)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian approach to
+  cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
+  519–530.
+  [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)

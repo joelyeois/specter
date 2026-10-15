@@ -57,6 +57,9 @@ def fresnel_propagator(
     """
     The Fresnel free-space propagator ``exp(i pi lambda d k^2)``.
 
+    The paraxial free-space propagator of the multislice method; see [1]_,
+    Ch. 6.
+
     Parameters
     ----------
     k2 : torch.Tensor
@@ -70,6 +73,11 @@ def fresnel_propagator(
     -------
     torch.Tensor
         Complex, the broadcast shape of ``distance`` and ``k2``.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     return torch.exp(1j * torch.pi * wavelength * distance * k2)
 
@@ -78,7 +86,7 @@ def bandlimit_mask(
     k: torch.Tensor, pixel_size: float, klim: float | None
 ) -> torch.Tensor | int:
     """
-    Kirkland's anti-aliasing bandlimit as a binary mask on ``k``.
+    Kirkland's anti-aliasing bandlimit [1]_ as a binary mask on ``k``.
 
     Built directly against ``k`` in native (unshifted) FFT order rather
     than via ``disk2d()``, whose disk is centred at index ``n // 2``
@@ -101,6 +109,11 @@ def bandlimit_mask(
     -------
     torch.Tensor or int
         Shape ``(1, nxy, nxy)`` float32, or 1.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     if klim is None:
         return 1

@@ -450,6 +450,17 @@ def build_potential_volume_analytic_scatter(
     -------
     potential_volume : torch.Tensor
         Potential volume, shape `grid_shape`, in units of V.
+
+    References
+    ----------
+    .. [1] Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+       et al. (2026). Measurement of atomic scattering factors by cryoelectron
+       microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+       e2528758123. https://doi.org/10.1073/pnas.2528758123
+    .. [2] Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+       parameterization of elastic and absorptive electron atomic scattering
+       factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+       https://doi.org/10.1107/S0108767395014371
     """
     a0 = bohr_radius()  # [Å]
     e = electron_charge_volt_angstrom()  # [V·Å]
@@ -636,6 +647,11 @@ def build_potential_volume_analytic_scatter_kirkland(
     -------
     potential_volume : torch.Tensor
         Potential volume, shape `grid_shape`, in units of V.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     device = coords.device
     dtype = coords.dtype
@@ -711,6 +727,14 @@ def build_potential_volume_analytic_scatter_lobato(
     -------
     potential_volume : torch.Tensor
         Potential volume, shape `grid_shape`, in units of V.
+
+    References
+    ----------
+    .. [1] Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
+       scattering factors, electron densities and electrostatic potentials for
+       neutral atoms that obey all physical constraints. *Acta Crystallographica
+       Section A: Foundations and Advances*, 70(6), 636–649.
+       https://doi.org/10.1107/S205327331401643X
     """
     device = coords.device
     dtype = coords.dtype

@@ -1,7 +1,7 @@
 # Frozen-plasmon forward model
 
 The frozen-plasmon model is an **opt-in Python API** for exposure-resolved
-zero-loss simulation, following Himes and Grigorieff (2021). It uses the same
+zero-loss simulation, following Himes & Grigorieff (2021). It uses the same
 multislice, optics and detector code as the rest of the forward model, which
 does not invoke it unless asked. The API requires explicit material and source data rather than
 inferring atom identities from a real-valued volume.
@@ -12,7 +12,8 @@ inferring atom identities from a real-valued volume.
 ## Available components
 
 - `specter.inelastic.PlasmonFilter`: integrate a supplied single-scattering EELS
-  spectrum over 7.5–100 eV and take the square-root angular cross-section shape.
+  spectrum over 7.5–100 eV and take the square-root angular cross-section shape
+  (Himes & Grigorieff 2021, Eq. 8).
   `from_csv` requires a two-column `energy_eV,loss_density` file and provenance.
   `approximate_drude` is an explicitly named development substitute.
 - `AtomicPlasmonSpecimen`: render particle atoms and explicit pseudo-water centres
@@ -22,7 +23,7 @@ inferring atom identities from a real-valued volume.
 - `BrownianCoordinates`: seeded solvent motion, replayable for a fixed exposure
   schedule; MSD is in Å² per e⁻/Å². Changing the temporal grid changes the random
   realization, so convergence comparisons need a common trajectory or ensembles.
-- `PotentialDoseDamage`: optional empirical damping of the particle's 3D elastic
+- `PotentialDoseDamage`: optional empirical damping (Grant & Grigorieff 2015) of the particle's 3D elastic
   potential at the exposure midpoint. It preserves the DC term. It does not
   represent chemical damage or mass loss; it must not be combined with another
   dose envelope for the same damage.
@@ -99,7 +100,8 @@ acquisition order without resetting solvent motion between tilts.
 The filter is dimensionless and has unit DC. Source coefficients establish the
 absorption magnitude. For uniform number density `n` (Å⁻³), MFP `L` (Å), and
 interaction parameter `sigma`, an MFP-calibrated coefficient is
-`1 / (2 * sigma * L * n)` V Å³ per scattering centre. Different species can use
+`1 / (2 * sigma * L * n)` V Å³ per scattering centre, the absorption
+potential of Vulović et al. (2013) divided among the centres. Different species can use
 measured relative cross-section weights. The magnitude is therefore
 MFP-calibrated (see [Limitations](#limitations)).
 
@@ -144,7 +146,7 @@ solvent evolution, damage DC preservation and CPU/GPU agreement.
 ## Limitations
 
 - **No measured loss spectrum is bundled.** `PlasmonFilter.approximate_drude`
-  is a development substitute; a parameterization faithful to Himes and
+  is a development substitute; a parameterization faithful to Himes &
   Grigorieff (2021) requires a measured single-scattering EELS spectrum
   supplied through `PlasmonFilter.from_csv`, together with empirically
   determined species strengths.
@@ -152,7 +154,7 @@ solvent evolution, damage DC preservation and CPU/GPU agreement.
   ice mean free path validates the overall normalization only; it does not
   show that the spatial spectrum of the absorption is correct. Transmission
   and spatial spectrum need independent checks.
-- **No experimental or cisTEM benchmark exists.** The model has not been
+- **No experimental or cisTEM (Grant et al. 2018) benchmark exists.** The model has not been
   compared against cisTEM's implementation or against experimental
   energy-filtered images for absolute counts, protein–ice contrast,
   exposure-dependent solvent noise or objective-aperture effects, with
@@ -169,6 +171,19 @@ solvent evolution, damage DC preservation and CPU/GPU agreement.
 
 ## References
 
-- Himes, B. A., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
-  radiation-sensitive samples using multislice wave propagation. *IUCrJ*, 8,
-  943–953. [doi:10.1107/S2052252521008538](https://doi.org/10.1107/S2052252521008538)
+- Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+  single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+  *eLife*, 4, e06980.
+  [doi:10.7554/eLife.06980](https://doi.org/10.7554/eLife.06980)
+- Grant, T., Rohou, A., & Grigorieff, N. (2018). cisTEM, user-friendly
+  software for single-particle image processing. *eLife*, 7, e35383.
+  [doi:10.7554/eLife.35383](https://doi.org/10.7554/eLife.35383)
+- Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+  radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+  8(6), 943–953.
+  [doi:10.1107/S2052252521008538](https://doi.org/10.1107/S2052252521008538)
+- Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J., Lazić, I.,
+  Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image formation
+  modeling in cryo-electron microscopy. *Journal of Structural Biology*,
+  183(1), 19–32.
+  [doi:10.1016/j.jsb.2013.05.008](https://doi.org/10.1016/j.jsb.2013.05.008)

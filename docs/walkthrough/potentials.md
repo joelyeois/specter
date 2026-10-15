@@ -9,16 +9,16 @@ from an atomic model as a superposition of one potential per atom,
 V(\mathbf{r}) = \sum_i V_i(\mathbf{r} - \mathbf{r}_i),
 \]
 
-the *independent atom model*. Each \(V_i\) is a fitted, spherically symmetric
+the *independent atom model* (Kirkland 2010). Each \(V_i\) is a fitted, spherically symmetric
 function of the atom's type, and \(V\) is measured in volts. This page loads a
 structure, renders its potential onto a voxel grid, and shows the two choices
 that change the result: the voxel size and the scattering factors.
 
 ## Loading a structure
 
-`Structure.from_pdb` reads an atomic model from a PDB accession code or a
-local `.pdb`/`.cif` file. The example is the 660 kDa ring of
-[6BDF](https://www.rcsb.org/structure/6BDF):
+`Structure.from_pdb` reads an atomic model from a PDB (Berman et al. 2000)
+accession code or a local `.pdb`/`.cif` file. The example is the 660 kDa
+20S proteasome of [6BDF](https://www.rcsb.org/structure/6BDF) (Campbell et al. 2015):
 
 ```python
 --8<-- "docs-figures/walkthrough/potentials.py:load"
@@ -40,7 +40,7 @@ structure = Structure.from_pdb("path/to/model.cif")
 
 Each atom carries a *bonded species* as well as an element: `N(HHHC)` is a
 nitrogen bonded to three hydrogens and a carbon. The default scattering
-factors are fitted per bonded species, which is why the structure is typed
+factors are fitted per bonded species (Shtyrov et al. 2026), which is why the structure is typed
 from its bond topology as it loads ([Scattering factors](#scattering-factors)
 below). The largest diameter is worth keeping: the next page uses it to space
 neighbouring particles.
@@ -123,9 +123,9 @@ factor. `scattering_factors` selects the fit:
 
 | Value | Fitted per | Use |
 |---|---|---|
-| `shtyrov` (default) | Bonded species, e.g. `C(HHHC)` | Biomolecules |
-| `kirkland` | Element | Bulk materials: ice, carbon, gold |
-| `lobato` | Element | Bulk materials |
+| `shtyrov` (default; Shtyrov et al. 2026) | Bonded species, e.g. `C(HHHC)` | Biomolecules |
+| `kirkland` (Kirkland 2010) | Element | Bulk materials: ice, carbon, gold |
+| `lobato` (Lobato & Van Dyck 2014) | Element | Bulk materials |
 
 ```python
 --8<-- "docs-figures/walkthrough/potentials.py:parameterizations"
@@ -154,8 +154,9 @@ for you when it adds ice, carbon or gold (see
 
 Shtyrov typing needs the structure's hydrogens. A structure deposited without
 them still loads, and the atoms whose bonded species cannot be read fall back
-to per-element factors. Installing the
-[Monomer Library](../installation.md#monomer-library-for-shtyrov-scattering-factors) lets SPECTER add the missing hydrogens
+to per-element factors (Peng et al. 1996). Installing the
+[Monomer Library](../installation.md#monomer-library-for-shtyrov-scattering-factors)
+(Vagin et al. 2004) lets SPECTER add the missing hydrogens
 from ideal geometry; see
 [Hydrogen coordinates](../concepts/atomic-potentials.md#hydrogen-coordinates).
 
@@ -206,3 +207,37 @@ factors.
 
 [Specimens: crowding and ice](specimens.md) surrounds this potential with
 neighbouring particles and a slab of amorphous ice.
+
+## References
+
+- Berman, H. M., Westbrook, J., Feng, Z., Gilliland, G., Bhat, T. N.,
+  Weissig, H., Shindyalov, I. N., & Bourne, P. E. (2000). The Protein Data
+  Bank. *Nucleic Acids Research*, 28(1), 235–242.
+  [doi:10.1093/nar/28.1.235](https://doi.org/10.1093/nar/28.1.235)
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
+  scattering factors, electron densities and electrostatic potentials for
+  neutral atoms that obey all physical constraints. *Acta Crystallographica
+  Section A: Foundations and Advances*, 70(6), 636–649.
+  [doi:10.1107/S205327331401643X](https://doi.org/10.1107/S205327331401643X)
+- Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+  parameterization of elastic and absorptive electron atomic scattering
+  factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+  [doi:10.1107/S0108767395014371](https://doi.org/10.1107/S0108767395014371)
+- Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+  et al. (2026). Measurement of atomic scattering factors by cryoelectron
+  microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+  e2528758123.
+  [doi:10.1073/pnas.2528758123](https://doi.org/10.1073/pnas.2528758123)
+- Vagin, A. A., Steiner, R. A., Lebedev, A. A., Potterton, L., McNicholas,
+  S., Long, F., & Murshudov, G. N. (2004). REFMAC5 dictionary: Organization
+  of prior chemical knowledge and guidelines for its use. *Acta
+  Crystallographica Section D: Biological Crystallography*, 60(12),
+  2184–2195.
+  [doi:10.1107/S0907444904023510](https://doi.org/10.1107/S0907444904023510)

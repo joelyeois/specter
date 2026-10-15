@@ -63,8 +63,9 @@ def load_kirkland_parameters() -> torch.Tensor:
 
     References
     ----------
-    Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*, 2nd Edition,
-    Appendix C.4.
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
+       Appendix C.4.
     """
     params_list = []
 
@@ -130,10 +131,11 @@ def load_lobato_parameters() -> torch.Tensor:
 
     References
     ----------
-    Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for scattering
-    factors, electron densities and electrostatic potentials for neutral atoms that obey
-    all physical constraints. Acta Crystallographica. Section A, Foundations and
-    Advances, 70(6), 636–649.
+    .. [1] Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
+       scattering factors, electron densities and electrostatic potentials for
+       neutral atoms that obey all physical constraints. *Acta Crystallographica
+       Section A: Foundations and Advances*, 70(6), 636–649.
+       https://doi.org/10.1107/S205327331401643X
     """
     params_list = []
 
@@ -202,11 +204,10 @@ def load_shtyrov_parameters(filepath: str) -> torch.Tensor:
 
     References
     ----------
-    Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M., Chen, S.,
-    McMullan, G., Short, J. M., Russo, C. J., Henderson, R., & Murshudov, G. N. (2026).
-    Measurement of atomic scattering factors by cryoelectron microscopy. Proceedings of
-    the National Academy of Sciences, 123(19), e2528758123.
-    https://doi.org/10.1073/pnas.2528758123
+    .. [1] Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+       et al. (2026). Measurement of atomic scattering factors by cryoelectron
+       microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+       e2528758123. https://doi.org/10.1073/pnas.2528758123
     """
     # parse .cif file
     logger.debug("Parsing MMCIF file.")
@@ -265,6 +266,11 @@ def kirkland_atomic_potential_2d(
     -------
     potential : torch.Tensor
         2D potential, same shape as r_xy.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     device = r_xy.device
     a0 = bohr_radius()  # [Å]
@@ -318,6 +324,11 @@ def kirkland_atomic_potential_3d(
     -------
     potential : torch.Tensor
         Atomic potential in units of V, same shape as r_xyz.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     device = r_xyz.device
     a0 = bohr_radius()  # [Å]
@@ -365,6 +376,11 @@ def kirkland_atomic_potential_3d_fourier(
         Electron scattering factor in units of Å, same shape as k_xyz.
         Multiply by c1 = 2*pi*e*a0 = 47.9 V·Å² to obtain the Fourier-space
         potential in V·Å³, as `PotentialBuilder` does.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
     device = k_xyz.device
 
@@ -405,6 +421,14 @@ def lobato_atomic_potential_2d(atomic_number: int, r_xy: torch.Tensor) -> torch.
     -------
     potential : torch.Tensor
         Atomic potential in units of V·Å, same shape as r_xy.
+
+    References
+    ----------
+    .. [1] Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
+       scattering factors, electron densities and electrostatic potentials for
+       neutral atoms that obey all physical constraints. *Acta Crystallographica
+       Section A: Foundations and Advances*, 70(6), 636–649.
+       https://doi.org/10.1107/S205327331401643X
     """
     device = r_xy.device
     vac_perm = 1 / 4 / torch.pi
@@ -450,6 +474,14 @@ def lobato_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch
     -------
     potential : torch.Tensor
         Atomic potential in units of V, same shape as r_xyz.
+
+    References
+    ----------
+    .. [1] Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
+       scattering factors, electron densities and electrostatic potentials for
+       neutral atoms that obey all physical constraints. *Acta Crystallographica
+       Section A: Foundations and Advances*, 70(6), 636–649.
+       https://doi.org/10.1107/S205327331401643X
     """
     device = r_xyz.device
     vac_perm = 1 / 4 / torch.pi
@@ -502,6 +534,14 @@ def lobato_atomic_potential_3d_fourier(
         Electron scattering factor in units of Å, same shape as k_xyz.
         Multiply by c1 = 2*pi*e*a0 = 47.9 V·Å² to obtain the Fourier-space
         potential in V·Å³, as `PotentialBuilder` does.
+
+    References
+    ----------
+    .. [1] Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
+       scattering factors, electron densities and electrostatic potentials for
+       neutral atoms that obey all physical constraints. *Acta Crystallographica
+       Section A: Foundations and Advances*, 70(6), 636–649.
+       https://doi.org/10.1107/S205327331401643X
     """
     device = k_xyz.device
 
@@ -595,7 +635,11 @@ def load_shtyrov_species_parameters(json_filepath: str) -> dict[str, torch.Tenso
 
     References
     ----------
-    sffit: https://github.com/as2875/sffit
+    .. [1] Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+       et al. (2026). Measurement of atomic scattering factors by cryoelectron
+       microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+       e2528758123. https://doi.org/10.1073/pnas.2528758123
+    .. [2] sffit. https://github.com/as2875/sffit
     """
     with open(json_filepath, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -720,10 +764,12 @@ def peng_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.T
 
     References
     ----------
-    Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
-    parameterization of elastic and absorptive electron atomic scattering
-    factors. Acta Crystallographica Section A, 52(2), 257–276.
-    https://doi.org/10.1107/S0108767395014371
+    .. [1] Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+       parameterization of elastic and absorptive electron atomic scattering
+       factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+       https://doi.org/10.1107/S0108767395014371
+    .. [2] Wojdyr, M. (2022). GEMMI: A library for structural biology. *Journal of
+       Open Source Software*, 7(73), 4200. https://doi.org/10.21105/joss.04200
     """
     a0 = bohr_radius()  # [Å]
     e = electron_charge_volt_angstrom()  # [V·Å]

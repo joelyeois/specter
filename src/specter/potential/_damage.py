@@ -37,6 +37,12 @@ specimen -- it folds in how the frames were combined and what that did to the
 noise -- so it does not belong on a potential when the detector is separately
 applying the run's real weights and the real noise gain they cause. Prefer
 :func:`frame_damage_envelope` on any path that fractionates the exposure.
+
+References
+----------
+.. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+   single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+   *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
 """
 
 from __future__ import annotations
@@ -94,6 +100,12 @@ def frame_damage_envelope(
     -------
     torch.Tensor
         Amplitude envelope in (0, 1], the shape of ``k``.
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
     if n_frames < 1:
         raise ValueError("n_frames must be at least 1")
@@ -180,6 +192,12 @@ def apply_dose_damage(
     -------
     torch.Tensor
         ``V`` itself, damaged.
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
     squeeze = V.ndim == 3
     if squeeze:

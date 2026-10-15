@@ -35,6 +35,6 @@ invocation count and geometry change.
 ## References
 
 - Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
-  formation. In *Current Approaches to Cryo-Electron Microscopy*,
-  *Progress in Molecular Biology and Translational Science*. Elsevier.
+  formation. In *Current approaches to cryo-electron microscopy* (Progress
+  in Molecular Biology and Translational Science, pp. 41–69). Elsevier.
   [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)

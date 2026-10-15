@@ -26,7 +26,8 @@ accumulates it in the phase, and exponentiates the sum once at the end:
 where \(F_z\) is the same Fresnel propagator as
 [multislice](multislice.md#the-recursion), evaluated at the distance from
 slice \(z\) to the exit plane rather than a single slice thickness. This
-is the Rytov approximation: the exponentiated first Born series. Expanding
+is the Rytov approximation (Keller 1969; Devaney 1981), in the slice-wise
+form derived by Yeo & Loh (2026): the exponentiated first Born series. Expanding
 the exponential to first order recovers
 [`firstborn`](other-modes.md#first-born) exactly, so Rytov and first Born
 agree wherever the linearization is valid and diverge only once the
@@ -85,7 +86,7 @@ its contribution an imaginary part, whose mean over the field is zero but
 whose fluctuation raises the mean of \(e^{-2\,\mathrm{Im}\,\Theta}\) above
 1, by an amount that grows with thickness. Over the 320 Å of the sweep
 above it is barely visible in the mean intensity
-([Other propagation modes](other-modes.md#accuracy-vs-thickness)). On a 6BDF particle in structured ice it is
+([Other propagation modes](other-modes.md#accuracy-vs-thickness)). On a 6BDF particle (Campbell et al. 2015) in structured ice it is
 1.7% at 500 Å, 3.3% at 1000 Å and 6.7% at 2000 Å, while multislice's mean
 intensity stays at 1.000 and Rytov's intensity pattern still correlates
 with multislice's at 0.979 or better
@@ -96,11 +97,18 @@ modes](other-modes.md#accuracy-vs-thickness).
 
 ## References
 
+- Campbell, M. G., Veesler, D., Cheng, A., Potter, C. S., & Carragher, B.
+  (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
+  20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
+  [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Devaney, A. J. (1981). Inverse-scattering theory within the Rytov
+  approximation. *Optics Letters*, 6(8), 374–376.
+  [doi:10.1364/OL.6.000374](https://doi.org/10.1364/OL.6.000374)
+- Keller, J. B. (1969). Accuracy and validity of the Born and Rytov
+  approximations. *Journal of the Optical Society of America*, 59(8),
+  1003–1004.
+  [doi:10.1364/JOSA.59.001003](https://doi.org/10.1364/JOSA.59.001003)
 - Yeo, J., & Loh, N. D. (2026). Pursuing the physics of cryo-EM image
-  formation. In *Current Approaches to Cryo-Electron Microscopy*,
-  *Progress in Molecular Biology and Translational Science*. Elsevier.
-  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001).
-  Derives the Rytov approximation as specialized to slice-wise electron
-  propagation, the form implemented here.
-- Rytov approximation: standard in coherent wave optics; see e.g. J. W.
-  Goodman, *Introduction to Fourier Optics*, for the general derivation.
+  formation. In *Current approaches to cryo-electron microscopy* (Progress
+  in Molecular Biology and Translational Science, pp. 41–69). Elsevier.
+  [doi:10.1016/bs.pmbts.2026.05.001](https://doi.org/10.1016/bs.pmbts.2026.05.001)

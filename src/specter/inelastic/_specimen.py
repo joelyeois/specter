@@ -41,6 +41,16 @@ class AtomicPlasmonSpecimen(nn.Module):
     Supply ``solvent_fraction`` for a measured hydration/exclusion field.
     ``evolve_atoms`` may supply dose-dependent coordinates (chemical or rigid
     motion model); it must return coordinates in Å on the same device.
+
+    References
+    ----------
+    .. [1] Vulović, M., Ravelli, R. B. G., van Vliet, L. J., Koster, A. J.,
+       Lazić, I., Lücken, U., Rullgård, H., Öktem, O., & Rieger, B. (2013). Image
+       formation modeling in cryo-electron microscopy. *Journal of Structural
+       Biology*, 183(1), 19–32. https://doi.org/10.1016/j.jsb.2013.05.008
+    .. [2] Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+       radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+       8(6), 943–953. https://doi.org/10.1107/S2052252521008538
     """
 
     def __init__(

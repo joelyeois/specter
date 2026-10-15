@@ -186,6 +186,26 @@ class PotentialBuilder(L.LightningModule):
         Precomputed 2D atomic potentials for each unique element.
     atomic_potentials_3d : torch.Tensor
         Precomputed 3D atomic potentials for each unique element.
+
+    References
+    ----------
+    .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
+       (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
+    .. [2] Lobato, I., & Van Dyck, D. (2014). An accurate parameterization for
+       scattering factors, electron densities and electrostatic potentials for
+       neutral atoms that obey all physical constraints. *Acta Crystallographica
+       Section A: Foundations and Advances*, 70(6), 636–649.
+       https://doi.org/10.1107/S205327331401643X
+    .. [3] Shtyrov, A., Wilson, H., Slowik, D., Yamashita, K., Li, J., Wojdyr, M.,
+       et al. (2026). Measurement of atomic scattering factors by cryoelectron
+       microscopy. *Proceedings of the National Academy of Sciences*, 123(19),
+       e2528758123. https://doi.org/10.1073/pnas.2528758123
+    .. [4] Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+       parameterization of elastic and absorptive electron atomic scattering
+       factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+       https://doi.org/10.1107/S0108767395014371
+    .. [5] Wojdyr, M. (2022). GEMMI: A library for structural biology. *Journal of
+       Open Source Software*, 7(73), 4200. https://doi.org/10.21105/joss.04200
     """
 
     def __init__(

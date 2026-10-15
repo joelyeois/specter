@@ -31,6 +31,15 @@ class GemmiPotentialBuilder:
         Atomic numbers of all atoms. Default is None.
     b_factor : float, optional
         Isotropic B-factor. Default is 20.0.
+
+    References
+    ----------
+    .. [1] Wojdyr, M. (2022). GEMMI: A library for structural biology. *Journal of
+       Open Source Software*, 7(73), 4200. https://doi.org/10.21105/joss.04200
+    .. [2] Peng, L.-M., Ren, G., Dudarev, S. L., & Whelan, M. J. (1996). Robust
+       parameterization of elastic and absorptive electron atomic scattering
+       factors. *Acta Crystallographica Section A*, 52(2), 257–276.
+       https://doi.org/10.1107/S0108767395014371
     """
 
     def __init__(

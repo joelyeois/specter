@@ -74,8 +74,8 @@ the underlying math.
     direct electron detectors) coincidence loss. See
     [Detector](detector.md).
 
-Stages 9 through 11 are [forward simulation](forward-simulation.md)
-proper; stages 1 through 8 assemble the volume that forward
+Stages 8 through 10 are [forward simulation](forward-simulation.md)
+proper; stages 1 through 7 assemble the volume that forward
 simulation runs on. The split also marks where the
 single-particle and cryo-ET pipelines diverge: they build \(V\)
 differently but hand it to the same downstream chain.
@@ -92,7 +92,7 @@ differently but hand it to the same downstream chain.
   [Conventions](conventions.md#applying-a-pose-real-space-or-fourier-space)).
   It is cheaper per image than the coordinate path, at the cost of losing
   per-atom gradients. `Specimen.crowd`, `Specimen.damage` and
-  `Specimen.solvate` record stages 3, 6 and 7, which `scatter` applies to
+  `Specimen.solvate` record stages 3, 5 and 6, which `scatter` applies to
   every image in the fixed order above.
 - **`Field`** describes a whole field of view rather than one box.
   `Field.pack` places duplicates of one template across the micrograph

@@ -18,6 +18,12 @@ class PotentialDoseDamage(nn.Module):
     or mass loss. Solvent and imaginary source are left to their own models.
     Substep convergence is required. Do not also enable an optical dose
     envelope for the same exposure.
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
     """
 
     def __init__(self, pixel_size: float, voltage: float = 300.0):

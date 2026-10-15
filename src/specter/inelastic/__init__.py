@@ -2,6 +2,12 @@
 
 Measured spectra and source coefficients are explicit inputs. The optional
 Drude spectrum and Brownian motion are labeled development approximations.
+
+References
+----------
+.. [1] Himes, B., & Grigorieff, N. (2021). Cryo-TEM simulations of amorphous
+   radiation-sensitive samples using multislice wave propagation. *IUCrJ*,
+   8(6), 943–953. https://doi.org/10.1107/S2052252521008538
 """
 
 from ._damage import PotentialDoseDamage

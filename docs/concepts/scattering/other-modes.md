@@ -15,7 +15,8 @@ slice-to-slice propagation entirely.
 
 ## First Born
 
-First Born is the weak phase object approximation: it linearizes each
+First Born, after Born (1926), is the weak phase object approximation
+(Kirkland 2010, Ch. 5): it linearizes each
 slice's transmission function \(\exp(i\sigma\Delta z V_z)\) to its
 first-order Taylor term before propagating and summing it,
 
@@ -87,7 +88,7 @@ tested here, including the thinnest. Its pattern correlation with
 `multislice` never exceeds \({\approx}0.02\) and briefly goes negative.
 The same collapse is not specific to `RandomIcemaker` ice: it also
 reproduces (from \({\approx}0.9\) at the thinnest slice to \({\approx}0\)
-at full depth) on a real protein potential, myoglobin (PDB `1mbo`).
+at full depth) on a real protein potential, myoglobin (PDB `1mbo`; Phillips 1980).
 Averaged over the whole image, the same \(a^2+b^2 = |\Theta|^2\) excess
 also explains the mean-intensity bias in [Accuracy vs.
 thickness](#accuracy-vs-thickness) below. [Kinematic](#kinematic)
@@ -97,8 +98,9 @@ linearization is not the cause; kinematic keeps that term exact.
 
 ## Projection
 
-The thin-specimen limit: sum the potential over Z first, then apply a
-single transmission function with no propagation step at all,
+The thin-specimen limit (Kirkland 2010, Ch. 5): sum the potential over Z
+first, then apply a single transmission function with no propagation step
+at all,
 
 \[
 \psi = \exp\!\left(i\sigma\Delta z \sum_{z} V_z\right)
@@ -170,6 +172,13 @@ approximate mode at every thickness tested, on both specimen types.
 
 ## References
 
-- Kirkland, E. J. (2010). *Advanced Computing in Electron Microscopy*, 2nd
-  Edition. Springer. Ch. 5-6 (weak phase object and projection
-  approximations).
+- Born, M. (1926). Quantenmechanik der Stoßvorgänge. *Zeitschrift für
+  Physik*, 38(11–12), 803–827.
+  [doi:10.1007/BF01397184](https://doi.org/10.1007/BF01397184)
+- Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
+  ed.). Springer.
+  [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+  Ch. 5–6 (weak phase object and projection approximations).
+- Phillips, S. E. V. (1980). Structure and refinement of oxymyoglobin at
+  1.6 Å resolution. *Journal of Molecular Biology*, 142(4), 531–554.
+  [doi:10.1016/0022-2836(80)90262-4](https://doi.org/10.1016/0022-2836(80)90262-4)

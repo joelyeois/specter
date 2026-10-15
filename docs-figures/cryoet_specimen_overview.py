@@ -15,6 +15,8 @@ Saves PNGs directly into docs/assets/images/.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import os
 
 import matplotlib
@@ -29,7 +31,7 @@ from specter.specimen import (
     PEI2016_CROWDING_TABLE,
     build_filler_pool_specs,
 )
-from specter.specimen.filament import ACTIN_SPEC, FilamentSpec, MicrotubuleSpec
+from specter.specimen.filament import ACTIN_SPEC, MicrotubuleSpec
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
 from specter.specimen.tomogram import (
     MembraneInstance,
@@ -93,26 +95,14 @@ def build() -> tuple[TomogramSpecimenGenerator, torch.Tensor]:
             TomogramProteinSpec("1BXN", location="lumen", ratio=1.0),
             *filler,
         ],
-        filament_specs=[
-            FilamentSpec(
-                code=ACTIN_SPEC.code,
-                step=ACTIN_SPEC.step,
-                flex_deg=ACTIN_SPEC.flex_deg,
-                twist_deg=ACTIN_SPEC.twist_deg,
-                n_copies=10,
-                n_monomers=(40, 90),
-            )
-        ],
+        filament_specs=[replace(ACTIN_SPEC, n_copies=10, n_monomers=(40, 90))],
         microtubule_specs=[
             MicrotubuleSpec(
                 n_copies=2,
                 # length=None spans the volume's own diagonal, so each tube
                 # crosses the whole field of view rather than appearing as
-                # a stub. bend_radius=3e4 (3 um) gives the smooth,
-                # mechanically-constrained curvature real microtubules show
-                # in cellular tomograms, instead of the near-straight
-                # default thermal walk.
-                bend_radius=3.0e4,
+                # a stub. The default walk bends at the apparent persistence
+                # length microtubules show in cells (30 um).
             )
         ],
         carbon_film_spec=CarbonFilmSpec(

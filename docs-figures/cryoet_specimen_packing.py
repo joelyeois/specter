@@ -377,20 +377,15 @@ def figure_occupancy_grid() -> None:
     complement, the membrane, and every instance already placed -- and a
     candidate is rejected if its rotated footprint meets any set voxel. No
     distance field is involved."""
-    from specter.specimen.filament import FilamentSpec
+    from dataclasses import replace
+
+    from specter.specimen.filament import ACTIN_SPEC
 
     # Filaments earn their place here: with only a membrane, the shell is
     # already outside the cytosol region, so "stamp the obstacles in" would
     # be a step that visibly does nothing.
     filaments = [
-        FilamentSpec(
-            code="1J6Z",
-            step=27.5,
-            flex_deg=12.0,
-            twist_deg=-166.6,
-            n_copies=6,
-            n_monomers=(30, 50),
-        ),
+        replace(ACTIN_SPEC, n_copies=6, n_monomers=(30, 50)),
     ]
     common = dict(
         target_shape=SHAPE_ZYX,

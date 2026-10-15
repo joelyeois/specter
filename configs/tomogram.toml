@@ -105,7 +105,8 @@ n_monomers = [20, 60]
 n_copies = 5
 n_protofilaments = 13   # 13 is the canonical in-cell lattice
 length = 6000.0       # A; omit to span the volume diagonal
-bend_radius = 30000.0 # A, a buckled tube; omit for the in-cell random walk
+# bend_radius = 30000.0 # A: a buckled tube as a constant-curvature arc, instead of
+#                      # the in-cell random walk (apparent persistence length 30 um)
 
 # Carbon support film -- at most one [[carbon_film]] table.
 [[carbon_film]]

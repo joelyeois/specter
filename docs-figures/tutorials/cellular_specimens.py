@@ -83,7 +83,7 @@ transcript.start("cytoskeleton")
 # --8<-- [start:cytoskeleton]
 cytoskeleton = dict(
     filament_specs=[replace(ACTIN_SPEC, n_copies=8, n_monomers=(40, 90))],
-    microtubule_specs=[MicrotubuleSpec(n_copies=2, bend_radius=3.0e4)],
+    microtubule_specs=[MicrotubuleSpec(n_copies=2)],
 )
 gen = TomogramSpecimenGenerator(
     membranes(), protein_specs=[], carbon_film_spec=carbon, **cytoskeleton, **common

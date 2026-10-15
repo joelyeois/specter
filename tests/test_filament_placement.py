@@ -7,9 +7,17 @@ from __future__ import annotations
 
 import math
 
+import pytest
+import roma
 import torch
 
-from specter.specimen.filament import FilamentSpec, place_filaments
+from specter.specimen.filament import (
+    ACTIN_SPEC,
+    DIMER_REPEAT,
+    PROTOFILAMENT_SPEC,
+    FilamentSpec,
+    place_filaments,
+)
 from specter.specimen.filament._path import generate_filament_path
 from specter.specimen.filament._placement import (
     filament_orientations,
@@ -17,9 +25,39 @@ from specter.specimen.filament._placement import (
 )
 from conftest import seeded
 
+# F-actin's deposited helix, from the helical parameters of 6DJO
+# (-166.55 deg, 27.45 A) and 7BT7 (-166.6 deg, 27.5 A), which superposing
+# consecutive subunits of the deposited coordinates reproduces. A negative
+# twist for a positive rise: the one-start (genetic) helix is left-handed
+# (Dominguez & Holmes 2011).
+_DEPOSITED_ACTIN_TWIST_DEG = -166.6
+_DEPOSITED_ACTIN_RISE = 27.5
+
+
+def _screw(rotation: torch.Tensor, translation: torch.Tensor) -> tuple[float, float]:
+    """(twist in degrees, rise) of the rigid motion ``x -> R x + t``, about
+    the screw axis oriented so that the rise is positive."""
+    rotvec = roma.rotmat_to_rotvec(rotation.double())
+    angle = float(rotvec.norm())
+    axis = rotvec / angle
+    rise = float(translation.double() @ axis)
+    twist = math.degrees(angle)
+    return (twist, rise) if rise >= 0 else (-twist, -rise)
+
+
+def _straight_actin(n: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """A straight ACTIN_SPEC filament along an oblique direction: monomer
+    positions and their template-to-world rotations."""
+    direction = torch.tensor([0.3, -0.8, 0.52])
+    direction = direction / direction.norm()
+    positions = torch.arange(n, dtype=torch.float32).unsqueeze(1) * (
+        ACTIN_SPEC.step * direction
+    )
+    return positions, filament_orientations(positions, ACTIN_SPEC.twist_deg)
+
 
 def test_generate_filament_path_step_spacing():
-    n, step = 12, 27.3
+    n, step = 12, ACTIN_SPEC.step
     positions = generate_filament_path(n, step, flex_deg=12.0, generator=seeded(0))
     assert positions.shape == (n, 3)
     dists = (positions[1:] - positions[:-1]).norm(dim=-1)
@@ -27,7 +65,7 @@ def test_generate_filament_path_step_spacing():
 
 
 def test_generate_filament_path_flex_bound():
-    n, step, flex_deg = 20, 85.0, 3.0
+    n, step, flex_deg = 20, PROTOFILAMENT_SPEC.step, 3.0
     positions = generate_filament_path(n, step, flex_deg=flex_deg, generator=seeded(1))
     tangents = filament_tangents(positions)
     # Consecutive-segment tangents (excluding the padded last repeat) must
@@ -75,7 +113,9 @@ def test_filament_tangents_single_monomer_is_z():
 
 
 def test_filament_orientations_align_local_z_to_tangent():
-    positions = generate_filament_path(7, step=27.3, flex_deg=12.0, generator=seeded(5))
+    positions = generate_filament_path(
+        7, step=ACTIN_SPEC.step, flex_deg=12.0, generator=seeded(5)
+    )
     tangents = filament_tangents(positions)
     rotations = filament_orientations(positions, twist_deg=0.0)
     assert rotations.shape == (7, 3, 3)
@@ -92,8 +132,10 @@ def test_filament_orientations_twist_rotates_about_tangent():
     # A straight filament (flex=0) has a constant tangent, so consecutive
     # monomers' orientation differs by exactly a rotation of twist_deg about
     # that shared tangent.
-    positions = generate_filament_path(5, step=27.3, flex_deg=0.0, generator=seeded(6))
-    twist_deg = 166.15
+    positions = generate_filament_path(
+        5, step=ACTIN_SPEC.step, flex_deg=0.0, generator=seeded(6)
+    )
+    twist_deg = ACTIN_SPEC.twist_deg
     rotations = filament_orientations(positions, twist_deg=twist_deg)
     tangent = filament_tangents(positions)[0]
 
@@ -107,6 +149,51 @@ def test_filament_orientations_twist_rotates_about_tangent():
     # And the relative rotation's axis is the shared tangent (relative
     # leaves it fixed).
     assert torch.allclose(relative @ tangent, tangent, atol=1e-3)
+
+
+def test_presets_take_their_numbers_from_measured_structures():
+    """F-actin's rise and twist are the deposited filaments' (not the
+    idealised 13/6 twist of -166.15 deg), and a free protofilament stacks
+    dimers at the microtubule lattice's own repeat."""
+    assert ACTIN_SPEC.step == pytest.approx(_DEPOSITED_ACTIN_RISE, abs=0.1)
+    assert ACTIN_SPEC.twist_deg == pytest.approx(_DEPOSITED_ACTIN_TWIST_DEG, abs=0.1)
+    assert PROTOFILAMENT_SPEC.step == DIMER_REPEAT
+
+
+def test_actin_preset_is_a_left_handed_one_start_helix():
+    """Consecutive monomers are related by F-actin's deposited screw.
+
+    The screw carrying monomer i onto monomer i+1 must turn -166.6 deg
+    about the filament axis for +27.5 A of rise. +166.6 deg would be the
+    mirror helix, which the old +166.15 deg preset described.
+    """
+    positions, rotations = _straight_actin(6)
+    direction = positions[1] - positions[0]
+    direction = direction / direction.norm()
+    for i in range(5):
+        rotation = rotations[i + 1] @ rotations[i].T
+        translation = positions[i + 1] - rotation @ positions[i]
+        twist, rise = _screw(rotation, translation)
+        assert twist == pytest.approx(_DEPOSITED_ACTIN_TWIST_DEG, abs=0.05)
+        assert rise == pytest.approx(_DEPOSITED_ACTIN_RISE, abs=0.05)
+        # The screw axis is the filament axis.
+        axis = roma.rotmat_to_rotvec(rotation)
+        assert abs(float(axis @ direction)) == pytest.approx(
+            float(axis.norm()), rel=1e-4
+        )
+
+
+def test_actin_long_pitch_strands_are_right_handed():
+    """Every second monomer lies on one of the two long-pitch strands, which
+    a left-handed -166.6 deg one-start helix makes right-handed:
+    2 * -166.6 + 360 = +26.8 deg per 55 A."""
+    positions, rotations = _straight_actin(5)
+    rotation = rotations[2] @ rotations[0].T
+    translation = positions[2] - rotation @ positions[0]
+    twist, rise = _screw(rotation, translation)
+    assert twist == pytest.approx(2 * _DEPOSITED_ACTIN_TWIST_DEG + 360, abs=0.1)
+    assert twist > 0
+    assert rise == pytest.approx(2 * _DEPOSITED_ACTIN_RISE, abs=0.1)
 
 
 def test_place_filaments_fixed_monomer_count():
@@ -151,7 +238,7 @@ def test_place_filaments_multiple_species():
 
 def test_place_filaments_reproducible_with_seeded_generator():
     specs = [
-        FilamentSpec(code="X", step=27.3, flex_deg=12.0, n_copies=2, n_monomers=(5, 9))
+        FilamentSpec(code="X", step=27.5, flex_deg=12.0, n_copies=2, n_monomers=(5, 9))
     ]
     a = place_filaments(specs, (64, 64, 64), 5.0, generator=seeded(11))
     b = place_filaments(specs, (64, 64, 64), 5.0, generator=seeded(11))

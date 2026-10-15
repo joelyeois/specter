@@ -44,8 +44,10 @@ import numpy as np
 
 from ...pdb import PDB
 
-#: Default source structure: a 13-protofilament GMPCPP-microtubule solved
-#: with EB3 bound (Zhang et al. 2015). Its deposited asymmetric unit is a
+#: Default source structure: a 13-protofilament GMPCPP-microtubule
+#: co-polymerized with EB3 (Zhang et al. 2015). EB3 compacts the lattice,
+#: so its monomer rise (41.0 A) is the GDP lattice's rather than the 42.0 A
+#: of undecorated GMPCPP. Its deposited asymmetric unit is a
 #: 3-protofilament x 4-monomer patch -- enough neighbouring protofilaments
 #: to fit the tube axis, which a single isolated dimer would not give.
 #: The two 131-residue EB3 chains are dropped during extraction.
@@ -372,6 +374,11 @@ def measure_source_lattice(
         ``radius``, ``lateral_spacing``, ``monomer_rise`` and
         ``n_protofilaments`` (inferred from the azimuthal step between
         adjacent protofilaments), all in Å where applicable.
+        ``monomer_rise`` is half the dimer repeat, measured between
+        monomers two apart along a protofilament: consecutive monomers are
+        not evenly spaced (in 6DPU the intra-dimer spacing is 41.4 A and the
+        inter-dimer one 42.6 A), so their median spacing would report the
+        shorter one rather than the lattice's rise.
     """
     if pdb_cache_dir is None:
         from ...config import default_pdb_cache_dir
@@ -416,8 +423,8 @@ def measure_source_lattice(
 
     rises = []
     for column in columns:
-        along = sorted(float(np.dot(centroids[c], direction)) for c in column)
-        rises += list(np.diff(along))
+        along = np.sort([float(np.dot(centroids[c], direction)) for c in column])
+        rises += list((along[2:] - along[:-2]) / 2)
     monomer_rise = float(np.median(rises)) if rises else float("nan")
 
     return {

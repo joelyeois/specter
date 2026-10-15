@@ -386,7 +386,7 @@ class TomogramConfig:
     # --- Filaments (optional, additive on top of membranes if present) ---
     # One dict per filament species, mapping straight onto
     # specter.specimen.filament.FilamentSpec's own kwargs, e.g.
-    # {"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_copies": 4}.
+    # {"code": "1TUB", "step": 82.0, "flex_deg": 3.0, "n_copies": 4}.
     # Placed via specter.specimen.filament.place_filaments -- specter-native
     # random-walk placement, with no region-gating and no collision
     # avoidance against the membrane shell or each other, but DOES get
@@ -399,14 +399,14 @@ class TomogramConfig:
             "Filament species to scatter through the tomogram (TOML-"
             "only, [[filaments]] tables), each mapping onto "
             "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "
-            "'step': 85.0, 'flex_deg': 3.0, 'n_copies': 4}. Placed right after "
+            "'step': 82.0, 'flex_deg': 3.0, 'n_copies': 4}. Placed right after "
             "membranes, before targets/filler -- no region-gating, no collision "
             "avoidance against the membrane shell or each other, but targets/"
             "filler DO avoid already-placed filaments."
         ),
     )
     # Convenience toggle: also place the bundled ACTIN_SPEC preset (real
-    # F-actin helical repeat -- step/twist from Holmes/Egelman) without
+    # F-actin helical repeat -- 27.5 A step and a -166.6 deg twist, measured) without
     # hand-writing a [[filaments]] entry. Additive to filaments above (both
     # may be set at once). ACTIN_SPEC's own n_copies default (1) applies
     # here too -- for more instances or other single-strand species, use

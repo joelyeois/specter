@@ -256,7 +256,9 @@ def fig_lattice_and_seam() -> None:
         1, 2, figsize=(13, 5.4), gridspec_kw={"width_ratios": [1, 1.25]}
     )
 
-    phi = 2 * np.pi * np.arange(n_pf) / n_pf
+    # Numbered clockwise seen from +z, as `build_tube_instances` lays them
+    # out: registers climb clockwise, a left-handed 3-start helix.
+    phi = -2 * np.pi * np.arange(n_pf) / n_pf
     x, y = lattice.radius * np.cos(phi), lattice.radius * np.sin(phi)
     theta = np.linspace(0, 2 * np.pi, 400)
     ax0.plot(
@@ -337,7 +339,7 @@ def fig_lattice_and_seam() -> None:
     )
     ax1.plot([], [], "o", color="0.6", label="pf 0 actual register")
     ax1.set(
-        xlabel="arc position around the tube (Å)",
+        xlabel="arc position around the tube, clockwise seen from +z (Å)",
         ylabel="axial position z (Å)",
         title=f"unrolled lattice — stagger {lattice.stagger:.2f} Å per pf",
         ylim=(-20, 400),
@@ -380,7 +382,7 @@ def fig_protofilament_number() -> None:
         color=ALPHA_COLOR,
         label="model  R = N·a/2π",
     )
-    for source, n_pf in (("3JAL", 13), ("6DPU", 14)):
+    for source, n_pf in (("3JAL", 13), ("6DPU", 14), ("6DPV", 14)):
         try:
             measured = measure_source_lattice(source)
         except Exception as exc:  # offline: skip the overlay, keep the curve
@@ -393,7 +395,7 @@ def fig_protofilament_number() -> None:
             fontsize=13,
             color=SEAM_COLOR,
             textcoords="offset points",
-            xytext=(8, -12),
+            xytext=(8, -12) if source != "6DPV" else (8, 4),
         )
     ax.scatter([], [], s=140, color=SEAM_COLOR, label="measured (deposited)")
     ax.set(
@@ -413,7 +415,7 @@ def fig_protofilament_number() -> None:
 
 
 def fig_bending() -> None:
-    """Thermal stiffness vs a mechanical bend, both at true scale."""
+    """The default in-cell random walk vs a buckled arc, both at true scale."""
     lattice = solve_tube_lattice(13)
     diameter = 2 * lattice.radius + 44.0
     n_rings = 74  # ~600 nm
@@ -426,16 +428,14 @@ def fig_bending() -> None:
         [
             (
                 MicrotubuleSpec(length=6000.0, confine_to_slab=False),
-                f"thermal walk — derived flex {flex:.2f}° "
-                "(L_p = 1 mm): essentially straight",
+                f"default random walk — derived flex {flex:.2f}° (in-cell L_p = 30 µm)",
                 ALPHA_COLOR,
             ),
             (
                 MicrotubuleSpec(
                     length=6000.0, bend_radius=3.0e4, confine_to_slab=False
                 ),
-                "bend_radius = 3 µm — the smooth curvature of a "
-                "mechanically constrained microtubule",
+                "bend_radius = 3 µm — a microtubule buckled under compressive load",
                 BETA_COLOR,
             ),
         ],

@@ -10,10 +10,13 @@ the same division of labor its protein stamping already uses (geometry
 decided here, rendering done by the caller, which alone knows about voxel
 sizes/atomic potentials).
 
-The presets: `ACTIN_SPEC` stacks uncomplexed G-actin (PDB 1J6Z [4]_) with
-F-actin's helical twist [1]_ [2]_; `PROTOFILAMENT_SPEC` stacks the
-alpha-beta tubulin dimer (PDB 1TUB [3]_). Both `flex_deg` values are
-CryoTomoSim's [5]_.
+The presets: `ACTIN_SPEC` stacks uncomplexed G-actin (PDB 1J6Z [4]_) on
+F-actin's measured helix, a rise of 27.5 A and a twist of -166.6 degrees per
+subunit [6]_ [7]_ (the left-handed genetic helix of the Holmes model [2]_,
+whose twist varies from subunit to subunit [1]_); `PROTOFILAMENT_SPEC`
+stacks the alpha-beta tubulin dimer (PDB 1TUB [3]_) at the dimer repeat of
+the GDP microtubule lattice, `_lattice.DIMER_REPEAT`. Both `flex_deg` values
+are CryoTomoSim's [5]_.
 
 References
 ----------
@@ -34,6 +37,15 @@ References
    (2023). Rapid synthesis of cryo-ET data for training deep learning models.
    *bioRxiv*. https://doi.org/10.1101/2023.04.28.538636
    (CTS source: https://github.com/carsonpurnell/cryotomosim_CTS)
+.. [6] Dominguez, R., & Holmes, K. C. (2011). Actin structure and function.
+   *Annual Review of Biophysics*, 40, 169–186.
+   https://doi.org/10.1146/annurev-biophys-042910-155359
+   (-166.6 ± 0.6 degrees and 27.6 A per subunit; -166.15 degrees is the
+   idealised 13/6 value, which repeats after exactly 13 subunits.)
+.. [7] von der Ecken, J., Müller, M., Lehman, W., Manstein, D. J., Penczek,
+   P. A., & Raunser, S. (2015). Structure of the F-actin–tropomyosin
+   complex. *Nature*, 519(7541), 114–117. https://doi.org/10.1038/nature14033
+   (27.5 A and 166.4 degrees per subunit.)
 """
 
 from __future__ import annotations
@@ -42,6 +54,7 @@ from dataclasses import dataclass
 
 import torch
 
+from ._lattice import DIMER_REPEAT
 from ._path import generate_filament_path
 from ._placement import filament_orientations
 
@@ -61,9 +74,13 @@ class FilamentSpec:
         Maximum per-step path curvature, degrees (see
         ``generate_filament_path``).
     twist_deg : float, optional
-        Helical twist per monomer, degrees, accumulated along the filament.
-        Default 0 (no twist -- a single, untwisted strand, e.g. a
-        microtubule protofilament).
+        Helical twist per monomer, degrees, accumulated along the filament:
+        a rotation about the direction of growth by the right-hand rule, so
+        a positive value builds a right-handed helix and a negative one a
+        left-handed helix (the sign convention of deposited helical
+        parameters, which pair a twist with a positive rise). Default 0 (no
+        twist -- a single, untwisted strand, e.g. a microtubule
+        protofilament).
     n_copies : int, optional
         Number of independent filament instances of this species to place.
         Default 1.
@@ -82,10 +99,11 @@ class FilamentSpec:
 
 
 #: Tubulin alpha-beta dimer (PDB 1TUB, electron crystallography) repeated
-#: along a **single protofilament** -- not a microtubule. step=85 A is the
-#: real tubulin-dimer axial repeat; flex=3 deg is CTS's own tuned value for
-#: a protofilament's gentle curvature. twist=0: a single protofilament
-#: doesn't itself twist.
+#: along a **single protofilament** -- not a microtubule. step is the dimer
+#: repeat of the GDP microtubule lattice (`_lattice.DIMER_REPEAT`, 82.0 A),
+#: shared with `MicrotubuleSpec` rather than written twice; flex=3 deg is
+#: CTS's own tuned value for a protofilament's gentle curvature. twist=0: a
+#: single protofilament doesn't itself twist.
 #:
 #: For an actual microtubule -- 13 protofilaments closed into a tube, with
 #: the lumen and the A-lattice seam -- use `MicrotubuleSpec` and
@@ -96,15 +114,23 @@ class FilamentSpec:
 #: renamed rather than reused, so that an existing config asking for
 #: MICROTUBULE_SPEC fails loudly instead of silently changing meaning.)
 PROTOFILAMENT_SPEC = FilamentSpec(
-    code="1TUB", step=85.0, flex_deg=3.0, twist_deg=0.0, n_monomers=(10, 30)
+    code="1TUB", step=DIMER_REPEAT, flex_deg=3.0, twist_deg=0.0, n_monomers=(10, 30)
 )
 
-#: Uncomplexed G-actin monomer (PDB 1J6Z) repeated as F-actin. step=27.3 A
-#: and twist=166.15 deg are the real, measured F-actin helical repeat
-#: (Holmes/Egelman); flex=12 deg is CTS's own tuned value for actin's
-#: greater flexibility relative to microtubules.
+#: Uncomplexed G-actin monomer (PDB 1J6Z) repeated as F-actin. step=27.5 A
+#: and twist=-166.6 deg are F-actin's measured rise and twist per subunit
+#: (Dominguez & Holmes 2011; von der Ecken et al. 2015; the deposited
+#: filaments 6DJO and 7BT7 give -166.55/27.45 and -166.6/27.5). The sign
+#: makes the one-start genetic helix left-handed, which in turn makes the two
+#: long-pitch strands right-handed (2 * -166.6 + 360 = +26.8 deg per 55 A).
+#: The idealised 13/6 twist, -166.15 deg, repeats after exactly 13 subunits
+#: and is a drawing convenience, not a measurement. flex=12 deg is CTS's own
+#: tuned value for actin's greater flexibility relative to microtubules.
+#: The helix is F-actin's; the subunit arrangement is not: the monomer sits
+#: on the axis with its longest principal axis along it, where a deposited
+#: filament's subunits sit 16 A off the axis with that axis ~80 deg from it.
 ACTIN_SPEC = FilamentSpec(
-    code="1J6Z", step=27.3, flex_deg=12.0, twist_deg=166.15, n_monomers=(20, 60)
+    code="1J6Z", step=27.5, flex_deg=12.0, twist_deg=-166.6, n_monomers=(20, 60)
 )
 
 

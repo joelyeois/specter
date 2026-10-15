@@ -384,9 +384,9 @@ def figure_occupancy_grid() -> None:
     filaments = [
         FilamentSpec(
             code="1J6Z",
-            step=27.3,
+            step=27.5,
             flex_deg=12.0,
-            twist_deg=166.15,
+            twist_deg=-166.6,
             n_copies=6,
             n_monomers=(30, 50),
         ),

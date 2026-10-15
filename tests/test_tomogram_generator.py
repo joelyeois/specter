@@ -671,6 +671,73 @@ def test_tomogram_specimen_generator_places_filaments():
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_filament_copies_render_at_their_rotation_not_its_transpose():
+    """A placed copy's density sits at ``position + R @ c``.
+
+    `FilamentInstance.rotation_matrix` maps template coordinates to world
+    ones, and `rotate_volume` moves density by the transpose of the matrix
+    it is given. Rendering the transpose left a filament's monomers spun
+    about the lab z axis instead of about the filament's own axis, and
+    tipped microtubule dimers off the tube axis. Compared here against the
+    same atoms placed both ways and rendered directly.
+    """
+    import roma
+
+    from specter.potential import PotentialBuilder
+    from specter.specimen.filament import FilamentInstance
+    from specter.specimen.membrane._placement import align_principal_axis_to_z
+
+    n, voxel_size = 40, 4.0
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=(n, n, n),
+        voxel_size=voxel_size,
+        protein_specs=[],
+        filament_specs=[FilamentSpec(code=str(_SMALL_FIXTURE), step=30.0, flex_deg=0)],
+        pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+        parameterization="kirkland",
+        progressbars=False,
+    )
+    # A rotation whose transpose sends the template's +Z somewhere else.
+    rotation = roma.rotvec_to_rotmat(torch.tensor([0.9, -0.4, 0.3]))
+    instance = FilamentInstance(
+        code=str(_SMALL_FIXTURE),
+        filament_id=0,
+        monomer_index=0,
+        position_xyz=torch.full((3,), n * voxel_size / 2),
+        rotation_matrix=rotation,
+    )
+    volume, _, _ = gen._render_filament_instances(
+        torch.zeros((n, n, n)),
+        torch.zeros((n, n, n), dtype=torch.int32),
+        1,
+        voxel_size,
+        [instance],
+    )
+
+    pdb = gen._load_pdb(str(_SMALL_FIXTURE))
+    template = align_principal_axis_to_z(pdb.coordinates)
+    builder = PotentialBuilder(
+        n_xyz=n,
+        dx=voxel_size,
+        atomic_numbers=pdb.atomic_numbers,
+        progressbars=False,
+        parameterization="kirkland",
+    )
+
+    def correlation(coordinates: torch.Tensor) -> float:
+        expected = builder.forward(coordinates, method="analytic").flatten()
+        rendered = volume.flatten()
+        expected, rendered = expected - expected.mean(), rendered - rendered.mean()
+        return float(expected @ rendered / (expected.norm() * rendered.norm()))
+
+    active = correlation(template @ rotation.T)
+    transposed = correlation(template @ rotation)
+    assert active > 0.9
+    assert active > transposed + 0.2
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_tomogram_specimen_generator_export_picks_includes_filaments(tmp_path):
     mgen = MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
     gen = TomogramSpecimenGenerator(

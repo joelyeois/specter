@@ -131,14 +131,14 @@ def test_render_workers_and_devices_reach_membrane_tomogram_generator(
 def test_filaments_config_builds_filament_specs():
     config = TomogramConfig(
         membrane=[{"shape_backend": "spherical_harmonics"}],
-        filaments=[{"code": "1TUB", "step": 85.0, "flex_deg": 3.0, "n_copies": 4}],
+        filaments=[{"code": "1TUB", "step": 82.0, "flex_deg": 3.0, "n_copies": 4}],
         **_BASE_KWARGS,
     )
     gen = build_tomogram_generator(config)
     assert len(gen.filament_specs) == 1
     spec = gen.filament_specs[0]
     assert spec.code == "1TUB"
-    assert spec.step == 85.0
+    assert spec.step == 82.0
     assert spec.flex_deg == 3.0
     assert spec.n_copies == 4
 
@@ -146,7 +146,7 @@ def test_filaments_config_builds_filament_specs():
 def test_actin_flag_is_additive_to_filaments():
     config = TomogramConfig(
         membrane=[{"shape_backend": "spherical_harmonics"}],
-        filaments=[{"code": "1TUB", "step": 85.0, "flex_deg": 3.0}],
+        filaments=[{"code": "1TUB", "step": 82.0, "flex_deg": 3.0}],
         actin=True,
         **_BASE_KWARGS,
     )

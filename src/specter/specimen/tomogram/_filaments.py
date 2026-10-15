@@ -447,7 +447,15 @@ class _FilamentStageMixin:
                 - offset
             )
             R = torch.stack([inst.rotation_matrix for inst in insts]).to(self.device)
-            theta = build_affine_matrix(R)
+            # `rotation_matrix` maps template coordinates to world ones (the
+            # template's +Z onto the path tangent, a dimer's +X radially out),
+            # while `rotate_volume` moves density by the TRANSPOSE of the
+            # matrix it is given (it samples the input at R x). Passing R
+            # itself rendered every copy at R^T: a filament not running along
+            # z came out as monomers spun about the lab z axis rather than a
+            # helix about its own axis, and microtubule dimers were rolled
+            # and tipped off the tube axis.
+            theta = build_affine_matrix(R.transpose(-1, -2))
 
             instance_ids = torch.tensor(
                 [inst_id for _, inst_id in entries],

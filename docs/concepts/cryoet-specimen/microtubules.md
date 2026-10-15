@@ -43,6 +43,17 @@ s = \frac{n_\mathrm{start} \, r}{N}
 the lateral spacing between protofilaments, \(r\) the monomer rise and
 \(s\) the axial stagger between adjacent protofilaments' registers.
 
+The 3-start helix is left-handed (Mandelkow et al. 1986): stepping
+laterally to the neighbouring protofilament turns \(-360^\circ/N\) about
+the tube axis for \(+s\) of rise. Superposing laterally adjacent monomers
+of the deposited lattices gives the same sign, −27.7° for +9.46 Å in 3JAL
+(Zhang et al. 2015) and −25.75° for +8.99 Å in 6DPU (Zhang et al. 2018).
+`build_tube_instances` lays the protofilaments out clockwise about the
+direction in which their registers climb, which reproduces a 3JAL patch of
+three protofilaments by four monomers to within 1 Å per subunit; the
+mirror-image lattice, which has the same radius, stagger and seam,
+misplaces the neighbouring protofilaments by up to 19 Å.
+
 ![The 13-protofilament cross-section, and the unrolled lattice showing the stagger and the seam.](../../assets/images/cryoet-microtubule-lattice.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 The 13-protofilament cross-section, and the unrolled lattice showing the stagger and the seam.
@@ -71,26 +82,38 @@ Rendered cross-sections at 11, 13 and 14 protofilaments, and radius versus proto
 
 `n_protofilaments` changes the radius, since the same lateral spacing
 has to fit around a longer circumference. The right-hand panel checks
-the model against the two deposited reconstructions its constants come
-from (Zhang et al. 2015; Zhang et al. 2018).
+the model against the deposited reconstructions its constants come from
+(Zhang et al. 2015; Zhang et al. 2018).
 
 ### Lattice constants
 
-Measured off deposited microtubule reconstructions
-(`measure_source_lattice`), not taken from a textbook: 3JAL
-(Zhang et al. 2015) and 6DPU (Zhang et al. 2018).
+Measured off deposited microtubule reconstructions, not taken from a
+textbook: 3JAL, a 13-protofilament GMPCPP microtubule co-polymerized with
+EB3 (Zhang et al. 2015), and the undecorated 14-protofilament GMPCPP and
+GDP microtubules 6DPU and 6DPV (Zhang et al. 2018). Radius and lateral
+spacing are fitted to the coordinates (`measure_source_lattice`); rise and
+stagger come from the deposited helical parameters, whose lateral rise
+\(s\) gives the monomer rise as \(r = s N / n_\mathrm{start}\).
 
-| | [3JAL](https://www.rcsb.org/structure/3JAL) (13 pf) | [6DPU](https://www.rcsb.org/structure/6DPU) (14 pf) | across N |
-|---|---|---|---|
-| radius of pf centres | 111.1 Å | 118.5 Å | scales with N |
-| lateral spacing | 53.8 Å | 53.3 Å | ~constant |
-| monomer rise | 40.9 Å | 41.4 Å | ~constant |
-| lateral stagger | 9.43 Å | 9.00 Å | tracks \(n_\mathrm{start} r / N\) |
+| | [3JAL](https://www.rcsb.org/structure/3JAL) (13 pf) | [6DPU](https://www.rcsb.org/structure/6DPU) (14 pf) | [6DPV](https://www.rcsb.org/structure/6DPV) (14 pf) | behaviour |
+|---|---|---|---|---|
+| nucleotide | GMPCPP + EB3 | GMPCPP | GDP | |
+| radius of pf centres | 110.9 Å | 118.0 Å | 118.5 Å | scales with N |
+| lateral spacing | 53.7 Å | 53.2 Å | 53.5 Å | ~constant |
+| monomer rise | 41.0 Å | 42.0 Å | 40.85 Å | set by the nucleotide |
+| lateral stagger | 9.46 Å | 8.99 Å | 8.75 Å | tracks \(n_\mathrm{start} r / N\) |
 
-The last row is the one that matters. The stagger isn't a fixed
-property of the lateral bond: a lattice with a different protofilament
-number accommodates it by sliding the lateral bond, which keeps the
-protofilaments close to parallel with the tube axis at every \(N\).
+The rise depends on the nucleotide, not on \(N\). GTP hydrolysis
+compacts the lattice, shortening the dimer repeat from about 83 Å to 81 Å
+(Alushin et al. 2014); for 13-protofilament microtubules Zhang et al.
+(2018) measure 83.95 Å with GMPCPP and 81.76 Å with GDP, and EB3 compacts
+the GMPCPP lattice of 3JAL to the GDP spacing. A microtubule in a cell is a
+GDP lattice, so `MONOMER_RISE` is 41.0 Å and `DIMER_REPEAT` 82.0 Å.
+
+The stagger isn't a fixed property of the lateral bond: a lattice with a
+different protofilament number accommodates it by sliding the lateral
+bond, which keeps the protofilaments close to parallel with the tube axis
+at every \(N\).
 
 !!! warning "No supertwist"
     Non-13-protofilament microtubules do supertwist slightly
@@ -119,7 +142,8 @@ re-expresses it with \(+Z\) along the protofilament (α → β, the
 plus-end direction) and \(+X\) pointing outwards. It caches the result
 next to the downloaded structure.
 
-The default source is **3JAL**, a 13-protofilament GMPCPP-microtubule
+The default source is **3JAL**, a 13-protofilament GMPCPP microtubule
+co-polymerized with EB3, which compacts its lattice to the GDP spacing
 (Zhang et al. 2015); extraction drops its two bound EB3 chains. The
 commoner kinesin-decorated microtubule structures, such as
 [3JAT](https://www.rcsb.org/structure/3JAT) (Zhang et al. 2015), and the
@@ -132,16 +156,16 @@ radius for the 13-protofilament default.
 Radial density profile of the rendered tube.
 ///
 
-The rendered wall peaks at the predicted protofilament radius, and the
-lumen stays empty. Its full width at half maximum runs a little broader
+The rendered wall peaks within 5 Å of the predicted protofilament radius,
+and the lumen stays empty. Its full width at half maximum runs a little broader
 than a real microtubule's, since the tubulin dimer is a real structure
 with a soft rendered edge, not a shell of zero thickness.
 
 ## Bending
 
-![Thermal versus mechanical bending, both drawn at true scale with the real tube width.](../../assets/images/cryoet-microtubule-bending.png){ width="900" style="display:block;margin:1.2em auto;" }
+![The default random walk at the in-cell persistence length versus a buckled arc, both drawn at true scale with the real tube width.](../../assets/images/cryoet-microtubule-bending.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-Thermal versus mechanical bending, both drawn at true scale with the real tube width.
+The default random walk at the in-cell persistence length versus a buckled arc, both drawn at true scale with the real tube width.
 ///
 
 A microtubule's axis follows the same persistent random walk filaments
@@ -152,18 +176,34 @@ protofilaments don't shear apart around a bend. Its flex angle is
 \(2\Delta s / L_p\) gives
 
 \[
-f = \sqrt{6 \, \Delta s / L_p} \approx 0.40^\circ
+f = \sqrt{6 \, \Delta s / L_p} \approx 2.3^\circ
 \]
 
-at tubulin's persistence length, taken as 1 mm (Gittes et al. (1993)
-measured 5.2 mm for taxol-stabilized microtubules). A microtubule is stiff enough that
-this stays nearly straight: it wanders about half its own diameter over
-a whole tomogram field.
+at the apparent persistence length of microtubules in cells, 30 µm
+(Brangwynne et al. 2007). Over a 600 nm field the tangent then turns by
+about 11° RMS, and the axis departs from its chord by about 15 nm at most
+(median over walks), some 60% of the tube's 25 nm diameter.
 
-The strongly curved microtubules you see in real cellular tomograms are
-mechanically buckled, not thermally bent. Use **`bend_radius`** for
-those instead: raising the flex angle produces a wiggly, tangled tube,
-a different object.
+The in-cell value is about 100 times shorter than the thermal persistence
+length measured in vitro, which spans 0.5–8 mm across studies and
+approaches 6.3 mm for long taxol-stabilized microtubules (Pampaloni et al.
+2006; 5.2 mm in Gittes et al. 1993). Brangwynne et al. (2007) trace the
+difference to growth: force fluctuations in the cytoplasm deflect the
+growing tip, and the surrounding elastic network freezes the resulting
+bends in, so the shapes of microtubules in a cell form a persistent random
+walk with this shorter apparent persistence length. SPECTER builds
+cellular specimens, so the walk uses the in-cell value.
+
+A microtubule under compressive load is a separate case: in cells it
+buckles into smooth arcs with a wavelength of about 3 µm (Brangwynne et
+al. 2006). **`bend_radius`** models such a bend as an arc of constant
+curvature in one plane, and it replaces the walk rather than adding to
+it, so the frozen-in bends the in-cell persistence length already
+describes are never counted twice. The two differ in shape more than in
+extent: over 600 nm the walk's tangent turns about as far as that of the
+3 µm-radius arc in the figure (about 11.5°), but it does so with randomly
+varying curvature in three dimensions. Raising the flex angle instead
+produces a kinked tube, a different object.
 
 Bending doesn't strain the lattice: no stretched outer wall, no
 compressed inner wall, no protofilament-number transition. At a 10 µm
@@ -218,7 +258,7 @@ per-dimer copies stay available in `microtubule_dimer_instances`.
 | `n_start` | Lateral-bond helix starts | 3 |
 | `n_copies` | Independent microtubules of this species | 1 |
 | `length` | Contour length, Å | the volume diagonal |
-| `bend_radius` | Radius of curvature, Å | `None` (thermal walk) |
+| `bend_radius` | Radius of curvature, Å | `None` (in-cell random walk) |
 | `confine_to_slab` | Reject steeply tilted directions | `True` |
 
 In a TOML config these are `[[microtubules]]` tables; see
@@ -228,7 +268,7 @@ In a TOML config these are `[[microtubules]]` tables; see
 [[microtubules]]
 n_copies = 2
 n_protofilaments = 13
-bend_radius = 30000.0    # 3 µm; omit for a straight, thermally bent tube
+bend_radius = 30000.0    # 3 µm; omit for the in-cell random walk
 ```
 
 ## Limitations
@@ -244,9 +284,24 @@ bend_radius = 30000.0    # 3 µm; omit for a straight, thermally bent tube
 
 ## References
 
+- Alushin, G. M., Lander, G. C., Kellogg, E. H., Zhang, R., Baker, D., &
+  Nogales, E. (2014). High-resolution microtubule structures reveal the
+  structural transitions in αβ-tubulin upon GTP hydrolysis. *Cell*,
+  157(5), 1117–1129.
+  [doi:10.1016/j.cell.2014.03.053](https://doi.org/10.1016/j.cell.2014.03.053)
 - Bishop, R. L. (1975). There is more than one way to frame a curve.
   *The American Mathematical Monthly*, 82(3), 246–251.
   [doi:10.1080/00029890.1975.11993807](https://doi.org/10.1080/00029890.1975.11993807)
+- Brangwynne, C. P., MacKintosh, F. C., Kumar, S., Geisse, N. A.,
+  Talbot, J., Mahadevan, L., Parker, K. K., Ingber, D. E., & Weitz, D. A.
+  (2006). Microtubules can bear enhanced compressive loads in living cells
+  because of lateral reinforcement. *The Journal of Cell Biology*, 173(5),
+  733–741.
+  [doi:10.1083/jcb.200601060](https://doi.org/10.1083/jcb.200601060)
+- Brangwynne, C. P., MacKintosh, F. C., & Weitz, D. A. (2007). Force
+  fluctuations and polymerization dynamics of intracellular microtubules.
+  *Proceedings of the National Academy of Sciences*, 104(41), 16128–16133.
+  [doi:10.1073/pnas.0703094104](https://doi.org/10.1073/pnas.0703094104)
 - Chrétien, D., & Wade, R. H. (1991). New data on the microtubule surface
   lattice. *Biology of the Cell*, 71(1–2), 161–174.
   [doi:10.1016/0248-4900(91)90062-R](https://doi.org/10.1016/0248-4900(91)90062-R)
@@ -259,11 +314,16 @@ bend_radius = 30000.0    # 3 µm; omit for a straight, thermally bent tube
   protofilament number, seam, and handedness. *The Journal of Cell Biology*,
   102(3), 1067–1073.
   [doi:10.1083/jcb.102.3.1067](https://doi.org/10.1083/jcb.102.3.1067)
+- Pampaloni, F., Lattanzi, G., Jonáš, A., Surrey, T., Frey, E., &
+  Florin, E.-L. (2006). Thermal fluctuations of grafted microtubules
+  provide evidence of a length-dependent persistence length. *Proceedings
+  of the National Academy of Sciences*, 103(27), 10248–10253.
+  [doi:10.1073/pnas.0603931103](https://doi.org/10.1073/pnas.0603931103)
 - Zhang, R., Alushin, G. M., Brown, A., & Nogales, E. (2015). Mechanistic
   origin of microtubule dynamic instability and its modulation by EB
   proteins. *Cell*, 162(4), 849–859. (PDB 3JAL, 3JAT)
   [doi:10.1016/j.cell.2015.07.012](https://doi.org/10.1016/j.cell.2015.07.012)
 - Zhang, R., LaFrance, B., & Nogales, E. (2018). Separating the effects of
   nucleotide and EB binding on microtubule structure. *Proceedings of the
-  National Academy of Sciences*, 115(27), E6191–E6200. (PDB 6DPU)
+  National Academy of Sciences*, 115(27), E6191–E6200. (PDB 6DPU, 6DPV)
   [doi:10.1073/pnas.1802637115](https://doi.org/10.1073/pnas.1802637115)

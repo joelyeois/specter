@@ -13,7 +13,8 @@ parallel-transport frame; the lattice (`_lattice.solve_tube_lattice`)
 supplies each protofilament's azimuth and axial register. Note the frame
 must be parallel-transported rather than built per-point: a frame that
 rolls about the tangent shears the protofilaments apart along a bend (see
-``_frames``).
+``_frames``). The registers climb clockwise about the axis, which makes the
+3-start helix left-handed, as in a real microtubule (see ``_lattice``).
 """
 
 from __future__ import annotations
@@ -205,11 +206,21 @@ def build_tube_instances(
         onto the outward radial direction at that protofilament's azimuth
         -- which is why the template has to be in the microtubule frame
         (see `_tubulin.extract_mt_dimer`).
+
+    Notes
+    -----
+    Protofilament ``p`` sits at azimuth ``-2 pi p / N`` (clockwise about the
+    tangent) with register ``p * stagger`` along it, so each lateral step
+    turns ``-360/N`` degrees for ``+stagger`` of rise: a left-handed
+    3-start helix. The deposited lattices measure -27.7 degrees per
+    +9.46 A (3JAL, 13 protofilaments) and -25.75 degrees per +8.99 A
+    (6DPU, 14 protofilaments).
     """
     frames = parallel_transport_frames(axis_xyz)
     n_pf = lattice.n_protofilaments
 
-    phi = 2 * math.pi * torch.arange(n_pf, dtype=axis_xyz.dtype) / n_pf
+    # Clockwise: a left-handed lateral helix (see Notes).
+    phi = -2 * math.pi * torch.arange(n_pf, dtype=axis_xyz.dtype) / n_pf
     cos_phi, sin_phi = torch.cos(phi), torch.sin(phi)
     z_offset = torch.arange(n_pf, dtype=axis_xyz.dtype) * lattice.stagger
 

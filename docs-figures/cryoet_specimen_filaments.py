@@ -89,7 +89,10 @@ def _render_segment(
         align_principal_axis_to_z(pdb.coordinates), method="analytic"
     ).to(DEVICE)
 
-    theta = build_affine_matrix(rotations.to(DEVICE))
+    # `rotate_volume` moves density by the transpose of the matrix it is
+    # given, so the template-to-world rotations go in transposed, exactly as
+    # `_render_filament_instances` passes them.
+    theta = build_affine_matrix(rotations.transpose(-1, -2).to(DEVICE))
     rotated = rotate_volume(template, theta, padding_mode="zeros")
     volume = torch.zeros(target_shape, device=DEVICE)
     return insert_particles_into_micrograph(
@@ -186,9 +189,9 @@ def figure_flex_sweep() -> None:
 def figure_twist() -> None:
     """Same straight monomer chain, rendered with and without the helical
     twist. Without it every monomer presents the same face, so the strand
-    reads as a smooth ridge; with F-actin's real 166.15 deg per-monomer
-    twist the projection picks up the crossover pattern a real F-actin
-    filament shows."""
+    reads as a smooth ridge; with F-actin's measured -166.6 deg per-monomer
+    twist (a left-handed one-start helix) the projection picks up the
+    crossover pattern a real F-actin filament shows."""
     voxel_size = 2.0
     n_monomers = 34
     shape = (48, 48, 380)
@@ -216,9 +219,9 @@ def figure_twist() -> None:
 
 
 def figure_presets() -> None:
-    """The two bundled presets rendered at the same scale: F-actin's 27.3 A
+    """The two bundled presets rendered at the same scale: F-actin's 27.5 A
     rise packs monomers into a continuous strand, while a microtubule
-    protofilament's 85 A tubulin-dimer repeat leaves the individual
+    protofilament's 82 A tubulin-dimer repeat leaves the individual
     subunits resolvable, and its flex_deg=3 keeps it far straighter."""
     voxel_size = 4.0
     specs = [

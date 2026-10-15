@@ -9,7 +9,8 @@ the current direction, then perturbs that direction by a random angle drawn
 from ``[0, flex_deg]`` about a random axis roughly perpendicular to it --
 bounded per-step curvature, unbounded cumulative curvature, the same
 "worm-like chain" flavor CTS used for both its actin and microtubule presets
-(``step=27.3, flex=12`` and ``step=85, flex=3`` respectively).
+(``flex=12`` and ``flex=3`` respectively; specter keeps those flex values
+and takes each preset's ``step`` from measured structures instead).
 
 References
 ----------

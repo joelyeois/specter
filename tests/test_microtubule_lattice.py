@@ -8,14 +8,18 @@ deposited structures they were measured from.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
 import torch
 
 from specter.specimen.filament import (
+    ACTIN_SPEC,
     DIMER_REPEAT,
     LATERAL_SPACING,
     MONOMER_RISE,
+    PERSISTENCE_LENGTH,
+    PROTOFILAMENT_SPEC,
     MicrotubuleSpec,
     build_tube_instances,
     microtubule_axis_path,
@@ -26,20 +30,43 @@ from specter.specimen.filament import (
 )
 from conftest import seeded
 
+# Deposited lateral helix of 3JAL (13 protofilaments), measured by
+# superposing laterally adjacent alpha or beta monomers of the deposited
+# coordinates: -27.7 degrees about the tube axis for +9.46 A of rise. A
+# negative twist for a positive rise is a left-handed 3-start helix
+# (Mandelkow et al. 1986).
+_3JAL_LATERAL_TWIST_DEG = -27.7
+_3JAL_LATERAL_RISE = 9.46
+
+
+def _screw(rotation: torch.Tensor, translation: torch.Tensor) -> tuple[float, float]:
+    """(twist in degrees, rise) of the rigid motion ``x -> R x + t``, about
+    the screw axis oriented so that the rise is positive."""
+    import roma
+
+    rotvec = roma.rotmat_to_rotvec(rotation.double())
+    angle = float(rotvec.norm())
+    axis = rotvec / angle
+    rise = float(translation.double() @ axis)
+    twist = math.degrees(angle)
+    return (twist, rise) if rise >= 0 else (-twist, -rise)
+
 
 # --------------------------------------------------------------------------
 # Lattice
 # --------------------------------------------------------------------------
 def test_lattice_13_protofilaments_matches_3jal():
-    """Measured off 3JAL: R = 111.1 A, stagger = 9.43 A."""
+    """Measured off 3JAL: R = 110.9 A, stagger (its deposited helical rise)
+    = 9.46 A."""
     lattice = solve_tube_lattice(13)
-    assert lattice.radius == pytest.approx(111.1, abs=1.5)
-    assert lattice.stagger == pytest.approx(9.43, abs=0.2)
+    assert lattice.radius == pytest.approx(110.9, abs=1.5)
+    assert lattice.stagger == pytest.approx(9.46, abs=0.05)
     assert lattice.dimer_repeat == pytest.approx(82.0)
 
 
-def test_lattice_14_protofilaments_matches_6dpu():
-    """Measured off 6DPU: R = 118.5 A, stagger = 9.00 A.
+def test_lattice_14_protofilaments_matches_6dpv():
+    """Measured off 6DPV (14 protofilaments, GDP): R = 118.5 A, stagger =
+    8.75 A. (6DPU, the same lattice with GMPCPP, is expanded: 8.99 A.)
 
     A 14-protofilament tube is wider and its stagger is *smaller* -- the
     lattice accommodates the extra protofilament by sliding the lateral
@@ -49,7 +76,7 @@ def test_lattice_14_protofilaments_matches_6dpu():
     """
     lattice = solve_tube_lattice(14)
     assert lattice.radius == pytest.approx(118.5, abs=1.5)
-    assert lattice.stagger == pytest.approx(9.00, abs=0.3)
+    assert lattice.stagger == pytest.approx(8.75, abs=0.1)
     assert lattice.stagger < solve_tube_lattice(13).stagger
 
 
@@ -95,11 +122,15 @@ def test_lattice_rejects_degenerate_tubes():
 
 
 def test_thermal_flex_matches_worm_like_chain():
-    """flex = sqrt(6*step/Lp); ~0.40 deg for tubulin at Lp = 1 mm."""
-    assert thermal_flex_deg() == pytest.approx(0.40, abs=0.02)
+    """flex = sqrt(6*step/Lp); ~2.3 deg for a microtubule at the in-cell
+    apparent persistence length, 30 um."""
+    assert PERSISTENCE_LENGTH == pytest.approx(3.0e5)
+    assert thermal_flex_deg() == pytest.approx(2.32, abs=0.01)
     # Stiffer -> straighter, and the scaling is 1/sqrt(Lp).
     stiff = thermal_flex_deg(persistence_length=5.0e7)
-    assert stiff == pytest.approx(thermal_flex_deg() / math.sqrt(5), rel=1e-6)
+    assert stiff == pytest.approx(
+        thermal_flex_deg() * math.sqrt(PERSISTENCE_LENGTH / 5.0e7), rel=1e-6
+    )
 
 
 # --------------------------------------------------------------------------
@@ -204,6 +235,32 @@ def test_tube_rotations_point_x_outwards_and_z_along_the_axis():
         assert torch.allclose(instance.rotation_matrix @ z_hat, z_hat, atol=1e-4)
 
 
+def test_lattice_is_a_left_handed_three_start_helix():
+    """Laterally adjacent dimers are related by the deposited screw.
+
+    Stepping from one protofilament to the next must turn -360/13 degrees
+    about the tube axis for +stagger of rise, as 3JAL's coordinates do
+    (`_3JAL_LATERAL_TWIST_DEG`, `_3JAL_LATERAL_RISE`). The mirror lattice
+    has the same radius, stagger and seam, so nothing else catches it.
+    """
+    lattice = solve_tube_lattice(13)
+    axis = torch.stack(
+        [torch.zeros(3), torch.zeros(3), torch.arange(3.0) * lattice.dimer_repeat],
+        dim=1,
+    )
+    instances = build_tube_instances("x.cif", 0, axis, lattice)
+    ring = sorted(
+        (i for i in instances if i.monomer_index == 1),
+        key=lambda i: i.protofilament_index,
+    )
+    for a, b in zip(ring, ring[1:]):
+        rotation = b.rotation_matrix @ a.rotation_matrix.T
+        translation = b.position_xyz - rotation @ a.position_xyz
+        twist, rise = _screw(rotation, translation)
+        assert twist == pytest.approx(_3JAL_LATERAL_TWIST_DEG, abs=0.1)
+        assert rise == pytest.approx(_3JAL_LATERAL_RISE, abs=0.05)
+
+
 def test_protofilament_registers_reproduce_the_stagger():
     lattice = solve_tube_lattice(13)
     axis = torch.stack(
@@ -250,22 +307,22 @@ def test_slab_confinement_keeps_long_tubes_in_plane():
     ) > max(float(t.axis_xyz[:, 2].max() - t.axis_xyz[:, 2].min()) for t in tubes)
 
 
-def test_thermal_tube_is_nearly_straight():
-    """At tubulin's persistence length a microtubule barely bends over a
-    600 nm field -- transverse wander of order half a diameter."""
-    spec = MicrotubuleSpec(code="x.cif", length=6000.0, confine_to_slab=False)
-    axis = microtubule_axis_path(
-        spec, 74, torch.zeros(3), torch.tensor([1.0, 0.0, 0.0]), generator=seeded(4)
-    )
-    chord = axis[-1] - axis[0]
-    contour = float((axis[1:] - axis[:-1]).norm(dim=-1).sum())
-    assert float(chord.norm()) / contour > 0.999
-
-    # Deviation from the straight line through the ends.
-    unit = chord / chord.norm()
-    offsets = axis - axis[0]
-    perpendicular = offsets - (offsets @ unit).unsqueeze(1) * unit
-    assert float(perpendicular.norm(dim=-1).max()) < 400.0
+def test_axis_walk_reproduces_the_persistence_length():
+    """The default walk is a worm-like chain of persistence length
+    `PERSISTENCE_LENGTH`: tangents decorrelate as exp(-s / L_p)."""
+    spec = MicrotubuleSpec(code="x.cif", confine_to_slab=False)
+    n_rings, lag = 64, 60
+    generator = seeded(4)
+    cosines = []
+    for _ in range(300):
+        axis = microtubule_axis_path(
+            spec, n_rings, torch.zeros(3), torch.tensor([1.0, 0.0, 0.0]), generator
+        )
+        steps = axis[1:] - axis[:-1]
+        tangents = steps / steps.norm(dim=-1, keepdim=True)
+        cosines.append(float(tangents[0] @ tangents[lag]))
+    expected = math.exp(-lag * DIMER_REPEAT / PERSISTENCE_LENGTH)
+    assert 1 - sum(cosines) / len(cosines) == pytest.approx(1 - expected, rel=0.2)
 
 
 def test_arc_bend_is_smooth_unlike_a_wiggly_walk():
@@ -293,18 +350,28 @@ def test_arc_bend_rejects_nonpositive_radius():
 # --------------------------------------------------------------------------
 @pytest.mark.network
 @pytest.mark.parametrize(
-    "source, n_pf",
-    [("3JAL", 13), ("6DPU", 14)],
+    "source, n_pf, rise",
+    # Deposited helical rise per lateral step x N / 3: 9.46 x 13/3 (3JAL,
+    # GMPCPP compacted by EB3), 8.99 x 14/3 (6DPU, GMPCPP, expanded) and
+    # 8.754 x 14/3 (6DPV, GDP).
+    [("3JAL", 13, 40.99), ("6DPU", 14, 41.95), ("6DPV", 14, 40.85)],
 )
-def test_constants_match_deposited_structures(source, n_pf, tmp_path):
-    """Guards the hardcoded constants against the data they came from."""
+def test_constants_match_deposited_structures(source, n_pf, rise, tmp_path):
+    """Guards the hardcoded constants against the data they came from.
+
+    The rise is set by the nucleotide, not by N: `MONOMER_RISE` is the
+    compacted GDP lattice (3JAL, 6DPV), and the expanded GMPCPP lattice of
+    6DPU sits about 1 A above it.
+    """
     from specter.specimen.filament import measure_source_lattice
 
     measured = measure_source_lattice(source, pdb_cache_dir=str(tmp_path))
     model = solve_tube_lattice(n_pf)
 
     assert round(measured["n_protofilaments"]) == n_pf
-    assert measured["monomer_rise"] == pytest.approx(MONOMER_RISE, abs=0.6)
+    assert measured["monomer_rise"] == pytest.approx(rise, abs=0.15)
+    if source != "6DPU":
+        assert measured["monomer_rise"] == pytest.approx(MONOMER_RISE, abs=0.2)
     assert measured["lateral_spacing"] == pytest.approx(LATERAL_SPACING, abs=1.0)
     assert measured["radius"] == pytest.approx(model.radius, rel=0.02)
 
@@ -426,19 +493,12 @@ def test_one_instance_id_per_filament_not_per_monomer():
     against that ground truth was being asked to find monomers."""
     import torch
 
-    from specter.specimen.filament import FilamentSpec, place_filaments
+    from specter.specimen.filament import place_filaments
     from specter.specimen.tomogram import TomogramSpecimenGenerator
 
     rng = torch.Generator()
     rng.manual_seed(11)
-    spec = FilamentSpec(
-        code="1J6Z",
-        step=27.3,
-        flex_deg=12.0,
-        twist_deg=166.15,
-        n_copies=20,
-        n_monomers=(20, 60),
-    )
+    spec = replace(ACTIN_SPEC, n_copies=20, n_monomers=(20, 60))
     instances = place_filaments([spec], (300, 1200, 1200), 5.0, rng)
     ids, after = TomogramSpecimenGenerator._one_id_per_filament(None, instances, 100)
 
@@ -457,28 +517,14 @@ def test_filament_ids_do_not_collide_across_species():
     else separated them."""
     import torch
 
-    from specter.specimen.filament import FilamentSpec, place_filaments
+    from specter.specimen.filament import place_filaments
     from specter.specimen.tomogram import TomogramSpecimenGenerator
 
     rng = torch.Generator()
     rng.manual_seed(0)
     specs = [
-        FilamentSpec(
-            code="1J6Z",
-            step=27.3,
-            flex_deg=12.0,
-            twist_deg=166.15,
-            n_copies=3,
-            n_monomers=(5, 5),
-        ),
-        FilamentSpec(
-            code="1TUB",
-            step=85.0,
-            flex_deg=3.0,
-            twist_deg=0.0,
-            n_copies=3,
-            n_monomers=(5, 5),
-        ),
+        replace(ACTIN_SPEC, n_copies=3, n_monomers=(5, 5)),
+        replace(PROTOFILAMENT_SPEC, n_copies=3, n_monomers=(5, 5)),
     ]
     instances = place_filaments(specs, (300, 1200, 1200), 5.0, rng)
     ids, _ = TomogramSpecimenGenerator._one_id_per_filament(None, instances, 1)
@@ -500,19 +546,12 @@ def test_filaments_export_one_path_per_filament_alongside_oriented_points():
 
     import torch
 
-    from specter.specimen.filament import FilamentSpec, place_filaments
+    from specter.specimen.filament import place_filaments
     from specter.specimen.tomogram._filaments import _filament_runs
 
     rng = torch.Generator()
     rng.manual_seed(11)
-    spec = FilamentSpec(
-        code="1J6Z",
-        step=27.3,
-        flex_deg=12.0,
-        twist_deg=166.15,
-        n_copies=7,
-        n_monomers=(20, 40),
-    )
+    spec = replace(ACTIN_SPEC, n_copies=7, n_monomers=(20, 40))
     instances = place_filaments([spec], (300, 1200, 1200), 5.0, rng)
     runs = list(_filament_runs(instances))
 
@@ -530,19 +569,12 @@ def test_filament_runs_handles_a_single_monomer_filament():
     swallows its neighbour."""
     import torch
 
-    from specter.specimen.filament import FilamentSpec, place_filaments
+    from specter.specimen.filament import place_filaments
     from specter.specimen.tomogram._filaments import _filament_runs
 
     rng = torch.Generator()
     rng.manual_seed(2)
-    spec = FilamentSpec(
-        code="1J6Z",
-        step=27.3,
-        flex_deg=12.0,
-        twist_deg=166.15,
-        n_copies=4,
-        n_monomers=(1, 1),
-    )
+    spec = replace(ACTIN_SPEC, n_copies=4, n_monomers=(1, 1))
     instances = place_filaments([spec], (300, 1200, 1200), 5.0, rng)
     runs = list(_filament_runs(instances))
     assert len(runs) == 4 and all(len(r) == 1 for r in runs)

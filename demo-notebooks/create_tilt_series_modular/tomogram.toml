@@ -74,9 +74,9 @@ membrane_min_transmembrane_spacing = 40.0
 # kwargs) or set `actin = true` for the built-in ACTIN_SPEC preset.
 [[filaments]]
 code = "1J6Z"          # F-actin monomer
-step = 27.3            # axial rise per monomer, A
+step = 27.5            # axial rise per monomer, A (measured F-actin)
 flex_deg = 12.0        # max per-step path curvature, degrees
-twist_deg = 166.15     # helical twist per monomer, degrees
+twist_deg = -166.6     # helical twist per monomer, degrees; negative = left-handed
 n_copies = 20
 n_monomers = [20, 60]
 
@@ -89,7 +89,7 @@ n_monomers = [20, 60]
 n_copies = 2
 n_protofilaments = 13   # 13 is the canonical in-cell lattice
 # length = 6000.0       # A; omit to span the volume diagonal
-# bend_radius = 30000.0 # A; omit for a straight, thermally bent tube
+# bend_radius = 30000.0 # A, a buckled tube; omit for the in-cell random walk
 
 # Carbon support film -- optional, at most one [[carbon_film]] table.
 [[carbon_film]]

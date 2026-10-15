@@ -63,7 +63,9 @@ Polarity matters for every comparison below. A simulated image is in
 detector counts, with the particle dark at underfocus
 ([Image polarity](../concepts/conventions.md#image-polarity)); a CryoSPARC
 restack stores the opposite contrast and records it as `blob/sign = -1`.
-Multiplying by that sign puts the two in the same convention.
+`load_experimental_images` multiplies every image by its sign (taken as -1
+when the file does not record one), so the two arrive in the same
+convention.
 
 ## Simulating the same particles
 
@@ -103,8 +105,10 @@ has the same average spectrum.
 
 `specter.match.matched_index_correlation` tests the pairing directly. It
 band-passes both stacks to 60-15 Å, takes the peak cross-correlation of each
-simulated particle with its own experimental image, and compares it with the
-same statistic for a random pairing of the two stacks. The two metadata files
+simulated particle with its own experimental image, and compares their mean
+with its distribution over 1000 random pairings of the two stacks, a
+permutation test that accounts for the spread of the random pairings as well
+as of the matched pairs. The two metadata files
 hold the same particles with two pose sets: one from a refinement aligned to
 the deposited map, and one from a refinement that never was:
 
@@ -126,9 +130,11 @@ from random ones.
 ///
 
 The check renders the particles noiselessly, without ice or neighbours,
-because only the view is under test. Aligned poses put 98% of pairs above
-their shuffled partners, at 0.328 against 0.082. The unaligned set scores
-0.080 against 0.078, the level of a random pairing, although its poses are
+because only the view is under test. Aligned poses score 0.328 against 0.082
+for a random pairing, 55.6 standard deviations of the random pairings above
+them, and a matched pair beats a mismatched one in every comparison. The
+unaligned set scores 0.080 against 0.078 (z = 1.7), the level of a random
+pairing, although its poses are
 not wrong in themselves: they differ from the aligned set by a single
 rotation of 142.3°, the same for every particle to within 0.001°. To fix such
 a set, align the refined map to a map rendered from the model (CryoSPARC's

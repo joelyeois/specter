@@ -498,7 +498,9 @@ def _read_refinement(
             f"{config.metadata_path} has {n_available} particles; n_probe and n_battery "
             f"need {n_needed}. Lower them or use a larger set."
         )
-    exp = load_experimental_images(
+    # The probes are written as normalized stacks, light particles on a dark
+    # background; the experimental images load in the recorded polarity.
+    exp = -load_experimental_images(
         config.metadata_path, n=n_needed, images_path=config.images_path
     )
     if exp.shape[-1] != exp.shape[-2]:

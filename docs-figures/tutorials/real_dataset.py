@@ -89,9 +89,9 @@ transcript.start("images")
 # --8<-- [start:images]
 from specter.match import load_experimental_images
 
-# The restack stores its images with the opposite polarity to the counts a
-# detector records, which CryoSPARC writes as blob/sign = -1.
-real = -load_experimental_images(
+# Read in the polarity the detector recorded: the restack stores the opposite,
+# which CryoSPARC writes as blob/sign = -1, and the loader multiplies by it.
+real = load_experimental_images(
     "empiar-11377-64particles-pdbframe.cs",
     images_path="empiar-11377-64particles-128px.mrcs",
 )

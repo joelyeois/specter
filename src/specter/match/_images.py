@@ -13,7 +13,7 @@ import mrcfile
 import numpy as np
 import torch
 
-from ..io import particle_image_refs, read_particle_images
+from ..io import image_signs, particle_image_refs, read_particle_images
 
 
 def load_experimental_images(
@@ -21,6 +21,12 @@ def load_experimental_images(
 ) -> torch.Tensor:
     """
     Load the first ``n`` experimental particle images of a refinement file.
+
+    The images come back in the polarity the microscope recorded, dark
+    particles on a light background, whichever way the stack stores them:
+    each is multiplied by its data sign, ``blob/sign`` in a CryoSPARC file
+    (:func:`specter.io.image_signs`), or -1 where the metadata records none,
+    the inverted contrast RELION and CryoSPARC write.
 
     Parameters
     ----------
@@ -41,6 +47,9 @@ def load_experimental_images(
     if images_path is not None:
         with mrcfile.mmap(images_path, permissive=True) as m:
             data = m.data if n is None else m.data[:n]
-            return torch.as_tensor(np.asarray(data, dtype=np.float32).copy())
-    refs = particle_image_refs(metadata_path)
-    return read_particle_images(refs if n is None else refs[:n])
+            images = torch.as_tensor(np.asarray(data, dtype=np.float32).copy())
+    else:
+        refs = particle_image_refs(metadata_path)
+        images = read_particle_images(refs if n is None else refs[:n])
+    signs = image_signs(metadata_path, list(range(len(images))))
+    return images * signs[:, None, None]

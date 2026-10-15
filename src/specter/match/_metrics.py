@@ -100,7 +100,23 @@ def _bandpass(
 
 @dataclass
 class PoseAlignmentResult:
-    """Outcome of `matched_index_correlation`."""
+    """
+    Outcome of `matched_index_correlation`.
+
+    Attributes
+    ----------
+    matched : float
+        Mean peak correlation of the matched pairs.
+    shuffled : float
+        Mean of the same statistic over random pairings, the null.
+    fraction_above : float
+        Of the comparisons between a matched pair and a mismatched one sharing
+        its simulated image, the fraction the matched pair wins; 0.5 under the
+        null.
+    z_score : float
+        ``(matched - shuffled)`` in units of the null's own spread: the
+        standard deviation of the mean over random pairings.
+    """
 
     matched: float
     shuffled: float
@@ -113,6 +129,22 @@ class PoseAlignmentResult:
         return self.z_score >= 5.0 and self.fraction_above > 0.6
 
 
+def _pair_correlations(
+    s: torch.Tensor, e: torch.Tensor, max_shift: int, chunk: int = 8
+) -> torch.Tensor:
+    """``C[i, j]``: peak cross-correlation of ``s[i]`` with ``e[j]``, ``(n, n)``."""
+    n = s.shape[0]
+    fs, fe = torch.fft.fft2(s), torch.fft.fft2(e)
+    c = s.shape[-1] // 2
+    window = slice(c - max_shift, c + max_shift + 1)
+    out = torch.empty(n, n)
+    for start in range(0, n, chunk):
+        cc = torch.fft.ifft2(fs[start : start + chunk, None] * fe[None].conj()).real
+        cc = torch.fft.fftshift(cc / s[0].numel(), dim=(-2, -1))
+        out[start : start + chunk] = cc[..., window, window].flatten(2).max(2).values
+    return out
+
+
 def matched_index_correlation(
     sim: torch.Tensor,
     exp: torch.Tensor,
@@ -120,19 +152,28 @@ def matched_index_correlation(
     band_angstrom: tuple[float, float] = (60.0, 15.0),
     max_shift: int = 12,
     seed: int = 0,
+    n_shuffles: int = 1000,
 ) -> PoseAlignmentResult:
     """
     Test whether simulated particle ``i`` shows the same view as experimental
     particle ``i``.
 
     The peak cross-correlation of each matched pair, band-passed to
-    ``band_angstrom`` and allowed a small shift, is compared with the same statistic
-    for a random pairing. Poses aligned to the model put the matched value
-    well above the shuffled one; poses from a refinement that was never
+    ``band_angstrom`` and allowed a small shift, is compared with the same
+    statistic over random pairings. Poses aligned to the model put the matched
+    value well above the shuffled one; poses from a refinement that was never
     aligned to the model (no Align 3D step against it) put the two at the
     same level. No rotationally averaged statistic can see this: on
     EMPIAR-11377, sixty classifications missed that every simulated view
     was rotated 142 degrees from its experimental one.
+
+    The null is a permutation test. Every simulated image is correlated with
+    every experimental one, and the matched mean is placed in the
+    distribution of means over `n_shuffles` random pairings, whose spread is
+    the standard error the z-score divides by. A single shuffled pairing is
+    one draw from that distribution: dividing by the matched pairs' standard
+    error alone took the draw for the null's exact mean, which at 64 pairs
+    passed unaligned poses at some shuffle seeds and failed them at others.
 
     Parameters
     ----------
@@ -147,24 +188,36 @@ def matched_index_correlation(
     max_shift : int, optional
         Shift search radius in pixels.
     seed : int, optional
-        Seed of the shuffled pairing.
+        Seed of the random pairings.
+    n_shuffles : int, optional
+        Random pairings the null is estimated from. Default 1000.
 
     Returns
     -------
     PoseAlignmentResult
     """
     n = sim.shape[0]
-    s = _bandpass(sim.float(), pixel_size, *band_angstrom)
-    e = _bandpass(exp.float(), pixel_size, *band_angstrom)
-    perm = torch.randperm(n, generator=torch.Generator().manual_seed(seed))
-    m = _xcorr_max(s, e, max_shift)
-    mp = _xcorr_max(s, e[perm], max_shift)
-    sem = float(m.std() / n**0.5) if n > 1 else float("inf")
+    s = _bandpass(sim.float().cpu(), pixel_size, *band_angstrom)
+    e = _bandpass(exp.float().cpu(), pixel_size, *band_angstrom)
+    pairs = _pair_correlations(s, e, max_shift)
+    matched = pairs.diagonal()
+    generator = torch.Generator().manual_seed(seed)
+    shuffles = torch.stack(
+        [torch.randperm(n, generator=generator) for _ in range(n_shuffles)]
+    )
+    null = pairs[torch.arange(n), shuffles].mean(dim=1)
+    spread = float(null.std())
+    others = ~torch.eye(n, dtype=torch.bool)
+    wins = (matched[:, None] > pairs)[others].float().mean() if n > 1 else 0.0
     return PoseAlignmentResult(
-        matched=float(m.mean()),
-        shuffled=float(mp.mean()),
-        fraction_above=float((m > mp).float().mean()),
-        z_score=float((m.mean() - mp.mean()) / sem) if sem > 0 else float("inf"),
+        matched=float(matched.mean()),
+        shuffled=float(null.mean()),
+        fraction_above=float(wins),
+        z_score=(
+            float((matched.mean() - null.mean()) / spread)
+            if spread > 0
+            else float("inf")
+        ),
     )
 
 

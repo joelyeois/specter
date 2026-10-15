@@ -6,6 +6,7 @@ file.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -348,6 +349,44 @@ def _row_order(uid: np.ndarray, other_uid: np.ndarray) -> np.ndarray | None:
     return order if np.array_equal(other_uid[order], uid) else None
 
 
+def _sibling_columns(
+    csfile_path: str | Path, columns: Callable[[object], tuple[np.ndarray, ...] | None]
+) -> tuple[np.ndarray, ...] | None:
+    """
+    ``columns`` of a ``.cs`` file, or of the sibling that holds its particles.
+
+    A job that rewrites its images keeps their blob columns in its other
+    ``.cs`` output, so when ``csfile_path`` carries none, the sibling ``.cs``
+    files in its directory are searched for one holding the same particles,
+    matched on ``uid`` and reordered onto this file's rows.
+    """
+    csfile_path = Path(csfile_path)
+    dataset = Dataset.load(str(csfile_path))
+    found = columns(dataset)
+    if found is not None:
+        return found
+    if "uid" not in dataset:
+        return None
+
+    uid = np.asarray(dataset["uid"])
+    for sibling in sorted(csfile_path.parent.glob("*.cs")):
+        if sibling.resolve() == csfile_path.resolve():
+            continue
+        try:
+            other = Dataset.load(str(sibling))
+        except Exception:  # noqa: BLE001 - an unreadable neighbour is not our problem
+            continue
+        found = columns(other)
+        if found is None or "uid" not in other:
+            continue
+        order = _row_order(uid, np.asarray(other["uid"]))
+        if order is None:
+            continue
+        logger.info("particle blob columns read from %s", sibling.name)
+        return tuple(column[order] for column in found)
+    return None
+
+
 def particle_stack_references(
     csfile_path: str | Path,
 ) -> tuple[np.ndarray, np.ndarray] | None:
@@ -381,30 +420,40 @@ def particle_stack_references(
         the project-relative stack paths and ``indices`` the slice of each
         stack. None when neither this file nor any sibling carries images.
     """
-    csfile_path = Path(csfile_path)
-    dataset = Dataset.load(str(csfile_path))
-    blobs = _blob_columns(dataset)
-    if blobs is not None:
-        return blobs
-    if "uid" not in dataset:
-        return None
+    found = _sibling_columns(csfile_path, _blob_columns)
+    return None if found is None else (found[0], found[1])
 
-    uid = np.asarray(dataset["uid"])
-    for sibling in sorted(csfile_path.parent.glob("*.cs")):
-        if sibling.resolve() == csfile_path.resolve():
-            continue
-        try:
-            other = Dataset.load(str(sibling))
-        except Exception:  # noqa: BLE001 - an unreadable neighbour is not our problem
-            continue
-        blobs = _blob_columns(other)
-        if blobs is None or "uid" not in other:
-            continue
-        order = _row_order(uid, np.asarray(other["uid"]))
-        if order is None:
-            continue
-        logger.info(
-            "particle images addressed by %s (blob/path, blob/idx)", sibling.name
-        )
-        return blobs[0][order], blobs[1][order]
-    return None
+
+def _sign_column(dataset: object) -> tuple[np.ndarray] | None:
+    """``blob/sign`` of a loaded dataset, or None if it does not record one."""
+    if "blob/sign" not in dataset:  # type: ignore[operator]
+        return None
+    return (np.asarray(dataset["blob/sign"], dtype=np.float32),)  # type: ignore[index]
+
+
+def particle_data_signs(csfile_path: str | Path) -> np.ndarray | None:
+    """
+    Per-row CryoSPARC data sign, ``blob/sign``, of a ``.cs`` file's particles.
+
+    CryoSPARC's Data Sign says which way round a stack stores its particles:
+    +1 dark on a light background, the polarity the microscope records, and
+    -1 light on a dark background, the inverted polarity RELION and CryoSPARC
+    extraction write. CryoSPARC multiplies each stored image by its sign
+    before it displays or processes it, so ``image * sign`` is the recorded
+    polarity whichever way the stack was written. Like the image addresses,
+    the sign lives with the blob columns, so a passthrough file's siblings
+    are searched for it (:func:`particle_stack_references`).
+
+    Parameters
+    ----------
+    csfile_path : str or Path
+        Path of the ``.cs`` file.
+
+    Returns
+    -------
+    numpy.ndarray or None
+        ``(n,)`` float32 of +1 and -1 in the file's row order, or None when
+        neither the file nor a sibling records the sign.
+    """
+    found = _sibling_columns(csfile_path, _sign_column)
+    return None if found is None else found[0]

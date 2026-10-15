@@ -50,8 +50,9 @@ stack](particle-stack.md#example-matching-empiar-11377) for a worked
 The forward model predicts electron counts per pixel, so the stack is
 brought into those units before the fit. `image_units` states what the
 stack holds. The default, `"normalized"`, is a CryoSPARC or RELION stack:
-zero mean, unit variance, inverted contrast. It is negated and mapped back
-to counts as `sqrt(N) * x + N`, where `N` is `dose_per_angstrom` times the
+zero mean and unit variance. Each image is first brought to the polarity
+the detector recorded by its `blob/sign` (-1, inverted contrast, when the
+`.cs` file does not record one), then mapped to counts as `sqrt(N) * x + N`, where `N` is `dose_per_angstrom` times the
 pixel area. `"counts"` is a stack already in electrons per pixel, such as
 one written by `specter simulate particles` with
 `normalize_particles = false`, and is used unchanged. The units are never

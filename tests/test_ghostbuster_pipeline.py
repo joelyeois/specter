@@ -493,3 +493,65 @@ def test_ghostbuster_refuses_particles_spread_over_several_stack_files(
         Ghostbuster(**common)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="2 stack files"):
         Ghostbuster(**common, address_by_blob_idx=True)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# blob/sign: a stack stored either way round preprocesses the same
+# ---------------------------------------------------------------------------
+
+
+def _dataset_with_sign(sign: float) -> type:
+    """_FakeDataset recording ``sign`` as every particle's blob/sign."""
+
+    class _WithSign(_FakeDataset):  # type: ignore[valid-type, misc]
+        @classmethod
+        def load(cls, csfile_path: str) -> "_WithSign":
+            ds = super().load(csfile_path)
+            ds["blob/sign"] = np.full(N_PARTICLES, sign, dtype=np.float32)
+            return ds
+
+    return _WithSign
+
+
+def test_a_stack_stored_either_way_round_preprocesses_the_same(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mrc_file: Path
+) -> None:
+    """
+    CryoSPARC's data sign says which way round a stack stores its particles:
+    -1 inverted, as extraction writes them, +1 as recorded. The same images
+    stored either way, each with its sign, must come out as the same counts;
+    an unconditional flip got the +1 stack backwards.
+    """
+    with mrcfile.mmap(str(mrc_file)) as mrc:
+        raw = np.asarray(mrc.data).copy()
+    recorded = tmp_path / "recorded.mrcs"
+    with mrcfile.new(str(recorded), overwrite=True) as mrc:
+        mrc.set_data(-raw)
+
+    def load(sign: float, path: Path) -> torch.Tensor:
+        monkeypatch.setattr(_cryosparc, "Dataset", _dataset_with_sign(sign))
+        return Ghostbuster(
+            cs_file="fake.cs",
+            mrc_file=str(path),
+            dose_per_angstrom=2.0,
+            propagation=Propagation(scattering_model="projection"),
+        )._images
+
+    inverted = load(-1.0, mrc_file)
+    assert torch.equal(inverted, _preprocessed(torch.as_tensor(raw)))
+    assert torch.equal(load(1.0, recorded), inverted)
+
+
+def test_counts_recorded_as_inverted_are_refused(
+    monkeypatch: pytest.MonkeyPatch, mrc_file: Path
+) -> None:
+    """A count has a physical sign; counts stored inverted are mislabelled."""
+    monkeypatch.setattr(_cryosparc, "Dataset", _dataset_with_sign(-1.0))
+    with pytest.raises(ValueError, match="blob/sign"):
+        Ghostbuster(
+            cs_file="fake.cs",
+            mrc_file=str(mrc_file),
+            dose_per_angstrom=2.0,
+            image_units="counts",
+            propagation=Propagation(scattering_model="projection"),
+        )

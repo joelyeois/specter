@@ -95,6 +95,7 @@ def write_row_ordered_csfile(
     """
     from cryosparc.dataset import Dataset
 
+    from ._cryosparc import particle_data_signs
     from ._images import particle_image_refs, read_particle_images
 
     out_file = Path(out_file)
@@ -102,6 +103,10 @@ def write_row_ordered_csfile(
     if n_particles is not None:
         refs = refs[:n_particles]
     n = len(refs)
+    # The images are copied as stored, so their data sign travels with them.
+    signs = particle_data_signs(cs_file)
+    if signs is not None:
+        signs = signs[:n]
     stacks = sorted({path for path, _ in refs})
 
     dataset = Dataset.load(str(cs_file))
@@ -111,7 +116,7 @@ def write_row_ordered_csfile(
     if stack_out is not None:
         stack_out = Path(stack_out)
         _write_reordered_stack(stack_out, refs, read_particle_images)
-        _set_addresses(dataset, stack_out.name, np.arange(n, dtype=np.uint32))
+        _set_addresses(dataset, stack_out.name, np.arange(n, dtype=np.uint32), signs)
         logger.info(
             "%d particles copied into %s in %s's row order",
             n,
@@ -119,9 +124,13 @@ def write_row_ordered_csfile(
             Path(cs_file).name,
         )
     else:
-        dataset = dataset.take(_row_order_matching_stack(refs, cs_file))
+        order = _row_order_matching_stack(refs, cs_file)
+        dataset = dataset.take(order)
         _set_addresses(
-            dataset, str(Path(stacks[0]).resolve()), np.arange(n, dtype=np.uint32)
+            dataset,
+            str(Path(stacks[0]).resolve()),
+            np.arange(n, dtype=np.uint32),
+            None if signs is None else signs[order],
         )
         logger.info(
             "%d rows reordered to match %s; no image data copied",
@@ -173,12 +182,19 @@ def _write_reordered_stack(
             mrc.data[lo : lo + len(chunk)] = read(chunk).numpy()  # type: ignore[operator]
 
 
-def _set_addresses(dataset: "Dataset", path: str, indices: np.ndarray) -> None:
+def _set_addresses(
+    dataset: "Dataset",
+    path: str,
+    indices: np.ndarray,
+    signs: np.ndarray | None = None,
+) -> None:
     """Point every row's ``blob`` at ``path`` and slice ``indices``.
 
     Writing the addresses into the same file as the poses is half the point: a
     CryoSPARC particle group keeps them in separate ``.cs`` files, so neither
-    one alone can be read.
+    one alone can be read. The data sign (``blob/sign``) goes with them when
+    the source records one, since it says which way round the images are
+    stored.
     """
     missing = [f for f in ("blob/path", "blob/idx") if f not in dataset]
     if missing:
@@ -187,3 +203,7 @@ def _set_addresses(dataset: "Dataset", path: str, indices: np.ndarray) -> None:
         )
     dataset["blob/path"] = np.array([path] * len(dataset))
     dataset["blob/idx"] = indices
+    if signs is not None:
+        if "blob/sign" not in dataset:
+            dataset.add_fields(["blob/sign"], ["f4"])
+        dataset["blob/sign"] = signs.astype(np.float32)

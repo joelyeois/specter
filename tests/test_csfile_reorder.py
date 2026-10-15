@@ -134,3 +134,32 @@ def test_n_particles_truncates_rows_and_images_together(
         exported = np.asarray(mrc.data, dtype=np.float32)
     assert len(np.load(out / "p.cs")) == 3
     assert np.array_equal(exported, images[ROTATION[:3]])
+
+
+@pytest.mark.parametrize("stack_out", [False, True])
+def test_the_data_sign_travels_with_the_images(tmp_path: Path, stack_out: bool) -> None:
+    """The images are written as stored, so their blob/sign must follow each
+    row; a +1 stack that lost it would be read back as inverted."""
+    from cryosparc.dataset import Dataset
+
+    from specter.io import particle_data_signs
+
+    cs_file, _ = _write_source(tmp_path, ROTATION)
+    dataset = Dataset.load(str(cs_file))
+    signs = np.where(np.arange(N) % 2 == 0, 1.0, -1.0).astype(np.float32)
+    dataset.add_fields(["blob/sign"], ["f4"])
+    dataset["blob/sign"] = signs
+    dataset.save(str(cs_file))
+
+    out = tmp_path / "out"
+    write_row_ordered_csfile(
+        cs_file, out / "p.cs", stack_out=out / "p.mrcs" if stack_out else None
+    )
+
+    written = particle_data_signs(out / "p.cs")
+    poses = np.load(out / "p.cs")["alignments3D/pose"]
+    source = np.load(cs_file)["alignments3D/pose"]
+    # Each written row keeps the sign of the source row whose pose it carries.
+    for row in range(N):
+        origin = int(np.flatnonzero((source == poses[row]).all(axis=1))[0])
+        assert written[row] == signs[origin]

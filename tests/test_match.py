@@ -93,6 +93,84 @@ def test_matched_index_correlation_separates_aligned_from_misaligned() -> None:
     assert not misaligned.passed, vars(misaligned)
 
 
+def test_experimental_images_load_in_the_recorded_polarity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """
+    The same particles stored inverted (blob/sign -1) and as recorded (+1)
+    load identically, in the recorded polarity; a stack whose metadata records
+    no sign is taken to be inverted, as RELION and CryoSPARC write them.
+    """
+    from specter.io import _cryosparc
+    from specter.match import load_experimental_images
+
+    rng = np.random.default_rng(0)
+    stored = rng.normal(size=(3, 8, 8)).astype(np.float32)
+
+    def stack(name: str, data: np.ndarray) -> str:
+        path = tmp_path / name
+        with mrcfile.new(str(path), overwrite=True) as mrc:
+            mrc.set_data(data)
+        return str(path)
+
+    def dataset(sign: float | None) -> type:
+        class _Stub(dict):
+            @classmethod
+            def load(cls, csfile_path: str) -> "_Stub":
+                table = {"uid": np.arange(3, dtype=np.uint64)}
+                if sign is not None:
+                    table["blob/sign"] = np.full(3, sign, dtype=np.float32)
+                return cls(table)
+
+        return _Stub
+
+    cs = tmp_path / "particles.cs"
+    cs.touch()
+    loaded = {}
+    for sign, data in ((-1.0, stored), (1.0, -stored), (None, stored)):
+        monkeypatch.setattr(_cryosparc, "Dataset", dataset(sign))
+        loaded[sign] = load_experimental_images(
+            str(cs), images_path=stack(f"{sign}.mrcs", data)
+        )
+    recorded = torch.as_tensor(-stored)
+    assert torch.equal(loaded[-1.0], recorded)
+    assert torch.equal(loaded[1.0], recorded)
+    assert torch.equal(loaded[None], recorded)
+
+
+def test_pose_check_null_holds_at_every_shuffle_seed() -> None:
+    """
+    The z-score divides by the spread of the mean over many random pairings,
+    so it does not hang on one shuffle. Against a single shuffled pairing
+    taken as the exact null, unaligned 64-particle stacks passed at some
+    seeds and failed at others; here a stack's z barely moves with the seed,
+    and stacks with no pose information sit near zero, far below the pass
+    threshold.
+    """
+    n, box, px = 64, 64, 2.0
+    signal = _smooth_signal(n, box, seed=1)
+
+    def noise(seed: int) -> torch.Tensor:
+        return torch.randn(n, box, box, generator=torch.Generator().manual_seed(seed))
+
+    exp = signal + 1.5 * noise(2)
+    perm = torch.randperm(n, generator=torch.Generator().manual_seed(9))
+    unaligned = signal[perm] + 1.5 * noise(4)
+    z = [
+        matched_index_correlation(unaligned, exp, px, seed=seed).z_score
+        for seed in range(6)
+    ]
+    assert max(z) - min(z) < 0.5, z
+    assert max(z) < 5.0, z
+
+    nulls = [
+        matched_index_correlation(_smooth_signal(n, box, seed=10 + k), exp, px)
+        for k in range(8)
+    ]
+    assert all(abs(r.z_score) < 4.0 for r in nulls), [r.z_score for r in nulls]
+    assert all(abs(r.fraction_above - 0.5) < 0.1 for r in nulls)
+
+
 def test_matched_pose_snr_recovers_a_known_noise_ratio() -> None:
     """exp has 2x the noise amplitude of sim -> SNR ratio sim/exp = 4 in every band."""
     n, box, px = 128, 64, 2.0

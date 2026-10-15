@@ -43,7 +43,8 @@ specter match particles \
 
 1. **Pose alignment.** A noiseless, ice-free render at the refinement's
    poses is correlated with the experimental images pair by pair and
-   compared with a random pairing. Pass or fail, with the fix named.
+   compared with the spread of 1000 random pairings, a permutation test.
+   Pass or fail, with the fix named.
 2. **Acquisition card to physics.** Detector MTF and DQE(0) by name; the
    coincidence radius from the detector's exclusion radius and hardware
    frame rate together with the dose rate, converted to the simulation's

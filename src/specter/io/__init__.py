@@ -1,6 +1,16 @@
 from ._convert import convert_csfile_to_starfile
-from ._cryosparc import extract_parameters_from_csfile, particle_stack_references
-from ._images import particle_image_refs, read_particle_images, row_order_conflict
+from ._cryosparc import (
+    extract_parameters_from_csfile,
+    particle_data_signs,
+    particle_stack_references,
+)
+from ._images import (
+    ASSUMED_DATA_SIGN,
+    image_signs,
+    particle_image_refs,
+    read_particle_images,
+    row_order_conflict,
+)
 from ._reorder import write_row_ordered_csfile
 from ._dose_weights import load_dose_weights
 from ._relion import (
@@ -14,6 +24,9 @@ __all__ = [
     "convert_csfile_to_starfile",
     "extract_parameters_from_csfile",
     "particle_stack_references",
+    "particle_data_signs",
+    "image_signs",
+    "ASSUMED_DATA_SIGN",
     "particle_image_refs",
     "read_particle_images",
     "row_order_conflict",

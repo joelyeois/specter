@@ -62,8 +62,9 @@ class ReconstructionConfig:
         ),
         check="positive",
     )
-    # What the stack's values are. A CryoSPARC/RELION stack is normalised with
-    # inverted contrast and is mapped back to counts from the dose; a stack
+    # What the stack's values are. A CryoSPARC/RELION stack is normalised; each
+    # image is brought to the recorded polarity by its blob/sign (-1 when the
+    # .cs does not record one) and mapped back to counts from the dose. A stack
     # already in electron counts is used as it is.
     image_units: ImageUnits = setting(
         "normalized",

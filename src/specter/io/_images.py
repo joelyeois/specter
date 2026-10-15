@@ -31,6 +31,12 @@ import torch
 #: One particle's image: the stack file, and its slice of it.
 ImageRef = tuple[str, int]
 
+#: The data sign assumed for a normalized stack whose metadata does not record
+#: one: light particles on a dark background, which is how RELION and
+#: CryoSPARC extraction and specter's own normalized output store them, and
+#: what CryoSPARC records as ``blob/sign = -1``.
+ASSUMED_DATA_SIGN = -1.0
+
 
 def read_particle_images(refs: list[ImageRef]) -> torch.Tensor:
     """
@@ -60,6 +66,45 @@ def read_particle_images(refs: list[ImageRef]) -> torch.Tensor:
                     np.asarray(img, dtype=np.float32).copy()
                 )
     return torch.stack([img for img in images if img is not None])
+
+
+def image_signs(
+    metadata_path: str | Path,
+    rows: list[int],
+    assumed: float = ASSUMED_DATA_SIGN,
+) -> torch.Tensor:
+    """
+    The factor taking each stored image to the polarity the microscope recorded.
+
+    ``stored * sign`` is dark particles on a light background whichever way
+    the stack was written: the data sign a CryoSPARC ``.cs`` file records in
+    ``blob/sign`` (:func:`specter.io.particle_data_signs`), or `assumed` where
+    it records none. A RELION ``.star`` file records no sign, and RELION
+    inverts the contrast on extraction by default, so it takes `assumed` too.
+
+    Parameters
+    ----------
+    metadata_path : str or Path
+        CryoSPARC ``.cs`` or RELION ``.star``.
+    rows : list of int
+        The rows whose images are read, as indices into the metadata file.
+    assumed : float, optional
+        The sign of a stack whose metadata records none. Default -1, the
+        inverted contrast of a normalized stack; +1 for a stack of counts.
+
+    Returns
+    -------
+    torch.Tensor
+        ``(len(rows),)`` float32 of +1 and -1.
+    """
+    signs = None
+    if str(metadata_path).endswith(".cs"):
+        from ._cryosparc import particle_data_signs
+
+        signs = particle_data_signs(metadata_path)
+    if signs is None:
+        return torch.full((len(rows),), float(assumed))
+    return torch.as_tensor(np.asarray(signs)[rows], dtype=torch.float32)
 
 
 def _resolve_relative(candidates: list[str], rel: str) -> str:

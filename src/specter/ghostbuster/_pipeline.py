@@ -35,7 +35,7 @@ class Ghostbuster(_GhostbusterBase):
         use identical settings for every other parameter.
 
     Loads particle data from CryoSPARC output files, preprocesses images
-    (sign flip, dose/scale normalisation), and drives a :class:`Reconstructor`
+    (data sign, dose/scale normalisation), and drives a :class:`Reconstructor`
     via a Lightning ``Trainer``.
 
     All parameters — data paths, physics settings, and training hyperparameters
@@ -139,9 +139,11 @@ class Ghostbuster(_GhostbusterBase):
         :meth:`~specter.jobs.Job.create` when used inside a ``Job`` context.
     image_units : {"normalized", "counts"}, optional
         What the particle stack's values are. ``"normalized"`` (the default)
-        is a CryoSPARC/RELION stack with zero mean, unit variance and
-        inverted contrast; it is sign-flipped and mapped back to counts as
-        ``sqrt(N) * x + N``, with ``N = dose_per_angstrom * pixel_size**2``.
+        is a CryoSPARC/RELION stack with zero mean and unit variance; each
+        image is brought to its recorded polarity by its data sign
+        (``blob/sign``, taken as -1, inverted contrast, when the ``.cs`` file
+        records none) and mapped back to counts as ``sqrt(N) * x + N``, with
+        ``N = dose_per_angstrom * pixel_size**2``.
         ``"counts"`` is electrons per pixel, used as is, such as a specter
         stack written with ``normalize_particles=False``.
     """
@@ -209,22 +211,27 @@ class Ghostbuster(_GhostbusterBase):
             pixel_size.item() if hasattr(pixel_size, "item") else pixel_size
         )
         dose_per_pixel = dose_per_angstrom * voxel_size**2
-        if image_units == "normalized" and images.is_floating_point():
+        # Into the polarity the microscope recorded: each image times its
+        # data sign, blob/sign in the .cs file. A normalized stack that
+        # records none is taken to be inverted, as RELION and CryoSPARC write
+        # them; counts carry their physical polarity.
+        signs = self._image_signs(cs_file, indices, image_units)
+        if not images.is_floating_point():
+            images = images.float()
+        if image_units == "normalized":
             # This stack is privately owned, so reuse it. Keep the existing
             # conversion arithmetic on bounded blocks instead of retaining
             # several full stacks during sign reversal, scaling and addition.
-            for block in images.split(64):
+            for block, sign in zip(images.split(64), signs.split(64)):
+                block.mul_(sign.to(block.dtype)[:, None, None])
                 block.copy_(
                     _images_to_counts(
-                        block, image_units, dose_per_pixel, flip_contrast=True
+                        block, image_units, dose_per_pixel, flip_contrast=False
                     )
                 )
         else:
             images = _images_to_counts(
-                images,
-                image_units,
-                dose_per_pixel,
-                flip_contrast=image_units == "normalized",
+                images, image_units, dose_per_pixel, flip_contrast=False
             )
 
         # preprocessed particle data (not hyperparams — not logged by job.create)
@@ -328,6 +335,32 @@ class Ghostbuster(_GhostbusterBase):
             anisomag,
             indices,
         )
+
+    @staticmethod
+    def _image_signs(
+        cs_file: str | Path, indices: torch.Tensor, image_units: str
+    ) -> torch.Tensor:
+        """
+        Each selected image's data sign, from the ``.cs`` file's ``blob/sign``.
+
+        Without one, a normalized stack is taken to be inverted (-1) and a
+        stack of counts to be in its recorded polarity (+1). Counts recorded
+        as inverted are refused: a count has a physical sign, so a stack of
+        counts stored negated is a mislabelled file, not a convention.
+        """
+        from ..io import image_signs
+
+        rows = [int(i) for i in indices.flatten().tolist()]
+        assumed = -1.0 if image_units == "normalized" else 1.0
+        signs = image_signs(cs_file, rows, assumed=assumed)
+        if image_units == "counts" and bool((signs < 0).any()):
+            raise ValueError(
+                f"{Path(cs_file).name} records a data sign of -1 (blob/sign) for a "
+                "stack given as image_units='counts': counts carry the polarity "
+                "they were recorded in, so they cannot be stored inverted. Check "
+                "image_units, or the sign the .cs file was written with."
+            )
+        return signs
 
     @staticmethod
     def _load_particle_images(

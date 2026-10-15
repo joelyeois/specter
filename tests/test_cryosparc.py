@@ -316,3 +316,49 @@ def test_non_uniform_voltage_is_refused(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(_cryosparc, "Dataset", _MixedVoltageDataset)
     with pytest.raises(ValueError, match=r"ctf/accel_kv.*240.*360"):
         extract_parameters_from_csfile("fake.cs", halfset="all")
+
+
+# ---------------------------------------------------------------------------
+# blob/sign: which way round a stack stores its particles
+# ---------------------------------------------------------------------------
+
+
+def test_particle_data_signs_reads_blob_sign_from_a_sibling_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """The data sign lives with the blob columns, so a passthrough file takes
+    it from the sibling holding its particles, reordered on uid."""
+    uid = np.array([10, 11, 12, 13], dtype=np.uint64)
+    monkeypatch.setattr(
+        _cryosparc,
+        "Dataset",
+        _stub_datasets(
+            {
+                "J_passthrough_particles.cs": {"uid": uid},
+                "restacked_particles.cs": {
+                    "uid": uid[::-1].copy(),
+                    "blob/path": np.array(["J/restack/batch_0.mrc"] * 4),
+                    "blob/idx": np.arange(4, dtype=np.int64),
+                    "blob/sign": np.array([1.0, 1.0, -1.0, -1.0], dtype=np.float32),
+                },
+            }
+        ),
+    )
+    for name in ("J_passthrough_particles.cs", "restacked_particles.cs"):
+        (tmp_path / name).touch()
+
+    signs = _cryosparc.particle_data_signs(tmp_path / "J_passthrough_particles.cs")
+
+    assert np.array_equal(signs, np.array([-1.0, -1.0, 1.0, 1.0]))
+
+
+def test_particle_data_signs_is_none_when_nothing_records_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setattr(
+        _cryosparc,
+        "Dataset",
+        _stub_datasets({"particles.cs": {"uid": np.arange(4, dtype=np.uint64)}}),
+    )
+    (tmp_path / "particles.cs").touch()
+    assert _cryosparc.particle_data_signs(tmp_path / "particles.cs") is None

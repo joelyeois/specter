@@ -396,7 +396,6 @@ def figure_occupancy_grid() -> None:
         target_shape=SHAPE_ZYX,
         voxel_size=VOXEL_SIZE,
         filament_specs=filaments,
-        packing_backend="shape",
         pdb_cache_dir=PDB_CACHE,
         seed=SEED,
         device=DEVICE,

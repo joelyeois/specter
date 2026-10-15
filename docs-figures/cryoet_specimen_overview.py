@@ -55,6 +55,7 @@ MICROTUBULE_COLOR = "#4C72B0"
 BEAD_COLOR = "#b8860b"
 TARGET_COLOR = "#d98218"
 FILLER_COLOR = "#6b4fa0"
+TRANSMEMBRANE_COLOR = "#55a868"
 
 
 def _membrane_instances() -> list[MembraneInstance]:
@@ -135,20 +136,26 @@ def build() -> tuple[TomogramSpecimenGenerator, torch.Tensor]:
 
 def _component_masks(gen: TomogramSpecimenGenerator) -> dict[str, np.ndarray]:
     """Split the run's own ground truth into one 3D boolean mask per
-    component. Instance ids are handed out in placement order -- filament
-    monomers first (one id each), then microtubules (one id per tube), then
-    beads, then cytosol/lumen proteins -- so the protein and bead ids the
-    generator reports back, plus the filament/microtubule instance counts,
-    are enough to identify every remaining labelled voxel."""
+    component. Instance ids are handed out in placement order --
+    transmembrane proteins first, then filaments (one id per filament, not
+    per monomer), then microtubules (one id per tube), then beads, then
+    cytosol/lumen proteins -- so the protein and bead ids the generator
+    reports back, plus the transmembrane, filament and microtubule counts,
+    are enough to identify every labelled voxel."""
     labels = gen.instance_labels.cpu()
     membrane = gen.membrane_labels.cpu() > 0
     shell = gen.regions["shell"].cpu()
 
-    n_filament_ids = len(gen.filament_instances)
+    first = 1 + len(gen.transmembrane_placements)
+    transmembrane_ids = torch.arange(1, first)
+    # The generator's own grouping: one id per run of a filament's monomers.
+    from specter.specimen.tomogram._filaments import _filament_runs
+
+    n_filament_ids = len(list(_filament_runs(gen.filament_instances)))
     n_microtubule_ids = len(gen.microtubule_instances)
-    filament_ids = torch.arange(1, 1 + n_filament_ids)
+    filament_ids = torch.arange(first, first + n_filament_ids)
     microtubule_ids = torch.arange(
-        1 + n_filament_ids, 1 + n_filament_ids + n_microtubule_ids
+        first + n_filament_ids, first + n_filament_ids + n_microtubule_ids
     )
     bead_ids = torch.tensor([b.instance_id for b in gen.bead_instances])
     target_ids = torch.tensor(
@@ -164,6 +171,7 @@ def _component_masks(gen: TomogramSpecimenGenerator) -> dict[str, np.ndarray]:
         # labelled membrane instance is film.
         "carbon film": (shell & ~membrane).numpy(),
         "membrane": membrane.numpy(),
+        "transmembrane protein": torch.isin(labels, transmembrane_ids).numpy(),
         "filament": torch.isin(labels, filament_ids).numpy(),
         "microtubule": torch.isin(labels, microtubule_ids).numpy(),
         "gold bead": torch.isin(labels, bead_ids).numpy(),
@@ -202,6 +210,7 @@ def figure_components(gen: TomogramSpecimenGenerator) -> None:
         "filament": FILAMENT_COLOR,
         "microtubule": MICROTUBULE_COLOR,
         "membrane": MEMBRANE_COLOR,
+        "transmembrane protein": TRANSMEMBRANE_COLOR,
         "gold bead": BEAD_COLOR,
     }
     # A thin mid-Z slab, not the full-depth projection: at this crowding a

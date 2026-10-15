@@ -110,7 +110,7 @@ tomogram usable as training data:
 Region map, per-instance membrane labels, and per-instance protein/filament/bead labels, all from the same mid-Z slice.
 ///
 
-- `regions`: `0` cytosol, `1` shell, `2` lumen.
+- `regions`: `0` cytosol, `1` shell, `2` lumen, `3` carbon film.
 - `membrane_labels`: which membrane instance a shell voxel belongs to.
   The first write wins where two instances overlap.
 - `instance_labels`: one id per filament, microtubule, bead, target,

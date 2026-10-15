@@ -348,8 +348,12 @@ def _save_exitwave_pair(
     filename: str,
     pad_fft: bool,
     n_pixels: int,
+    pixel_size: float,
 ) -> None:
-    """Save an exit-wave tensor's magnitude and phase as separate .mrcs files."""
+    """
+    Save an exit-wave tensor's magnitude and phase as separate .mrcs files,
+    with `pixel_size` (Angstrom) in each header.
+    """
     import mrcfile
 
     if pad_fft:
@@ -359,7 +363,9 @@ def _save_exitwave_pair(
     phase_path = os.path.join(output_dir, f"{filename}_{suffix}_phase.mrcs")
     with mrcfile.new(mag_path, overwrite=True) as mrc:
         mrc.set_data(ew.abs().numpy().astype("float32"))
+        mrc.voxel_size = pixel_size
     console.print(f"  [green]✓[/green] {mag_path}")
     with mrcfile.new(phase_path, overwrite=True) as mrc:
         mrc.set_data(ew.angle().numpy().astype("float32"))
+        mrc.voxel_size = pixel_size
     console.print(f"  [green]✓[/green] {phase_path}")

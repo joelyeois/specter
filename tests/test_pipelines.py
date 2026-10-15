@@ -372,15 +372,21 @@ def test_run_pipeline_tracked_by_project(
     tmp_path: Path, make_config, run, job_type: str, artifacts: dict, params: dict
 ) -> None:
     """--project routes output through specter.jobs instead of output_dir/
-    filename -- opt-in, unlike reconstruction's always-on tracking."""
-    run(make_config(tmp_path))
+    filename -- opt-in, unlike reconstruction's always-on tracking. Every
+    image file carries its pixel size in the header, which the micrograph,
+    tilt-series and particle stacks left at 0 until 2026-10-15."""
+    config = make_config(tmp_path)
+    run(config)
+    pixel_size = getattr(config, "pixel_size", None) or config.voxel_size
 
     job_dir = tmp_path / "apoferritin" / job_type / "J001"
     for name, shape in artifacts.items():
         assert (job_dir / name).exists()
-        if shape is not None:
+        if name.endswith((".mrc", ".mrcs")):
             with mrcfile.open(job_dir / name) as mrc:
-                assert mrc.data.shape == shape
+                if shape is not None:
+                    assert mrc.data.shape == shape
+                assert float(mrc.voxel_size.x) == pytest.approx(pixel_size, rel=1e-6)
 
     job = json.loads((job_dir / "job.json").read_text())
     assert job["status"] == "complete"

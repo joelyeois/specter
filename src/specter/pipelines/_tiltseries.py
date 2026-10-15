@@ -275,6 +275,7 @@ def run_tilt_series(
         mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
         with mrcfile.new(mrcs_path, overwrite=True) as mrc:
             mrc.set_data(images.numpy().astype("float32"))
+            mrc.voxel_size = dx
         console.print(f"  [green]✓[/green] {mrcs_path}")
 
         ctf_params_broadcast = {
@@ -304,6 +305,7 @@ def run_tilt_series(
                 config.filename,
                 config.pad_fft,
                 micrograph_size,
+                dx,
             )
 
     _print_total_time(t_start)

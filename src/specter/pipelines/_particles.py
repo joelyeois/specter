@@ -765,6 +765,7 @@ def _save_stack(
                 config.filename,
                 config.pad_fft,
                 config.n_pixels,
+                pixel_size,
             )
 
         if clean_exitwaves is not None:
@@ -776,4 +777,5 @@ def _save_stack(
                 config.filename,
                 config.pad_fft,
                 config.n_pixels,
+                pixel_size,
             )

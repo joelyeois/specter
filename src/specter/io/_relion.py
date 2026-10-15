@@ -479,6 +479,8 @@ def create_particle_starfile(
     mrcs_path = os.path.join(output_dir, filename + ".mrcs")
     with mrcfile.new(mrcs_path, overwrite=True) as mrc:
         mrc.set_data(particles.numpy().astype(np.float32))
+        if dx is not None:
+            mrc.voxel_size = dx
 
     _console.print(f"  [green]✓[/green] {mrcs_path}")
 

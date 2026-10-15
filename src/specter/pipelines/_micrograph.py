@@ -333,6 +333,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
         with mrcfile.new(mrcs_path, overwrite=True) as mrc:
             mrc.set_data(images_t.numpy().astype("float32"))
+            mrc.voxel_size = config.pixel_size
         console.print(f"  [green]✓[/green] {mrcs_path}")
 
         create_micrograph_starfile(
@@ -356,6 +357,7 @@ def run_micrograph(config: MicrographConfig) -> None:
                 config.filename,
                 config.pad_fft,
                 config.micrograph_size,
+                config.pixel_size,
             )
 
         if clean_exitwaves_t is not None:
@@ -367,6 +369,7 @@ def run_micrograph(config: MicrographConfig) -> None:
                 config.filename,
                 config.pad_fft,
                 config.micrograph_size,
+                config.pixel_size,
             )
 
     _print_total_time(t_start)

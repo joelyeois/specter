@@ -105,8 +105,8 @@ records every electron in the pixel it lands in.
 `perfect` is the limit set by the pixel's own aperture, a sinc that falls to
 0.64 at Nyquist (McMullan et al. 2009). The others are measured or published curves for real
 cameras at 300 kV ([MTF: a pure blur](../concepts/detector.md#mtf-a-pure-blur)).
-K3's datasheet gives an MTF without a \(\mathrm{DQE}(0)\), so `k3_300kv`
-counts every electron
+K3's datasheet gives only lower bounds on its DQE at no stated dose rate,
+not a low-dose-rate \(\mathrm{DQE}(0)\), so `k3_300kv` counts every electron
 ([DQE(0): a separate counting efficiency](../concepts/detector.md#dqe0-a-separate-counting-efficiency)).
 
 ![The bundled detector MTFs, and each camera's spectral SNR relative to an ideal counter, measured and predicted.](../assets/images/walkthrough/detection-detectors.png){ width="900" style="display:block;margin:1.2em auto;" }
@@ -156,8 +156,9 @@ exclusion cell per frame
 ![The fraction of electrons counted against dose rate for a Falcon 4i, and the noise power spectrum of flat illumination with and without coincidence loss.](../assets/images/walkthrough/detection-coincidence.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Left: the fraction of incident electrons counted, for a Falcon 4i's 2.0 px
-exclusion radius at 320 frames per second, simulated at 1 Å, 40 e⁻/Å² and
-40 frames. It falls from 99.5% at 0.25 e⁻/px/s to 57% at 32 e⁻/px/s.
+exclusion radius at 320 frames per second (Thermo Fisher Scientific 2022),
+simulated at 1 Å, 40 e⁻/Å² and 40 frames. It falls from 99.5% at
+0.25 e⁻/px/s to 57% at 32 e⁻/px/s.
 Right: the noise power spectrum of the flat images, divided by the mean
 count, so that plain Poisson noise sits at 1.
 ///
@@ -212,6 +213,9 @@ stack of particles, each with its own pose, defocus and draw of ice.
   of optimal performance at 300 keV of three direct electron detectors for
   use in low dose electron microscopy. *Ultramicroscopy*, 147, 156–163.
   [doi:10.1016/j.ultramic.2014.08.002](https://doi.org/10.1016/j.ultramic.2014.08.002)
+- Thermo Fisher Scientific. (2022). *Falcon 4i Direct Electron Detector*
+  (Datasheet DS0371-EN-01-2022).
+  [documents.thermofisher.com](https://documents.thermofisher.com/TFS-Assets/MSD/Datasheets/falcon-detector-datasheet-ds0371.pdf)
 - Zivanov, J., Nakane, T., & Scheres, S. H. W. (2020). Estimation of
   high-order aberrations and anisotropic magnification from cryo-EM data sets
   in *RELION*-3.1. *IUCrJ*, 7(2), 253–267.

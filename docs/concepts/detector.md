@@ -101,11 +101,12 @@ DQE(0) per detector model.
 
 Falcon 4i, Falcon 3EC and K2 have traceable low-dose-rate published values
 (0.92, 0.95 and 0.80 at 300 kV; Thermo Fisher Scientific 2022, 2018;
-McMullan et al. 2014); K3's datasheet publishes an MTF with no
-accompanying DQE(0) figure, so it defaults to 1.0 (an ideal counter) rather
-than guessing. These values
+McMullan et al. 2014). K3's datasheet (Gatan, Inc. 2021) gives only lower bounds on its DQE
+(above 0.90 at its peak at 300 kV) at no stated dose rate, which is not a
+low-dose-rate DQE(0), so K3 defaults to 1.0 (an ideal counter) rather than
+guessing. These values
 must be *low-dose-rate* DQE(0): published DQE falls with dose rate
-largely because of coincidence loss (Li et al. 2013; McMullan et al. 2014),
+largely because of coincidence loss (Li, Zheng et al. 2013; McMullan et al. 2014),
 which SPECTER already models
 separately (below). Using a high-flux figure here would count that
 loss twice.
@@ -140,7 +141,7 @@ counting efficiency DQE(0) = 0.92 modelled explicitly, reproducing the
 measured detected-electron yield to ~3% RMSE. The K2 Summit's 2.54 physical
 pixels is obtained by inverting the same model against Campbell et al.
 (2015)'s measurement of a 25% loss at ~12 e⁻/px/s and 400 frames per second
-(Li et al. 2013).
+(Li, Mooney et al. 2013).
 Both values are listed in `detectors.EXCLUSION_RADIUS_PX`; a radius belongs
 to the camera unit and its counting configuration, so it is a prior for
 other cameras of the same model, not a constant. On the right, the exclusion
@@ -149,7 +150,7 @@ spectrum relative to plain Poisson: an electron's presence excludes its
 own neighborhood for an instant, which suppresses variance at scales
 larger than the exclusion radius while leaving the high-frequency
 (per-pixel) noise floor nearly untouched. That matches the signature
-reported for real DED coincidence loss (Li et al. 2013; McMullan et al.
+reported for real DED coincidence loss (Li, Zheng et al. 2013; McMullan et al.
 2014). Zambon (2024) gives a closed-form treatment of the same phenomenon
 (Roach's statistical-overlap model), which `Detector.apply_coincidence`'s
 spatial simulation does not itself implement. It is useful for the DQE/SNR
@@ -161,9 +162,10 @@ correlated low-frequency power-spectrum dip shown above.
 
 The calibrated radius and the `coincidence_radius` setting are in different
 units. `EXCLUSION_RADIUS_PX` is in physical detector pixels and applies per
-*hardware* frame, the rate at which the camera counts
-(`detectors.HARDWARE_FRAME_RATE_HZ`: 320 Hz for the Falcon 4i (Thermo Fisher
-Scientific 2022), 400 Hz for the K2 (Li et al. 2013), 1500 Hz for the K3).
+*hardware* frame, the rate at which the camera counts.
+`detectors.HARDWARE_FRAME_RATE_HZ` holds 320 Hz for the Falcon 4i (Thermo
+Fisher Scientific 2022), 400 Hz for the K2 (Li, Mooney et al. 2013) and
+1500 Hz for the K3 (Gatan, Inc. 2021; Sheng et al. 2022).
 `coincidence_radius` is in pixels of the simulated image and applies per simulated frame, of which there are `n_frames`. A
 simulation usually runs at a coarser pixel and with far fewer frames than the
 camera recorded, so the radius is converted at constant occupancy, the mean
@@ -182,7 +184,11 @@ with \(\dot D_\text{px}\) the dose rate in e⁻ per physical pixel per second,
 `detectors.coincidence_radius_for_simulation`). A Falcon 4i at 4 e⁻/px/s gives
 \(\lambda = 4/320 \cdot \pi \cdot 2.0^2 = 0.157\); simulated at 1 Å,
 40 e⁻/Å² and 40 frames, that is 1 e⁻ per pixel per frame and
-\(r_\text{sim} = 0.22\) px. The conversion preserves the mean loss and its
+\(r_\text{sim} = 0.22\) px. A K3 recording in correlated double sampling (CDS)
+mode reads each frame twice and counts at 750 Hz rather than 1500 Hz (Sheng et
+al. 2022). For such data \(f_\text{hw}\) is 750 Hz, which at the same dose
+rate doubles \(\lambda\) and raises \(r_\text{sim}\) by \(\sqrt{2}\).
+The conversion preserves the mean loss and its
 dependence on contrast, but not the spatial extent of the exclusion, which
 only a detector stage run at the physical pixel and frame rate would
 reproduce.
@@ -201,6 +207,14 @@ weights were computed for; a mismatch is reported with a warning.
   (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
   20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
   [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Gatan, Inc. (2021). *K3 Direct Detection Cameras, Models 1025 and 1024*
+  (Datasheet DS-1025-FL8-CA-FEB21).
+  [gatan.com](https://www.gatan.com/products/tem-imaging-spectroscopy/k3-camera)
+- Li, X., Mooney, P., Zheng, S., Booth, C. R., Braunfeld, M. B., Gubbens, S.,
+  Agard, D. A., & Cheng, Y. (2013). Electron counting and beam-induced motion
+  correction enable near-atomic-resolution single-particle cryo-EM. *Nature
+  Methods*, 10(6), 584–590.
+  [doi:10.1038/nmeth.2472](https://doi.org/10.1038/nmeth.2472)
 - Li, X., Zheng, S. Q., Egami, K., Agard, D. A., & Cheng, Y. (2013).
   Influence of electron dose rate on electron counting images recorded with
   the K2 camera. *Journal of Structural Biology*, 184(2), 251–260.
@@ -213,6 +227,11 @@ weights were computed for; a mismatch is reported with a warning.
   of optimal performance at 300 keV of three direct electron detectors for
   use in low dose electron microscopy. *Ultramicroscopy*, 147, 156–163.
   [doi:10.1016/j.ultramic.2014.08.002](https://doi.org/10.1016/j.ultramic.2014.08.002)
+- Sheng, Y., Harrison, P. J., Vogirala, V., Yang, Z., Strain-Damerell, C.,
+  Frosio, T., Himes, B. A., Siebert, C. A., Zhang, P., & Clare, D. K. (2022).
+  Application of super-resolution and correlative double sampling in
+  cryo-electron microscopy. *Faraday Discussions*, 240, 261–276.
+  [doi:10.1039/D2FD00049K](https://doi.org/10.1039/D2FD00049K)
 - Thermo Fisher Scientific. (2018). *Falcon 3EC Direct Electron Detector*
   (Datasheet DS0236-EN-10-2018).
   [documents.thermofisher.com](https://documents.thermofisher.com/TFS-Assets/MSD/Technical-Notes/Falcon-3EC-Datasheet.pdf)

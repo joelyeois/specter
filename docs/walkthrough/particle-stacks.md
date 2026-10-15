@@ -49,8 +49,8 @@ The four dictionaries pass keywords to the verbs the stack is built from:
 `scatter` to `Specimen.scatter`, `optics` to `ExitWave.apply_ctf`, `coherence`
 to `ExitWave.intensity` and `camera` to `Image.detect`. The mean of
 34.3 counts per pixel is the 40 e⁻/Å² dose reduced by the Falcon 4i's
-\(\mathrm{DQE}(0)\) of 0.92 and by about 7% coincidence loss
-(see [Detection](detection.md)).
+\(\mathrm{DQE}(0)\) of 0.92 (Thermo Fisher Scientific 2022) and by about 7%
+coincidence loss (see [Detection](detection.md)).
 
 `batch_size` is the number of images formed at once. An exit wave on the
 propagation grid holds four times as many complex values as a pixel image, so
@@ -198,3 +198,6 @@ of ice, the way a micrograph records them before they are picked.
   cryo-EM structure determination. *Journal of Structural Biology*, 180(3),
   519–530.
   [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)
+- Thermo Fisher Scientific. (2022). *Falcon 4i Direct Electron Detector*
+  (Datasheet DS0371-EN-01-2022).
+  [documents.thermofisher.com](https://documents.thermofisher.com/TFS-Assets/MSD/Datasheets/falcon-detector-datasheet-ds0371.pdf)

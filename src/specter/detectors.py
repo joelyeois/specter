@@ -698,8 +698,10 @@ def dqe0_for_detector(detector_model: str | None) -> float:
     Notes
     -----
     The K3 entries deliberately have no value: their bundled response is a
-    measured MTF (already normalised to 1 at DC) with no accompanying DQE(0)
-    figure in the same datasheet, so assuming one would be inventing physics.
+    measured MTF (already normalised to 1 at DC), and Gatan's datasheet gives
+    only lower bounds on the DQE (above 0.90 at its peak at 300 kV) at no
+    stated dose rate, which is not the low-dose-rate DQE(0) this needs, so
+    assuming one would be inventing physics.
     They therefore behave as ideal counters until a sourced value is added.
 
     References
@@ -759,9 +761,17 @@ EXCLUSION_RADIUS_PX: dict[str, float] = {
 
 #: Frame rate at which each detector counts, in Hz. Coincidence happens per
 #: hardware frame, so this -- not the number of fractions saved -- sets the
-#: per-frame flux. A hybrid-pixel counter (DECTRIS SINGLA, ~4500 Hz with
-#: sub-microsecond dead time) has no coincidence loss at cryo-EM rates, which
-#: ``"perfect"`` stands in for.
+#: per-frame flux. Falcon 4i: 320 Hz (Thermo Fisher Scientific 2022, datasheet
+#: DS0371-EN-01-2022). K2 Summit: 400 Hz (Li et al. 2013, Nat. Methods 10,
+#: 584-590). K3: 1500 Hz (Gatan datasheet DS-1025-FL8-CA-FEB21; Sheng et al.
+#: 2022, Faraday Discuss. 240, 261-276). K3 data recorded in correlated double
+#: sampling (CDS) mode read every frame twice and count at 750 Hz (Sheng et al.
+#: 2022); for such a dataset pass 750 to `coincidence_occupancy`, which doubles
+#: the occupancy and raises the coincidence radius a simulation should use by
+#: sqrt(2) at the same dose rate. Full references are in
+#: `coincidence_occupancy`. A hybrid-pixel counter (DECTRIS SINGLA, ~4500 Hz
+#: with sub-microsecond dead time) has no coincidence loss at cryo-EM rates,
+#: which ``"perfect"`` stands in for.
 HARDWARE_FRAME_RATE_HZ: dict[str, float] = {
     "falcon4i_300kv": 320.0,
     "falcon4i_200kv": 320.0,
@@ -801,6 +811,34 @@ def coincidence_occupancy(
     float
         ``dose_rate / frame_rate * pi * r**2``. The mean coincidence loss of
         `Detector.apply_coincidence` is a function of this number alone.
+
+    Notes
+    -----
+    The frame rate is the camera's internal counting rate in the mode the data
+    were recorded in (`HARDWARE_FRAME_RATE_HZ`): 320 Hz for the Falcon 4i
+    [1]_, 400 Hz for the K2 Summit [2]_ and 1500 Hz for the K3 [3]_, [4]_. In
+    correlated double sampling (CDS) mode a K3 reads each frame twice and
+    counts at 750 Hz [4]_, so CDS data take ``frame_rate_hz=750``: twice the
+    occupancy of the same dose rate in the standard mode.
+
+    References
+    ----------
+    .. [1] Thermo Fisher Scientific. (2022). *Falcon 4i Direct Electron Detector*
+       (Datasheet DS0371-EN-01-2022).
+       https://documents.thermofisher.com/TFS-Assets/MSD/Datasheets/falcon-detector-datasheet-ds0371.pdf
+    .. [2] Li, X., Mooney, P., Zheng, S., Booth, C. R., Braunfeld, M. B.,
+       Gubbens, S., Agard, D. A., & Cheng, Y. (2013). Electron counting and
+       beam-induced motion correction enable near-atomic-resolution
+       single-particle cryo-EM. *Nature Methods*, 10(6), 584–590.
+       https://doi.org/10.1038/nmeth.2472
+    .. [3] Gatan, Inc. (2021). *K3 Direct Detection Cameras, Models 1025 and
+       1024* (Datasheet DS-1025-FL8-CA-FEB21).
+       https://www.gatan.com/products/tem-imaging-spectroscopy/k3-camera
+    .. [4] Sheng, Y., Harrison, P. J., Vogirala, V., Yang, Z., Strain-Damerell,
+       C., Frosio, T., Himes, B. A., Siebert, C. A., Zhang, P., & Clare, D. K.
+       (2022). Application of super-resolution and correlative double sampling
+       in cryo-electron microscopy. *Faraday Discussions*, 240, 261–276.
+       https://doi.org/10.1039/D2FD00049K
     """
     if frame_rate_hz <= 0:
         raise ValueError("frame_rate_hz must be positive")

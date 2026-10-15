@@ -62,6 +62,23 @@ def test_every_calibrated_detector_has_a_frame_rate() -> None:
         assert name in HARDWARE_FRAME_RATE_HZ
 
 
+def test_k3_cds_frame_rate_raises_the_simulation_radius_by_sqrt2() -> None:
+    """
+    A K3 in correlated double sampling mode counts at 750 Hz, half its
+    standard 1500 Hz: at the same dose rate the occupancy doubles and the
+    simulation radius grows by sqrt(2), as `HARDWARE_FRAME_RATE_HZ` documents.
+    """
+    standard_hz = HARDWARE_FRAME_RATE_HZ["k3_300kv"]
+    assert standard_hz == 1500.0
+    # No K3 exclusion radius is calibrated; the ratios do not depend on it.
+    standard = coincidence_occupancy(1.0, 15.0, standard_hz)
+    cds = coincidence_occupancy(1.0, 15.0, 750.0)
+    assert cds == pytest.approx(2 * standard)
+    assert coincidence_radius_for_simulation(cds, 40.0, 1.0, 40) == pytest.approx(
+        math.sqrt(2) * coincidence_radius_for_simulation(standard, 40.0, 1.0, 40)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Matched-pose metrics on synthetic stacks
 # ---------------------------------------------------------------------------

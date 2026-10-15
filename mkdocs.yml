@@ -167,6 +167,7 @@ nav:
           - specter.specimen: api/specimen.md
           - specter.tilt: api/tilt.md
           - Core modules: api/core.md
+      - Bibliography: references.md
 
 plugins:
   - mkdocstrings:

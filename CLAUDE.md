@@ -72,6 +72,8 @@ Prose in `docs/` (Concepts, user guide, etc.) follows a formal/academic register
 - **Don't cite the tool's own development history as justification.** A design choice (e.g. "this approximation matches what a prior/reference implementation did") doesn't need to lean on that prior tool's authority — the reader has no context for it and doesn't need it to trust the explanation. Legitimate bibliographic citations still belong in a `## References` section; the rule is about weaving lineage into prose as a rationale, not about citing sources.
 - **State each caveat once**, in the section it belongs to (usually `## Limitations`), rather than explaining it at length inline and then again at the bottom. A one-line pointer ("see Limitations") from the first mention is fine.
 
+- **Cite borrowed work where it is described.** A method, parameterization, measured value, dataset or structure taken from someone else's publication is cited author–year in the text (`Cowley & Moodie (1957)`, `(McMullan et al. 2015)`) and listed in a `## References` section at the very end of the page: `- Surname, I. I., & Surname, I. I. (Year). Title in sentence case. *Journal*, Vol(Issue), first–last. [doi:X](https://doi.org/X)`, all authors up to ten, else the first six and `et al.`. Check every entry against Crossref (`https://api.crossref.org/works/<doi>`) before adding it; never write a DOI, volume or page range from memory. Docstrings use a NumPy `References` section with `.. [n]` entries in the same form. `python docs-figures/bibliography.py` collects the pages' entries into `docs/references.md`.
+
 `docs/concepts/cryoet-specimen/filaments.md` is the calibrated example if unsure how a rewrite should read.
 
 ## Development Workflow
@@ -396,7 +398,10 @@ docs-figures/                  # Tracked scripts that regenerate docs/assets/ima
                               # the Command-line guides (docs/user-guide/), running the real `specter` commands.
                               # tests/test_docs_snippets.py checks every quoted section and image exists;
                               # check_outputs.py reruns the page scripts before a release and lists every
-                              # number a page quotes that its new output no longer contains.
+                              # number a page quotes that its new output no longer contains. bibliography.py
+                              # collects every page's References section into docs-includes/bibliography.md
+                              # for docs/references.md; tests/test_bibliography_docs.py fails when it is stale
+                              # or when two pages write one DOI differently.
 docs-includes/                 # Generated Markdown fragments that docs/ pulls in via pymdownx.snippets (base_path is
                               # the repo root). OUTSIDE docs/ on purpose: a .md file inside docs_dir is built as a
                               # page of its own, and a fragment is not a page. Nothing here is edited by hand —

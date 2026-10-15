@@ -158,7 +158,7 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
     # nothing restores, leaking this run's root into every later bare Job()
     # in the same interpreter; it is the notebook-facing session setter, not
     # a channel for library code.
-    root = resolve_output_dir(config, "reconstructions", create=True)
+    root = resolve_output_dir(config, "reconstructions", create=True, tracked=True)
 
     if config.halfset == "gold":
         run_dir = _run_gold_standard(config, base_dir=root)

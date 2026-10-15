@@ -27,7 +27,9 @@ def is_tracked(config: Any) -> bool:
     return config.project is not None or config.job_id is not None
 
 
-def resolve_output_dir(config: Any, job_type: str, *, create: bool = False) -> str:
+def resolve_output_dir(
+    config: Any, job_type: str, *, create: bool = False, tracked: bool | None = None
+) -> str:
     """
     Resolve ``config.output_dir`` -- the single directory a run writes under.
 
@@ -68,6 +70,13 @@ def resolve_output_dir(config: Any, job_type: str, *, create: bool = False) -> s
         what lets a non-main DDP rank call it to agree on a path without
         racing its siblings. Only the one process that owns the run passes
         ``True`` -- see `_tracked_output_dir`.
+    tracked : bool, optional
+        Whether the run is tracked. Default `is_tracked`: whether ``project``
+        or ``job_id`` is set. A command that tracks every run, as
+        ``specter reconstruct particle`` does, passes ``True``; reading its
+        unset ``project``/``job_id`` as untracked would hand ``Job`` the
+        ``<job_type>/`` default and nest the run in
+        ``<job_type>/<job_type>/J001``.
 
     Returns
     -------
@@ -76,7 +85,7 @@ def resolve_output_dir(config: Any, job_type: str, *, create: bool = False) -> s
     """
     if config.output_dir is not None:
         return str(config.output_dir)
-    if is_tracked(config):
+    if is_tracked(config) if tracked is None else tracked:
         root = ensure_project_root() if create else find_specter_project_root()
         return str(root)
     return default_output_dir(job_type)

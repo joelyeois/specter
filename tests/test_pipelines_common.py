@@ -59,6 +59,21 @@ def test_resolve_output_dir_unset_defaults_differ_by_tracking(
     assert resolve_output_dir(_Config(project="p"), "particles") == str(tmp_path)
 
 
+def test_a_command_that_always_tracks_defaults_to_the_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`specter reconstruct particle` tracks every run, project or not.
+
+    Reading its unset `project`/`job_id` as untracked returned the
+    `reconstructions/` default, under which `Job` grew its own
+    `reconstructions/J001`, and no project marker was written.
+    """
+    monkeypatch.chdir(tmp_path)
+    root = resolve_output_dir(_Config(), "reconstructions", create=True, tracked=True)
+    assert root == str(tmp_path)
+    assert (tmp_path / ".specter").is_file()
+
+
 def test_untracked_yields_output_dir_unchanged(tmp_path: Path) -> None:
     config = _Config(output_dir=str(tmp_path / "flat"))
     with _tracked_output_dir(config, "particles") as output_dir:

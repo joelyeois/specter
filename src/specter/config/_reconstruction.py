@@ -12,7 +12,7 @@ from typing import Literal
 from specter.options import (
     EwaldSphereSign,
     ImageUnits,
-    RotateMode,
+    PoseMode,
     Scheduler,
     SymmetryMode,
 )
@@ -381,8 +381,14 @@ class ReconstructionConfig:
     sparsity: float | None = setting(
         None, help="L1 regularisation weight on the volume.", check="non_negative"
     )
-    rotate_mode: RotateMode = setting(
-        "real", help="Domain in which per-particle rotations are applied."
+    rotate_mode: PoseMode = setting(
+        "real",
+        help=(
+            "How each particle's pose is applied. real/fourier: rotate the volume "
+            "with trilinear interpolation. surface: sample the unrotated volume's "
+            "transform on the posed Ewald surface, with no interpolation "
+            "(projection, firstborn, rytov and ctf only; no lr_R)."
+        ),
     )
     learn_noise_model: bool = setting(
         False,

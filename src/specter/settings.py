@@ -47,7 +47,7 @@ from specter.options import (
     EwaldSphereSign,
     IceModel,
     NoiseModel,
-    RotateMode,
+    PoseMode,
     ScatteringFactors,
     ScatteringModel,
     TemporalCoherence,
@@ -155,9 +155,16 @@ class Propagation:
         and for a micrograph of level, uniform ice, on for a tilt series
         (whose two edges cross a tilted slab at different depths) and for a
         micrograph whose ice profile varies across the field.
-    rotate_mode : RotateMode
-        How a volume is rotated into the beam frame: trilinear in real space
-        or in Fourier space. Default ``"real"``.
+    rotate_mode : PoseMode
+        How a pose is applied: ``"real"`` or ``"fourier"`` rotate the volume
+        into the beam frame with trilinear interpolation, in real or Fourier
+        space; ``"surface"`` leaves the volume unrotated and samples its
+        transform on the posed Ewald surface
+        (`specter.scattering.surface_slice_sum`), with no interpolation. The
+        last is available for the single-scatter models (``"projection"``,
+        ``"firstborn"``, ``"rytov"``, ``"ctf"``) and, in `Specimen.scatter`,
+        only for an undressed template: crowding, ice, damage and per-image
+        atom rendering all need the rotated volume. Default ``"real"``.
     """
 
     scattering_model: ScatteringModel = "multislice"
@@ -169,7 +176,7 @@ class Propagation:
     klim: float | None = None
     oversample: int = 2
     pad_fft: bool | None = None
-    rotate_mode: RotateMode = "real"
+    rotate_mode: PoseMode = "real"
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.alpha <= 1.0:
@@ -205,6 +212,20 @@ class Propagation:
             )
         if not isinstance(self.oversample, int) or self.oversample < 1:
             raise ValueError(f"oversample={self.oversample!r} must be an integer >= 1")
+        if self.rotate_mode == "surface":
+            if self.scattering_model not in ("projection", "firstborn", "rytov", "ctf"):
+                raise ValueError(
+                    f"rotate_mode='surface' with scattering_model="
+                    f"{self.scattering_model!r}: only the single-scatter models "
+                    "(projection, firstborn, rytov, ctf) are one sample of the "
+                    "volume's transform; multislice and kinematic need the "
+                    "rotated volume."
+                )
+            if self.absorption_model != "alpha":
+                raise ValueError(
+                    "rotate_mode='surface' needs absorption_model='alpha': the "
+                    "mean-free-path absorption field is read off the rotated volume."
+                )
 
     def pads(self, default: bool) -> bool:
         """`pad_fft`, or the imaging path's `default` when it is None."""

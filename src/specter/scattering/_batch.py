@@ -630,6 +630,51 @@ class Scattering(L.LightningModule):
         projection = 2 * self.sigma * self.pixel_size * torch.sum(V, 1)
         return projection
 
+    def from_slice_sum(self, spectrum: torch.Tensor, nz: int) -> torch.Tensor:
+        """
+        The exit wave of a real volume, given its slice sum.
+
+        What :meth:`rytov`, :meth:`firstborn`, :meth:`projection` and
+        :meth:`ctf` compute once the volume has been reduced to one spectrum:
+        ``sum_z fft2(V_z) * F_z`` for the first two, ``fft2(sum_z V_z)`` for
+        the last two. `specter.scattering.surface_slice_sum` produces that
+        spectrum from the unposed volume.
+
+        Parameters
+        ----------
+        spectrum : torch.Tensor
+            ``(B, Y, X)`` complex, native FFT order.
+        nz : int
+            Depth of the volume in slices, for the uniform absorption.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(B, Y, X)`` exit waves (projected potentials for ``"ctf"``).
+        """
+        model = self.scattering_model
+        real_volume = torch.empty(0)
+        absorbed = self.sigma * self.pixel_size * self.uniform_absorption * nz
+        if model == "rytov":
+            field = ifft2(self._phase_scale(real_volume) * spectrum)
+            return oversampled_exp(field - absorbed, self.oversample, self.crop)
+        if model == "firstborn":
+            return 1 + ifft2(self._phase_scale(real_volume) * spectrum) - absorbed
+        projected = ifft2(spectrum).real
+        if model == "projection":
+            return oversampled_exp(
+                self._phase_scale(real_volume) * projected - absorbed,
+                self.oversample,
+                self.crop,
+            )
+        if model == "ctf":
+            if self.uniform_absorption != 0.0:
+                raise ValueError(
+                    "uniform_absorption is not supported by scattering_model='ctf'"
+                )
+            return 2 * self.sigma * self.pixel_size * projected
+        raise ValueError(f"scattering_model={model!r} has no single slice sum")
+
     def forward(
         self, V: torch.Tensor, *, absorption_potential: torch.Tensor | None = None
     ) -> torch.Tensor:

@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 import torch
 
-__all__ = ["GridTransform"]
+__all__ = ["GridTransform", "clear_plan_cache", "sample_transform"]
 
 #: Oversampling of FINUFFT's internal grid. 1.25 holds a 560^3 single-precision
 #: plan in 2.7 GB where the library default, 2.0, needs 11 GB, at a cost in
@@ -173,3 +173,116 @@ class GridTransform:
         """
         q = freqs.to(device=self.device, dtype=torch.float64)
         return torch.exp(-2j * math.pi * (q @ self._centre)).to(self.complex_dtype)
+
+
+# Plans for `sample_transform`, which a training loop calls every step: building
+# one costs 70-230 ms at 512^3, longer than the transform itself, so each is
+# built once per (type, shape, precision, device) and only its points change.
+_PLANS: dict[tuple[Any, ...], Any] = {}
+
+
+def clear_plan_cache() -> None:
+    """Release the NUFFT plans `sample_transform` keeps, and the device memory they hold."""
+    _PLANS.clear()
+
+
+def _cached_plan(
+    kind: int, shape: tuple[int, ...], double: bool, device: torch.device, eps: float
+) -> tuple[Any, bool]:
+    gpu = device.type == "cuda"
+    key = (kind, shape, double, gpu, device.index, eps)
+    if key not in _PLANS:
+        dtype = "complex128" if double else "complex64"
+        kwargs: dict[str, Any] = dict(
+            eps=eps, isign=-1 if kind == 2 else 1, dtype=dtype, modeord=0
+        )
+        kwargs["upsampfac"] = _UPSAMPFAC
+        if gpu:
+            import cufinufft
+
+            _PLANS[key] = cufinufft.Plan(
+                kind, shape, gpu_device_id=device.index or 0, **kwargs
+            )
+        else:
+            import finufft
+
+            _PLANS[key] = finufft.Plan(
+                kind, shape, nthreads=torch.get_num_threads(), **kwargs
+            )
+    return _PLANS[key], gpu
+
+
+def _execute(
+    kind: int,
+    values: torch.Tensor,
+    pts: torch.Tensor,
+    shape: tuple[int, ...],
+    eps: float,
+) -> torch.Tensor:
+    """One type-1 or type-2 transform through a cached plan, on ``values``' device."""
+    double = values.dtype == torch.complex128
+    plan, gpu = _cached_plan(kind, shape, double, values.device, eps)
+    if gpu:
+        plan.setpts(pts[0], pts[1], pts[2])
+        return plan.execute(values.contiguous())
+    p = pts.cpu().numpy()
+    plan.setpts(p[0], p[1], p[2])
+    out = np.asarray(plan.execute(values.detach().cpu().contiguous().numpy()))
+    return torch.from_numpy(out).to(values.device)
+
+
+class _SampleTransform(torch.autograd.Function):
+    """Type-2 forward; its adjoint, a type-1 with the opposite sign, is the backward."""
+
+    @staticmethod
+    def forward(  # type: ignore[override]
+        ctx: Any, volume: torch.Tensor, pts: torch.Tensor, eps: float
+    ) -> torch.Tensor:
+        cdtype = torch.complex128 if pts.dtype == torch.float64 else torch.complex64
+        ctx.save_for_backward(pts)
+        ctx.shape, ctx.eps, ctx.real = tuple(volume.shape), eps, not volume.is_complex()
+        return _execute(2, volume.to(cdtype), pts, ctx.shape, eps)
+
+    @staticmethod
+    def backward(ctx: Any, grad: torch.Tensor) -> tuple[Any, ...]:  # type: ignore[override]
+        (pts,) = ctx.saved_tensors
+        cdtype = torch.complex128 if pts.dtype == torch.float64 else torch.complex64
+        g = _execute(1, grad.to(cdtype), pts, ctx.shape, ctx.eps)
+        return (g.real if ctx.real else g), None, None
+
+
+def sample_transform(
+    volume: torch.Tensor, freqs: torch.Tensor, eps: float = 1e-6
+) -> torch.Tensor:
+    """
+    A grid's transform at arbitrary frequencies, differentiable in the grid.
+
+    The same quantity as `GridTransform`, ``sum_n volume[n] *
+    exp(-2j * pi * q . (n - shape // 2))``, for a caller that evaluates it
+    repeatedly and needs gradients: the plans are cached between calls
+    (`clear_plan_cache` releases them), and the backward is the transform's
+    adjoint, a type-1 NUFFT that spreads the incoming gradient back onto the
+    grid. No gradient flows to ``freqs``.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Real or complex grid of shape (Z, Y, X); CUDA tensors use cuFINUFFT,
+        others FINUFFT. float64/complex128 runs in double precision.
+    freqs : torch.Tensor
+        Frequencies of shape (M, 3) in cycles per voxel, ordered (x, y, z).
+    eps : float, optional
+        Requested relative accuracy. Default 1e-6.
+
+    Returns
+    -------
+    torch.Tensor
+        Complex values of shape (M,).
+    """
+    if volume.ndim != 3:
+        raise ValueError(f"expected a (Z, Y, X) grid, got shape {tuple(volume.shape)}")
+    double = volume.dtype in (torch.float64, torch.complex128)
+    real = torch.float64 if double else torch.float32
+    q = freqs.detach().to(device=volume.device, dtype=real)
+    pts = (q.flip(-1) * (2 * math.pi)).T.contiguous()
+    return _SampleTransform.apply(volume, pts, eps).reshape(-1)

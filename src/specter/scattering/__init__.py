@@ -8,6 +8,9 @@ reconstruction need. Both follow Kirkland's multislice formalism [1]_ and
 offer the same models (``multislice``, ``rytov``, ``firstborn``,
 ``kinematic``, ``projection``, ``ctf``), built from the kernels in
 ``_kernels``. The multislice method is that of Cowley & Moodie [2]_.
+`surface_slice_sum` forms the single-scatter models' slice sum from the
+UNROTATED volume instead, by sampling its transform on the posed Ewald
+surface, with no interpolation.
 
 References
 ----------
@@ -22,6 +25,7 @@ References
 from ..constants import energy_to_wavelength, interaction_parameter
 from ._batch import Scattering
 from ._iterative import IterativeScattering
+from ._surface import SURFACE_MODELS, surface_slice_sum
 from ._kernels import (
     absorption_factor,
     bandlimit_mask,
@@ -31,6 +35,7 @@ from ._kernels import (
 )
 
 __all__ = [
+    "SURFACE_MODELS",
     "IterativeScattering",
     "Scattering",
     "absorption_factor",
@@ -40,4 +45,5 @@ __all__ = [
     "fresnel_propagator",
     "interaction_parameter",
     "phase_scale",
+    "surface_slice_sum",
 ]

@@ -131,15 +131,16 @@ Conversion into `specter`'s representation:
 
 ## Applying a pose: real space or Fourier space
 
-You apply a pose to a volume by one of two interchangeable methods,
-selected by the `rotate_mode` field of the `Propagation` settings group,
-passed as `Specimen.scatter(..., rotate_mode=...)`, or as
+You apply a pose to a volume by one of three methods, selected by the
+`rotate_mode` field of the `Propagation` settings group, passed as
+`Specimen.scatter(..., rotate_mode=...)`, or as
 `propagation=Propagation(rotate_mode=...)` to `Reconstructor` or
-`Ghostbuster`. In a TOML config or on the command line
-it is the flat field `rotate_mode` of `ParticleStackConfig` and
-`ReconstructionConfig`. Both methods express the same
-convention, and both start from the same affine built above; they differ
-only in where the interpolation happens.
+`Ghostbuster`. In a TOML config or on the command line it is the flat field
+`rotate_mode` of `ParticleStackConfig` and `ReconstructionConfig`. All three
+express the same convention and start from the same affine built above.
+`"real"` and `"fourier"` rotate the volume and differ only in where the
+interpolation happens; `"surface"` never rotates it (see
+[Sampling the Ewald surface](#sampling-the-ewald-surface)).
 
 `"real"`, the default, resamples the density with `grid_sample`, applying the
 rotation and the translation together in one trilinear pass. `"fourier"`
@@ -172,7 +173,50 @@ centred in a roomy box, and the less accurate one for a crowded or off-centre
 specimen, or for any volume whose density reaches the box edge. It costs two
 FFTs and two resampling passes rather than one.
 
-Point-group averaging uses neither method by default. `apply_symmetry`,
+Rotation origin follows the same `"relion"` / `"center"` choice described
+above. In Fourier space, the rotation necessarily centres on the
+spectrum's DC term, which `fft3(..., shift=True)` places at `n // 2`. You
+reach `"center"` by folding the half-voxel offset into the same phase
+ramp; it works for cubic volumes only.
+
+### Sampling the Ewald surface
+
+For the single-scatter models the slice sum that forms the exit wave is the
+volume's transform on a surface. With the propagator \(F_z\) from slice
+\(z\) to the exit plane,
+
+\[
+\sum_z \mathcal{F}_2[V_z](\mathbf{k})\,F_z(\mathbf{k})
+= e^{i\phi(\mathbf{k})}\,
+\hat V\!\left(k_x,\,k_y,\,\mp\tfrac{\lambda}{2}|\mathbf{k}|^2\right),
+\]
+
+where \(\hat V\) is the volume's discrete-space Fourier transform, the sign
+is the Ewald curvature sign, and \(\phi\) collects the propagation to the
+exit plane and the phase origin. Rytov exponentiates the same sum and first
+Born linearises it; projection and the CTF model sample the plane
+\(k_z = 0\). A rotation of the specimen therefore rotates the sampling
+surface instead of the density, and an in-plane shift multiplies the result
+by a phase ramp. `rotate_mode="surface"`
+(`specter.scattering.surface_slice_sum`) evaluates the transform of the
+unrotated volume at the rotated points with a type-2 non-uniform FFT
+(Barnett et al. 2019; Shih et al. 2021), and its adjoint supplies the
+gradient, so no step resamples the grid. On poses that `"real"` applies
+without interpolating (quarter turns and whole-voxel shifts), the two agree
+to 1e-5 for all four models and both curvature signs.
+
+The method has three limits. Multislice and the kinematic model are not one
+sample of the transform and are refused. Crowding, ice, dose damage,
+per-image atom rendering and an objective aperture act on the posed volume,
+which this method never forms, so `Specimen.scatter` refuses them as well;
+it serves the bare template that `Reconstructor` scatters. No gradient flows
+to the rotation, so `Reconstructor` refuses `lr_R` under it, while shifts
+remain differentiable. Content shifted across the box edge wraps
+periodically, where `"real"` clips it.
+
+### Point-group averaging
+
+Point-group averaging uses neither rotation method by default. `apply_symmetry`,
 which `Reconstructor` calls once per epoch to enforce a point group, takes
 `method="exact"` (`symmetrize_exact`): it evaluates the volume's
 discrete-space transform at rotated frequencies with a type-2 non-uniform FFT
@@ -197,12 +241,6 @@ regime in which the table above shows that path to be least accurate. The
 exact average holds for a map that is band-limited and lies inside the box's
 inscribed sphere; density reaching the box faces wraps, as in any
 Fourier-space rotation.
-
-Rotation origin follows the same `"relion"` / `"center"` choice described
-above. In Fourier space, the rotation necessarily centres on the
-spectrum's DC term, which `fft3(..., shift=True)` places at `n // 2`. You
-reach `"center"` by folding the half-voxel offset into the same phase
-ramp; it works for cubic volumes only.
 
 ## Optical sign conventions
 

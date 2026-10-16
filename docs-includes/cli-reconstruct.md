@@ -107,7 +107,7 @@ specter reconstruct particle [OPTIONS]
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2 damping high-resolution signal in the forward model. |
 | `--klim` | `FLOAT` | _none_ | Hard frequency cutoff (1/Angstrom) applied to the simulated images. |
 | `--sparsity` | `FLOAT` | _none_ | L1 regularisation weight on the volume. |
-| `--rotate_mode` | `real` \| `fourier` | `real` | Domain in which per-particle rotations are applied. |
+| `--rotate_mode` | `real` \| `fourier` \| `surface` | `real` | How each particle's pose is applied. real/fourier: rotate the volume with trilinear interpolation. surface: sample the unrotated volume's transform on the posed Ewald surface, with no interpolation (projection, firstborn, rytov and ctf only; no lr_R). |
 | `--learn_noise_model` | `True` \| `False` | `False` | Estimate sigma^2(k) from the residuals during training (RELION-style) instead of assuming it. |
 | `--use_ncc` | `True` \| `False` | `False` | Use a normalised cross-correlation loss instead of MSE. |
 

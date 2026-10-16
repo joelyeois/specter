@@ -247,6 +247,12 @@ class Reconstructor(_BaseReconstructor):
         self._register_anisomag_and_scale(anisomag, scale, quaternions.shape[0])
 
         # imaging models
+        if propagation.rotate_mode == "surface" and lr_R is not None:
+            raise ValueError(
+                "rotate_mode='surface' does not refine rotations: the sampled "
+                "transform carries no gradient to the pose. Leave lr_R unset or "
+                "use rotate_mode='real'."
+            )
         self.propagation = propagation
         self.optics = optics
         self._register_bfactor(bfactor, quaternions.shape[0])
@@ -718,7 +724,17 @@ class Reconstructor(_BaseReconstructor):
             theta = rotations.build_affine_matrix(R, T)
             nz, ny, nx = mask.shape
             rotator = VolumeRotator(
-                nz, ny, nx, origin="relion", mode=self.propagation.rotate_mode
+                nz,
+                ny,
+                nx,
+                origin="relion",
+                # A mask is projected only to weight the loss; the surface
+                # path has no rotated volume to share, so it takes "real".
+                mode=(
+                    "real"
+                    if self.propagation.rotate_mode == "surface"
+                    else self.propagation.rotate_mode
+                ),
             ).to(mask.device)
             projected = rotator(mask, theta).max(dim=1).values
 

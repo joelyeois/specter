@@ -279,6 +279,17 @@ for complete five-epoch timings, host/GPU memory measurements and Fourier/FSC
 comparisons at 256- and 512-pixel input sizes. The memory saving is on the host;
 whole-command speed gains depend on the workload.
 
+## Pose application
+
+`--rotate_mode surface` computes each particle's exit wave from the
+unrotated volume's transform, sampled on the posed Ewald surface with a
+non-uniform FFT, instead of rotating the volume with trilinear interpolation
+(`real`, the default, or `fourier`). It removes the interpolation error from
+the forward model and is faster per particle, for the `projection`,
+`firstborn`, `rytov` and `ctf` scattering models. It does not refine
+rotations, so it cannot be combined with `--lr_R`. See
+[Sampling the Ewald surface](../concepts/conventions.md#sampling-the-ewald-surface).
+
 ## Symmetry
 
 `--symmetry` enforces a point-group symmetry (e.g. `C3`, `D7`, `I1`) on the

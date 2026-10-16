@@ -34,6 +34,7 @@ from ..potential import (
     template_occupancy_reference,
 )
 from ..rotations import VolumeRotator, translate_coordinates
+from ..scattering import surface_slice_sum
 from ..settings import Camera, Crowding, Ice, Optics, Propagation
 from . import _stages as stages
 from ._data import Exposure, Poses, settings_group
@@ -349,7 +350,15 @@ class Specimen:
         """What :meth:`scatter` will do to each image, in order."""
         p = settings_group(Propagation, propagation, settings)
         nz, nxy, pad = self.nz, self.nxy, self.pad_nxy(p.pads(False))
-        steps = [f"rotate the {nxy}^3 template to the image's pose ({p.rotate_mode})"]
+        if p.rotate_mode == "surface":
+            steps = [
+                f"sample the {nxy}^3 template's transform on the posed "
+                f"{'plane' if p.scattering_model in ('projection', 'ctf') else 'Ewald surface'}"
+            ]
+        else:
+            steps = [
+                f"rotate the {nxy}^3 template to the image's pose ({p.rotate_mode})"
+            ]
         steps.append(f"pad to {nz} x {pad} x {pad} voxels")
         if self.crowding is not None:
             steps.append(
@@ -451,9 +460,26 @@ class Specimen:
             uniform,
             str(device),
         )
-        V, v_ab = self._volume(poses, voltage, exposure, seed, objective_aperture, p)
-        wave = scattering(V, absorption_potential=v_ab)
-        del V, v_ab
+        if p.rotate_mode == "surface":
+            self._check_surface(objective_aperture)
+            spectrum = surface_slice_sum(
+                self.potential,
+                poses.quaternions,
+                poses.shifts,
+                pad_nxy=pad_nxy,
+                pixel_size=self.voxel_size,
+                wavelength=scattering.wavelength,
+                ews_curvature_sign=p.ews_curvature_sign,
+                flat=p.scattering_model in ("projection", "ctf"),
+            )
+            wave = scattering.from_slice_sum(spectrum, self.nz)
+            del spectrum
+        else:
+            V, v_ab = self._volume(
+                poses, voltage, exposure, seed, objective_aperture, p
+            )
+            wave = scattering(V, absorption_potential=v_ab)
+            del V, v_ab
         linear = p.scattering_model == "ctf"
         has_depth = p.scattering_model not in ("projection", "ctf")
         return ExitWave(
@@ -472,6 +498,23 @@ class Specimen:
             damaged=self.damaged,
             solvent_filtered=self._filters_solvent,
         )
+
+    def _check_surface(self, objective_aperture: float | None) -> None:
+        """Refuse what ``rotate_mode="surface"`` cannot do: it never forms the posed volume."""
+        dressed = {
+            "crowding": self.crowding is not None,
+            "ice": self.icemaker is not None,
+            "damage": self.damaged,
+            "per-image atom rendering": self.atoms is not None,
+            "an objective aperture": objective_aperture is not None,
+        }
+        present = [name for name, on in dressed.items() if on]
+        if present:
+            raise ValueError(
+                "rotate_mode='surface' samples the bare template's transform and "
+                f"cannot apply {', '.join(present)}, which act on the posed volume; "
+                "use rotate_mode='real'"
+            )
 
     def _volume(
         self,
@@ -498,6 +541,11 @@ class Specimen:
             )
         if (self.damaged or self._filters_solvent) and exposure is None:
             raise ValueError("damage() and Ice(motion_variance=...) need an exposure")
+        if p.rotate_mode == "surface":
+            raise ValueError(
+                "rotate_mode='surface' never forms the posed volume; materialize "
+                "it with rotate_mode='real'"
+            )
         template, device = self.potential, self.potential.device
         nxy, nz, n = self.nxy, self.nz, len(poses)
         thickness = None if self.ice is None else self.ice.thickness

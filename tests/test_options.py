@@ -32,7 +32,7 @@ _FIELD_ALIAS = {
     "bulk_scattering_factors": options.ScatteringFactors,
     "potential_method": options.PotentialMethod,
     "conv_backend": options.ConvBackend,
-    "rotate_mode": options.RotateMode,
+    "rotate_mode": options.PoseMode,
     "symmetry_mode": options.SymmetryMode,
     "tilt_axis": options.TiltAxis,
     "scheduler": options.Scheduler,

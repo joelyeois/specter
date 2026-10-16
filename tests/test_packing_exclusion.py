@@ -9,6 +9,7 @@ voxel (see specter.specimen.tomogram for how region masks feed into this).
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import torch
 from scipy import ndimage
 
@@ -150,3 +151,68 @@ def test_sampling_mask_raises_on_all_false_mask():
     except ValueError:
         raised = True
     assert raised
+
+
+@pytest.mark.parametrize(
+    "n,factor",
+    [
+        (40, 1),  # even canvas, field at render resolution
+        (41, 1),  # odd
+        (40, 2),  # even, coarse field
+        (41, 2),  # coarse field overhanging the canvas
+        (41, 4),
+    ],
+)
+def test_sampling_mask_positions_land_in_the_canvas_voxels_they_were_drawn_from(
+    n, factor, monkeypatch
+):
+    """
+    A field built from the render canvas must be read back on the canvas's
+    own grid: allow exactly one field voxel, and every accepted sphere must be
+    stamped (at ``round(x / voxel) + n // 2``, as
+    `insert_particles_into_micrograph` stamps it) inside the render voxels
+    that field voxel was pooled from.
+
+    Until 2026-10-16 the field was centred on the box, voxel ``j`` at ``(j +
+    0.5 - n_field / 2) * field_voxel``, half a render voxel off the canvas on
+    an even axis and up to ``factor / 2`` voxels off when the pooling factor
+    does not divide the canvas.
+    """
+    from specter.specimen.tomogram import _helpers
+
+    # The field's coarsening is normally chosen by a voxel budget; pin it.
+    monkeypatch.setattr(
+        _helpers,
+        "_resolve_exclusion_field_grid",
+        lambda shape, v: _helpers._coarsen_grid_by(shape, v, factor),
+    )
+
+    voxel = 2.0
+    shape = (n, n, n)
+    j = (n // factor) // 2 - 1  # an interior field voxel
+    allowed = torch.zeros(shape, dtype=torch.bool)
+    block = slice(j * factor, min((j + 1) * factor, n))
+    allowed[block, block, block] = True
+
+    allowed_field, exclusion_field, field_voxel, field_origin = (
+        _helpers._allowed_region_exclusion_field(allowed, shape, voxel)
+    )
+    assert field_voxel == voxel * factor
+    assert int(allowed_field.sum()) == 1
+
+    coords, _ = pack_hard_spheres_3d(
+        torch.full((40,), 0.05),
+        (n * voxel,) * 3,
+        seed=0,
+        sampling_mask=allowed_field,
+        field_voxel_size=field_voxel,
+        field_origin=field_origin,
+        clip_axes=(True, True, True),
+    )
+    assert coords.shape[0] > 5
+    stamped = torch.round(coords / voxel).long() + n // 2
+    lo, hi = j * factor, min((j + 1) * factor, n) - 1
+    assert bool(((stamped >= lo) & (stamped <= hi)).all()), (
+        f"render voxels {sorted(set(stamped.flatten().tolist()))} drawn from a "
+        f"field voxel that pools render voxels {lo}..{hi}"
+    )

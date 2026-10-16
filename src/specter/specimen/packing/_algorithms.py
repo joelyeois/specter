@@ -197,6 +197,7 @@ def pack_hard_spheres_3d(
     exclusion_distance_field: torch.Tensor | None = None,
     field_voxel_size: float | None = None,
     sampling_mask: torch.Tensor | None = None,
+    field_origin: tuple[float, float, float] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pack hard spheres of given (possibly different) radii into a box via
@@ -275,9 +276,8 @@ def pack_hard_spheres_3d(
         thickness boundary particles should not cross.
     exclusion_distance_field : torch.Tensor, optional
         Physical distance (Å) to the nearest FORBIDDEN voxel, shape
-        ``(Z, Y, X)``, on a box-centered grid at `field_voxel_size` spacing
-        (same centering convention `.membrane._raster.rasterize_membrane_
-        density` uses by default -- e.g. build this via ``scipy.ndimage.
+        ``(Z, Y, X)``, at `field_voxel_size` spacing and placed by
+        `field_origin` (build it e.g. via ``scipy.ndimage.
         distance_transform_edt`` on the complement of a boolean "forbidden"
         mask). A candidate is rejected if the field, trilinearly sampled at
         its center, is less than `radius + gap` -- i.e. its full sphere
@@ -319,6 +319,17 @@ def pack_hard_spheres_3d(
         `exclusion_distance_field` was built to keep candidates fully
         inside) fixes this by construction. Default None (uniform box-wide
         sampling, the original behavior).
+    field_origin : tuple of float, optional
+        Position (x, y, z), Å, of voxel (0, 0, 0) of
+        `exclusion_distance_field`/`sampling_mask`; voxel ``i`` is at
+        ``field_origin + i * field_voxel_size``. Default None: the render
+        canvas's own convention for a field at its resolution, voxel ``k`` at
+        ``(k - n // 2) * field_voxel_size`` (that of
+        `~specter.crowding.insert_particles_into_micrograph`). A field
+        max-pooled from the canvas by an integer factor is offset from that,
+        and from the canvas centre whenever the factor does not divide the
+        canvas; `..tomogram._helpers._allowed_region_exclusion_field` returns
+        the origin that goes with its field.
 
     Returns
     -------
@@ -349,19 +360,31 @@ def pack_hard_spheres_3d(
             "exclusion_distance_field and sampling_mask must have the same shape"
         )
 
+    field_origin_xyz = torch.zeros(3, device=device)
+    field = exclusion_distance_field
+    if field is None:
+        field = sampling_mask
+    if field is not None:
+        assert field_voxel_size is not None
+        if field_origin is None:
+            fz, fy, fx = field.shape
+            field_origin = (
+                -(fx // 2) * field_voxel_size,
+                -(fy // 2) * field_voxel_size,
+                -(fz // 2) * field_voxel_size,
+            )
+        field_origin_xyz = torch.tensor(
+            field_origin, dtype=torch.float32, device=device
+        )
+
     mask_voxel_positions_xyz: torch.Tensor | None = None
     if sampling_mask is not None:
-        nz, ny, nx = sampling_mask.shape
+        assert field_voxel_size is not None
         voxel_idx_zyx = sampling_mask.nonzero(as_tuple=False)
         if voxel_idx_zyx.shape[0] == 0:
             raise ValueError("sampling_mask has no True voxels")
-        extent = (
-            torch.tensor([nx, ny, nz], dtype=torch.float32, device=device)
-            * field_voxel_size
-        )
-        origin = -0.5 * extent
         idx_xyz = voxel_idx_zyx[:, [2, 1, 0]].to(device=device, dtype=torch.float32)
-        mask_voxel_positions_xyz = origin + (idx_xyz + 0.5) * field_voxel_size
+        mask_voxel_positions_xyz = field_origin_xyz + idx_xyz * field_voxel_size
 
     def _half_extents_xyz(box: tuple[float, float, float]) -> torch.Tensor:
         D, H, W = box
@@ -379,11 +402,7 @@ def pack_hard_spheres_3d(
         `specimen/membrane`."""
         assert exclusion_distance_field is not None and field_voxel_size is not None
         nz, ny, nx = exclusion_distance_field.shape
-        extent = (
-            torch.tensor([nx, ny, nz], dtype=points_xyz.dtype, device=device)
-            * field_voxel_size
-        )
-        origin = -0.5 * extent
+        origin = field_origin_xyz.to(points_xyz.dtype)
         idx = (points_xyz - origin) / field_voxel_size
         norm = (
             2.0

@@ -845,6 +845,7 @@ class TomogramSpecimenGenerator(
                     pack_voxel,
                     pack_factor,
                     occupancy,
+                    canvas_shape=self.target_shape,
                 )
             n_requested = int(exact_radii.numel())
             n_placed = int(accepted_idx.numel())
@@ -928,6 +929,7 @@ class TomogramSpecimenGenerator(
                     pack_voxel,
                     pack_factor,
                     occupancy,
+                    canvas_shape=self.target_shape,
                 )
             if accepted_idx.numel() == 0:
                 warnings.warn(
@@ -1056,7 +1058,7 @@ class TomogramSpecimenGenerator(
             forbidden = forbidden | obstacle_mask.cpu()
         allowed = ~forbidden
 
-        allowed_field, exclusion_field, field_voxel_size = (
+        allowed_field, exclusion_field, field_voxel_size, field_origin = (
             _allowed_region_exclusion_field(allowed, target_shape, voxel_size)
         )
 
@@ -1088,6 +1090,7 @@ class TomogramSpecimenGenerator(
                 exclusion_distance_field=exclusion_field,
                 field_voxel_size=field_voxel_size,
                 sampling_mask=allowed_field,
+                field_origin=field_origin,
                 max_passes=self.region_max_passes,
                 clip_axes=self.clip_axes,
             )
@@ -1201,6 +1204,7 @@ class TomogramSpecimenGenerator(
         pack_voxel: float,
         factor: int,
         occupancy: torch.Tensor,
+        canvas_shape: tuple[int, int, int] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Pack via `..packing.pack_shapes_3d` (exact rotated footprints against
@@ -1226,11 +1230,15 @@ class TomogramSpecimenGenerator(
         occupancy : torch.Tensor
             Boolean, shape `pack_shape`, True where an instance may not go.
             Already at packing resolution.
+        canvas_shape : tuple of int, optional
+            The render grid `pack_shape` tiles, which positions are returned
+            on. Default None: ``pack_shape * factor``.
 
         Returns
         -------
         coords : torch.Tensor
-            Accepted centers (x, y, z), A, box-centered, shape (M, 3).
+            Accepted molecule-origin positions (x, y, z), A, on the render
+            grid's convention, shape (M, 3).
         rotations : torch.Tensor
             Orientation each instance was accepted at, shape (M, 3, 3). Must
             be reused at render time.
@@ -1281,6 +1289,7 @@ class TomogramSpecimenGenerator(
             region_mask=region_mask,
             n_orientations=self.n_orientations,
             pool_factor=factor,
+            canvas_shape=canvas_shape,
             max_retries=self.packing_max_retries,
             seed=self.seed,
             device=self.device,

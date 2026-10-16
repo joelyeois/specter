@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import pytest
 import torch
 
@@ -66,45 +65,117 @@ def test_build_species_mask_gap_is_quantized_to_voxel_size():
     assert int(m5.sum()) > int(m0.sum())
 
 
-def test_pack_shapes_3d_output_reproduces_its_own_occupancy_grid():
+def _lopsided(seed: int = 0) -> torch.Tensor:
     """
-    Re-stamp from the RETURNED coords/rotations and require an exact match
-    with the packer's occupancy grid. This is what guarantees the renderer
-    draws the geometry that was collision-tested.
-    """
-    voxel = 4.0
-    masks = [build_species_mask(blob(), voxel, gap=0.0)]
-    species = torch.zeros(50, dtype=torch.long)
-    grid = (30, 60, 60)
+    An asymmetric cloud: an elongated body with a lobe off to one side.
 
-    coords, rotations, accepted, occ = pack_shapes_3d(
-        masks, species, grid, voxel, seed=1, n_orientations=32, max_retries=40
+    Its footprint's bounding box is centred well away from its origin, so a
+    placement recorded at the footprint's middle rather than at the origin
+    shows up as whole voxels of offset, not just rounding.
+    """
+    g = torch.Generator().manual_seed(seed)
+    body = torch.randn(300, 3, generator=g) * torch.tensor([3.0, 4.0, 14.0])
+    lobe = torch.randn(120, 3, generator=g) * 3.0 + torch.tensor([9.0, 0.0, 12.0])
+    coords = torch.cat([body, lobe])
+    return coords - coords.mean(0)
+
+
+def _render_masks(masks, coords, rots, species, canvas_shape, voxel):
+    """
+    Draw each placement's footprint mask the way the renderer draws a copy.
+
+    `fold_subvoxel_offsets` + `rotate_volume` + `insert_particles_into_micrograph`
+    is `_insert_rotated_copies`' own sequence, with the mask standing in for
+    the potential template, so the result is the footprint the canvas
+    actually receives at the recorded position and rotation. Thresholded at
+    0.5 like `_rotation_cache`, one copy at a time so neighbouring copies'
+    interpolation tails cannot add up past it. Returns the per-voxel count.
+    """
+    from specter.crowding import fold_subvoxel_offsets, insert_particles_into_micrograph
+
+    hits = torch.zeros(canvas_shape, dtype=torch.int16)
+    for i in range(len(coords)):
+        mask = masks[int(species[i])].to(torch.float32)
+        theta = build_affine_matrix(rots[i].unsqueeze(0))
+        theta, whole = fold_subvoxel_offsets(
+            theta, coords[i : i + 1], voxel, mask.shape
+        )
+        rotated = rotate_volume(mask, theta, padding_mode="zeros")
+        copy = insert_particles_into_micrograph(
+            rotated, whole, pixel_size=voxel, micro_shape=canvas_shape
+        )
+        hits += (copy > 0.5).to(torch.int16)
+    return hits
+
+
+@pytest.mark.parametrize(
+    "canvas_shape,factor",
+    [
+        ((32, 40, 40), 1),  # even
+        ((33, 39, 41), 1),  # odd
+        ((32, 40, 40), 2),  # coarse packing grid, even
+        ((33, 39, 39), 3),  # coarse, odd
+        ((33, 39, 41), 2),  # coarse grid overhanging the canvas
+    ],
+)
+def test_rendered_copies_reproduce_the_packers_occupancy_grid(canvas_shape, factor):
+    """
+    Render every placement through the renderer's own functions, at the
+    returned position and rotation, and require the result to be EXACTLY
+    the occupancy the packer marked (after pooling onto the packing grid).
+
+    This is the property that makes packing mean anything: the copy is drawn
+    where its footprint was collision-tested. Until 2026-10-16 positions were
+    the packing voxel's centre, ``-extent / 2 + (idx + 0.5) * voxel``, on a
+    canvas that puts voxel ``k`` at ``(k - n // 2) * voxel``, and the voxel
+    was the middle of the trimmed footprint rather than the molecule origin
+    -- half a voxel on every even axis, plus up to several voxels for an
+    asymmetric molecule.
+    """
+    voxel = 2.0
+    grid = tuple(-(-n // factor) for n in canvas_shape)
+    mask = build_species_mask(_lopsided(), voxel, gap=0.0)
+    torch.manual_seed(0)  # the rotation cache draws from the global stream
+    coords, rots, accepted, occ = pack_shapes_3d(
+        [mask],
+        torch.zeros(30, dtype=torch.long),
+        grid,
+        voxel * factor,
+        pool_factor=factor,
+        canvas_shape=canvas_shape,
+        seed=1,
+        n_orientations=16,
+        max_retries=60,
     )
-    assert accepted.numel() > 0
+    assert accepted.numel() >= 3, "too few placements for the test to bite"
+    # every position is a whole render voxel of the canvas
+    assert torch.equal(coords, torch.round(coords / voxel) * voxel)
 
-    replay = np.zeros(grid, dtype=np.int32)
-    extent = np.array(grid)[::-1] * voxel
-    origin = -0.5 * extent
-    for i in range(accepted.numel()):
-        m = masks[0].to(torch.float32)
-        theta = build_affine_matrix(rotations[i].unsqueeze(0))
-        rm = (rotate_volume(m, theta, padding_mode="zeros")[0] > 0.5).numpy()
-        nzi = np.nonzero(rm)
-        sl = tuple(slice(int(a.min()), int(a.max()) + 1) for a in nzi)
-        fp = rm[sl]
-        centre = np.round((coords[i].numpy() - origin) / voxel - 0.5).astype(int)[::-1]
-        loc = centre - np.array(fp.shape) // 2
-        lo = np.maximum(loc, 0)
-        hi = np.minimum(loc + np.array(fp.shape), np.array(grid))
-        slo = lo - loc
-        shi = slo + (hi - lo)
-        replay[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]] += fp[
-            slo[0] : shi[0], slo[1] : shi[1], slo[2] : shi[2]
-        ]
-
-    assert int((replay > 1).sum()) == 0, "instances overlap when replayed"
-    assert int((replay > 0).sum()) == int(occ.sum()), (
-        "replayed footprints do not reproduce the packer's occupancy grid"
+    hits = _render_masks([mask], coords, rots, accepted * 0, canvas_shape, voxel)
+    assert int((hits > 1).sum()) == 0, "rendered copies overlap"
+    rendered = (
+        torch.nn.functional.max_pool3d(
+            (hits > 0)[None, None].to(torch.float32),
+            kernel_size=factor,
+            stride=factor,
+            ceil_mode=True,
+        )[0, 0]
+        > 0
+    )
+    assert int((rendered & ~occ).sum()) == 0, "a copy covers voxels never tested"
+    missing = occ & ~rendered
+    # The only marked voxels a copy may fail to cover are those whose render
+    # voxels lie past the canvas (a coarse grid that overhangs it), where
+    # insertion clips.
+    overhang = torch.zeros(grid, dtype=torch.bool)
+    for axis, n in enumerate(canvas_shape):
+        if n % factor:
+            sl = [slice(None)] * 3
+            sl[axis] = slice(grid[axis] - 1, grid[axis])
+            overhang[tuple(sl)] = True
+    assert int((missing & ~overhang).sum()) == 0, (
+        f"{int((missing & ~overhang).sum())} tested voxels are not where the "
+        "copy was rendered"
     )
 
 
@@ -229,31 +300,101 @@ def test_generator_coarse_packing_survives_both_placement_stages():
     assert len(gen.placements) > 0
 
 
-def _stamp_fine(masks_fine, coords, rots, species, grid, voxel):
-    """Rasterize placements at FINE resolution; return per-voxel hit count."""
-    acc = np.zeros(grid, dtype=np.int16)
-    origin = -0.5 * np.array(grid)[::-1] * voxel
-    for i in range(len(coords)):
-        m = masks_fine[int(species[i])].to(torch.float32)
-        theta = build_affine_matrix(rots[i].unsqueeze(0))
-        rm = (rotate_volume(m, theta, padding_mode="zeros")[0] > 0.5).numpy()
-        nzi = np.nonzero(rm)
-        if len(nzi[0]) == 0:
-            continue
-        sl = tuple(slice(int(a.min()), int(a.max()) + 1) for a in nzi)
-        fp = rm[sl]
-        centre = np.round((coords[i].numpy() - origin) / voxel - 0.5).astype(int)[::-1]
-        loc = centre - np.array(fp.shape) // 2
-        lo = np.maximum(loc, 0)
-        hi = np.minimum(loc + np.array(fp.shape), np.array(grid))
-        if np.any(hi <= lo):
-            continue
-        slo = lo - loc
-        shi = slo + (hi - lo)
-        acc[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]] += fp[
-            slo[0] : shi[0], slo[1] : shi[1], slo[2] : shi[2]
-        ]
-    return acc
+@pytest.mark.parametrize(
+    "target_shape,packing_voxel_size",
+    [
+        ((40, 48, 48), None),  # even, packed at render resolution
+        ((40, 48, 48), 8.0),  # even, packed on a 2x coarser grid
+        ((41, 49, 49), 8.0),  # odd, and a coarse grid overhanging the canvas
+    ],
+)
+def test_generator_renders_a_copy_on_the_footprint_it_tested(
+    target_shape, packing_voxel_size, monkeypatch
+):
+    """
+    One copy of an asymmetric structure (myoglobin), packed and rendered by
+    `TomogramSpecimenGenerator` itself: the voxels the packer marked as
+    taken must line up with the voxels the rendered copy occupies.
+
+    The two are different shapes -- the packer's footprint is the atoms
+    grown by their van der Waals radius, the rendered label is the potential
+    above 1% of its peak -- so they are compared by alignment: of every
+    integer shift of the rendered footprint, the best overlap must be at
+    zero. Before 2026-10-16 it never was in an even box (best shifts of one
+    to two voxels, on the order of 10 A at 4 A/voxel), and a copy then
+    rendered partly outside the space it had been granted.
+    """
+    import specter.specimen.tomogram._generator as generator_module
+    from specter.specimen.tomogram import (
+        TomogramProteinSpec,
+        TomogramSpecimenGenerator,
+    )
+
+    fixture = Path(__file__).parent / "test_data" / "1mbo.cif"
+    if not fixture.exists():
+        pytest.skip("bundled PDB fixture missing")
+
+    marked: list[torch.Tensor] = []
+    real_pack = generator_module.pack_shapes_3d
+
+    def recording_pack(*args, **kwargs):
+        before = kwargs["occupancy"].clone()
+        out = real_pack(*args, **kwargs)
+        marked.append(out[3] & ~before)
+        return out
+
+    monkeypatch.setattr(generator_module, "pack_shapes_3d", recording_pack)
+
+    voxel = 4.0
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=target_shape,
+        voxel_size=voxel,
+        protein_specs=[
+            TomogramProteinSpec(pdb_source=str(fixture), n_copies=1, location="cytosol")
+        ],
+        packing_voxel_size=packing_voxel_size,
+        parameterization="kirkland",
+        seed=0,
+        progressbars=False,
+    )
+    gen.generate()
+    assert len(gen.placements) == 1 and len(marked) == 1
+    tested = marked[0]
+
+    factor = 1 if packing_voxel_size is None else round(packing_voxel_size / voxel)
+    rendered = gen.instance_labels > 0
+    rendered = (
+        torch.nn.functional.max_pool3d(
+            rendered[None, None].to(torch.float32),
+            kernel_size=factor,
+            stride=factor,
+            ceil_mode=True,
+        )[0, 0]
+        > 0
+    )
+    assert rendered.shape == tested.shape
+
+    def overlap(shift: tuple[int, int, int]) -> float:
+        moved = torch.roll(rendered, shift, dims=(0, 1, 2))
+        return float((moved & tested).sum()) / float((moved | tested).sum())
+
+    shifts = [
+        (dz, dy, dx)
+        for dz in (-3, -2, -1, 0, 1, 2, 3)
+        for dy in (-3, -2, -1, 0, 1, 2, 3)
+        for dx in (-3, -2, -1, 0, 1, 2, 3)
+    ]
+    best = max(shifts, key=overlap)
+    assert best == (0, 0, 0), (
+        f"the rendered copy lines up best with the tested footprint shifted "
+        f"by {best} packing voxels (overlap {overlap(best):.3f}, against "
+        f"{overlap((0, 0, 0)):.3f} unshifted)"
+    )
+    position = gen.placements[0].position_xyz
+    assert torch.equal(position, torch.round(position / voxel) * voxel), (
+        "a packed position must be a whole render voxel"
+    )
 
 
 def test_coarse_packing_leaves_no_overlap_at_render_resolution():
@@ -286,7 +427,7 @@ def test_coarse_packing_leaves_no_overlap_at_render_resolution():
     )
     assert accepted.numel() > 20, f"only {accepted.numel()} placed; test is vacuous"
 
-    hits = _stamp_fine(
+    hits = _render_masks(
         [fine],
         coords,
         rots,
@@ -314,7 +455,7 @@ def test_rotation_cache_pools_after_rotating():
 
     factor, n_or = 4, 24
     fine = build_species_mask(blob(n_atoms=3000, radius=14.0), 1.0, gap=0.0)
-    cache, _, _, _, R = _rotation_cache(fine, n_or, "cpu", 0, pool_factor=factor)
+    cache, _, _, _, _, R = _rotation_cache(fine, n_or, "cpu", 0, pool_factor=factor)
 
     def pool(x):
         return (

@@ -163,7 +163,7 @@ class _MembraneStageMixin:
                 ]
             )
             if carbon_mask is not None:
-                allowed_field, exclusion_field, field_voxel_size = (
+                allowed_field, exclusion_field, field_voxel_size, field_origin = (
                     _allowed_region_exclusion_field(
                         (~carbon_mask).cpu(), target_shape, voxel_size
                     )
@@ -186,6 +186,7 @@ class _MembraneStageMixin:
                     if carbon_mask is not None
                     else None,
                     sampling_mask=(allowed_field if carbon_mask is not None else None),
+                    field_origin=field_origin if carbon_mask is not None else None,
                 )
             n_dropped = len(self.membrane_instances) - accepted_idx.numel()
             if n_dropped:

@@ -353,7 +353,7 @@ def _allowed_region_exclusion_field(
     allowed: torch.Tensor,
     target_shape: tuple[int, int, int],
     voxel_size: float,
-) -> tuple[torch.Tensor, torch.Tensor, float]:
+) -> tuple[torch.Tensor, torch.Tensor, float, tuple[float, float, float]]:
     """
     Build the sampling mask and clearance field `pack_hard_spheres_3d`
     takes from a boolean ``allowed`` mask on the render grid.
@@ -380,6 +380,12 @@ def _allowed_region_exclusion_field(
         float32 clearance, Å, same shape as ``allowed_field``.
     field_voxel_size : float
         Voxel size of both fields, Å.
+    field_origin : tuple of float
+        Position (x, y, z), Å, of field voxel (0, 0, 0), for
+        `pack_hard_spheres_3d`'s `field_origin`. Field voxel ``j`` pools
+        render voxels ``[j * f, (j + 1) * f)``, which the canvas puts at
+        ``(k - n // 2) * voxel_size``, so it sits at their mean, ``(j * f +
+        (f - 1) / 2 - n // 2) * voxel_size``.
     """
     field_voxel_size, field_shape, field_factor = _resolve_exclusion_field_grid(
         target_shape, voxel_size
@@ -393,7 +399,14 @@ def _allowed_region_exclusion_field(
         torch.from_numpy(ndimage.distance_transform_edt(allowed_field.numpy())).float()
         * field_voxel_size
     )
-    return allowed_field, exclusion_field, field_voxel_size
+    nz, ny, nx = target_shape
+    half_block = (field_factor - 1) / 2
+    field_origin = (
+        (half_block - nx // 2) * voxel_size,
+        (half_block - ny // 2) * voxel_size,
+        (half_block - nz // 2) * voxel_size,
+    )
+    return allowed_field, exclusion_field, field_voxel_size, field_origin
 
 
 # Bytes/voxel for each accumulator tensor (volume: float32, instance_labels

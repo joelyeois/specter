@@ -240,7 +240,14 @@ def _rotation_cache(
     device: torch.device | str,
     seed: int | None,
     pool_factor: int = 1,
-) -> tuple[list[np.ndarray], list[tuple], list[bool], list[np.ndarray], torch.Tensor]:
+) -> tuple[
+    list[np.ndarray],
+    list[tuple],
+    list[bool],
+    list[np.ndarray],
+    np.ndarray,
+    torch.Tensor,
+]:
     """
     Rotate `mask` into `n_orientations` orientations, once.
 
@@ -280,6 +287,15 @@ def _rotation_cache(
         which is what licenses the loop's cheap pre-test -- a molecule with
         a hollow center (a shell, a channel) can legitimately be placed
         over an occupied center voxel.
+    origin_offsets : np.ndarray
+        Per orientation, where the molecule origin sits relative to the
+        footprint's anchor voxel ``(hz, hy, hx)``, in voxels of `mask`'s own
+        (fine) grid, shape (n_orientations, 3), int64, (z, y, x). A
+        placement whose anchor lands on packing voxel ``c`` puts the origin
+        on fine voxel ``c * pool_factor + offset``: the anchor is the
+        trimmed footprint's middle voxel, which for an asymmetric molecule
+        is not where its origin is (up to two voxels away on 1MBO at 4 A).
+        `_placement_positions` turns that into the recorded position.
     R : torch.Tensor
         The rotation matrices, shape (n_orientations, 3, 3).
     """
@@ -371,10 +387,20 @@ def _rotation_cache(
     geom: list[tuple] = []
     centre_solid: list[bool] = []
     probes: list[np.ndarray] = []
+    # The molecule origin is `mask`'s centre voxel (odd-sized, see
+    # `build_species_mask`), and `rotate_volume` turns about that voxel, so
+    # it stays there. Pooling tiles the rotated fine box from index 0, so
+    # packing voxel t of an orientation covers fine voxels
+    # [t * pool_factor, (t + 1) * pool_factor) -- the same tiling
+    # `_downsample_mask_maxpool` gives the occupancy grid, which is what
+    # lets a fine offset be read straight off the packing index.
+    centre_fine = np.array([s // 2 for s in mask.shape], dtype=np.int64)
+    origin_offsets = np.zeros((n, 3), dtype=np.int64)
     for i in range(n):
         bz0, bz1, by0, by1, bx0, bx1 = (int(v) for v in bounds[i])
         if bz1 < bz0:
             fp = rot_np[i]
+            bz0 = by0 = bx0 = 0
         else:
             fp = np.ascontiguousarray(
                 rot_np[i, bz0 : bz1 + 1, by0 : by1 + 1, bx0 : bx1 + 1]
@@ -382,12 +408,59 @@ def _rotation_cache(
         cache.append(fp)
         sz, sy, sx = fp.shape
         geom.append((sz, sy, sx, sz // 2, sy // 2, sx // 2))
+        anchor = np.array([bz0 + sz // 2, by0 + sy // 2, bx0 + sx // 2])
+        origin_offsets[i] = centre_fine - anchor * pool_factor
         centre_solid.append(bool(fp[sz // 2, sy // 2, sx // 2]) if fp.size else False)
         idx = np.array(np.nonzero(fp)).T
         if idx.shape[0] > _N_PROBE:
             idx = idx[rng.choice(idx.shape[0], _N_PROBE, replace=False)]
         probes.append(np.ascontiguousarray(idx))
-    return cache, geom, centre_solid, probes, R
+    return cache, geom, centre_solid, probes, origin_offsets, R
+
+
+def _placement_positions(
+    anchors_zyx: np.ndarray,
+    origin_offsets_zyx: np.ndarray,
+    canvas_shape: tuple[int, ...],
+    canvas_voxel_size: float,
+    pool_factor: int,
+) -> np.ndarray:
+    """
+    Physical position of each accepted placement's molecule origin.
+
+    The canvas a copy is rendered into maps voxel ``k`` to ``(k - n // 2) *
+    voxel`` per axis (`~specter.arrays.clip_insert_bounds`,
+    `~specter.crowding.insert_particles_into_micrograph`), and packing voxel
+    ``j`` covers fine voxels ``[j * pool_factor, (j + 1) * pool_factor)`` of
+    it. So the origin of a footprint anchored at packing voxel ``c`` is on
+    fine voxel ``c * pool_factor + offset``, and its position is that
+    voxel's. Every position is therefore a whole render voxel, and the copy
+    is stamped exactly where its footprint was tested, on even and odd grids
+    alike and at any `pool_factor`.
+
+    Parameters
+    ----------
+    anchors_zyx : np.ndarray
+        Packing-grid voxel each footprint's anchor was placed on, shape
+        (M, 3), (z, y, x).
+    origin_offsets_zyx : np.ndarray
+        The accepted orientation's offset from `_rotation_cache`, shape
+        (M, 3), (z, y, x), in render voxels.
+    canvas_shape : tuple of int
+        (Z, Y, X) of the render grid.
+    canvas_voxel_size : float
+        Render voxel size, A.
+    pool_factor : int
+        Packing voxels per render voxel, per axis.
+
+    Returns
+    -------
+    np.ndarray
+        Positions (x, y, z), A, shape (M, 3).
+    """
+    fine = anchors_zyx * pool_factor + origin_offsets_zyx
+    centre = np.array(canvas_shape, dtype=np.int64) // 2
+    return np.ascontiguousarray(((fine - centre) * canvas_voxel_size)[:, ::-1])
 
 
 def pack_shapes_3d(
@@ -404,6 +477,7 @@ def pack_shapes_3d(
     device: str | torch.device = "cpu",
     clip_axes: tuple[bool, bool, bool] = (False, False, False),
     pool_factor: int = 1,
+    canvas_shape: tuple[int, int, int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Pack rigid molecular shapes into a voxel grid via Random Sequential
@@ -427,8 +501,11 @@ def pack_shapes_3d(
         with membranes/filaments/carbon already rendered. Modified in place
         as instances are placed. Default None (empty).
     region_mask : torch.Tensor, optional
-        Boolean (Z, Y, X); instance centers are drawn uniformly from its True
-        voxels. Default None (anywhere in the grid).
+        Boolean (Z, Y, X); each attempt's anchor voxel (the middle of its
+        trimmed footprint, not necessarily the molecule origin) is drawn
+        uniformly from its True voxels. It narrows where attempts are drawn;
+        what may be covered is `occupancy`'s to say. Default None (anywhere
+        in the grid).
     n_orientations : int, optional
         Size of the per-species rotation cache. Default 256.
     max_retries : int, optional
@@ -518,11 +595,25 @@ def pack_shapes_3d(
         `_rotation_cache`, where the order of those two operations is what
         makes the guarantee hold at render resolution. Default 1 (masks are
         already at the packing grid's own voxel size).
+    canvas_shape : tuple of int, optional
+        (Z, Y, X) of the render grid the copies are drawn into, at
+        ``voxel_size / pool_factor``. The packing grid tiles it from voxel 0,
+        packing voxel ``j`` covering render voxels ``[j * pool_factor, (j +
+        1) * pool_factor)``, so `grid_shape` must be ``ceil(canvas_shape /
+        pool_factor)``. Needed to place each copy on the render grid's own
+        centre, which a coarse grid that overhangs the canvas does not
+        share. Default None: ``grid_shape * pool_factor``.
 
     Returns
     -------
     coords : torch.Tensor
-        Accepted instance centers (x, y, z), A, box-centered, shape (M, 3).
+        Accepted instance positions (x, y, z), A, shape (M, 3): where each
+        molecule's origin (the frame of `species_masks`, which is the frame
+        its potential template is built in) lands, in the render grid's
+        convention that voxel ``k`` is at ``(k - n // 2) * voxel`` -- the one
+        `~specter.crowding.insert_particles_into_micrograph` stamps with.
+        Each is a whole render voxel, and rendering a copy there reproduces
+        the footprint that was collision-tested (see `_placement_positions`).
     rotations : torch.Tensor
         Rotation matrix each instance was accepted at, shape (M, 3, 3).
     accepted_idx : torch.Tensor
@@ -532,7 +623,17 @@ def pack_shapes_3d(
     """
     rng = np.random.default_rng(seed)
     nz, ny, nx = grid_shape
-    grid = np.array([nz, ny, nx])
+    canvas = (
+        tuple(int(g) * pool_factor for g in grid_shape)
+        if canvas_shape is None
+        else tuple(int(c) for c in canvas_shape)
+    )
+    if tuple(-(-c // pool_factor) for c in canvas) != tuple(grid_shape):
+        raise ValueError(
+            f"grid_shape {tuple(grid_shape)} does not tile canvas_shape {canvas} "
+            f"at pool_factor {pool_factor}: expected ceil(canvas_shape / "
+            "pool_factor)"
+        )
 
     occ = (
         np.zeros(grid_shape, dtype=bool)
@@ -563,6 +664,7 @@ def pack_shapes_3d(
     order = np.argsort(-footprints)
 
     out_pos: list[tuple[int, int, int]] = []
+    out_offset: list[np.ndarray] = []
     out_rot: list[np.ndarray] = []
     out_row: list[int] = []
 
@@ -593,7 +695,7 @@ def pack_shapes_3d(
         rows = np.flatnonzero(species_idx_np == s)
         if rows.size == 0:
             continue
-        cache, geom, centre_solid, probes, R = _rotation_cache(
+        cache, geom, centre_solid, probes, origin_offsets, R = _rotation_cache(
             species_masks[int(s)], n_orientations, device, seed, pool_factor
         )
         R_np = R.cpu().numpy()
@@ -768,6 +870,7 @@ def pack_shapes_3d(
                     if not np.any(occ[dst] & sub):
                         occ[dst] |= sub
                         out_pos.append((cz, cy, cx))
+                        out_offset.append(origin_offsets[oi])
                         out_rot.append(R_np[oi])
                         out_row.append(int(rows[row_i]))
                         accepted = True
@@ -794,10 +897,13 @@ def pack_shapes_3d(
             torch.from_numpy(occ),
         )
 
-    idx_zyx = np.asarray(out_pos)
-    extent = grid[::-1] * voxel_size  # (x, y, z)
-    origin = -0.5 * extent
-    coords_xyz = origin + (idx_zyx[:, ::-1] + 0.5) * voxel_size
+    coords_xyz = _placement_positions(
+        np.asarray(out_pos, dtype=np.int64),
+        np.asarray(out_offset, dtype=np.int64),
+        canvas,
+        voxel_size / pool_factor,
+        pool_factor,
+    )
 
     return (
         torch.tensor(coords_xyz, dtype=torch.float32),

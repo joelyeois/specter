@@ -15,6 +15,7 @@ import torch
 
 from specter.specimen.packing._shape import (
     _DENSE_REGION_FRACTION,
+    _placement_positions,
     _rotation_cache,
     build_species_mask,
     pack_shapes_3d,
@@ -36,7 +37,11 @@ def pack_shapes_3d_reference(
     clip_axes: tuple[bool, bool, bool] = (False, False, False),
     pool_factor: int = 1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """The one-attempt-at-a-time loop this replaced, kept verbatim (docstring removed)."""
+    """The one-attempt-at-a-time loop this replaced, kept verbatim (docstring
+    removed) except for recording each placement's orientation offset and
+    converting with `_placement_positions`, which is shared rather than
+    duplicated: this test pins placement decisions, and
+    `test_packing_shape.py` pins the conversion against the renderer."""
     rng = np.random.default_rng(seed)
     nz, ny, nx = grid_shape
     grid = np.array([nz, ny, nx])
@@ -70,6 +75,7 @@ def pack_shapes_3d_reference(
     order = np.argsort(-footprints)
 
     out_pos: list[tuple[int, int, int]] = []
+    out_offset: list[np.ndarray] = []
     out_rot: list[np.ndarray] = []
     out_row: list[int] = []
 
@@ -91,7 +97,7 @@ def pack_shapes_3d_reference(
         rows = np.flatnonzero(species_idx_np == s)
         if rows.size == 0:
             continue
-        cache, geom, centre_solid, probes, R = _rotation_cache(
+        cache, geom, centre_solid, probes, origin_offsets, R = _rotation_cache(
             species_masks[int(s)], n_orientations, device, seed, pool_factor
         )
         # Probe indices -> flat offsets, which needs the grid's own strides
@@ -188,6 +194,7 @@ def pack_shapes_3d_reference(
                     continue
                 occ[dst] |= sub
                 out_pos.append((cz, cy, cx))
+                out_offset.append(origin_offsets[oi])
                 out_rot.append(R_np[oi])
                 out_row.append(int(row))
                 stall = 0
@@ -201,10 +208,13 @@ def pack_shapes_3d_reference(
             torch.from_numpy(occ),
         )
 
-    idx_zyx = np.asarray(out_pos)
-    extent = grid[::-1] * voxel_size  # (x, y, z)
-    origin = -0.5 * extent
-    coords_xyz = origin + (idx_zyx[:, ::-1] + 0.5) * voxel_size
+    coords_xyz = _placement_positions(
+        np.asarray(out_pos, dtype=np.int64),
+        np.asarray(out_offset, dtype=np.int64),
+        tuple(int(g) * pool_factor for g in grid),
+        voxel_size / pool_factor,
+        pool_factor,
+    )
 
     return (
         torch.tensor(coords_xyz, dtype=torch.float32),

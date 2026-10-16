@@ -141,6 +141,27 @@ class ReconstructionConfig:
         ),
         check="non_negative",
     )
+    # Unset starts from zeros. A strongly scattering specimen (a peak phase of
+    # several radians) can leave the optimiser on a wrapped-phase solution
+    # from zeros that a low-resolution start avoids.
+    init_volume: str | None = setting(
+        None,
+        help=(
+            "Starting volume (.mrc) instead of zeros, on the reconstruction's grid "
+            "or an integer multiple of it (block-averaged down, as --test_run "
+            "needs). Both gold-standard halves start from it, so low-pass it "
+            "with --init_lowpass to keep the halves independent."
+        ),
+        check="existing_file",
+    )
+    init_lowpass: float | None = setting(
+        None,
+        help=(
+            "Low-pass --init_volume to this resolution (Angstrom) before starting. "
+            "Unset uses it as it is."
+        ),
+        check="positive",
+    )
 
     # --- Symmetry ---
     symmetry: str | None = setting(
@@ -350,7 +371,10 @@ class ReconstructionConfig:
     ews_curvature_sign: EwaldSphereSign = setting(
         "negative",
         help=(
-            "Sign convention for Ewald-sphere curvature. negative matches CryoSPARC."
+            "Sign of the Ewald-sphere curvature. The correct sign follows from the "
+            "instrument's image geometry, not from a software convention, so try "
+            "both on a new dataset: the wrong one costs resolution wherever the "
+            "curvature matters."
         ),
     )
     # Unset reads the amplitude contrast from the .cs file, which is where it

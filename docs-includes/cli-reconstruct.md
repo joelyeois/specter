@@ -47,6 +47,8 @@ specter reconstruct particle [OPTIONS]
 | `--lr` | `FLOAT` | `0.1` | Learning rate for the volume. Unset (None) freezes the volume, which is what refining poses alone means. |
 | `--scheduler` | `LambdaLR` \| `OneCycleLR` \| `CosineAnnealingWarmRestarts` \| `MultiplicativeLR` | `LambdaLR` | Learning-rate schedule for the volume optimiser. |
 | `--lr_decay` | `FLOAT` | `0.1` | Decay rate for the LambdaLR schedule: multiplier = 1 / (1 + lr_decay * sqrt(global_step)). Unused by other schedulers. |
+| `--init_volume` | `TEXT` | _none_ | Starting volume (.mrc) instead of zeros, on the reconstruction's grid or an integer multiple of it (block-averaged down, as --test_run needs). Both gold-standard halves start from it, so low-pass it with --init_lowpass to keep the halves independent. |
+| `--init_lowpass` | `FLOAT` | _none_ | Low-pass --init_volume to this resolution (Angstrom) before starting. Unset uses it as it is. |
 
 **Symmetry**{ #specter-reconstruct-particle-symmetry }
 
@@ -102,7 +104,7 @@ specter reconstruct particle [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--scattering_model` | `multislice` \| `rytov` \| `firstborn` \| `projection` | `rytov` | Wave propagation model used by the forward pass. rytov is the default here rather than multislice: the model runs once per particle per step, and rytov is the cheapest one that still carries Ewald-sphere curvature. |
-| `--ews_curvature_sign` | `negative` \| `positive` | `negative` | Sign convention for Ewald-sphere curvature. negative matches CryoSPARC. |
+| `--ews_curvature_sign` | `negative` \| `positive` | `negative` | Sign of the Ewald-sphere curvature. The correct sign follows from the instrument's image geometry, not from a software convention, so try both on a new dataset: the wrong one costs resolution wherever the curvature matters. |
 | `--alpha` | `FLOAT` | _none_ | Amplitude contrast ratio for the forward model, overriding the .cs file's ctf/amp_contrast. Unset uses the .cs file's value. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2 damping high-resolution signal in the forward model. |
 | `--klim` | `FLOAT` | _none_ | Hard frequency cutoff (1/Angstrom) applied to the simulated images. |

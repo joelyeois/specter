@@ -119,7 +119,10 @@ class Propagation:
         300 kV, noting the uncertainty and the voltage caveat documented
         there.
     ews_curvature_sign : EwaldSphereSign
-        Sign of the Ewald-sphere curvature, matching CryoSPARC's convention.
+        Sign of the Ewald-sphere curvature. Which sign describes a given
+        dataset is a property of the instrument's image geometry rather than of
+        a software convention, so a reconstruction should try both; a
+        simulation and the reconstruction of its output must use the same one.
         Default ``"negative"``.
     klim : float, optional
         Kirkland bandlimit as a fraction of Nyquist (``0.66`` prevents FFT

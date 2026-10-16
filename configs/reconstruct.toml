@@ -36,6 +36,8 @@ batchsize = 3
 lr = 0.1               # volume learning rate; unset to freeze the volume
 scheduler = "LambdaLR"
 lr_decay = 0.1         # LambdaLR only: multiplier = 1 / (1 + lr_decay * sqrt(step))
+# init_volume = "start.mrc"   # start from this map (volts) instead of zeros
+# init_lowpass = 15.0         # low-pass the start to this resolution (A) first
 
 # Omit `symmetry` for C1. "exact" averages the point group without
 # interpolation; symmetry_batchsize applies only to the interpolating "real" and

@@ -137,7 +137,7 @@ specter simulate particles [OPTIONS]
 | `--conv_backend` | `fftconvolve` \| `conv3d` \| `auto` | `fftconvolve` | Convolution backend for potential building. Unused for potential_method='analytic'. |
 | `--periodic` | `True` \| `False` | `False` | Wrap atom density across the box faces when voxelizing. Keep false for a particle -- a protein is a finite object, so wrapping smears its edge density onto the opposite face. Requires potential_method='3d'; 'analytic' and '2d' raise. |
 | `--shtyrov_params_path` | `TEXT` | _none_ | Override the bundled Shtyrov parameter table. |
-| `--ews_curvature_sign` | `negative` \| `positive` | `positive` | Ewald sphere curvature sign, matching CryoSPARC's convention. |
+| `--ews_curvature_sign` | `negative` \| `positive` | `positive` | Ewald-sphere curvature sign. Reconstruct the stack with the same sign: a mismatch costs resolution wherever the curvature matters. |
 | `--klim` | `FLOAT` | _none_ | Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but discards real spatial frequency content above it. Unset (the default) keeps the full Nyquist range and accepts the aliasing. |
 | `--rotate_mode` | `real` \| `fourier` | `real` | Volume rotation method: 'real' (trilinear interpolation) or 'fourier' (no boundary artifacts). |
 | `--bulk_scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `kirkland` | Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain. |

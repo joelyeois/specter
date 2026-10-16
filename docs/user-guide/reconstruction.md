@@ -304,6 +304,35 @@ for the measured loss. `--symmetry_batchsize` lowers the memory of those two
 modes on a large box. An I1 average of a 560³ map takes about 30 s and 5 GiB
 on a GPU with `exact`.
 
+## Starting volume
+
+A reconstruction starts from zeros unless `--init_volume` names a map (.mrc,
+in volts) on the reconstruction's grid or an integer multiple of it; a finer
+map is block-averaged down, which is what `--test_run` binning requires.
+`--init_lowpass` filters the starting map to a given resolution in Å first.
+Both halves of a gold-standard run start from the same map, so it should
+carry no detail finer than the resolution the halves are meant to establish
+independently; a 15 Å low-pass is a common choice.
+
+A start matters most for strongly scattering specimens. With a peak projected
+phase of several radians the loss has wrapped-phase local minima, and a
+reconstruction from zeros can settle in one: in simulation, a specimen with a
+peak phase near 17 rad reached FSC = 0.5 at 6.4 Å from zeros and 1.3 Å from
+its own map low-passed to 15 Å. Protein specimens, with peak phases near
+1 rad, converge from zeros.
+
+## Ewald-sphere curvature sign
+
+`--ews_curvature_sign` selects the sign of the Ewald-sphere curvature. Which
+sign describes a dataset is a property of the instrument's image geometry,
+not of the software that produced the particle file, so a new dataset should
+be reconstructed with both. The wrong sign costs resolution wherever the
+curvature matters, which for a particle of diameter D at wavelength λ is
+below about √(2λD): on datasets measured during development the incorrect
+sign cost 0.17 to 0.43 Å, and fell behind a projection reconstruction that
+ignores curvature altogether. A simulated stack and its reconstruction must
+use the same sign.
+
 ## Limitations
 
 Pose, translation, and defocus refinement (`--lr_R`/`--lr_T`/`--lr_D`) are

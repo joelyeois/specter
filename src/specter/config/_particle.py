@@ -454,7 +454,10 @@ class ParticleStackConfig:
     # --- Advanced: scattering ---
     ews_curvature_sign: EwaldSphereSign = setting(
         "positive",
-        help="Ewald sphere curvature sign, matching CryoSPARC's convention.",
+        help=(
+            "Ewald-sphere curvature sign. Reconstruct the stack with the same sign: "
+            "a mismatch costs resolution wherever the curvature matters."
+        ),
     )
     # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
     # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but

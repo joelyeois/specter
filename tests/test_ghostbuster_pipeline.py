@@ -185,6 +185,83 @@ def test_ghostbuster_alpha_out_of_range_rejected(mrc_file: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Ghostbuster: starting volume
+# ---------------------------------------------------------------------------
+
+
+def _volume_file(tmp_path: Path, data: np.ndarray) -> Path:
+    path = tmp_path / "start.mrc"
+    with mrcfile.new(str(path), overwrite=True) as mrc:
+        mrc.set_data(data.astype(np.float32))
+    return path
+
+
+def _starting_volume(mrc_file: Path, **kwargs) -> torch.Tensor:
+    gb = Ghostbuster(
+        cs_file="fake.cs",
+        mrc_file=str(mrc_file),
+        dose_per_angstrom=2.0,
+        propagation=Propagation(scattering_model="projection"),
+        **kwargs,
+    )
+    model, _ = gb._build_reconstructor_and_loader(gb._images, gb._voxel_size, 2)
+    return model.V.detach().float().cpu()
+
+
+def test_reconstruction_starts_from_zeros_by_default(mrc_file: Path) -> None:
+    assert torch.equal(_starting_volume(mrc_file), torch.zeros(BOX, BOX, BOX))
+
+
+def test_init_volume_is_the_starting_volume(mrc_file: Path, tmp_path: Path) -> None:
+    """A map on the images' grid is taken exactly, from a file or a tensor."""
+    data = np.random.default_rng(2).normal(size=(BOX, BOX, BOX))
+    path = _volume_file(tmp_path, data)
+    expected = torch.as_tensor(data, dtype=torch.float32)
+    assert torch.equal(_starting_volume(mrc_file, init_volume=path), expected)
+    assert torch.equal(_starting_volume(mrc_file, init_volume=expected), expected)
+
+
+def test_init_volume_on_a_finer_grid_is_block_averaged(
+    mrc_file: Path, tmp_path: Path
+) -> None:
+    """A 2x box is averaged 2x2x2, which keeps the potential per voxel."""
+    data = np.random.default_rng(3).normal(size=(2 * BOX,) * 3)
+    path = _volume_file(tmp_path, data)
+    expected = (
+        torch.as_tensor(data, dtype=torch.float32)
+        .reshape(BOX, 2, BOX, 2, BOX, 2)
+        .mean(dim=(1, 3, 5))
+    )
+    torch.testing.assert_close(
+        _starting_volume(mrc_file, init_volume=path), expected, rtol=1e-6, atol=1e-6
+    )
+
+
+def test_init_lowpass_keeps_the_mean_and_removes_fine_detail(
+    mrc_file: Path, tmp_path: Path
+) -> None:
+    data = np.random.default_rng(4).normal(size=(BOX, BOX, BOX)) + 3.0
+    path = _volume_file(tmp_path, data)
+    start = _starting_volume(mrc_file, init_volume=path, init_lowpass=4 * PIXEL_SIZE)
+    raw = torch.as_tensor(data, dtype=torch.float32)
+    assert start.mean().item() == pytest.approx(raw.mean().item(), rel=1e-5)
+    k = torch.fft.fftfreq(BOX, d=PIXEL_SIZE)
+    k_mag = torch.sqrt(sum(g**2 for g in torch.meshgrid(k, k, k, indexing="ij")))
+    high = k_mag > 1 / (2.5 * PIXEL_SIZE)
+
+    def power(v: torch.Tensor) -> torch.Tensor:
+        return (torch.fft.fftn(v).abs() ** 2)[high].sum()
+
+    assert power(start) < 0.01 * power(raw)
+
+
+def test_init_volume_box_mismatch_is_refused(mrc_file: Path, tmp_path: Path) -> None:
+    path = _volume_file(tmp_path, np.zeros((BOX + 3,) * 3))
+    with pytest.raises(ValueError, match="integer multiple"):
+        _starting_volume(mrc_file, init_volume=path)
+
+
+# ---------------------------------------------------------------------------
 # TomogramGhostbuster: angle/quaternion resolution and run/test_run
 # ---------------------------------------------------------------------------
 

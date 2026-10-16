@@ -91,6 +91,17 @@ class Ghostbuster(_GhostbusterBase):
         Number of training epochs.
     batchsize : int
         Dataloader batch size.
+    init_volume : torch.Tensor, str, Path, or None, optional
+        Starting volume, in the reconstruction's units (volts), instead of
+        zeros: a ``(N, N, N)`` tensor or a path to a .mrc file. A volume an
+        integer multiple of the image box is block-averaged down to it, which
+        is what `test_run`'s binning needs. Default None (zeros).
+    init_lowpass : float, optional
+        Resolution in Å to which `init_volume` is low-passed before training
+        starts (a smooth Butterworth edge with its half-power point there).
+        Both halves of a gold-standard run start from the same volume, so it
+        should carry no detail finer than the halves are meant to establish
+        independently. Default None (unfiltered).
     propagation : Propagation, optional
         How the forward model computes the exit wave. Default
         ``Propagation(scattering_model="rytov")``. Its ``alpha`` is replaced
@@ -181,6 +192,8 @@ class Ghostbuster(_GhostbusterBase):
         lr_decay: float = 0.1,
         epochs: int = 5,
         batchsize: int = 3,
+        init_volume: torch.Tensor | str | Path | None = None,
+        init_lowpass: float | None = None,
         propagation: Propagation = Propagation(scattering_model="rytov"),
         optics: Optics = Optics(),
         symmetry: str | None = None,
@@ -275,6 +288,10 @@ class Ghostbuster(_GhostbusterBase):
         self.lr_decay = lr_decay
         self.epochs = epochs
         self.batchsize = batchsize
+        if init_lowpass is not None and init_lowpass <= 0:
+            raise ValueError(f"init_lowpass={init_lowpass} must be positive (Angstrom)")
+        self.init_volume = init_volume
+        self.init_lowpass = init_lowpass
         # The amplitude contrast is data, read from the .cs file above unless
         # `alpha` overrides it.
         self.propagation = replace(propagation, alpha=self._alpha)
@@ -432,6 +449,64 @@ class Ghostbuster(_GhostbusterBase):
         )
         return images
 
+    def _initial_volume(self, n: int, voxel_size: float) -> torch.Tensor:
+        """
+        The volume training starts from: zeros, or `init_volume` on this grid.
+
+        Parameters
+        ----------
+        n : int
+            Box size of the images, and so of the reconstructed volume.
+        voxel_size : float
+            Voxel size of the reconstruction in Å, after any binning.
+
+        Returns
+        -------
+        torch.Tensor
+            Starting volume, shape ``(n, n, n)``, on the CPU.
+
+        Raises
+        ------
+        ValueError
+            If `init_volume` is not a cube, or its box is not an integer
+            multiple of `n`.
+        """
+        if self.init_volume is None:
+            return torch.zeros(n, n, n)
+        if isinstance(self.init_volume, torch.Tensor):
+            volume = self.init_volume.detach().to("cpu", torch.float32).clone()
+        else:
+            with mrcfile.open(str(self.init_volume), permissive=True) as mrc:
+                volume = torch.as_tensor(mrc.data.astype("float32"))
+        if volume.ndim != 3 or len(set(volume.shape)) != 1:
+            raise ValueError(
+                f"init_volume must be a cube, got shape {tuple(volume.shape)}"
+            )
+        box = volume.shape[-1]
+        if box % n:
+            raise ValueError(
+                f"init_volume is {box}^3 but the images are {n}x{n}: its box must "
+                "equal the images' or be an integer multiple of it"
+            )
+        if box != n:
+            # test_run bins the images; block-averaging keeps the potential's
+            # value per voxel, as the binned reconstruction expects.
+            factor = box // n
+            volume = torch.nn.functional.avg_pool3d(volume[None, None], factor)[0, 0]
+        if self.init_lowpass is not None:
+            k = torch.fft.fftfreq(n, d=voxel_size)
+            kz, ky, kx = torch.meshgrid(k, k, k, indexing="ij")
+            k_mag = torch.sqrt(kz**2 + ky**2 + kx**2)
+            # Butterworth, order 8: half power at 1 / init_lowpass, no ringing
+            # worth the name, and DC passed unchanged.
+            response = 1.0 / torch.sqrt(1.0 + (k_mag * self.init_lowpass) ** 16)
+            volume = torch.fft.ifftn(torch.fft.fftn(volume) * response).real
+        console.print(
+            f"  starting volume: {self.init_volume if isinstance(self.init_volume, (str, Path)) else 'tensor'}"
+            + (f", low-passed to {self.init_lowpass:g} Å" if self.init_lowpass else "")
+        )
+        return volume.contiguous()
+
     def _build_reconstructor_and_loader(
         self,
         images: torch.Tensor,
@@ -442,7 +517,7 @@ class Ghostbuster(_GhostbusterBase):
 
         n = images.shape[-1]
         kmask = ball3d(n, n)
-        volume_init = torch.zeros(n, n, n)
+        volume_init = self._initial_volume(n, voxel_size)
 
         idx = torch.arange(len(images))
         dataset = torch.utils.data.TensorDataset(images, idx)

@@ -76,11 +76,13 @@ class Reconstructor(_BaseReconstructor):
     ctf_params : dict[str, torch.Tensor]
         Per-particle CTF parameters; each value has leading dimension N.
     scale : torch.Tensor, optional
-        Per-particle loss weight, shape (N,) (e.g. cryoSPARC
-        ``alignments3D/alpha``). Multiplies each particle's contribution to
-        the image-domain loss before batch averaging — particles with a
-        small scale are down-weighted in the gradient update. ``None``
-        (default) weights every particle equally.
+        Per-particle scale, shape (N,) (e.g. cryoSPARC
+        ``alignments3D/alpha``): the factor by which a particle's contrast is
+        attenuated, as CryoSPARC fits it. It multiplies the predicted signal,
+        ``N0 + scale * (prediction - N0)`` with ``N0`` the no-specimen count
+        per pixel, over noise that does not change with it; a particle's
+        gradient is therefore proportional to its scale and vanishes at zero.
+        ``None`` (default) is 1 for every particle.
     voltage : float
         Electron beam accelerating voltage in kV.
     dose_per_angstrom : float
@@ -572,12 +574,17 @@ class Reconstructor(_BaseReconstructor):
 
         Notes
         -----
-        Each branch is weighted by the per-particle ``self.scale[idx]``
-        before the final batch mean, so a small scale down-weights that
-        particle's contribution to the gradient update. Weighting is applied
-        as a plain multiply-then-mean (not normalised by the sum of weights
-        in the batch), since scale values are meaningful relative to each
-        other across the whole dataset, not just within one batch.
+        The per-particle scale multiplies the predicted signal about the
+        no-specimen level ``dose * voxel_size**2`` (the forward model has no
+        camera, so DQE(0) is 1), and every particle's loss counts equally. It
+        is a contrast attenuation, not a noise level: weighting the loss by
+        it instead (until 2026-10-17) modelled full-strength signal over
+        noise of variance ``sigma^2 / scale``, which predicts held-out images
+        worse (EMPIAR-10083: pooled held-out FRC 0.0389 against 0.0408 at
+        8-4.5 A) although the reconstructed map came out the same. A
+        normalised cross-correlation cannot see a scale, so under `use_ncc`
+        the only effect left is that a particle with no signal (scale <= 0)
+        is dropped.
 
         Under multi-GPU (DDP), the *logged* norm/total loss is
         gathered/averaged across ranks (see ``_gather_for_logging``) so it
@@ -585,23 +592,28 @@ class Reconstructor(_BaseReconstructor):
         returns (which feeds ``manual_backward``) stays the local, per-rank
         value throughout; DDP synchronises gradients on its own.
         """
-        w = self.scale[idx]  # (B,)
+        scale = self.scale[idx]  # (B,)
         if self.use_ncc:
-            loss = (w * ncc_loss(out, images)).mean()
-        elif self.learn_noise_model:
-            self.sigma2_k = update_sigma2(
-                self.sigma2_k, images - out, self.noise_ema_momentum
-            )
-            loss = noise_weighted_loss(out, images, self.sigma2_k, w)
-        elif self.nps_weight is not None:
-            loss = nps_weighted_loss(out, images, self.nps_weight, w)
+            # A correlation is blind to amplitude; only "no signal" survives.
+            loss = ((scale > 0).to(out.dtype) * ncc_loss(out, images)).mean()
         else:
-            mask = (
-                self._project_fsc_mask_2d(idx, images.shape)
-                if self.use_2d_mask
-                else None
-            )
-            loss = mse_loss(out, images, w, mask=mask)
+            level = self.dose_per_angstrom * self.voxel_size**2
+            out = level + scale[:, None, None] * (out - level)
+            w = torch.ones_like(scale)
+            if self.learn_noise_model:
+                self.sigma2_k = update_sigma2(
+                    self.sigma2_k, images - out, self.noise_ema_momentum
+                )
+                loss = noise_weighted_loss(out, images, self.sigma2_k, w)
+            elif self.nps_weight is not None:
+                loss = nps_weighted_loss(out, images, self.nps_weight, w)
+            else:
+                mask = (
+                    self._project_fsc_mask_2d(idx, images.shape)
+                    if self.use_2d_mask
+                    else None
+                )
+                loss = mse_loss(out, images, w, mask=mask)
         # Kept on the device: a `.cpu()` here is a sync per step, and with
         # three of them the step ran 270 ms where the same work runs 160 ms
         # asynchronously. The lists are read once, when the epoch's metrics

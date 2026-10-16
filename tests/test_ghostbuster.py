@@ -269,61 +269,66 @@ def test_bfactor_kwarg_overrides_ctf_params_bfactor(tiny_volume: torch.Tensor) -
 
 
 # ---------------------------------------------------------------------------
-# Per-particle scale weighting
+# Per-particle scale: an attenuation of the predicted signal
 # ---------------------------------------------------------------------------
 
 
-def test_scale_scales_mse_loss_linearly(gb_kwargs: dict) -> None:
-    """Doubling every particle's scale doubles the plain-MSE loss."""
-    n_particles = 3
-    n = gb_kwargs["V"].shape[-1]
-    images = torch.randn(n_particles, n, n)
-    out = torch.randn(n_particles, n, n)
-    idx = torch.arange(n_particles)
-
-    base = dict(gb_kwargs)
-    base.update(
-        quaternions=base["quaternions"].repeat(n_particles, 1),
-        translations=base["translations"].repeat(n_particles, 1),
-        ctf_params={k: v.repeat(n_particles) for k, v in base["ctf_params"].items()},
+def _scaled_model(
+    gb_kwargs: dict, scale: list[float], **kwargs: object
+) -> Reconstructor:
+    n = len(scale)
+    base = {**gb_kwargs, "V": gb_kwargs["V"].clone()}
+    base["quaternions"] = base["quaternions"].repeat(n, 1)
+    base["translations"] = base["translations"].repeat(n, 1)
+    base["ctf_params"] = {k: v.repeat(n) for k, v in base["ctf_params"].items()}
+    return Reconstructor(
+        **base,
+        lr=0.1,
+        scale=torch.tensor(scale),
         propagation=Propagation(scattering_model="projection"),
+        **kwargs,
     )
 
-    gb_unit = Reconstructor(**base, scale=torch.ones(n_particles))
-    gb_double = Reconstructor(**base, scale=torch.full((n_particles,), 2.0))
 
-    loss_unit = gb_unit._compute_loss(out, images, idx)
-    loss_double = gb_double._compute_loss(out, images, idx)
-    assert torch.allclose(loss_double, 2.0 * loss_unit, rtol=1e-4)
+def test_scale_multiplies_the_signal_about_the_flat_level(gb_kwargs: dict) -> None:
+    """The scale attenuates contrast, not the dose: a prediction becomes
+    N0 + s (f - N0), N0 = dose * voxel_size^2, and every particle counts once."""
+    model = _scaled_model(gb_kwargs, [0.5, 1.5])
+    idx = torch.tensor([0, 1])
+    out = model.forward(idx).detach()
+    images = out + torch.randn_like(out)
+    level = model.dose_per_angstrom * model.voxel_size**2
+    expected = level + torch.tensor([0.5, 1.5])[:, None, None] * (out - level)
+    loss = model._compute_loss(out, images, idx)
+    assert torch.allclose(loss, ((expected - images) ** 2).mean(), rtol=1e-5)
+
+
+@pytest.mark.parametrize("use_ncc", [False, True])
+def test_zero_scale_gives_no_gradient(gb_kwargs: dict, use_ncc: bool) -> None:
+    model = _scaled_model(gb_kwargs, [0.0, 1.0], use_ncc=use_ncc)
+    idx = torch.tensor([0])
+    out = model.forward(idx)
+    images = out.detach() + torch.randn_like(out)
+    loss = model._compute_loss(out, images, idx)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert model.V.grad is not None and torch.count_nonzero(model.V.grad) == 0
 
 
 def test_small_scale_reduces_gradient_contribution(gb_kwargs: dict) -> None:
-    """A particle with a small scale contributes less to the volume gradient."""
-    n_particles = 2
-    n = gb_kwargs["V"].shape[-1]
+    """A weakly scaled particle pulls on the volume weakly."""
     torch.manual_seed(0)
-    images = torch.randn(n_particles, n, n)
+    n = gb_kwargs["V"].shape[-1]
+    images = torch.randn(2, n, n)
+    idx = torch.arange(2)
 
-    base = dict(gb_kwargs)
-    base.update(
-        quaternions=base["quaternions"].repeat(n_particles, 1),
-        translations=base["translations"].repeat(n_particles, 1),
-        ctf_params={k: v.repeat(n_particles) for k, v in base["ctf_params"].items()},
-        propagation=Propagation(scattering_model="projection"),
-        lr=0.1,
-    )
-    idx = torch.arange(n_particles)
-
-    def volume_grad_norm(scale: torch.Tensor) -> torch.Tensor:
-        model = Reconstructor(**{**base, "V": base["V"].clone()}, scale=scale)
-        out = model.forward(idx)
-        loss = model._compute_loss(out, images, idx)
+    def volume_grad_norm(scale: list[float]) -> torch.Tensor:
+        model = _scaled_model(gb_kwargs, scale)
+        loss = model._compute_loss(model.forward(idx), images, idx)
         (grad,) = torch.autograd.grad(loss, model.V)
         return grad.norm()
 
-    grad_uniform = volume_grad_norm(torch.tensor([1.0, 1.0]))
-    grad_downweighted = volume_grad_norm(torch.tensor([1.0, 0.01]))
-    assert grad_downweighted < grad_uniform
+    assert volume_grad_norm([1.0, 0.01]) < volume_grad_norm([1.0, 1.0])
 
 
 # ---------------------------------------------------------------------------

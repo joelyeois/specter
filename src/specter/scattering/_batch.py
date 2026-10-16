@@ -182,7 +182,7 @@ class Scattering(L.LightningModule):
             # call forms it, so the stack is bitwise the per-slice one.
             coef = torch.tensor(
                 [
-                    1j * torch.pi * self.wavelength * (pixel_size * (nz - i))
+                    -1j * torch.pi * self.wavelength * (pixel_size * (nz - i))
                     for i in range(nz)
                 ],
                 dtype=torch.complex64,
@@ -195,7 +195,7 @@ class Scattering(L.LightningModule):
             # negative sign, flipped) copy, twice the memory -- 2 GiB where
             # 1 GiB does at a 512 box. Real rather than complex so that
             # `Module.double()` and friends still convert it.
-            if ews_curvature_sign == "negative":
+            if ews_curvature_sign == "positive":
                 F = F.flip(0)
             self.register_buffer(
                 "_F_traversal", torch.view_as_real(F), persistent=False
@@ -284,7 +284,7 @@ class Scattering(L.LightningModule):
         # performance restructuring -- output and gradients are bitwise
         # identical to the per-slice form. See _kernels._MULTISLICE_SLICE_CHUNK.
         #
-        # A negative Ewald-sphere sign traverses the slices in reverse. That is
+        # A positive Ewald-sphere sign traverses the slices in reverse (the beam enters at the last slice). That is
         # done by walking the chunks backwards and flipping each one as it is
         # consumed, not by `torch.flip(V, dims=(1,))` up front: the whole-volume
         # flip is a full copy of the padded volume (6 GB for three 512-pixel
@@ -296,7 +296,7 @@ class Scattering(L.LightningModule):
             if absorption_potential is not None
             else None
         )
-        reverse = self.ews_curvature_sign == "negative"
+        reverse = self.ews_curvature_sign == "positive"
         if reverse:
             chunks = chunks[::-1]
             if absorption_chunks is not None:
@@ -360,7 +360,7 @@ class Scattering(L.LightningModule):
         if self.scattering_model == "multislice":
             return torch.complex(self._F_step_real, self._F_step_imag)
         F = torch.view_as_complex(self._F_traversal)
-        return F.flip(0) if self.ews_curvature_sign == "negative" else F
+        return F.flip(0) if self.ews_curvature_sign == "positive" else F
 
     def _propagator(self, V: torch.Tensor) -> torch.Tensor:
         """
@@ -368,7 +368,7 @@ class Scattering(L.LightningModule):
         and complex dtype, in slice order matching the traversal.
 
         Stored flipped once at construction for ``ews_curvature_sign=
-        "negative"``, rather than flipping the *volume* -- a full copy of
+        "positive"``, rather than flipping the *volume* -- a full copy of
         ``V`` in forward and again in backward -- since flipping the constant
         propagator is the same sum. On the buffer's own device and dtype this
         is a zero-copy view of it; any other combination is converted once and

@@ -174,9 +174,11 @@ damage, are listed under [Envelopes](../concepts/aberrations.md#envelopes).
 ## The defocus reference plane
 
 A thick specimen does not have a single defocus: each layer sits at its own
-distance from the plane the lens is focused on. Every `ExitWave` from a
-propagating model carries `defocus_shift`, half the depth of its box, and
-`apply_ctf` subtracts it from `dfu` and `dfv`:
+distance from the plane the lens is focused on. The wave leaves the box at
+its exit face, half the box's depth downstream of the midplane and that much
+further from focus, so every `ExitWave` from a propagating model carries a
+`defocus_shift` of minus half the depth, which `apply_ctf` subtracts from
+`dfu` and `dfv`:
 
 ```python
 --8<-- "docs-figures/walkthrough/ctf.py:reference-plane"
@@ -206,13 +208,15 @@ Left: the power spectrum of the particle in 2000 Å of ice at a nominal 1 µm,
 with the zeros expected if that defocus belonged to the midplane, the entry
 face or the exit face. The minima follow the midplane. Right: the defocus at
 which a point scatterer images, against its depth below the entry face
-(25 Å search steps). The dashed line has slope −1 and passes through the
+(25 Å search steps). The dashed line has slope +1 and passes through the
 nominal defocus at the midplane.
 ///
 
 A scatterer at the midplane images at exactly the nominal defocus, and each
-ångström towards the entry face adds one ångström of underfocus, to within
-the 25 Å search step. The power spectrum of a uniform slab of ice agrees: its
+ångström towards the exit face adds one ångström of underfocus, to within
+the 25 Å search step: an underfocused lens images a plane upstream of the
+specimen, so the further downstream a scatterer sits, the further it is
+from focus. The power spectrum of a uniform slab of ice agrees: its
 minima sit at the zeros for the nominal defocus, not at those for either
 face. For a slab of uniform density, and for a particle centred in its box,
 the midplane is the scattering centroid, the plane whose defocus the Thon

@@ -26,7 +26,7 @@ def test_identity_slice_views_match_indexed_fetch_and_gradients(sign, roi, devic
     samples = []
     references = []
     for i, nz, sample in scattering._iter_slices(volume, theta, 2, "test", roi):
-        z = nz - 1 - i if sign == "negative" else i
+        z = nz - 1 - i if sign == "positive" else i
         reference = scattering._fetch_volume_slices(
             volume,
             torch.tensor([z], device=device),

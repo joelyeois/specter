@@ -331,8 +331,10 @@ class TomogramReconstructor(_BaseReconstructor):
                 self.nxy,
                 self.voxel_size,
             )
-            half_depth = tilt_defocus_shift(
-                (1, self.nz, self.nxy, self.nxy), theta, self.voxel_size, model
+            half_depth = abs(
+                tilt_defocus_shift(
+                    (1, self.nz, self.nxy, self.nxy), theta, self.voxel_size, model
+                )
             )
             low = float(min(dfu[i], dfv[i])) - half_depth
             high = float(max(dfu[i], dfv[i])) + half_depth

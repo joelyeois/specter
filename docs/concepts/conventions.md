@@ -290,17 +290,19 @@ amplitude contrast (`alpha`), both under
 
 A thick specimen has no single defocus: each plane at height \(z\) is imaged
 at its own, and the defocus increases by one ångström for every ångström
-towards the entry face. The defocus a CTF fit reports is that of the
+towards the exit face, since an underfocused lens images a plane upstream of
+the specimen. The defocus a CTF fit reports is that of the
 specimen's centre of scattering mass, which Balakrishnan et al. (2023)
 established and used to recover depth from a single shot. For a particle centred in its
 box, or a uniform slab of ice, that is the box's midplane, and it is the value
 a `.cs` or `.star` file records.
 
 A propagating scattering model returns the wave where it leaves the volume,
-at the exit face, half the box depth \(n_z\Delta x/2\) below the midplane.
-`specter` therefore subtracts \(n_z\Delta x/2\) from `dfu` and `dfv` before
-building a transfer function, automatically (every `ExitWave` carries the
-shift as `defocus_shift`, which `ExitWave.apply_ctf` applies), for every
+at the exit face, half the box depth \(n_z\Delta x/2\) below the midplane,
+where the defocus is larger by that much. `specter` therefore adds
+\(n_z\Delta x/2\) to `dfu` and `dfv` before building a transfer function,
+automatically (every `ExitWave` carries the shift as a `defocus_shift` of
+\(-n_z\Delta x/2\), which `ExitWave.apply_ctf` subtracts), for every
 propagating scattering model: `multislice`, `rytov`, `firstborn`, and
 `kinematic`. The nominal defocus is then the midplane's, and is written to
 a STAR or `.cs` file unchanged. The `projection` and `ctf` models have no

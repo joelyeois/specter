@@ -1,5 +1,5 @@
-1899 Å below the entry face: images at 9100 Å
-1449 Å below the entry face: images at 9550 Å
- 999 Å below the entry face: images at 10000 Å
- 549 Å below the entry face: images at 10425 Å
-  99 Å below the entry face: images at 10875 Å
+ 100 Å below the entry face: images at 9125 Å
+ 550 Å below the entry face: images at 9550 Å
+1000 Å below the entry face: images at 10000 Å
+1450 Å below the entry face: images at 10450 Å
+1900 Å below the entry face: images at 10900 Å

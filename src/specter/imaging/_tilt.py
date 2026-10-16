@@ -182,18 +182,19 @@ def tilt_defocus_shift(
     scattering_model: str,
 ) -> float:
     """
-    Angstrom from a tilt's exit face to the plane its nominal defocus
-    refers to.
+    The defocus shift for a tilt's exit wave: minus the distance from its
+    exit face to the plane its nominal defocus refers to.
 
     Multislice propagates the tilted column's depth rather than the
     volume's, so the wave leaves half the tilted depth below the specimen's
-    centre rather than half the volume's. Zero for the models with no depth.
+    centre rather than half the volume's; the shift is negative for the same
+    reason as `defocus_midplane_shift`'s. Zero for the models with no depth.
     """
     if scattering_model in ("projection", "ctf"):
         return 0.0
     nz = volume_shape[-3]
     nz_tilt = tilt_geometry.nz_tilt_for_pose(volume_shape, theta)
-    return defocus_midplane_shift(nz, voxel_size) + (nz_tilt - nz) * voxel_size / 2.0
+    return defocus_midplane_shift(nz, voxel_size) - (nz_tilt - nz) * voxel_size / 2.0
 
 
 class _TiltSolvent:

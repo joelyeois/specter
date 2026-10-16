@@ -326,9 +326,9 @@ class IterativeScattering(L.LightningModule):
     def _slice_processing_order(
         self, nz_new: int, device: str | torch.device
     ) -> torch.Tensor:
-        """Z-slice traversal order; negative EWS curvature reverses it."""
+        """Z-slice traversal order; positive EWS curvature reverses it."""
         indices = torch.arange(nz_new, device=device)
-        if self.ews_curvature_sign == "negative":
+        if self.ews_curvature_sign == "positive":
             indices = torch.flip(indices, dims=(0,))
         return indices
 
@@ -456,7 +456,7 @@ class IterativeScattering(L.LightningModule):
         slices_block: torch.Tensor | None = None
         for i in pbar:
             if is_identity:
-                z = nz_new - 1 - i if self.ews_curvature_sign == "negative" else i
+                z = nz_new - 1 - i if self.ews_curvature_sign == "positive" else i
                 slice_sample = self._fetch_volume_slices(
                     V,
                     slice(z, z + 1),

@@ -475,10 +475,11 @@ class Sample:
         shift = defocus_midplane_shift(nz, self.voxel_size)
         if self.profile is not None:
             # The defocus refers to the ice's scattering centroid, and the
-            # wave leaves the exit face: the low-z face when the beam enters
-            # at +z (negative Ewald sign, the default), the high one otherwise.
-            toward_entry = 1.0 if p.ews_curvature_sign == "negative" else -1.0
-            shift += toward_entry * self.profile.centroid(nxy, self.voxel_size)
+            # wave leaves the exit face: the high-z face when the beam enters
+            # at slice 0 (negative Ewald sign, the default), the low one
+            # otherwise.
+            toward_exit = 1.0 if p.ews_curvature_sign == "negative" else -1.0
+            shift += toward_exit * self.profile.centroid(nxy, self.voxel_size)
         return ExitWave(
             array=wave,
             pixel_size=self.voxel_size,

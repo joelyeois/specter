@@ -103,11 +103,12 @@ def surface_slice_sum(
     phase = -2 * math.pi * dx * (kx * centre + ky * centre + kz * (nz // 2))
     if not flat:
         # The propagator from slice z to the exit plane is
-        # exp(i pi lambda dz d k^2) over the remaining distance d: dz*(nz - z)
-        # for the positive sign, dz*(z + 1) once the stack is traversed the
-        # other way. Sampling at k_z absorbs the z-dependent part.
-        depth = nz if ews_curvature_sign == "positive" else 1
-        phase = phase + math.pi * lam * dx * depth * k2
+        # exp(-i pi lambda dz d k^2) over the remaining distance d: dz*(nz - z)
+        # for the negative sign, whose beam enters at slice 0, and dz*(z + 1)
+        # for the positive sign, whose beam enters at the last slice. Sampling
+        # at k_z absorbs the z-dependent part.
+        depth = nz if ews_curvature_sign == "negative" else 1
+        phase = phase - math.pi * lam * dx * depth * k2
     factor = torch.polar(torch.ones_like(phase), phase)
 
     t = shifts.to(device=device, dtype=torch.float64)

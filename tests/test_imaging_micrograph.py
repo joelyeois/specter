@@ -48,11 +48,20 @@ def _retired_ctf(ctf: CTF, waves: object, profile: IceProfile | None) -> CTF:
     than to its scattering centroid, the plane a nominal defocus now refers
     to. Moving the defocus by the difference between the two shifts makes the
     comparison one of everything else, which is unchanged.
+
+    It also propagated with the conjugate Fresnel propagator, under which an
+    exit-face defocus ``A`` images each slice where the physical propagator's
+    ``A + T + dz`` does (``T`` the column's depth, ``dz`` one slice), so the
+    retired exit-face defocus ``dfu - z_top`` is moved by that much. ``T``
+    comes from the wave's own shift, ``-T / 2`` plus the ice centroid's
+    height.
     """
     if profile is None:
         return ctf
     _, z_top = profile.surfaces(NXY, PIXEL)
-    offset = waves.defocus_shift - float(z_top.mean())
+    centroid = profile.centroid(NXY, PIXEL)
+    depth = 2.0 * (centroid - waves.defocus_shift)
+    offset = waves.defocus_shift + depth + PIXEL - float(z_top.mean())
     params = dict(ctf.params)
     for name in ("dfu", "dfv"):
         params[name] = params[name] + offset

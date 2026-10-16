@@ -55,10 +55,15 @@ def fresnel_propagator(
     k2: torch.Tensor, wavelength: float, distance: float | torch.Tensor
 ) -> torch.Tensor:
     """
-    The Fresnel free-space propagator ``exp(i pi lambda d k^2)``.
+    The Fresnel free-space propagator ``exp(-i pi lambda d k^2)``.
 
     The paraxial free-space propagator of the multislice method; see [1]_,
-    Ch. 6.
+    Ch. 6. Its sign pairs with the transmission function ``exp(+i sigma V)``
+    and with the transfer function's defocus term: propagating a wave a
+    distance ``d`` downstream is the same as overfocusing it by ``d``, since
+    an underfocused lens images a plane upstream of the specimen. Until
+    2026-10-16 the sign was ``+``, the conjugate, which gave the right
+    single-scattering image but walked each slice the wrong way in depth.
 
     Parameters
     ----------
@@ -79,7 +84,7 @@ def fresnel_propagator(
     .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
        (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
-    return torch.exp(1j * torch.pi * wavelength * distance * k2)
+    return torch.exp(-1j * torch.pi * wavelength * distance * k2)
 
 
 def bandlimit_mask(

@@ -93,8 +93,9 @@ same fine grid:
 
 The defocus has to be corrected first. The wave was computed at the exit
 face, but a nominal defocus is that of the specimen's midplane, half the box
-depth above it; `defocus_midplane_shift` gives the distance, 256 Å here. The
-objects carry it on the wave as `ExitWave.defocus_shift` and subtract it in
+depth above it and that much nearer focus; `defocus_midplane_shift` gives the
+correction, minus that distance, −256 Å here. The objects carry it on the
+wave as `ExitWave.defocus_shift` and subtract it in
 `apply_ctf` ([The defocus reference plane](../concepts/conventions.md#the-defocus-reference-plane)).
 
 ## Summing the focal spread and detecting

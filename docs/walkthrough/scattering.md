@@ -102,9 +102,10 @@ grid*, `oversample` times finer than the pixels per axis
 ([Oversampling](#oversampling) below explains why), and `waves.pixels()`
 Fourier-crops it to the pixel grid for inspection. The later stages consume
 `waves.array` directly, so the image is formed on the finer grid.
-`defocus_shift` is half the depth of the box, 128 Å here. The next page
-subtracts it from the defocus, so that the defocus you pass is that of the
-box's midplane; see
+`defocus_shift` is minus half the depth of the box, −128 Å here, since the
+wave leaves at the exit face, downstream of the midplane and further from
+focus. The next page subtracts it from the defocus, so that the defocus you
+pass is that of the box's midplane; see
 [The defocus reference plane](ctf.md#the-defocus-reference-plane).
 
 Ice changes the exit wave substantially. Solvating the same specimen in
@@ -184,7 +185,7 @@ Three behaviours follow from the forms in the table.
   approximately \(1 + |\Theta|^2\), so the 1.5 rad of uniform phase per 500 Å
   of ice becomes a mean of 3.25 at 500 Å and 36.5 at 2000 Å, and the
   spurious \(|\Theta|^2\) term overwhelms the pattern: correlation falls from
-  0.58 without ice to 0.10 at 2000 Å. The particle that shows in its
+  0.80 without ice to 0.22 at 2000 Å. The particle that shows in its
   intensity in the bottom row comes from that spurious term.
 - **Projection** is a pure phase object, so its exit-wave intensity is
   exactly flat. Its phase carries the projected potential, and for a thin
@@ -234,7 +235,7 @@ The rotationally averaged power spectrum of the exit-wave intensity in
 
 On the volume's own grid the wrapped content is 2% of the image's contrast
 power, and its power grows with frequency. At `oversample=2` the error falls to
-4.2e-7, the float32 noise floor, with no bandlimit needed. Two is the default
+4.1e-7, the float32 noise floor, with no bandlimit needed. Two is the default
 because it is converged; the cost and the comparison with Kirkland's (2010) `klim`
 bandlimit are in
 [Grid aliasing](../concepts/scattering/multislice.md#grid-aliasing-oversample-and-klim).
@@ -255,8 +256,8 @@ further:
 ![Exit-wave phase of 6BDF at 120, 200 and 300 kV, on a shared scale.](../assets/images/walkthrough/scattering-voltage.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 The exit-wave phase at three voltages on a shared scale. The largest phase
-shift grows from 0.61 rad at 300 kV to 0.83 rad at 120 kV, roughly in
-proportion to \(\sigma\).
+shift grows from 0.64 rad at 300 kV to 0.79 rad at 120 kV as \(\sigma\)
+grows.
 ///
 
 A stronger phase means more contrast per electron, and also more multiple

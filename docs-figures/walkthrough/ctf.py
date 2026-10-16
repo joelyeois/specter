@@ -236,7 +236,7 @@ nominal = CTF.from_values(10000.0, cs=0.0)
 trial_defoci = np.arange(8800.0, 11201.0, 25.0)
 
 matched = {}
-for depth in [100, 550, 1000, 1450, 1900]:  # slice index; the beam enters at nz - 1
+for depth in [100, 550, 1000, 1450, 1900]:  # slice index; the beam enters at slice 0
     blob = 5.0 * torch.exp(
         -((z - depth) ** 2 + (y - n // 2) ** 2 + (x - n // 2) ** 2) / 18
     )
@@ -254,7 +254,7 @@ for depth in [100, 550, 1000, 1450, 1900]:  # slice index; the beam enters at nz
         .item()
         for d in trial_defoci
     ]
-    below_entry = nz - 1 - depth
+    below_entry = depth
     matched[below_entry] = trial_defoci[int(np.argmin(errors))]
     print(
         f"{below_entry:4d} Å below the entry face: images at {matched[below_entry]:.0f} Å"
@@ -270,8 +270,8 @@ for color, style, (label, d) in zip(
     ["-", "--", ":"],
     [
         ("midplane, 1.0 µm", 10000.0),
-        ("entry face, 1.1 µm", 11000.0),
-        ("exit face, 0.9 µm", 9000.0),
+        ("entry face, 0.9 µm", 9000.0),
+        ("exit face, 1.1 µm", 11000.0),
     ],
 ):
     for i in range(1, 6):
@@ -291,7 +291,7 @@ ax.set(
 ax.legend(frameon=False, loc="lower right", fontsize=7)
 depths = np.array(sorted(matched))
 ax2.plot(depths, [matched[d] / 1e4 for d in depths], "o", color=PALETTE[0])
-ax2.plot([0, nz], [1.1, 0.9], color="0.5", lw=0.8, ls="--")
+ax2.plot([0, nz], [0.9, 1.1], color="0.5", lw=0.8, ls="--")
 ax2.axvline(nz / 2, color="0.7", lw=0.6, ls=":")
 ax2.axhline(1.0, color="0.7", lw=0.6, ls=":")
 ax2.set(

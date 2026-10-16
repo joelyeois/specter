@@ -538,17 +538,19 @@ def test_the_dose_envelope_changes_the_image(small_volume, ctf_params):
 def test_the_ctf_keeps_the_nominal_defocus(small_volume, ctf_params):
     """
     Multislice returns the wave at the volume's exit face, half its Z extent
-    from the midplane whose defocus the CryoSPARC/RELION value is. The wave
-    carries that shift and `apply_ctf` subtracts it, so the `CTF` a caller
-    holds, and writes back out, stays the nominal, midplane defocus.
+    from the midplane whose defocus the CryoSPARC/RELION value is. The exit
+    face is the high-defocus end (an underfocused lens images a plane
+    upstream), so the wave carries minus half the depth and `apply_ctf`
+    subtracts it, so the `CTF` a caller holds, and writes back out, stays the
+    nominal, midplane defocus.
     """
     original = ctf_params["dfu"].clone()
     ctf = CTF(ctf_params)
     waves = Specimen(small_volume, 2.0).scatter(
         _IDENTITY, voltage=VOLTAGE, scattering_model="multislice", alpha=0.1
     )
-    expected = small_volume.shape[0] * 2.0 / 2
-    assert expected > 0
+    expected = -small_volume.shape[0] * 2.0 / 2
+    assert expected < 0
     assert waves.defocus_shift == pytest.approx(expected)
 
     lens = waves.apply_ctf(ctf)

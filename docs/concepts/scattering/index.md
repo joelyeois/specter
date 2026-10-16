@@ -76,11 +76,12 @@ modes](other-modes.md#accuracy-vs-thickness) for the measured error curves.
 ## Two conventions shared by every model
 
 **Ewald sphere curvature sign.** Before propagation, `ews_curvature_sign`
-(`"negative"` by default, `"positive"` to match [CryoSPARC](https://cryosparc.com/);
-Punjani et al. 2017) determines
-the order in which the beam traverses the volume's Z-slices. Under
-`"positive"` the beam enters at slice 0 and exits after the last slice;
-under `"negative"` it enters at the last slice and exits after slice 0.
+(`"negative"` by default) determines the order in which the beam traverses
+the volume's Z-slices. Under `"negative"` the beam enters at slice 0 and
+exits after the last slice; under `"positive"` it enters at the last slice
+and exits after slice 0. Which sign describes a dataset follows from the
+instrument's image geometry rather than from a software convention; see
+[Ewald-sphere curvature sign](../../user-guide/reconstruction.md#ewald-sphere-curvature-sign).
 Multislice, Rytov, and first Born each propagate a slice's contribution a
 different net distance to the exit plane (DeRosier 2000), so reversing the traversal order
 changes which face of the specimen accumulates the least propagation and
@@ -278,10 +279,6 @@ the included Drude spectrum is a development approximation.
   electron microscopy of biological molecules in ice. *Ultramicroscopy*,
   46(1–4), 349–373.
   [doi:10.1016/0304-3991(92)90024-E](https://doi.org/10.1016/0304-3991(92)90024-E)
-- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
-  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
-  determination. *Nature Methods*, 14(3), 290–296.
-  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)
 - Rice, W. J., Cheng, A., Noble, A. J., Eng, E. T., Kim, L. Y., Carragher,
   B., & Potter, C. S. (2018). Routine determination of ice thickness for
   cryo-EM grids. *Journal of Structural Biology*, 204(1), 38–44.

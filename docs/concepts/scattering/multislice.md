@@ -145,13 +145,13 @@ is left on the volume grid.
 
 ## Ewald sphere curvature and the traversal order
 
-`ews_curvature_sign="negative"` (the default, matching the convention
-used elsewhere in this documentation) reverses the Z-slice traversal
-order: the beam enters at the volume's last Z-slice and leaves through
-slice 0, which is therefore the face adjacent to the exit plane.
-`"positive"` matches the convention of [CryoSPARC](https://cryosparc.com/) (Punjani et al. 2017)
-instead. Because each slice propagates a different net distance to the
-exit plane (DeRosier 2000), the traversal order changes the result. A projection-only model has no such
+`ews_curvature_sign="negative"` (the default) walks the Z-slices in
+order: the beam enters at slice 0 and leaves through the last slice, which
+is therefore the face adjacent to the exit plane. `"positive"` reverses
+the order. Because each slice propagates a different net distance to the
+exit plane (DeRosier 2000), the traversal order changes the result; which
+order describes a dataset follows from the instrument's image geometry
+([Ewald-sphere curvature sign](../../user-guide/reconstruction.md#ewald-sphere-curvature-sign)). A projection-only model has no such
 asymmetry: summing a volume's slices is commutative regardless of order.
 
 ## `IterativeScattering` and tilted volumes
@@ -207,7 +207,3 @@ rather than indexing directly into `V`. Two further mechanisms apply:
   ed.). Springer.
   [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
   Ch. 6.
-- Punjani, A., Rubinstein, J. L., Fleet, D. J., & Brubaker, M. A. (2017).
-  cryoSPARC: Algorithms for rapid unsupervised cryo-EM structure
-  determination. *Nature Methods*, 14(3), 290–296.
-  [doi:10.1038/nmeth.4169](https://doi.org/10.1038/nmeth.4169)

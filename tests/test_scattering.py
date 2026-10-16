@@ -311,7 +311,7 @@ def test_klim_bandlimit_keeps_low_frequencies(dummy_volume):
 def _multislice_per_slice_reference(scat, V):
     """The pre-chunking implementation of Scattering.multislice, verbatim."""
     F = scat.F_real + 1j * scat.F_imag
-    if scat.ews_curvature_sign == "negative":
+    if scat.ews_curvature_sign == "positive":
         V = torch.flip(V, dims=(1,))
     exitwave = None
     for i in range(V.size(1)):
@@ -562,7 +562,7 @@ def _reference(model: Scattering, name: str, V: torch.Tensor) -> torch.Tensor:
     """The pre-rewrite implementations, applied to a real V as `forward` did."""
     F = model.F_real + 1j * model.F_imag
     V = apply_amplitude_contrast(V, alpha=model.alpha)
-    if model.ews_curvature_sign == "negative":
+    if model.ews_curvature_sign == "positive":
         V = torch.flip(V, dims=(1,))
     c = model.sigma * model.pixel_size
     if name == "rytov":
@@ -635,7 +635,7 @@ def test_single_scatter_models_accept_a_complex_volume():
 )
 def test_propagator_is_the_cached_per_slice_stack(scattering_model, n, nz, px, sign):
     """The broadcast build is bitwise the per-slice `fresnel_propagator` stack,
-    held once (cached, and flipped once for the negative Ewald sign), and is
+    held once (cached, and flipped once for the positive Ewald sign), and is
     neither checkpoint state nor lost by `.double()`."""
     from specter.scattering._kernels import frequency_grid, fresnel_propagator
 
@@ -654,7 +654,7 @@ def test_propagator_is_the_cached_per_slice_stack(scattering_model, n, nz, px, s
     )
     assert torch.equal(model.F_real, per_slice.real)
     assert torch.equal(model.F_imag, per_slice.imag)
-    traversal = per_slice.flip(0) if sign == "negative" else per_slice
+    traversal = per_slice.flip(0) if sign == "positive" else per_slice
     assert torch.equal(torch.view_as_complex(model._F_traversal), traversal)
     assert [name for name, _ in model.named_buffers()].count("_F_traversal") == 1
     assert "_F_traversal" not in model.state_dict()
@@ -778,7 +778,7 @@ def _supersampled_reference(V, factor, *, alpha, pixel_size=1.0, sign="negative"
     scat = Scattering(n, pixel_size, 300.0, progressbars=False)
     k = frequency_grid(n * factor, pixel_size / factor)
     F = fresnel_propagator(k**2, scat.wavelength, pixel_size).to(torch.complex64)
-    if sign == "negative":
+    if sign == "positive":
         V = V.flip(1)
     psi = None
     for z in range(V.shape[1]):
@@ -929,3 +929,68 @@ def test_linear_models_ignore_oversample(model):
     a = Scattering(n, 1.0, 300.0, oversample=1, **kw)(V)
     b = Scattering(n, 1.0, 300.0, oversample=2, **kw)(V)
     assert torch.equal(a, b)
+
+
+@pytest.mark.parametrize("sign", ["negative", "positive"])
+def test_multislice_matches_an_independent_physical_reference(sign):
+    """
+    Against a multislice written from the textbook pairing, transmission
+    ``exp(+i sigma V dz)`` and propagator ``exp(-i pi lambda dz k^2)``
+    (Kirkland 2010, Ch. 6), imaged through the same transfer function.
+
+    A strong specimen (1.8 rad of projected phase) makes the second-order
+    terms matter: the conjugate propagator SPECTER used until 2026-10-16 was
+    2.2e-3 of the image contrast off here, and the physical one is at float
+    precision. The negative sign's beam enters at slice 0 and the exit wave's
+    transfer function needs half the depth more underfocus than the
+    midplane's.
+    """
+    import math
+
+    from specter.constants import energy_to_wavelength, interaction_parameter
+    from specter.imaging import CTF, Poses, Specimen
+
+    torch.manual_seed(0)
+    n, nz, dx, df = 48, 120, 1.0, 10000.0
+    lam = float(energy_to_wavelength(300.0))
+    sig = float(interaction_parameter(300.0))
+    z, y, x = torch.meshgrid(
+        *(torch.arange(s, dtype=torch.float64) for s in (nz, n, n)), indexing="ij"
+    )
+    V = torch.zeros(nz, n, n, dtype=torch.float64)
+    for _ in range(300):
+        p = torch.tensor([nz / 2, n / 2, n / 2], dtype=torch.float64) + (
+            torch.rand(3, dtype=torch.float64) - 0.5
+        ) * torch.tensor([100.0, 30.0, 30.0], dtype=torch.float64)
+        V += 18.0 * torch.exp(
+            -((z - p[0]) ** 2 + (y - p[1]) ** 2 + (x - p[2]) ** 2) / (2 * 2.5**2)
+        )
+    k = torch.fft.fftfreq(n, dx, dtype=torch.float64)
+    k2 = k[:, None] ** 2 + k[None, :] ** 2
+    step = torch.exp(-1j * math.pi * lam * dx * k2)
+    order = range(nz) if sign == "negative" else range(nz - 1, -1, -1)
+    psi = torch.ones(n, n, dtype=torch.complex128)
+    for j in order:
+        psi = torch.fft.ifft2(
+            torch.fft.fft2(psi * torch.exp(1j * sig * dx * V[j])) * step
+        )
+    lens = torch.exp(1j * math.pi * lam * (df + nz * dx / 2) * k2)
+    reference = torch.fft.ifft2(torch.fft.fft2(psi) * lens).abs() ** 2
+
+    image = (
+        Specimen(V.float(), voxel_size=dx)
+        .scatter(
+            Poses.tilt_series([0.0]),
+            voltage=300.0,
+            ews_curvature_sign=sign,
+            oversample=1,
+            alpha=0.0,
+        )
+        .apply_ctf(CTF.from_values(df, cs=0.0))
+        .intensity(cc=None)
+        .pixels()[0]
+        .double()
+    )
+    contrast = (reference - reference.mean()).pow(2).mean().sqrt()
+    assert float(sig * dx * V.sum(0).max()) > 1.0
+    assert float((image - reference).pow(2).mean().sqrt() / contrast) < 2e-4

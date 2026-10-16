@@ -290,13 +290,16 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     Pinned by
     ``tests/test_aberrations_functions.py::test_nominal_defocus_is_the_midplane_defocus``.
 
-    The sign follows from which end of the volume the beam enters. Defocus
-    *increases* with z, so for a particle at centred coordinate ``z_i`` (the
+    The shift is *negative*, minus half the depth. An underfocused lens
+    images a plane upstream of the specimen, so a scatterer further
+    downstream sits further from it, and the exit face is the high-defocus
+    end: the transfer function applied to the exit wave needs ``T / 2`` more
+    underfocus than the midplane's, and subtracting this shift adds it. Under
+    the default negative Ewald sign the beam enters at slice 0, so defocus
+    *increases* with z, and for a particle at centred coordinate ``z_i`` (the
     convention :func:`specter.crowding.insert_particles_into_micrograph`
     uses) the effective defocus is ``df_ref + z_i``, where ``df_ref`` is the
-    nominal defocus, at ``z = 0``. Equivalently, the entry face at ``+nz *
-    pixel_size / 2`` is the high-defocus end and the exit face the low one,
-    which is why this shift is *subtracted*. Measured, not assumed: a scatterer
+    nominal defocus, at ``z = 0``. Measured, not assumed: a scatterer
     placed 96 A below the midplane produces an image matching the same
     scatterer at the midplane imaged at ``dfu - 96`` to within an RMS of
     5.9e-4, against 1.6 for the unshifted comparison and 3.1 for the
@@ -332,7 +335,7 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
        *Communications Physics*, 6(1), 321.
        https://doi.org/10.1038/s42005-023-01431-6
     """
-    return (nz * pixel_size) / 2
+    return -(nz * pixel_size) / 2
 
 
 def aberration_model_for_scattering(

@@ -62,6 +62,19 @@ from ..arrays import compute_nz
 IceProfileMode = Literal["flat", "wedge", "meniscus"]
 
 
+def _canvas_axis(
+    n: int, pixel_size: float, device: torch.device | str = "cpu"
+) -> torch.Tensor:
+    """Position, Å, of each voxel of an ``n``-voxel canvas axis.
+
+    Voxel ``k`` is at ``(k - n // 2) * pixel_size``: the box-centred
+    convention every placement into the canvas uses, which puts the
+    physical origin exactly on voxel ``n // 2``. ``(k - (n - 1) / 2)``, the
+    geometric centre, is half a voxel away on an even axis.
+    """
+    return (torch.arange(n, dtype=torch.float32, device=device) - n // 2) * pixel_size
+
+
 @dataclass
 class IceProfile:
     """
@@ -164,8 +177,14 @@ class IceProfile:
     # ------------------------------------------------------------------
 
     def _grid(self, nxy: int, pixel_size: float) -> tuple[torch.Tensor, torch.Tensor]:
-        """Centred (x, y) coordinate grids in Å, each of shape (nxy, nxy)."""
-        axis = (torch.arange(nxy, dtype=torch.float32) - (nxy - 1) / 2) * pixel_size
+        """Centred (x, y) coordinate grids in Å, each of shape (nxy, nxy).
+
+        Pixel ``k`` is at ``(k - nxy // 2) * pixel_size``, the canvas
+        convention :func:`~specter.crowding.insert_particles_into_micrograph`
+        places particles in, so a field value belongs to the column a
+        particle at that position is rendered into.
+        """
+        axis = _canvas_axis(nxy, pixel_size)
         return axis[None, :].expand(nxy, nxy), axis[:, None].expand(nxy, nxy)
 
     def thickness(self, nxy: int, pixel_size: float) -> torch.Tensor:
@@ -279,8 +298,7 @@ class IceProfile:
         """
         z_bot, z_top = self.surfaces(nxy, pixel_size)
         idx = (
-            (xy.detach().cpu() / pixel_size + (nxy - 1) / 2)
-            .round()
+            ((xy.detach().cpu() / pixel_size).round() + nxy // 2)
             .long()
             .clamp(0, nxy - 1)
         )
@@ -365,6 +383,12 @@ class IceProfile:
         clip individual water molecules mid-atom rather than removing them
         whole, which is a fidelity limit of working in voxel space.
 
+        Slice ``k`` sits at ``z = (k - nz // 2) * pixel_size`` and column
+        ``(j, i)`` at the lateral position :meth:`surfaces` evaluates it at,
+        the convention particles are placed in, so a particle kept inside
+        its column's slab by :meth:`surfaces_at` is rendered inside the
+        ice this window confines.
+
         Parameters
         ----------
         nz : int
@@ -387,9 +411,7 @@ class IceProfile:
         """
         z_bot, z_top = self.surfaces(nxy, pixel_size)
         z_bot, z_top = z_bot.to(device), z_top.to(device)
-        z_axis = (
-            torch.arange(nz, dtype=torch.float32, device=device) - (nz - 1) / 2
-        ) * pixel_size
+        z_axis = _canvas_axis(nz, pixel_size, device=device)
         if z_slice is not None:
             z_axis = z_axis[z_slice]
         z = z_axis[:, None, None]

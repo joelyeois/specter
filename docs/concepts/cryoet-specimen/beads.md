@@ -135,6 +135,9 @@ approximates nothing. Proteins are packed by shape-based collision, the
 only protein backend.
 Beads avoid the membrane shell, the carbon film, and already-placed
 filaments and beads; the protein-fill stage that follows then avoids them.
+Each bead is built with its atoms and boundary displaced by the sub-voxel
+part of its position and inserted at the nearest voxel, so its density, its
+instance label and its pick share one position.
 
 They are **not** region-gated. A fiducial sits in the ice, not in a
 cytosol or lumen compartment, so `TomogramBeadSpec` has no `location`

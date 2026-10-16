@@ -116,20 +116,27 @@ def test_centroid_is_zero_for_a_level_midplane():
     The nominal defocus refers to the ice's scattering centroid. A level
     mid-plane puts it at the box's midplane however the thickness varies, so
     the vacuum a wedge leaves in its box does not move the defocus.
+
+    A tilted film is measured on an odd field, whose pixels are symmetric
+    about the origin; an even field is centred half a pixel below it (pixel
+    k at (k - n // 2) * px), so there a level tilted film's centroid is the
+    mid-plane's height at that centre, -tilt * px / 2.
     """
     assert IceProfile(mode="flat", mean_thickness=500.0).centroid(64, 2.0) == 0.0
     wedge = IceProfile(mode="wedge", thickness_range=(250.0, 900.0))
     assert wedge.centroid(128, 2.0) == pytest.approx(0.0, abs=1e-6)
     level_tilt = IceProfile(mode="flat", mean_thickness=400.0, tilt=0.1)
-    assert level_tilt.centroid(64, 2.0) == pytest.approx(0.0, abs=1e-3)
+    assert level_tilt.centroid(65, 2.0) == pytest.approx(0.0, abs=1e-3)
+    assert level_tilt.centroid(64, 2.0) == pytest.approx(-0.1 * 2.0 / 2, abs=1e-3)
 
 
 def test_centroid_weights_a_tilted_film_by_its_thickness():
     """
     A tilted film that is also thicker on its raised side scatters more from
     that side, so its centroid rises; thicker on the lowered side, it falls.
+    An odd field, symmetric about the origin, makes the two mirror images.
     """
-    nxy, px, slope = 64, 2.0, 0.1
+    nxy, px, slope = 65, 2.0, 0.1
     raised = IceProfile(
         mode="wedge", thickness_range=(200.0, 800.0), tilt=slope, angle=0.0
     )
@@ -195,11 +202,12 @@ def test_surfaces_at_reproduces_the_field():
     prof = IceProfile(mode="wedge", thickness_range=(200.0, 800.0))
     nxy, px = 64, 2.0
     z_bot_f, z_top_f = prof.surfaces(nxy, px)
-    # Sample on the exact pixel centres of one row.
-    xs = (torch.arange(nxy, dtype=torch.float32) - (nxy - 1) / 2) * px
+    # Sample at the exact pixel positions of one row, pixel k at
+    # (k - nxy // 2) * px (the canvas convention particles are placed in).
+    xs = (torch.arange(nxy, dtype=torch.float32) - nxy // 2) * px
     xy = torch.stack([xs, torch.zeros(nxy)], dim=1)
     z_bot, z_top = prof.surfaces_at(xy, nxy, px)
-    row = nxy // 2 if nxy % 2 else nxy // 2  # y = 0 rounds to this row
+    row = nxy // 2  # y = 0 is this row
     assert torch.allclose(z_top, z_top_f[row], atol=1e-3)
     assert torch.allclose(z_bot, z_bot_f[row], atol=1e-3)
 

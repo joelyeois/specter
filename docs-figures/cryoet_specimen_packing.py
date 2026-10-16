@@ -21,6 +21,7 @@ import os
 import matplotlib
 import numpy as np
 import torch
+from scipy import ndimage
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -43,7 +44,6 @@ from specter.specimen.tomogram import (
     TomogramSpecimenGenerator,
     TomogramProteinSpec,
 )
-from specter.specimen.tomogram._helpers import _build_sphere_exclusion_field
 
 OUT_DIR = "docs/assets/images"
 # Expanded: passed through unexpanded, a literal "~" directory gets
@@ -487,6 +487,22 @@ def figure_staging() -> None:
     print(f"saved {path}")
 
 
+def _sphere_distance_field(
+    coords_xyz: torch.Tensor,
+    radii: torch.Tensor,
+    shape: tuple[int, int, int],
+    voxel_size: float,
+) -> np.ndarray:
+    """Distance (A) to the nearest placed sphere, on the canvas grid (voxel
+    k at (k - n // 2) * voxel_size), for the figure's middle panel."""
+    occupied = np.zeros(shape, dtype=bool)
+    axes = [(np.arange(n) - n // 2) * voxel_size for n in shape]
+    zz, yy, xx = np.meshgrid(*axes, indexing="ij")
+    for (x, y, z), r in zip(coords_xyz.numpy(), radii.numpy()):
+        occupied |= (zz - z) ** 2 + (yy - y) ** 2 + (xx - x) ** 2 <= r**2
+    return ndimage.distance_transform_edt(~occupied, sampling=(voxel_size,) * 3)
+
+
 def figure_exclusion_field() -> None:
     """One mechanism covers both obstacle avoidance and region
     restriction: a distance field to the nearest forbidden voxel. A
@@ -511,7 +527,6 @@ def figure_exclusion_field() -> None:
     from specter.specimen.tomogram._regions import classify_membrane_regions
 
     regions = classify_membrane_regions(density)
-    from scipy import ndimage
 
     shell_field = ndimage.distance_transform_edt(
         ~regions["shell"].numpy(), sampling=(VOXEL_SIZE,) * 3
@@ -529,9 +544,9 @@ def figure_exclusion_field() -> None:
         field_voxel_size=VOXEL_SIZE,
         sampling_mask=regions["cytosol"],
     )
-    placed_field = _build_sphere_exclusion_field(
+    placed_field = _sphere_distance_field(
         coords, torch.full((coords.shape[0],), radius), shape, VOXEL_SIZE
-    ).numpy()
+    )
     combined = np.minimum(shell_field, placed_field)
 
     fig, axes = plt.subplots(1, 3, figsize=(12.0, 4.0))

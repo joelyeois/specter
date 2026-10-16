@@ -104,6 +104,7 @@ from ..packing import (
 from ._helpers import (
     _MAX_PACKING_GRID_VOXELS,
     _allowed_region_exclusion_field,
+    _canvas_box_center,
     _coarsen_grid_by,
     _coarsen_grid_to_budget,
     _downsample_mask_maxpool,
@@ -1091,6 +1092,7 @@ class TomogramSpecimenGenerator(
                 field_voxel_size=field_voxel_size,
                 sampling_mask=allowed_field,
                 field_origin=field_origin,
+                box_center=_canvas_box_center(target_shape, voxel_size),
                 max_passes=self.region_max_passes,
                 clip_axes=self.clip_axes,
             )
@@ -1120,14 +1122,25 @@ class TomogramSpecimenGenerator(
         )
         next_instance_id += n_placed
 
+        # Each bead is inserted at the whole voxel nearest its position and
+        # rendered with the remainder already applied to its atoms and mask
+        # (`BeadGenerator.generate(offset_xyz=...)`), so its density and
+        # label sit exactly at the position its pick records. Building it
+        # off-centre is exact and free; resampling a finished bead to move it
+        # would blur its lattice.
+        whole = torch.round(coords / voxel_size) * voxel_size
+        remainder = coords - whole
+
         # One bead at a time: each is an independent realisation (its own
         # grain, orientation and, for a [low, high] radius, its own size),
         # so there is no shared template to batch over.
         for i in range(n_placed):
-            bead = bead_gen.generate(radius=float(accepted_radii[i]))
+            bead = bead_gen.generate(
+                radius=float(accepted_radii[i]), offset_xyz=remainder[i]
+            )
             volume = insert_particles_into_micrograph(
                 bead.density.to(volume.device).unsqueeze(0),
-                coords[i : i + 1],
+                whole[i : i + 1],
                 pixel_size=voxel_size,
                 micrograph=volume,
             )
@@ -1140,7 +1153,7 @@ class TomogramSpecimenGenerator(
             )
             instance_labels = _insert_instance_labels(
                 binarized,
-                coords[i : i + 1],
+                whole[i : i + 1],
                 voxel_size=voxel_size,
                 labels=instance_labels,
             )

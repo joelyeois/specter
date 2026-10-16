@@ -482,15 +482,11 @@ def test_transmembrane_picks_outside_the_box_are_dropped():
     # Some really were outside, so the assertion below isn't vacuous.
     assert len(gen.transmembrane_placements) < n_labelled
 
-    half = torch.tensor(
-        [
-            shallow_shape[2] * _V_SIZE / 2,
-            shallow_shape[1] * _V_SIZE / 2,
-            shallow_shape[0] * _V_SIZE / 2,
-        ]
-    )
+    # Inside means in a canvas voxel: voxel k is at (k - n // 2) * voxel.
+    n_xyz = torch.tensor(shallow_shape[::-1])
     for tp in gen.transmembrane_placements:
-        assert bool((tp.center_xyz.abs() < half).all()), tp.center_xyz
+        index = torch.round(tp.center_xyz / _V_SIZE).long() + n_xyz // 2
+        assert bool(((index >= 0) & (index < n_xyz)).all()), tp.center_xyz
 
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")

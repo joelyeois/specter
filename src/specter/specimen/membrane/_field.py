@@ -20,8 +20,10 @@ does not depend on the resolution the caller ultimately rasterizes at.
 
 Coordinates follow the rest of Specter: physical points are ``(x, y, z)``
 triples, dense grids are ``(Z, Y, X)`` tensors, and ``MembraneField.origin_xyz``
-is the physical location of grid index ``(0, 0, 0)`` (a corner, not the
-centered-at-atom convention used by ``soft_voxelize_coordinates``).
+is the physical location of grid index ``(0, 0, 0)``. A grid built about the
+physical origin puts that origin on voxel ``n // 2`` of each axis
+(:func:`_centred_origin_xyz`), the render canvas's convention, which is also
+where ``soft_voxelize_coordinates`` and ``clip_insert_bounds`` put it.
 """
 
 from __future__ import annotations
@@ -200,6 +202,40 @@ def blend_field(
     return acc
 
 
+def _centred_origin_xyz(
+    shape_zyx: tuple[int, ...], spacing_angstrom: float
+) -> torch.Tensor:
+    """
+    Physical ``(x, y, z)`` of voxel ``(0, 0, 0)`` of a grid centred on the origin.
+
+    Centred in the render canvas's convention: voxel ``k`` of an axis of
+    ``n`` voxels sits at ``(k - n // 2) * spacing_angstrom``, so physical
+    ``(0, 0, 0)`` is exactly on voxel ``n // 2`` whatever the parity of
+    ``n``. That is the voxel `~specter.arrays.clip_insert_bounds` puts on a
+    local grid's insertion point, so a membrane grid built about this origin
+    and inserted at a canvas voxel renders its physical origin on that
+    voxel. ``-n * spacing / 2``, the grid's geometric centre, is half a voxel
+    away on an odd axis.
+
+    Parameters
+    ----------
+    shape_zyx : tuple of int
+        Grid shape ``(Z, Y, X)``.
+    spacing_angstrom : float
+        Voxel spacing, Å.
+
+    Returns
+    -------
+    torch.Tensor
+        Origin ``(x, y, z)``, Å, float32, shape ``(3,)``.
+    """
+    nz, ny, nx = shape_zyx
+    return -(
+        torch.tensor([nx // 2, ny // 2, nz // 2], dtype=torch.float32)
+        * spacing_angstrom
+    )
+
+
 def _grid_points_xyz(
     shape_zyx: tuple[int, int, int],
     spacing_angstrom: float,
@@ -207,6 +243,13 @@ def _grid_points_xyz(
     device: str | torch.device,
     dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
+    """
+    Physical ``(x, y, z)`` of every voxel of a grid, shape ``(Z, Y, X, 3)``.
+
+    Voxel ``(k, j, i)`` is at ``origin_xyz + (i, j, k) * spacing_angstrom``.
+    Every grid the membrane package builds about the physical origin takes
+    `origin_xyz` from `_centred_origin_xyz`, the canvas convention.
+    """
     nz, ny, nx = shape_zyx
     iz = torch.arange(nz, device=device, dtype=dtype)
     iy = torch.arange(ny, device=device, dtype=dtype)

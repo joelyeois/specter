@@ -151,6 +151,10 @@ class MembraneInstance:
         module's own docstring) -- an instance that doesn't fit gets
         dropped, and `position_xyz` is set here (mutated in place) for
         whichever instances are accepted, so it's inspectable afterward.
+        Always a whole canvas voxel (voxel ``k`` at ``(k - n // 2) *
+        voxel_size``): the instance is merged a whole voxel at a time, so
+        the packed position is snapped to the voxel it renders at before
+        transmembrane picks, labels or regions use it.
     """
 
     generator: MembraneGenerator

@@ -115,8 +115,11 @@ as a translation in the same affine resample that rotates the copy
 interpolation pass. Trilinear resampling conserves the first moment of
 the density, so the copy's centroid lands on the sampled position to
 within interpolation error (about \(10^{-3}\) voxel for a smooth
-template), not to within half a voxel. A tomogram's proteins, filaments
-and microtubules are placed through the same function.
+template), not to within half a voxel. A tomogram's proteins, filaments,
+microtubules and transmembrane proteins are placed through the same function.
+[Conventions](conventions.md#canvas-coordinates) gives the frame these
+positions are in, and how gold beads and membranes, which are not resampled,
+reach the same accuracy.
 
 ### Water–air interface adsorption
 

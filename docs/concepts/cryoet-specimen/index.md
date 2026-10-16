@@ -124,7 +124,11 @@ Region map, per-instance membrane labels, and per-instance protein/filament/bead
 
 Membranes deliberately have no picks entry: a surface has no single
 natural "position" the way a protein does, so `membrane_labels` and
-`regions` are its ground truth instead.
+`regions` are its ground truth instead. A membrane instance is merged into
+the volume a whole voxel at a time, so its position is snapped to the
+nearest voxel before anything uses it; each transmembrane protein's pick is
+its surface site offset by that position, and its density is centred on the
+pick.
 
 ## Limitations
 

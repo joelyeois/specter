@@ -246,6 +246,7 @@ def _rotation_cache(
     list[bool],
     list[np.ndarray],
     np.ndarray,
+    np.ndarray,
     torch.Tensor,
 ]:
     """
@@ -296,6 +297,16 @@ def _rotation_cache(
         trimmed footprint's middle voxel, which for an asymmetric molecule
         is not where its origin is (up to two voxels away on 1MBO at 4 A).
         `_placement_positions` turns that into the recorded position.
+    fine_reach : np.ndarray
+        Per orientation, how many fine voxels the rotated fine footprint
+        spans from the first fine voxel of the trimmed footprint's first
+        packing voxel to its last occupied fine voxel, inclusive, shape
+        (n_orientations, 3), int64, (z, y, x). A footprint starting at
+        packing voxel ``l`` covers fine voxels up to ``l * pool_factor +
+        fine_reach - 1``, which on a packing grid that overhangs the canvas
+        can lie past the canvas's far face even though the packing voxel is
+        on the grid. Equals the trimmed footprint's own size when
+        `pool_factor` is 1.
     R : torch.Tensor
         The rotation matrices, shape (n_orientations, 3, 3).
     """
@@ -323,10 +334,25 @@ def _rotation_cache(
     # the whole run's 15.84 GiB peak. Filling a preallocated buffer keeps the
     # peak at one copy.
     rot: torch.Tensor | None = None
+    fine_last: list[torch.Tensor] = []
     filled = 0
     for i in range(0, n_orientations, chunk):
         piece = rotate_volume(vol, theta[i : i + chunk], padding_mode="zeros") > 0.5
         if pool_factor > 1:
+            # Last occupied FINE voxel per axis, read before pooling throws
+            # it away (see `fine_reach`). -1 for an empty orientation.
+            fz_any = piece.any(dim=3)
+            fine_last.append(
+                torch.stack(
+                    [
+                        _last_true(fz_any.any(dim=2)),
+                        _last_true(fz_any.any(dim=1)),
+                        _last_true(piece.any(dim=2).any(dim=1)),
+                    ],
+                    dim=1,
+                )
+            )
+            del fz_any
             # Pool inside the chunk loop so the fine rotation is transient
             # and only the coarse result is retained.
             piece = (
@@ -396,6 +422,10 @@ def _rotation_cache(
     # lets a fine offset be read straight off the packing index.
     centre_fine = np.array([s // 2 for s in mask.shape], dtype=np.int64)
     origin_offsets = np.zeros((n, 3), dtype=np.int64)
+    fine_reach = np.zeros((n, 3), dtype=np.int64)
+    fine_last_np = (
+        torch.cat(fine_last).cpu().numpy() if fine_last else None
+    )  # (n, 3), only when pooled
     for i in range(n):
         bz0, bz1, by0, by1, bx0, bx1 = (int(v) for v in bounds[i])
         if bz1 < bz0:
@@ -410,12 +440,23 @@ def _rotation_cache(
         geom.append((sz, sy, sx, sz // 2, sy // 2, sx // 2))
         anchor = np.array([bz0 + sz // 2, by0 + sy // 2, bx0 + sx // 2])
         origin_offsets[i] = centre_fine - anchor * pool_factor
+        if fine_last_np is None:
+            fine_reach[i] = (sz, sy, sx) if fp.any() else (0, 0, 0)
+        else:
+            start = np.array([bz0, by0, bx0]) * pool_factor
+            fine_reach[i] = np.maximum(fine_last_np[i] - start + 1, 0)
         centre_solid.append(bool(fp[sz // 2, sy // 2, sx // 2]) if fp.size else False)
         idx = np.array(np.nonzero(fp)).T
         if idx.shape[0] > _N_PROBE:
             idx = idx[rng.choice(idx.shape[0], _N_PROBE, replace=False)]
         probes.append(np.ascontiguousarray(idx))
-    return cache, geom, centre_solid, probes, origin_offsets, R
+    return cache, geom, centre_solid, probes, origin_offsets, fine_reach, R
+
+
+def _last_true(a: torch.Tensor) -> torch.Tensor:
+    """Index of the last True per row of a (N, L) bool tensor; -1 if none."""
+    idx = torch.arange(a.shape[1], device=a.device).expand_as(a)
+    return torch.where(a, idx, torch.full_like(idx, -1)).max(dim=1).values
 
 
 def _placement_positions(
@@ -586,7 +627,11 @@ def pack_shapes_3d(
         host, where the collision test is already 0.08 ms.
     clip_axes : tuple of bool, optional
         (z, y, x). True lets a footprint extend past that wall (it is
-        truncated); False requires it to fit entirely.
+        truncated); False requires it to fit entirely. "Entirely" is judged
+        on the render grid: when `canvas_shape` does not fill the coarse
+        grid's last packing voxel, a footprint that reaches the render
+        voxels past the canvas's face is rejected, although its packing
+        voxels are on the grid.
     pool_factor : int, optional
         Collide on a grid `pool_factor` times coarser than `species_masks`
         are rasterized at. `species_masks` are then at
@@ -688,6 +733,10 @@ def pack_shapes_3d(
     # placements are bitwise identical to that form (pinned in
     # tests/test_pack_shapes_reference.py).
     clip_z, clip_y, clip_x = clip_axes
+    overhang_z, overhang_y, overhang_x = (
+        not clip and g * pool_factor > c
+        for clip, g, c in zip(clip_axes, grid_shape, canvas)
+    )
     occ_flat = occ.reshape(-1)
     plane = ny * nx
 
@@ -695,13 +744,16 @@ def pack_shapes_3d(
         rows = np.flatnonzero(species_idx_np == s)
         if rows.size == 0:
             continue
-        cache, geom, centre_solid, probes, origin_offsets, R = _rotation_cache(
-            species_masks[int(s)], n_orientations, device, seed, pool_factor
+        cache, geom, centre_solid, probes, origin_offsets, fine_reach, R = (
+            _rotation_cache(
+                species_masks[int(s)], n_orientations, device, seed, pool_factor
+            )
         )
         R_np = R.cpu().numpy()
         n_cache = len(cache)
         g = np.asarray(geom, dtype=np.int64)  # (n_cache, 6): fz fy fx hz hy hx
         fz_a, fy_a, fx_a, hz_a, hy_a, hx_a = (g[:, i] for i in range(6))
+        reach_z, reach_y, reach_x = fine_reach.T
         cs_a = np.asarray(centre_solid, dtype=bool)
 
         # Probe voxels padded to (n_cache, P) with a validity mask, as flat
@@ -793,6 +845,19 @@ def pack_shapes_3d(
                 rej |= (loy != ly) | (hiy != ey)
             if not clip_x:
                 rej |= (lox != lx) | (hix != ex)
+            # On a packing grid that overhangs the canvas, the last packing
+            # voxel of an axis covers render voxels past the canvas's far
+            # face. A footprint on the grid can still reach them, and the
+            # renderer would clip what lands there, so a wall that may not
+            # be crossed is tested on the RENDER grid as well (see
+            # `fine_reach`). Exact: an attempt is rejected only if an
+            # occupied render voxel of its footprint is outside the canvas.
+            if overhang_z:
+                rej |= lz * pool_factor + reach_z[oris] > canvas[0]
+            if overhang_y:
+                rej |= ly * pool_factor + reach_y[oris] > canvas[1]
+            if overhang_x:
+                rej |= lx * pool_factor + reach_x[oris] > canvas[2]
             inside = (
                 (loz == lz)
                 & (loy == ly)

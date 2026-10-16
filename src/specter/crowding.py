@@ -872,8 +872,11 @@ class CrowdWithDuplicates(L.LightningModule):
         occupancy = None
         if self.ice_profile is not None:
             z_bot_field, z_top_field = self.ice_profile.surfaces(self.nxy_out, self.dx)
+            # Packing voxel k is canvas voxel k, at (k - n // 2) * dx: the
+            # position `pack_shapes_3d` records for it, and the one the
+            # profile's own grid and window use.
             z_axis = (
-                torch.arange(self.nz_out, dtype=torch.float32) - (self.nz_out - 1) / 2
+                torch.arange(self.nz_out, dtype=torch.float32) - self.nz_out // 2
             ) * self.dx
             interior = (z_axis[:, None, None] >= z_bot_field[None]) & (
                 z_axis[:, None, None] <= z_top_field[None]

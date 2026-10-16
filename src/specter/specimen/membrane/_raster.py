@@ -25,7 +25,7 @@ from __future__ import annotations
 import torch
 
 from ...filters import gaussian_blur3d
-from ._field import MembraneField, _grid_points_xyz
+from ._field import MembraneField, _centred_origin_xyz, _grid_points_xyz
 from ._profile import BilayerProfile
 
 
@@ -56,8 +56,9 @@ def rasterize_membrane_density(
         Output voxel size, Å.
     target_origin_xyz : torch.Tensor, optional
         Physical ``(x, y, z)`` location of output grid index ``(0, 0, 0)``,
-        Å. Default centers the output grid on the physical origin,
-        matching ``field``'s own centered-origin convention.
+        Å. Default centres the output grid on the physical origin in the
+        render canvas's convention, physical ``(0, 0, 0)`` on voxel
+        ``n // 2`` of each axis (see `._field._centred_origin_xyz`).
     antialias_sigma_angstrom : float, optional
         Gaussian blur sigma applied to the fine density before resampling,
         Å. Default ``0.5 * target_spacing_angstrom`` whenever the output is
@@ -92,14 +93,7 @@ def rasterize_membrane_density(
     )
 
     if target_origin_xyz is None:
-        extent = (
-            torch.tensor(
-                [target_shape[2], target_shape[1], target_shape[0]],
-                dtype=torch.float32,
-            )
-            * target_spacing_angstrom
-        )
-        target_origin_xyz = -0.5 * extent
+        target_origin_xyz = _centred_origin_xyz(target_shape, target_spacing_angstrom)
 
     points_xyz = _grid_points_xyz(
         target_shape, target_spacing_angstrom, target_origin_xyz, field.phi.device

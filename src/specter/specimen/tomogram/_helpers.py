@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from typing import Literal
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy import ndimage
@@ -149,19 +148,52 @@ def _insert_rotated_copies(
     return volume, instance_labels
 
 
+def _canvas_box_center(
+    shape_zyx: tuple[int, ...], voxel_size: float
+) -> tuple[float, float, float]:
+    """Centre (x, y, z), Å, of a canvas of `shape_zyx` voxels.
+
+    Voxel ``k`` of an axis of ``n`` is at ``(k - n // 2) * voxel_size``, so
+    the canvas's faces are at ``-(n // 2 + 1/2)`` and ``n - n // 2 - 1/2``
+    voxels: centred on the origin when ``n`` is odd and half a voxel below
+    it when ``n`` is even. Passed to `pack_hard_spheres_3d` as
+    `box_center`, with ``shape * voxel_size`` as its `box`, it puts the
+    packer's walls on the faces of the canvas the spheres render into.
+    """
+    nz, ny, nx = shape_zyx
+    return tuple(float(((n - 1) / 2 - n // 2) * voxel_size) for n in (nx, ny, nz))  # type: ignore[return-value]
+
+
+def _snap_to_canvas_voxel(
+    position_xyz: torch.Tensor, voxel_size: float
+) -> torch.Tensor:
+    """Positions (x, y, z), Å, moved to the nearest canvas voxel.
+
+    The canvas puts voxel ``k`` at ``(k - n // 2) * voxel_size``, so a
+    multiple of `voxel_size` is a voxel whatever the canvas's parity. A
+    membrane instance is max-merged into the canvas a whole voxel at a time
+    (`_insert_volume_max`), so its position is snapped here, once, before
+    anything reads it: what its transmembrane picks are offset by, and what
+    its labels and region masks are stamped at, is then where its density
+    actually is rather than up to half a voxel per axis away.
+    """
+    return torch.round(position_xyz / voxel_size) * voxel_size
+
+
 def _position_to_center_index(
     position_xyz: tuple[float, float, float],
     shape_zyx: tuple[int, ...],
     voxel_size: float,
 ) -> tuple[int, int, int]:
-    """Physical (x, y, z) offset from a volume's own center -> absolute
-    (z, y, x) voxel index of that offset -- the center-relative convention
-    `MembraneGenerator` itself uses (physical (0,0,0) = volume center),
-    matching `_insert_instance_labels`'s own indexing math above. NOT
-    `clip_insert_bounds`'s own corner-relative (0..extent) convention,
-    which is for genuinely small local arrays -- the wrong frame for a
-    MembraneGenerator instance, which always renders on its own full target
-    grid centered at (0,0,0) (see that class's own module docstring)."""
+    """Physical (x, y, z) position -> absolute (z, y, x) index of the
+    canvas voxel nearest it, in the canvas convention that voxel ``k`` of an
+    axis of ``n`` is at ``(k - n // 2) * voxel_size`` (the indexing
+    `_insert_instance_labels` above and `insert_particles_into_micrograph`
+    use). Pair it with `clip_insert_bounds`, which puts a local grid's voxel
+    ``m // 2`` on the index returned: a `MembraneGenerator` grid holds its
+    physical origin on that voxel (`membrane._field._centred_origin_xyz`),
+    so the instance lands on `position_xyz` exactly when that position is a
+    canvas voxel (`_snap_to_canvas_voxel`)."""
     z_center, y_center, x_center = (
         shape_zyx[0] // 2,
         shape_zyx[1] // 2,
@@ -181,10 +213,9 @@ def _insert_volume_max(
     position_xyz: tuple[float, float, float],
     voxel_size: float,
 ) -> torch.Tensor:
-    """Max-merge `local` (same center-relative convention as `volume`,
-    i.e. physical (0,0,0) at its own center) into `volume`, shifted by
-    `position_xyz`. See `_position_to_center_index` for why this uses a
-    different convention than `clip_insert_bounds`. `local` is
+    """Max-merge `local` (physical (0,0,0) on its voxel ``m // 2``, the
+    same convention as `volume`) into `volume`, its origin on the canvas
+    voxel nearest `position_xyz` (see `_position_to_center_index`). `local` is
     moved to `volume`'s own device (not the other way around) -- `volume`
     is the shared, potentially large accumulator (see
     TomogramSpecimenGenerator's own `accumulator_device` docstring),
@@ -198,39 +229,6 @@ def _insert_volume_max(
     dst, src = bounds
     volume[dst] = torch.maximum(volume[dst], local[src].to(volume.device))
     return volume
-
-
-def _build_sphere_exclusion_field(
-    coords_xyz: torch.Tensor,
-    radii: torch.Tensor,
-    target_shape: tuple[int, int, int],
-    voxel_size: float,
-) -> torch.Tensor:
-    """Rasterize already-placed spheres into a boolean occupied grid and
-    return its Euclidean distance transform, ready to combine (elementwise
-    minimum, matching `pack_hard_spheres_3d`'s own "union of forbidden
-    regions" guidance) with another `exclusion_distance_field` for a
-    following packing stage."""
-    Z, Y, X = target_shape
-    occupied = np.zeros((Z, Y, X), dtype=bool)
-    cz, cy, cx = Z / 2.0, Y / 2.0, X / 2.0
-
-    coords_np = coords_xyz.cpu().numpy()
-    radii_np = radii.cpu().numpy()
-    for (x, y, z), r in zip(coords_np, radii_np):
-        vz, vy, vx = cz + z / voxel_size, cy + y / voxel_size, cx + x / voxel_size
-        r_vox = r / voxel_size
-        z0, z1 = max(0, int(np.floor(vz - r_vox))), min(Z, int(np.ceil(vz + r_vox)) + 1)
-        y0, y1 = max(0, int(np.floor(vy - r_vox))), min(Y, int(np.ceil(vy + r_vox)) + 1)
-        x0, x1 = max(0, int(np.floor(vx - r_vox))), min(X, int(np.ceil(vx + r_vox)) + 1)
-        if z0 >= z1 or y0 >= y1 or x0 >= x1:
-            continue
-        zz, yy, xx = np.mgrid[z0:z1, y0:y1, x0:x1]
-        dist2 = (zz - vz) ** 2 + (yy - vy) ** 2 + (xx - vx) ** 2
-        occupied[z0:z1, y0:y1, x0:x1] |= dist2 <= r_vox**2
-
-    field = ndimage.distance_transform_edt(~occupied, sampling=(voxel_size,) * 3)
-    return torch.from_numpy(field).float()
 
 
 # Voxel budget for building an exclusion_distance_field/sampling_mask (see

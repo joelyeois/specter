@@ -91,7 +91,7 @@ import torch
 import torch.nn.functional as F
 from scipy.special import sph_harm_y, sph_harm_y_all
 
-from ._field import MembraneField, _signed_distance_transform
+from ._field import MembraneField, _centred_origin_xyz, _signed_distance_transform
 
 # Voxels of the working grid `generate_membrane_field_spherical_harmonics` builds
 # per slab. Bounds the device memory its per-voxel geometry holds at once: the
@@ -446,11 +446,7 @@ def generate_membrane_field_spherical_harmonics(
     if sh_max_degree < 2:
         raise ValueError(f"sh_max_degree must be >= 2, got {sh_max_degree}")
 
-    extent_angstrom = (
-        torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * spacing_angstrom
-    )
-    origin_xyz = -0.5 * extent_angstrom
+    origin_xyz = _centred_origin_xyz(shape_zyx, spacing_angstrom)
 
     # The per-voxel geometry below runs on `device` and is separable: x depends
     # only on the column index, y only on the row, z only on the slice, so the

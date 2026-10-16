@@ -166,6 +166,13 @@ reaches volume fraction 0.264 versus 0.269 with no overlapping voxels,
 0.348, but that density comes from under-sized collision geometry, not
 better packing.
 
+The coarse grid tiles the render canvas from its first voxel, so when the
+pooling factor does not divide the canvas, the last packing voxel of an axis
+also covers render voxels past the canvas's far face. On an axis that may
+not be clipped (`clip_axes`), the packer also tests each footprint's extent
+on the render grid and rejects one that would reach past that face, so no
+copy loses density at the edge.
+
 ## Sphere packing, for beads and membranes
 
 Gold fiducials and membrane instances have no footprint to collide — a
@@ -279,7 +286,10 @@ They use a distance field instead: both "stay out of the membrane" and "stay
 inside the lumen" share the same input, a field giving the physical
 distance to the nearest **forbidden** voxel. It rejects a candidate
 unless the field, sampled at its centre, exceeds `radius + gap`, meaning
-its whole sphere clears the forbidden set.
+its whole sphere clears the forbidden set. The walls a sphere must stay
+inside are the faces of the render canvas, which on an even axis is centred
+half a voxel off the origin (see
+[Conventions](../conventions.md#canvas-coordinates)).
 
 ![The shell distance field, the field from already-placed spheres, and their elementwise minimum, with rejected centres shaded.](../../assets/images/cryoet-packing-exclusion-field.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption

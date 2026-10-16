@@ -26,6 +26,7 @@ from typing import Literal
 import torch
 
 from ...arrays import clip_insert_bounds
+from ...crowding import fold_subvoxel_offsets
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, rotate_volume
@@ -41,7 +42,7 @@ from ._extent import (
     DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
     membrane_bounding_radius,
 )
-from ._field import MembraneField, _grid_points_xyz
+from ._field import MembraneField, _centred_origin_xyz, _grid_points_xyz
 from ._field_spherical_harmonics import generate_membrane_field_spherical_harmonics
 from ._field_swept_spline import generate_membrane_field_swept_spline
 from ._placement import (
@@ -1221,7 +1222,11 @@ class MembraneGenerator:
         extent_angstrom = (
             torch.tensor([nx, ny, nz], dtype=torch.float32) * self.voxel_size
         )
-        self._origin_xyz = -0.5 * extent_angstrom
+        # Physical (0, 0, 0) -- the organelle's own centre, and the point a
+        # caller's `position_xyz` places -- on voxel n // 2 of each axis,
+        # which is where `clip_insert_bounds` puts a local grid's insertion
+        # point. `-extent / 2` put it half a voxel off on every odd axis.
+        self._origin_xyz = _centred_origin_xyz(self.target_shape, self.voxel_size)
 
         field_shape_zyx = (
             int(torch.ceil(extent_angstrom[2] / field_spacing_angstrom)),
@@ -1439,10 +1444,19 @@ class MembraneGenerator:
         )
         chunk = max(1, _TRANSMEMBRANE_ROTATION_BATCH_VOXELS // largest)
 
+        # A site is a continuous point on the surface. Each template is
+        # inserted at the voxel nearest its site and the sub-voxel remainder
+        # is folded into the rotation that resamples it anyway
+        # (`fold_subvoxel_offsets`), so the protein's centre lands on the
+        # site its placement records rather than up to half a voxel from it.
+        # `self._origin_xyz` puts physical (0, 0, 0) on voxel n // 2, so a
+        # site's coordinates are already its offset from that voxel.
+        centre_zyx = torch.tensor([s // 2 for s in self.volume.shape], dtype=torch.long)
         placements: list[TransmembranePlacement] = []
         for c0 in range(0, n_found, chunk):
             site_ids = range(c0, min(c0 + chunk, n_found))
             rotated: dict[int, torch.Tensor] = {}
+            insert_at: dict[int, torch.Tensor] = {}
             for species in sorted({choices[i] for i in site_ids}):
                 group = [i for i in site_ids if choices[i] == species]
                 template = templates[self.transmembrane_specs[species].pdb_source]
@@ -1455,13 +1469,17 @@ class MembraneGenerator:
                     .transpose(-1, -2)
                     .to(self.device)
                 )
+                theta, whole = fold_subvoxel_offsets(
+                    theta, sites_cpu[group], self.voxel_size, template.shape
+                )
                 volumes = rotate_volume(template, theta, padding_mode="zeros")
                 rotated.update(zip(group, volumes))
+                whole_zyx = (whole / self.voxel_size).round().long().flip(-1)
+                insert_at.update(zip(group, centre_zyx + whole_zyx))
 
             for i in site_ids:
                 spec = self.transmembrane_specs[choices[i]]
-                center_zyx = self._physical_to_voxel_index(sites_cpu[i])
-                self._insert_blend(rotated.pop(i), center_zyx, instance_id=i + 1)
+                self._insert_blend(rotated.pop(i), insert_at.pop(i), instance_id=i + 1)
                 placements.append(
                     TransmembranePlacement(
                         species_id=spec.pdb_source,

@@ -453,7 +453,10 @@ class BeadGenerator:
         return atoms[atoms.norm(dim=-1) <= reach]
 
     def generate(
-        self, radius: float, generator: torch.Generator | None = None
+        self,
+        radius: float,
+        generator: torch.Generator | None = None,
+        offset_xyz: tuple[float, float, float] | torch.Tensor | None = None,
     ) -> BeadInstance:
         """
         Parameters
@@ -465,6 +468,13 @@ class BeadGenerator:
             RNG for the crystal orientation, lattice jitter and shape
             realisation. Default None (global RNG, so ``specter.seed``
             controls it).
+        offset_xyz : tuple of float or torch.Tensor, optional
+            Displacement (x, y, z), Å, of the bead's centre from the grid's
+            centre voxel ``n // 2``, at most half a voxel per axis. The
+            atoms and the mask are both built about the displaced centre,
+            so a bead inserted at the whole voxel nearest its position, with
+            the remainder passed here, renders exactly at that position.
+            Draws no random numbers. Default None (centred on ``n // 2``).
 
         Returns
         -------
@@ -472,6 +482,15 @@ class BeadGenerator:
         """
         if radius <= 0:
             raise ValueError(f"radius must be > 0, got {radius}")
+        offset = (
+            torch.zeros(3)
+            if offset_xyz is None
+            else torch.as_tensor(offset_xyz, dtype=torch.float32).reshape(3)
+        )
+        if bool((offset.abs() > 0.501 * self.voxel_size).any()):
+            raise ValueError(
+                f"offset_xyz must be within half a voxel per axis, got {offset_xyz}"
+            )
 
         # A fresh crystal orientation per bead, so no two fiducials show
         # their lattice fringes running the same way.
@@ -492,7 +511,12 @@ class BeadGenerator:
         # `arrays.clip_insert_bounds` use -- so the rendered bead lands
         # where the placement code thinks it does. (CTS instead offset its
         # centre by a further +1.5 voxels, leaving the bead off-centre and
-        # clipped on three faces.)
+        # clipped on three faces.) `offset` then moves it off that voxel by
+        # at most half a voxel, which costs no padding: an atom at
+        # `x <= half_extent / voxel + 1/2` voxels from the centre splats no
+        # further than `floor(x) + 1 <= ceil(half_extent / voxel) + 1`, the
+        # same bound as an unshifted one, and the kernel reaches `pad - 1`
+        # beyond that.
         pad = 1 + self._kernel.shape[0] // 2
         half = int(np.ceil(shape.half_extent / self.voxel_size)) + pad
         n = 2 * half + 1
@@ -500,9 +524,9 @@ class BeadGenerator:
         idx = torch.arange(n, dtype=torch.float32) - half
         zz, yy, xx = torch.meshgrid(idx, idx, idx, indexing="ij")
         centres = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3) * self.voxel_size
-        mask = shape.contains(centres).reshape(n, n, n)
+        mask = shape.contains(centres - offset).reshape(n, n, n)
 
-        atoms = raw_lattice[shape.contains(raw_lattice)]
+        atoms = raw_lattice[shape.contains(raw_lattice)] + offset
         deltas = soft_voxelize_coordinates(atoms, (n, n, n), self.voxel_size)
         density = spatial_convolve3d_same(deltas[None], self._kernel)[0]
 

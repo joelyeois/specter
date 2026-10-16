@@ -198,6 +198,7 @@ def pack_hard_spheres_3d(
     field_voxel_size: float | None = None,
     sampling_mask: torch.Tensor | None = None,
     field_origin: tuple[float, float, float] | None = None,
+    box_center: tuple[float, float, float] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pack hard spheres of given (possibly different) radii into a box via
@@ -240,8 +241,8 @@ def pack_hard_spheres_3d(
         irrelevant (spheres are internally grouped and processed
         largest-first regardless of input order).
     box : tuple of float
-        (D, H, W) box extents in Å (z, y, x), centered at the
-        origin -- same convention as
+        (D, H, W) box extents in Å (z, y, x), centred on `box_center` --
+        by default on the origin, the convention of
         :func:`specter.coords.poisson_disk_neighbors_3d`.
     gap : float, optional
         Extra clearance between sphere surfaces, Å, beyond simple
@@ -330,11 +331,21 @@ def pack_hard_spheres_3d(
         and from the canvas centre whenever the factor does not divide the
         canvas; `..tomogram._helpers._allowed_region_exclusion_field` returns
         the origin that goes with its field.
+    box_center : tuple of float, optional
+        Position (x, y, z), Å, of the box's centre; the walls are at
+        ``box_center -+ box / 2``. Default None, the origin. A render canvas
+        of ``n`` voxels puts voxel ``k`` at ``(k - n // 2) * voxel`` and
+        spans ``[-(n // 2) - 1/2, n - n // 2 - 1/2]`` voxels, so its centre
+        is the origin on an odd axis and ``-voxel / 2`` on an even one;
+        `..tomogram._helpers._canvas_box_center` returns the centre to pass
+        for one, with ``shape * voxel`` as `box`, so the walls are the
+        canvas's faces.
 
     Returns
     -------
     coords : torch.Tensor, shape (M, 3)
-        Accepted sphere centers (x, y, z), Å, box-centered. M <= N.
+        Accepted sphere centers (x, y, z), Å, in the frame `box_center` is
+        given in. M <= N.
     accepted_idx : torch.Tensor, shape (M,)
         Indices into `radii` for the spheres that were successfully
         placed, in the order accepted (not input order) -- use this to
@@ -446,19 +457,16 @@ def pack_hard_spheres_3d(
                 cand = mask_voxel_positions_xyz[chosen] + jitter
             else:
                 cand = (
-                    (
-                        torch.rand(remaining.numel(), 3, generator=gen, device=device)
-                        - 0.5
-                    )
-                    * 2
-                    * half
-                )
+                    torch.rand(remaining.numel(), 3, generator=gen, device=device) - 0.5
+                ) * 2 * half + centre
             # full sphere must fit on non-clippable axes; only the center
             # needs to stay in-bounds on clippable ones (see `clip_axes`).
             required_margin = torch.where(
                 clip_allowed_xyz.unsqueeze(0), 0.0, cand_radii.unsqueeze(1)
             )
-            blocked = ((cand.abs() + required_margin) > half.unsqueeze(0)).any(dim=1)
+            blocked = (
+                ((cand - centre).abs() + required_margin) > half.unsqueeze(0)
+            ).any(dim=1)
 
             if exclusion_distance_field is not None:
                 dist = _sample_exclusion_distance(cand)
@@ -540,6 +548,11 @@ def pack_hard_spheres_3d(
         gen.manual_seed(seed)
 
     half = _half_extents_xyz(box)
+    centre = (
+        torch.zeros(3, device=device)
+        if box_center is None
+        else torch.tensor(box_center, dtype=torch.float32, device=device)
+    )
     box_t = torch.diag(_box_dims_xyz(box))
     N = radii.shape[0]
     radii = radii.to(device)

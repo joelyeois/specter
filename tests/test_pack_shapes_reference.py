@@ -97,7 +97,7 @@ def pack_shapes_3d_reference(
         rows = np.flatnonzero(species_idx_np == s)
         if rows.size == 0:
             continue
-        cache, geom, centre_solid, probes, origin_offsets, R = _rotation_cache(
+        cache, geom, centre_solid, probes, origin_offsets, _, R = _rotation_cache(
             species_masks[int(s)], n_orientations, device, seed, pool_factor
         )
         # Probe indices -> flat offsets, which needs the grid's own strides

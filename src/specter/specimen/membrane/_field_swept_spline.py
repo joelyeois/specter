@@ -113,6 +113,7 @@ from scipy import ndimage
 from ._field import (
     MembraneField,
     SphereSource,
+    _centred_origin_xyz,
     _grid_points_xyz,
     _warn_if_clipped_at_boundary,
     blend_field,
@@ -325,11 +326,7 @@ def generate_membrane_field_swept_spline(
         for i in range(n_points)
     ]
 
-    extent_angstrom = (
-        torch.tensor([shape_zyx[2], shape_zyx[1], shape_zyx[0]], dtype=torch.float32)
-        * spacing_angstrom
-    )
-    origin_xyz = -0.5 * extent_angstrom
+    origin_xyz = _centred_origin_xyz(shape_zyx, spacing_angstrom)
 
     points_xyz = _grid_points_xyz(shape_zyx, spacing_angstrom, origin_xyz, device)
     phi = blend_field(sources, points_xyz, blend_sharpness_angstrom)

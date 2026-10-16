@@ -20,11 +20,13 @@ from ..membrane import TransmembranePlacement
 from ..packing import pack_hard_spheres_3d
 from ._helpers import (
     _allowed_region_exclusion_field,
+    _canvas_box_center,
     _insert_local_labels,
     _insert_shell_label,
     _insert_volume_max,
     _instance_bounding_radius,
     _position_to_center_index,
+    _snap_to_canvas_voxel,
 )
 from ._regions import classify_membrane_regions
 from ._specs import MembraneInstance
@@ -67,9 +69,9 @@ class _MembraneStageMixin:
         # without colliding is dropped (never .generate()-called at all,
         # cheaper than generating first and rejecting after), matching
         # this module's own "reject and move on" packing philosophy rather
-        # than retrying at new positions. Instances with an explicit
-        # position_xyz are placed as given and NOT included in this
-        # collision check.
+        # than retrying at new positions. Every instance is placed this
+        # way: `MembraneInstance.position_xyz` is not settable at
+        # construction, and is written here for the instances accepted.
         # The phases below stay on phase_start/phase_done rather than
         # `with phase(...)`: their completion line reports a count (instances
         # placed, structures loaded) that only exists once the block has run.
@@ -187,6 +189,7 @@ class _MembraneStageMixin:
                     else None,
                     sampling_mask=(allowed_field if carbon_mask is not None else None),
                     field_origin=field_origin if carbon_mask is not None else None,
+                    box_center=_canvas_box_center(target_shape, voxel_size),
                 )
             n_dropped = len(self.membrane_instances) - accepted_idx.numel()
             if n_dropped:
@@ -198,6 +201,11 @@ class _MembraneStageMixin:
                     "generated).",
                     stacklevel=2,
                 )
+            # Snapped to the canvas voxel the instance will be merged at,
+            # before anything reads the position (see
+            # `_snap_to_canvas_voxel`). The snap moves a centre at most half
+            # a voxel per axis, against a bounding sphere packed with `gap`.
+            coords = _snap_to_canvas_voxel(coords, voxel_size)
             for k, orig_idx in enumerate(accepted_idx.tolist()):
                 mi = self.membrane_instances[orig_idx]
                 mi.position_xyz = tuple(coords[k].tolist())
@@ -285,11 +293,15 @@ class _MembraneStageMixin:
                 # volume does not cover. Same reasoning, and the same
                 # center-point granularity, as the carbon-film drop below.
                 if tm_placements:
-                    half = torch.tensor(
-                        [box[2] / 2, box[1] / 2, box[0] / 2], dtype=torch.float32
-                    )
+                    # By the canvas voxel each centre falls in, the same
+                    # rounding the insertion uses: voxel k is at
+                    # (k - n // 2) * voxel_size.
                     centers = torch.stack([tp.center_xyz for tp in tm_placements])
-                    outside = (centers.abs() >= half).any(dim=1)
+                    n_xyz = torch.tensor(
+                        [volume.shape[2], volume.shape[1], volume.shape[0]]
+                    )
+                    index = torch.round(centers / voxel_size).long() + n_xyz // 2
+                    outside = ((index < 0) | (index >= n_xyz)).any(dim=1)
                     n_outside = int(outside.sum())
                     if n_outside:
                         warnings.warn(

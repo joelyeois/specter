@@ -62,6 +62,37 @@ direction, the second-to-last axis is \(y\) (rows), and the last axis is
 uses on disk, so writing
 volumes and image stacks needs no transposition.
 
+## Canvas coordinates
+
+Positions are in Å, relative to the centre of the volume they are placed in.
+Voxel \(k\) of an axis of \(n\) voxels of size \(\Delta\) sits at
+\((k - \lfloor n/2 \rfloor)\,\Delta\), so the origin lies exactly on voxel
+\(\lfloor n/2 \rfloor\) whatever the parity of \(n\). This is the index the
+default rotation origin and a centred spectrum's DC term also use. The faces
+of the volume are at \(-(\lfloor n/2 \rfloor + \tfrac{1}{2})\,\Delta\) and
+\((n - \lfloor n/2 \rfloor - \tfrac{1}{2})\,\Delta\), so an even axis is
+centred half a voxel below the origin rather than on it.
+
+Everything that places density into a volume records its position in this
+frame and renders at that position:
+
+- Rotated copies (crowding duplicates, micrograph particles, tomogram
+  proteins, filament subunits, tubulin dimers and transmembrane proteins) are
+  added at the nearest whole voxel, and the remainder, at most half a voxel
+  per axis, is applied by the affine resample that rotates them
+  (`crowding.fold_subvoxel_offsets`).
+- Gold beads are built with the remainder already applied to their atoms and
+  boundary (`BeadGenerator.generate(offset_xyz=...)`), since resampling a
+  finished bead would blur its lattice.
+- A membrane instance is merged into the volume a whole voxel at a time, so
+  its position is snapped to the nearest voxel before its transmembrane
+  proteins, labels or region masks use it. Its own working grids put the
+  organelle's centre on their voxel \(\lfloor m/2 \rfloor\).
+- The shape packer records the render voxel a footprint was tested at, and
+  the sphere packer's walls are the faces of the volume.
+- An `IceProfile` evaluates its thickness, mid-plane and window on the same
+  grid, so a particle and the ice column it is placed in agree.
+
 ## Fourier conventions
 
 **FFTs are unshifted by default.** `specter.fft`'s `fft2`/`ifft2`/`fft3`

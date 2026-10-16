@@ -455,7 +455,7 @@ def test_rotation_cache_pools_after_rotating():
 
     factor, n_or = 4, 24
     fine = build_species_mask(blob(n_atoms=3000, radius=14.0), 1.0, gap=0.0)
-    cache, _, _, _, _, R = _rotation_cache(fine, n_or, "cpu", 0, pool_factor=factor)
+    cache, _, _, _, _, _, R = _rotation_cache(fine, n_or, "cpu", 0, pool_factor=factor)
 
     def pool(x):
         return (

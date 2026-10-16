@@ -32,8 +32,8 @@ from specter.specimen.filament._actin import (
     _fit_actin_filament,
     _kabsch,
     _source_cif,
-    subunit_centre_in_filament_frame,
 )
+from specter.specimen.filament._placement import subunit_centre_in_filament_frame
 from specter.specimen.tomogram import TomogramSpecimenGenerator
 from conftest import seeded
 

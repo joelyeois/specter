@@ -24,7 +24,8 @@ tube with a lumen and an A-lattice seam, gets its own page; see
 
 !!! info "Source"
     `specter.specimen.filament` (`_path`, `_placement`, `_generator`,
-    `_actin`), stamped by `TomogramSpecimenGenerator._stamp_filaments`.
+    `_actin`, `_tubulin`), stamped by
+    `TomogramSpecimenGenerator._stamp_filaments`.
     `docs-figures/cryoet_specimen_filaments.py` produces the figures,
     calling the same functions the real code path does.
 
@@ -103,11 +104,25 @@ by `frame`:
   all atoms), every centre within 0.07 Å and every orientation within
   0.21°. That residual is the deposited model's own: its five chains were
   refined independently and differ from one another by as much.
-- **`"principal_axis"`** (the default, and `PROTOFILAMENT_SPEC`). `code` is
-  an isolated monomer. SPECTER centres it on the filament axis and
-  pre-rotates its coordinates so that its **longest principal axis** points
-  along \(+Z\). This is an approximation; see
-  [Limitations](#limitations).
+- **`"microtubule_dimer"`** (`PROTOFILAMENT_SPEC`). `code` names a
+  deposited microtubule, and one αβ-tubulin dimer is lifted out of it in
+  the microtubule frame (`extract_mt_dimer`, described under
+  [Microtubules](microtubules.md#the-dimer-template)), the same template a
+  `MicrotubuleSpec` builds its tube wall from. The filament axis of a free
+  protofilament is the protofilament's own axis, not the tube axis: the
+  origin lies midway between the centroids of the dimer's α and β
+  monomers, both of which lie on the \(Z\) axis to within 0.2 Å, \(+Z\)
+  points from α to β toward the plus end, and \(+X\) is the face that
+  points away from the tube axis in the source lattice. Two dimers placed
+  this way on a straight path, `twist_deg = 0` and `step = DIMER_REPEAT`,
+  superpose onto two consecutive dimers of each protofilament of 3JAL
+  (Zhang et al. 2015) with a Cα RMSD of 0.14 Å. Most of that residual is
+  the step: the deposited dimer repeat is 81.76 Å, 0.24 Å short of
+  `DIMER_REPEAT`, and at the deposited repeat the RMSD is 0.085 Å.
+- **`"principal_axis"`** (the default). `code` is an isolated monomer.
+  SPECTER centres it on the filament axis and pre-rotates its coordinates
+  so that its **longest principal axis** points along \(+Z\). This is an
+  approximation; see [Limitations](#limitations).
 
 `twist_deg` is what separates a helical polymer from a plain stack:
 
@@ -144,7 +159,7 @@ F-actin and a microtubule protofilament rendered at the same scale.
 | Preset | `code` | `frame` | `step` (Å) | `flex_deg` | `twist_deg` | `n_monomers` |
 |---|---|---|---|---|---|---|
 | `ACTIN_SPEC` | 7BT7 (ADP-F-actin filament; Kumari et al. 2020) | `"actin_filament"` | 27.5 | 12.0 | −166.6 | (20, 60) |
-| `PROTOFILAMENT_SPEC` | 1TUB (αβ-tubulin dimer; Nogales et al. 1998) | `"principal_axis"` | 82.0 | 3.0 | 0.0 | (10, 30) |
+| `PROTOFILAMENT_SPEC` | 3JAL (13-protofilament microtubule; Zhang et al. 2015) | `"microtubule_dimer"` | 82.0 | 3.0 | 0.0 | (10, 30) |
 
 `step` and `twist_deg` are measured values. F-actin's rise and twist come
 from cryo-EM reconstructions of the filament: 27.6 Å and −166.6 ± 0.6°
@@ -156,15 +171,15 @@ the helical parameters deposited with 7BT7, the filament its subunit comes
 from; that subunit carries its bound ADP and Mg²⁺. The protofilament's
 step is the dimer repeat of the GDP microtubule lattice,
 `DIMER_REPEAT` (see [Microtubules](microtubules.md#lattice-constants)),
-so a free protofilament and a protofilament in a tube stack their dimers
+and its dimer is the one a `MicrotubuleSpec` uses, so a free
+protofilament and a protofilament in a tube stack the same dimer
 identically. `flex_deg` is a tuned value in both cases, taken from
 CryoTomoSim (Purnell et al. 2023), not a persistence-length measurement.
 
 `twist_deg = 0` is correct for the protofilament preset: a single
-protofilament does not itself twist. Its 13-protofilament tube geometry
-and small supertwist fall outside this preset's scope;
-`PROTOFILAMENT_SPEC` gives you a single protofilament only. For the
-full tube, see [`MicrotubuleSpec`](microtubules.md).
+protofilament does not itself twist. `PROTOFILAMENT_SPEC` gives you a
+single protofilament only. For the full tube, see
+[`MicrotubuleSpec`](microtubules.md).
 
 ## Placement
 
@@ -188,19 +203,20 @@ subunit's rotation, and these are what the filament's oriented-point
 picks hold; a path per filament is written beside them. For an
 `"actin_filament"` species that point lies on the filament axis level with
 the subunit, and the subunit's own centre is 15.7 Å from it, along the
-copy's rotated \(+X\) axis.
+copy's rotated \(+X\) axis. For a `"microtubule_dimer"` species it is the
+midpoint of the dimer's two monomers, on the protofilament axis.
 
 ## Parameters at a glance
 
 | Parameter | Meaning | Default |
 |---|---|---|
-| `code` | PDB ID or local file for the monomer, or for the F-actin model an `"actin_filament"` subunit is lifted from | — |
+| `code` | PDB ID or local file for the monomer; for an extracted `frame`, the deposited model the subunit is lifted from (an F-actin filament, or the PDB ID of a microtubule) | — |
 | `step` | Axial rise per monomer, Å | — |
 | `flex_deg` | Maximum per-step turn, degrees | — |
 | `twist_deg` | Helical twist per monomer, degrees | 0.0 |
 | `n_copies` | Independent filament instances of this species | 1 |
 | `n_monomers` | Monomers per instance; an int, or a `(min, max)` drawn per instance | (10, 30) |
-| `frame` | `"principal_axis"` for an isolated monomer, `"actin_filament"` for a subunit lifted out of a deposited F-actin model | `"principal_axis"` |
+| `frame` | `"principal_axis"` for an isolated monomer, `"actin_filament"` for a subunit lifted out of a deposited F-actin model, `"microtubule_dimer"` for a tubulin dimer lifted out of a deposited microtubule | `"principal_axis"` |
 
 In a TOML config these are `[[filaments]]` tables, or `actin = true` for
 the `ACTIN_SPEC` preset; see
@@ -224,14 +240,19 @@ the `ACTIN_SPEC` preset; see
   monomer doesn't capture it. A PDB structure's native coordinate axes
   carry no inherent relationship to its stacking direction either, so
   some convention has to apply; this is that convention, not a
-  structurally validated docking. It applies to `PROTOFILAMENT_SPEC` and
-  to custom species. For F-actin the difference would be large, which is
-  why `ACTIN_SPEC` uses `"actin_filament"` instead.
+  structurally validated docking. It applies to custom species only; both
+  presets take their subunit from a deposited polymer instead.
 - **Every F-actin subunit is the same straight-filament subunit.** The
   deposited model is a straight ADP filament, and each copy is a rigid
   copy of one of its subunits. The changes of subunit structure that
   bending and nucleotide state cause (Reynolds et al. 2022) are not
   represented, and on a bent path the subunits follow the bend rigidly.
+- **A free protofilament is a straight lattice protofilament.** Every
+  dimer of `PROTOFILAMENT_SPEC` is the straight dimer of the
+  microtubule lattice. The outward curvature of protofilaments peeling
+  away from a depolymerising end, and the curved conformation of
+  unpolymerised GDP-tubulin, are not represented; `flex_deg` bends the
+  path, and the dimers follow it rigidly.
 
 ## References
 
@@ -261,9 +282,6 @@ the `ACTIN_SPEC` preset; see
   recognition by commonly used cellular actin markers. *The EMBO Journal*,
   39(14), e104006. (PDB 7BT7)
   [doi:10.15252/embj.2019104006](https://doi.org/10.15252/embj.2019104006)
-- Nogales, E., Wolf, S. G., & Downing, K. H. (1998). Structure of the αβ
-  tubulin dimer by electron crystallography. *Nature*, 391(6663), 199–203.
-  [doi:10.1038/34465](https://doi.org/10.1038/34465)
 - Purnell, C., Heebner, J., Swulius, M. T., Hylton, R., Kabonick, S.,
   Grillo, M., Grigoryev, S., Heberle, F., Waxham, M. N., & Swulius, M. T.
   (2023). Rapid synthesis of cryo-ET data for training deep learning
@@ -278,3 +296,8 @@ the `ACTIN_SPEC` preset; see
   P. A., & Raunser, S. (2015). Structure of the F-actin–tropomyosin
   complex. *Nature*, 519(7541), 114–117.
   [doi:10.1038/nature14033](https://doi.org/10.1038/nature14033)
+- Zhang, R., Alushin, G. M., Brown, A., & Nogales, E. (2015). Mechanistic
+  origin of microtubule dynamic instability and its modulation by EB
+  proteins. *Cell*, 162(4), 849–859.
+  [doi:10.1016/j.cell.2015.07.012](https://doi.org/10.1016/j.cell.2015.07.012)
+  (PDB 3JAL)

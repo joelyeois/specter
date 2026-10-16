@@ -24,6 +24,16 @@ species by `FilamentSpec.frame`:
 * ``"actin_filament"`` lifts one subunit out of a deposited filament model
   already in the filament frame (``_actin.extract_actin_subunit``), so its
   distance from the axis and its orientation are the deposited ones.
+* ``"microtubule_dimer"`` lifts one alpha-beta tubulin dimer out of a
+  deposited microtubule in the microtubule frame
+  (``_tubulin.extract_mt_dimer``): ``+Z`` along its protofilament toward
+  the plus end, the origin midway between its two monomers on the
+  protofilament's own axis, ``+X`` the direction that pointed away from the
+  tube axis in the source lattice.
+
+Both extracted modes render the subunit's coordinates as written, with the
+copy's path point at the extracted file's origin
+(`subunit_centre_in_filament_frame` undoes the re-centring `PDB` applies).
 * ``"principal_axis"`` pre-rotates an isolated monomer's coordinates via
   ``specter.specimen.membrane._placement.align_principal_axis_to_z``: a
   fetched PDB's native axes have no relationship to its stacking direction,
@@ -37,6 +47,8 @@ from __future__ import annotations
 
 import math
 
+import gemmi
+import numpy as np
 import roma
 import torch
 
@@ -110,3 +122,68 @@ def filament_orientations(
     angles = torch.arange(n, dtype=frames.dtype) * math.radians(twist_deg)
     spins = roma.rotvec_to_rotmat(angles.unsqueeze(1) * z_hat)
     return frames @ spins
+
+
+def subunit_centre_in_filament_frame(
+    path: str, coordinates: torch.Tensor, atomic_numbers: torch.Tensor
+) -> torch.Tensor:
+    """
+    Where a centred copy of an extracted subunit has its origin, in the
+    filament frame.
+
+    `PDB` re-centres every structure on its own centroid, which moves a
+    subunit written by `extract_actin_subunit` or `extract_mt_dimer` off
+    the origin its file was written about: the point on the filament axis
+    level with an actin subunit, 15.7 A from its centre, or the midpoint of
+    a tubulin dimer's two monomers, a fraction of an Angstrom from the
+    dimer's all-atom centroid. Rendering then needs that centroid's
+    position in the filament frame, so a copy can be put back where the
+    subunit sits.
+
+    Parameters
+    ----------
+    path : str
+        The extracted subunit, as `extract_actin_subunit` or
+        `extract_mt_dimer` returns it. Every chain in the file counts.
+    coordinates : torch.Tensor
+        `PDB`'s centred coordinates of the same file, shape ``(n, 3)``.
+    atomic_numbers : torch.Tensor
+        `PDB`'s atomic numbers, shape ``(n,)``.
+
+    Returns
+    -------
+    torch.Tensor
+        The centroid of `coordinates` in the filament frame, shape ``(3,)``,
+        physical ``(x, y, z)`` in Å: ``(r, 0, 0)`` for an actin subunit up
+        to the hydrogens `PDB` may have added.
+
+    Raises
+    ------
+    ValueError
+        If the parsed structure and the file hold different numbers of
+        heavy atoms, so the shift `PDB` applied cannot be recovered.
+
+    Notes
+    -----
+    Compared on heavy atoms only: `PDB` may add hydrogens the file does not
+    hold, but keeps its heavy atoms, and the difference of the two
+    heavy-atom centroids is exactly the shift `PDB` applied.
+    """
+    st = gemmi.read_structure(path)
+    file_heavy = np.array(
+        [
+            [a.pos.x, a.pos.y, a.pos.z]
+            for chain in st[0]
+            for res in chain
+            for a in res
+            if a.element.atomic_number > 1
+        ]
+    )
+    heavy = atomic_numbers > 1
+    if int(heavy.sum()) != len(file_heavy):
+        raise ValueError(
+            f"{path}: the parsed structure holds {int(heavy.sum())} heavy atoms "
+            f"and the file {len(file_heavy)}, so its centring cannot be undone"
+        )
+    centre = file_heavy.mean(axis=0) - coordinates[heavy].double().mean(0).numpy()
+    return torch.tensor(centre, dtype=torch.float32)

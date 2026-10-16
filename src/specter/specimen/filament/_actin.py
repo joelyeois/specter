@@ -59,7 +59,6 @@ from pathlib import Path
 
 import gemmi
 import numpy as np
-import torch
 from scipy.spatial.transform import Rotation
 
 from ...pdb import PDB
@@ -455,56 +454,3 @@ def measure_actin_filament(
         "principal_axis_angle_deg": float(np.mean(angles)),
         "n_subunits": float(len(fit.chains)),
     }
-
-
-def subunit_centre_in_filament_frame(
-    path: str, coordinates: torch.Tensor, atomic_numbers: torch.Tensor
-) -> torch.Tensor:
-    """
-    Where a centred copy of an extracted subunit has its origin, in the
-    filament frame.
-
-    `PDB` re-centres every structure on its own centroid, which for a
-    subunit written by `extract_actin_subunit` moves it off the filament
-    axis. Rendering then needs that centroid's position in the filament
-    frame, so a copy can be put back where the subunit sits.
-
-    Parameters
-    ----------
-    path : str
-        The extracted subunit, as `extract_actin_subunit` returns it.
-    coordinates : torch.Tensor
-        `PDB`'s centred coordinates of the same file, shape ``(n, 3)``.
-    atomic_numbers : torch.Tensor
-        `PDB`'s atomic numbers, shape ``(n,)``.
-
-    Returns
-    -------
-    torch.Tensor
-        The centroid of `coordinates` in the filament frame, shape ``(3,)``,
-        physical ``(x, y, z)`` in Å: ``(r, 0, 0)`` up to the hydrogens
-        `PDB` may have added.
-
-    Notes
-    -----
-    Compared on heavy atoms only: `PDB` may add hydrogens the file does not
-    hold, but keeps its heavy atoms, and the difference of the two
-    heavy-atom centroids is exactly the shift `PDB` applied.
-    """
-    st = gemmi.read_structure(path)
-    file_heavy = np.array(
-        [
-            [a.pos.x, a.pos.y, a.pos.z]
-            for res in st[0][0]
-            for a in res
-            if a.element.atomic_number > 1
-        ]
-    )
-    heavy = atomic_numbers > 1
-    if int(heavy.sum()) != len(file_heavy):
-        raise ValueError(
-            f"{path}: the parsed structure holds {int(heavy.sum())} heavy atoms "
-            f"and the file {len(file_heavy)}, so its centring cannot be undone"
-        )
-    centre = file_heavy.mean(axis=0) - coordinates[heavy].double().mean(0).numpy()
-    return torch.tensor(centre, dtype=torch.float32)

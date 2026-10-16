@@ -15,9 +15,11 @@ filament (PDB 7BT7 [4]_), lifted out in the filament frame by
 ``_actin.extract_actin_subunit``, on F-actin's measured helix, a rise of
 27.5 A and a twist of -166.6 degrees per subunit [6]_ [7]_ (the left-handed
 genetic helix of the Holmes model [2]_, whose twist varies from subunit to
-subunit [1]_); `PROTOFILAMENT_SPEC` stacks the alpha-beta tubulin dimer
-(PDB 1TUB [3]_) at the dimer repeat of the GDP microtubule lattice,
-`_lattice.DIMER_REPEAT`. Both `flex_deg` values are CryoTomoSim's [5]_.
+subunit [1]_); `PROTOFILAMENT_SPEC` stacks one alpha-beta tubulin dimer of
+a deposited microtubule (PDB 3JAL [3]_), lifted out in the microtubule
+frame by ``_tubulin.extract_mt_dimer``, at the dimer repeat of the GDP
+microtubule lattice, `_lattice.DIMER_REPEAT`, with no twist. Both
+`flex_deg` values are CryoTomoSim's [5]_.
 
 References
 ----------
@@ -27,9 +29,10 @@ References
 .. [2] Holmes, K. C., Popp, D., Gebhard, W., & Kabsch, W. (1990). Atomic model
    of the actin filament. *Nature*, 347(6288), 44–49.
    https://doi.org/10.1038/347044a0
-.. [3] Nogales, E., Wolf, S. G., & Downing, K. H. (1998). Structure of the αβ
-   tubulin dimer by electron crystallography. *Nature*, 391(6663), 199–203.
-   https://doi.org/10.1038/34465
+.. [3] Zhang, R., Alushin, G. M., Brown, A., & Nogales, E. (2015).
+   Mechanistic origin of microtubule dynamic instability and its
+   modulation by EB proteins. *Cell*, 162(4), 849–859.
+   https://doi.org/10.1016/j.cell.2015.07.012 (PDB 3JAL)
 .. [4] Kumari, A., Kesarwani, S., Javoor, M. G., Vinothkumar, K. R., &
    Sirajuddin, M. (2020). Structural insights into actin filament
    recognition by commonly used cellular actin markers. *The EMBO Journal*,
@@ -61,11 +64,12 @@ from ._actin import ACTIN_FILAMENT_SOURCE
 from ._lattice import DIMER_REPEAT
 from ._path import generate_filament_path
 from ._placement import filament_orientations
+from ._tubulin import MT_DIMER_SOURCE
 
 
 #: How the structure a `FilamentSpec` names is placed relative to the
 #: filament axis; see `FilamentSpec.frame`.
-FilamentFrame = Literal["principal_axis", "actin_filament"]
+FilamentFrame = Literal["principal_axis", "actin_filament", "microtubule_dimer"]
 
 
 @dataclass
@@ -76,8 +80,11 @@ class FilamentSpec:
     ----------
     code : str
         PDB ID (fetched from RCSB) or local file path for the structure
-        the subunit comes from: the monomer itself, or, for
-        ``frame="actin_filament"``, a deposited model of the filament.
+        the subunit comes from: the monomer itself, or, for an extracted
+        `frame`, the deposited model it is lifted out of -- an F-actin
+        filament for ``"actin_filament"``, a microtubule (a PDB ID whose
+        asymmetric unit holds at least three neighbouring protofilaments)
+        for ``"microtubule_dimer"``.
     step : float
         Axial rise per monomer, Å.
     flex_deg : float
@@ -98,7 +105,7 @@ class FilamentSpec:
         Monomer count per filament instance. A fixed int, or a
         ``(min, max)`` range (inclusive) drawn uniformly per instance.
         Default ``(10, 30)``.
-    frame : {"principal_axis", "actin_filament"}, optional
+    frame : {"principal_axis", "actin_filament", "microtubule_dimer"}, optional
         Where each subunit sits relative to the filament axis.
         ``"principal_axis"`` (default): `code` is an isolated monomer,
         centred on the axis with its longest principal axis along it, an
@@ -108,6 +115,16 @@ class FilamentSpec:
         together with the filament axis (``_actin.extract_actin_subunit``),
         and every copy sits where that subunit sits in the deposited
         filament, off the axis. `ACTIN_SPEC` uses it.
+        ``"microtubule_dimer"``: `code` is a deposited microtubule; one
+        alpha-beta dimer is lifted out of it in the microtubule frame
+        (``_tubulin.extract_mt_dimer``), the frame `MicrotubuleSpec` builds
+        its tube wall from. The filament axis is the protofilament's own
+        axis, through the midpoint of the dimer's two monomers, not the
+        tube axis (111 A away in 3JAL): ``+Z`` runs along the protofilament toward
+        the plus end, and ``+X`` is the face that pointed out of the tube.
+        With ``twist_deg=0`` and ``step=DIMER_REPEAT``, a straight filament
+        is one protofilament of the source lattice. `PROTOFILAMENT_SPEC`
+        uses it.
     """
 
     code: str
@@ -126,12 +143,21 @@ class FilamentSpec:
             )
 
 
-#: Tubulin alpha-beta dimer (PDB 1TUB, electron crystallography) repeated
-#: along a **single protofilament** -- not a microtubule. step is the dimer
-#: repeat of the GDP microtubule lattice (`_lattice.DIMER_REPEAT`, 82.0 A),
-#: shared with `MicrotubuleSpec` rather than written twice; flex=3 deg is
-#: CTS's own tuned value for a protofilament's gentle curvature. twist=0: a
-#: single protofilament doesn't itself twist.
+#: One alpha-beta tubulin dimer of the deposited microtubule 3JAL
+#: (`_tubulin.MT_DIMER_SOURCE`, Zhang et al. 2015), lifted out in the
+#: microtubule frame (`_tubulin.extract_mt_dimer`) and repeated along a
+#: **single protofilament** -- not a microtubule. It is the dimer a
+#: `MicrotubuleSpec` builds its wall from, placed the same way: the path
+#: runs through the midpoint of the dimer's two monomers, on the
+#: protofilament's own axis, and each copy's +Z (alpha to beta) points
+#: along it toward the plus end. step is the dimer repeat of the GDP
+#: microtubule lattice (`_lattice.DIMER_REPEAT`, 82.0 A), shared with
+#: `MicrotubuleSpec` rather than written twice; twist=0, since a
+#: protofilament is a straight column of dimers. A straight copy therefore
+#: superposes on a protofilament of 3JAL itself (CA RMSD 0.14 A over two
+#: dimers, ``tests/test_microtubule_lattice.py``). flex=3 deg is CTS's own
+#: tuned value for a protofilament's gentle curvature; the outward
+#: curling of a real free protofilament is not modelled.
 #:
 #: For an actual microtubule -- 13 protofilaments closed into a tube, with
 #: the lumen and the A-lattice seam -- use `MicrotubuleSpec` and
@@ -142,7 +168,12 @@ class FilamentSpec:
 #: renamed rather than reused, so that an existing config asking for
 #: MICROTUBULE_SPEC fails loudly instead of silently changing meaning.)
 PROTOFILAMENT_SPEC = FilamentSpec(
-    code="1TUB", step=DIMER_REPEAT, flex_deg=3.0, twist_deg=0.0, n_monomers=(10, 30)
+    code=MT_DIMER_SOURCE,
+    step=DIMER_REPEAT,
+    flex_deg=3.0,
+    twist_deg=0.0,
+    n_monomers=(10, 30),
+    frame="microtubule_dimer",
 )
 
 #: F-actin: one subunit of the deposited ADP-F-actin filament 7BT7
@@ -185,8 +216,10 @@ class FilamentInstance:
     #: filament that is a point on its axis, level with the subunit, not
     #: necessarily the subunit's own centre: an ``"actin_filament"`` subunit
     #: sits off the axis, at ``position_xyz + rotation_matrix @ c`` for its
-    #: centre ``c`` in the filament frame. For a microtubule it is the
-    #: dimer's centre on the tube wall.
+    #: centre ``c`` in the filament frame. For a ``"microtubule_dimer"``
+    #: filament it is the midpoint of the dimer's two monomers, on the
+    #: protofilament axis; for a microtubule, the dimer's centre on the
+    #: tube wall.
     position_xyz: torch.Tensor
     #: (3, 3): template-to-world rotation; see `filament_orientations`.
     rotation_matrix: torch.Tensor

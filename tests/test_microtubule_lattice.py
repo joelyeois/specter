@@ -654,6 +654,200 @@ def test_a_cached_dimer_from_an_older_extraction_is_re_extracted(tmp_path):
     assert stale.stat().st_mtime_ns == mtime
 
 
+# --------------------------------------------------------------------------
+# A free protofilament (PROTOFILAMENT_SPEC) stacks the microtubule's dimer
+# --------------------------------------------------------------------------
+def test_a_straight_free_protofilament_is_one_protofilament_of_a_straight_tube():
+    """Every protofilament of a straight tube is the free protofilament,
+    moved rigidly.
+
+    `PROTOFILAMENT_SPEC` takes the tube's own dimer in the microtubule
+    frame, steps it by `DIMER_REPEAT` along +Z with no twist, and puts the
+    path through the dimer's origin. One rigid motion that carries the
+    first free copy onto the first copy of a tube protofilament must then
+    carry every free copy, position and rotation, onto that protofilament.
+    """
+    from specter.specimen.filament import MT_DIMER_SOURCE, place_filaments
+
+    assert PROTOFILAMENT_SPEC.frame == "microtubule_dimer"
+    assert PROTOFILAMENT_SPEC.code == MT_DIMER_SOURCE
+    assert PROTOFILAMENT_SPEC.twist_deg == 0.0
+
+    lattice = solve_tube_lattice(13)
+    assert lattice.dimer_repeat == pytest.approx(PROTOFILAMENT_SPEC.step)
+    n = 6
+    axis = torch.stack(
+        [torch.zeros(n), torch.zeros(n), torch.arange(float(n)) * lattice.dimer_repeat],
+        dim=1,
+    )
+    tube = build_tube_instances("x.cif", 0, axis, lattice)
+    spec = replace(PROTOFILAMENT_SPEC, n_monomers=n, flex_deg=0.0)
+    free = place_filaments([spec], (64, 64, 64), 5.0, generator=seeded(0))
+
+    for p in range(lattice.n_protofilaments):
+        column = [inst for inst in tube if inst.protofilament_index == p]
+        rotation = (
+            column[0].rotation_matrix.double() @ free[0].rotation_matrix.double().T
+        )
+        shift = (
+            column[0].position_xyz.double() - rotation @ free[0].position_xyz.double()
+        )
+        for f, t in zip(free, column, strict=True):
+            moved = rotation @ f.position_xyz.double() + shift
+            assert torch.allclose(moved, t.position_xyz.double(), atol=1e-3)
+            assert torch.allclose(
+                rotation @ f.rotation_matrix.double(),
+                t.rotation_matrix.double(),
+                atol=1e-5,
+            )
+
+
+def test_a_microtubule_dimer_species_renders_the_extracted_dimer_as_written(
+    tmp_path,
+):
+    """``frame="microtubule_dimer"`` renders the dimer `extract_mt_dimer`
+    writes, without re-orienting it, and places it by the file's origin.
+
+    The template must be the extracted coordinates as written: a
+    principal-axis alignment would choose its own roll about +Z and lose
+    the radial face. The centre is where `PDB`'s re-centring put the
+    file's origin, which a copy's path point is (two chains here, so every
+    chain has to count).
+    """
+    import gemmi
+
+    from specter.specimen.filament import FilamentSpec, extract_mt_dimer
+    from specter.specimen.tomogram import TomogramSpecimenGenerator
+
+    _write_tubulin_patch(tmp_path / "SYNT.cif", plus_sign=-1)
+    voxel_size = 4.0
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=(32, 32, 32),
+        voxel_size=voxel_size,
+        protein_specs=[],
+        filament_specs=[
+            FilamentSpec(
+                code="SYNT",
+                step=DIMER_REPEAT,
+                flex_deg=0.0,
+                frame="microtubule_dimer",
+            )
+        ],
+        pdb_cache_dir=str(tmp_path),
+        parameterization="kirkland",
+        progressbars=False,
+    )
+    template, centre = gen._filament_template("SYNT", voxel_size, as_given=False)
+
+    path = extract_mt_dimer("SYNT", pdb_cache_dir=str(tmp_path))
+    as_written = gen._build_species_template(
+        gen._load_pdb(path), voxel_size, gen.device
+    )
+    assert torch.allclose(template, as_written)
+
+    model = gemmi.read_structure(path)[0]
+    assert len(model) == 2
+    xyz = np.array([[a.pos.x, a.pos.y, a.pos.z] for c in model for r in c for a in r])
+    np.testing.assert_allclose(centre.numpy(), xyz.mean(axis=0), atol=1e-3)
+
+
+@pytest.mark.network
+def test_straight_protofilament_superposes_on_the_3jal_protofilaments(tmp_path):
+    """Two dimers placed by `PROTOFILAMENT_SPEC` on a straight path
+    superpose on two consecutive dimers of each 3JAL protofilament.
+
+    Measured: CA RMSD 0.14 A on each of the three protofilaments of the
+    deposited patch (1722 CA). 3JAL's own dimer repeat is 81.76 A, 0.24 A
+    short of `DIMER_REPEAT`; stepped at 81.76 A the RMSD is 0.085 A. For
+    comparison, the previous preset (1TUB, aligned by its longest principal
+    axis) gave 4.7 A, its stacking axis 7.5 deg off the protofilament.
+    """
+    import gemmi
+
+    from specter.pdb import PDB
+    from specter.specimen.filament import extract_mt_dimer, place_filaments
+    from specter.specimen.filament._actin import _kabsch, _residue_ca
+    from specter.specimen.filament._tubulin import (
+        _N_SITE_CONTACT,
+        _ca_centroid,
+        _chain_entities,
+        _fit_tube_axis,
+        _nucleotide_xyz,
+        _polymer_xyz,
+    )
+
+    cache = str(tmp_path)
+    template = [
+        _residue_ca(chain)
+        for chain in gemmi.read_structure(
+            extract_mt_dimer(PROTOFILAMENT_SPEC.code, pdb_cache_dir=cache)
+        )[0]
+    ]  # alpha, beta
+
+    cif = PDB.fetch_pdb_file(
+        PROTOFILAMENT_SPEC.code,
+        ext="cif",
+        pdb_cache_dir=cache,
+        assembly=False,
+        verbose=False,
+    )
+    st = gemmi.read_structure(cif)
+    st.setup_entities()
+    entities = _chain_entities(st, cif)
+    centroids = {}
+    for chain in st[0]:
+        if "tubulin" in entities.get(chain.name, ""):
+            centroid = _ca_centroid(chain)
+            if centroid is not None:
+                centroids[chain.name] = centroid
+    direction, _, columns = _fit_tube_axis(centroids)
+    assert len(columns) == 3
+
+    for column in columns:
+        # Each alpha with the beta capping its nucleotide, as the
+        # extraction pairs them, ordered toward the plus end.
+        betas = [c for c in column if "beta" in entities[c]]
+        dimers = []
+        for alpha in (c for c in column if "alpha" in entities[c]):
+            site = _nucleotide_xyz(st[0][alpha])
+            contact = {
+                b: np.linalg.norm(
+                    _polymer_xyz(st[0][b])[:, None] - site[None], axis=-1
+                ).min()
+                for b in betas
+            }
+            beta = min(contact, key=contact.__getitem__)
+            if contact[beta] <= _N_SITE_CONTACT:
+                dimers.append((alpha, beta))
+        plus = direction * np.sign(
+            (centroids[dimers[0][1]] - centroids[dimers[0][0]]) @ direction
+        )
+        dimers.sort(key=lambda d: float(centroids[d[0]] @ plus))
+        assert len(dimers) == 2
+
+        spec = replace(PROTOFILAMENT_SPEC, n_monomers=len(dimers), flex_deg=0.0)
+        instances = place_filaments([spec], (200, 200, 200), 5.0, generator=seeded(3))
+        placed, deposited = [], []
+        for inst, names in zip(instances, dimers, strict=True):
+            position = inst.position_xyz.double().numpy()
+            rotation = inst.rotation_matrix.double().numpy()
+            for monomer, name in zip(template, names, strict=True):
+                ca = _residue_ca(st[0][name])
+                keys = sorted(set(monomer) & set(ca))
+                placed.append(
+                    np.stack([position + rotation @ monomer[k] for k in keys])
+                )
+                deposited.append(np.stack([ca[k] for k in keys]))
+        placed_xyz, deposited_xyz = np.concatenate(placed), np.concatenate(deposited)
+        rotation, translation = _kabsch(placed_xyz, deposited_xyz)
+        rmsd = np.sqrt(
+            ((placed_xyz @ rotation.T + translation - deposited_xyz) ** 2).sum(1).mean()
+        )
+        assert len(placed_xyz) > 1600
+        assert rmsd < 0.25
+
+
 def test_one_instance_id_per_filament_not_per_monomer():
     """A filament is one object in the segmentation, like a microtubule.
 

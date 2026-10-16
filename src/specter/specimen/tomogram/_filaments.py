@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING
 
 import torch
@@ -25,15 +25,23 @@ from ..filament import (
     place_filaments,
     place_microtubules,
 )
-from ..filament._actin import (
-    extract_actin_subunit,
-    subunit_centre_in_filament_frame,
-)
+from ..filament._actin import extract_actin_subunit
+from ..filament._placement import subunit_centre_in_filament_frame
+from ..filament._tubulin import extract_mt_dimer
 from ..membrane._placement import align_principal_axis_to_z
 from ._helpers import _insert_rotated_copies
 
 if TYPE_CHECKING:
     from ...pdb import PDB
+
+#: `FilamentSpec.frame` values whose subunit is lifted out of a deposited
+#: model, each mapped to the extraction that writes it in the filament
+#: frame. Such a species renders its extracted coordinates as written, with
+#: each copy's path point at the file's origin.
+_EXTRACTED_FRAMES: dict[str, Callable[..., str]] = {
+    "actin_filament": extract_actin_subunit,
+    "microtubule_dimer": extract_mt_dimer,
+}
 
 
 def _filament_runs(
@@ -407,12 +415,18 @@ class _FilamentStageMixin:
             That centroid in the template's own frame relative to a copy's
             `position_xyz`, shape ``(3,)``, Å: a copy's template centre
             lands at ``position_xyz + rotation_matrix @ centre``. Zero
-            unless the species is an ``"actin_filament"`` subunit, whose
-            position is a point on the filament axis and whose centre sits
-            15.7 A from it.
+            unless the species' `FilamentSpec.frame` is an extracted one
+            (`_EXTRACTED_FRAMES`): an ``"actin_filament"`` subunit's
+            position is a point on the filament axis and its centre sits
+            15.7 A from it; a ``"microtubule_dimer"``'s position is the
+            midpoint of its two monomers, a fraction of an Angstrom from
+            its all-atom centroid.
         """
-        if not as_given and self._filament_frame(code) == "actin_filament":
-            path = extract_actin_subunit(code, pdb_cache_dir=self.pdb_cache_dir)
+        extract = (
+            None if as_given else _EXTRACTED_FRAMES.get(self._filament_frame(code))
+        )
+        if extract is not None:
+            path = extract(code, pdb_cache_dir=self.pdb_cache_dir)
             pdb = self._load_pdb(path)
             centre = subunit_centre_in_filament_frame(
                 path, pdb.coordinates, pdb.atomic_numbers
@@ -453,8 +467,9 @@ class _FilamentStageMixin:
             copy's position. Default False: place each filament species by
             its `FilamentSpec.frame`, either pre-rotating an isolated
             monomer's longest principal axis onto ``+Z`` or lifting an
-            F-actin subunit out of a deposited filament in the filament
-            frame (`_filament_template`). Microtubules pass True: their
+            F-actin subunit or a tubulin dimer out of a deposited model in
+            the filament frame (`_filament_template`). Microtubules pass
+            True: their
             dimer template is already in the microtubule frame
             (`_tubulin.extract_mt_dimer`), where the roll about ``+Z``
             carries the radial orientation that principal-axis alignment

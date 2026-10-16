@@ -386,7 +386,9 @@ class TomogramConfig:
     # --- Filaments (optional, additive on top of membranes if present) ---
     # One dict per filament species, mapping straight onto
     # specter.specimen.filament.FilamentSpec's own kwargs, e.g.
-    # {"code": "1TUB", "step": 82.0, "flex_deg": 3.0, "n_copies": 4}.
+    # {"code": "3JAL", "frame": "microtubule_dimer", "step": 82.0,
+    # "flex_deg": 3.0, "n_copies": 4} (PROTOFILAMENT_SPEC's free
+    # protofilament: one tubulin dimer of the 3JAL microtubule).
     # Placed via specter.specimen.filament.place_filaments -- specter-native
     # random-walk placement, with no region-gating and no collision
     # avoidance against the membrane shell or each other, but DOES get
@@ -398,8 +400,9 @@ class TomogramConfig:
         help=(
             "Filament species to scatter through the tomogram (TOML-"
             "only, [[filaments]] tables), each mapping onto "
-            "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '1TUB', "
-            "'step': 82.0, 'flex_deg': 3.0, 'n_copies': 4}. Placed right after "
+            "specter.specimen.filament.FilamentSpec kwargs, e.g. {'code': '3JAL', "
+            "'frame': 'microtubule_dimer', 'step': 82.0, 'flex_deg': 3.0, "
+            "'n_copies': 4}. Placed right after "
             "membranes, before targets/filler -- no region-gating, no collision "
             "avoidance against the membrane shell or each other, but targets/"
             "filler DO avoid already-placed filaments."

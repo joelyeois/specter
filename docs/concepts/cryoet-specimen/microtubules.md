@@ -17,7 +17,10 @@ rigid copies of a single tubulin dimer, the same machinery
 `PotentialBuilder` render plus one rotation per dimer.
 
 `PROTOFILAMENT_SPEC` is different: it gives you a **single**
-protofilament, one strand, no tube, no lumen, no seam.
+protofilament, one strand, no tube, no lumen, no seam. It stacks the same
+dimer template described [below](#the-dimer-template) along a
+[filament](filaments.md) path, so a straight free protofilament is one
+protofilament of this lattice.
 
 !!! example "In code"
     This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
@@ -139,8 +142,12 @@ at constant \((x, y)\), and their asymmetric unit is a small
 multi-protofilament patch. `extract_mt_dimer` fits the tube axis from
 those neighbouring protofilaments, lifts out one αβ dimer, and
 re-expresses it with \(+Z\) along the protofilament, pointing from α to β
-toward the plus end, and \(+X\) pointing outwards. It caches the result
-next to the downloaded structure.
+toward the plus end, and \(+X\) pointing outwards. The origin is the
+midpoint of the α and β centroids, which both lie on the \(Z\) axis to
+within 0.2 Å in 3JAL, so the dimer's own protofilament axis runs through
+it. A tube places that origin on the wall, at the protofilament radius; a
+free protofilament (`PROTOFILAMENT_SPEC`) places it on the filament path.
+It caches the result next to the downloaded structure.
 
 The nucleotides identify the dimer and its polarity. Each tubulin monomer
 binds a guanine nucleotide on the face that points to the plus end. The
@@ -346,8 +353,9 @@ bend_radius = 30000.0    # 3 µm; omit for the in-cell random walk
   [doi:10.1073/pnas.0603931103](https://doi.org/10.1073/pnas.0603931103)
 - Zhang, R., Alushin, G. M., Brown, A., & Nogales, E. (2015). Mechanistic
   origin of microtubule dynamic instability and its modulation by EB
-  proteins. *Cell*, 162(4), 849–859. (PDB 3JAL, 3JAT)
+  proteins. *Cell*, 162(4), 849–859.
   [doi:10.1016/j.cell.2015.07.012](https://doi.org/10.1016/j.cell.2015.07.012)
+  (PDB 3JAL, 3JAT)
 - Zhang, R., LaFrance, B., & Nogales, E. (2018). Separating the effects of
   nucleotide and EB binding on microtubule structure. *Proceedings of the
   National Academy of Sciences*, 115(27), E6191–E6200. (PDB 6DPU, 6DPV)

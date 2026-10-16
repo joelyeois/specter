@@ -30,8 +30,12 @@ comes within 3.6 A of the alpha's GTP, the beta on the alpha's other side
 The extracted dimer is re-expressed so that
 
 * ``+Z`` is the protofilament axis, pointing alpha -> beta, toward the
-  microtubule plus end, and
-* ``+X`` points radially outwards, away from the tube axis,
+  microtubule plus end,
+* ``+X`` points radially outwards, away from the tube axis, and
+* the origin is the midpoint of the alpha and beta CA centroids, which
+  lies on the protofilament's own axis (both centroids sit within 0.2 A of
+  ``Z`` in 3JAL): a tube puts it on the wall, a free protofilament
+  (``_generator.PROTOFILAMENT_SPEC``) on its path,
 
 then cached next to the downloaded structure so the (small) extraction runs
 once per source. The default source, PDB 3JAL, is from Zhang et al. [1]_.
@@ -327,7 +331,8 @@ def extract_mt_dimer(
     str
         Path to an mmCIF holding the two chains of one dimer, rotated so
         ``+Z`` is the protofilament axis, pointing alpha -> beta toward the
-        plus end, and ``+X`` points radially outwards from the tube axis.
+        plus end, and ``+X`` points radially outwards from the tube axis,
+        with the origin midway between the two monomers' CA centroids.
 
     Raises
     ------

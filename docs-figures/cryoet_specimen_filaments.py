@@ -72,9 +72,9 @@ def _render_segment(
     """Render one filament's monomers into a box through
     ``TomogramSpecimenGenerator._render_filament_instances``, the renderer
     `_stamp_filaments` itself calls: one template per species, prepared by
-    the spec's `frame` (an F-actin subunit lifted out of the deposited
-    filament, or a monomer's longest principal axis aligned to +Z), then
-    one rotated copy inserted per monomer.
+    the spec's `frame` (an F-actin subunit or a tubulin dimer lifted out of
+    a deposited model, or a monomer's longest principal axis aligned to
+    +Z), then one rotated copy inserted per monomer.
 
     `positions_xyz` is box-centered here; the generator's instances are
     corner-relative, so they are shifted by half the box on the way in.
@@ -223,7 +223,7 @@ def figure_presets() -> None:
     voxel_size = 4.0
     specs = [
         ("F-actin (7BT7 subunit)", ACTIN_SPEC),
-        ("Microtubule protofilament (1TUB)", PROTOFILAMENT_SPEC),
+        ("Microtubule protofilament (3JAL dimer)", PROTOFILAMENT_SPEC),
     ]
     shape = (40, 200, 480)
     fig, axes = plt.subplots(len(specs), 1, figsize=(9.0, 4.2))

@@ -59,7 +59,7 @@ def membranes() -> list[MembraneInstance]:
             MembraneGenerator(
                 voxel_size=voxel_size,
                 sh_axes_range=(200.0, 320.0),  # semi-axes, Å
-                bilayer_thickness=38.0,
+                bilayer_thickness=37.0,
                 transmembrane_specs=[TransmembraneSpec("1C3W", frequency=20)],
                 device="cuda",
                 seed=i,

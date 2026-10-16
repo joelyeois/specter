@@ -1,3 +1,3 @@
 targets: {'6QZP': 12, '7VD8': 12}
-filler: 1684 in the cytosol from 11 species
-filler: 18 in the vesicle lumens
+filler: 1644 in the cytosol from 11 species
+filler: 16 in the vesicle lumens

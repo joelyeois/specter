@@ -1,2 +1,2 @@
 actin: 8 filaments, 583 monomers
-microtubules: 2 tubes, 1380 tubulin dimers
+microtubules: 2 tubes, 1404 tubulin dimers

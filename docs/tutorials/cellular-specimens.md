@@ -32,7 +32,7 @@ rebuilt with one more component and the earlier ones stay where they were.
 
 A `MembraneGenerator` draws one closed membrane: here a vesicle whose surface
 is a spherical-harmonic perturbation of an ellipsoid with semi-axes drawn
-from 200–320 Å, rendered as a 38 Å lipid bilayer and studded with
+from 200–320 Å, rendered as a 37 Å lipid bilayer and studded with
 bacteriorhodopsin (`1C3W`; Luecke et al. 1999) at 20 sites per vesicle. `MembraneInstance` wraps
 each one for the tomogram, which places it by collision-rejecting random
 placement. `CarbonFilmSpec` paints the edge of the carbon support into the
@@ -111,14 +111,14 @@ vesicles:
 ///caption
 The specimen projected along the beam after each stage, each panel on its
 own grey scale: the vesicles and the carbon film along one edge; then actin
-filaments and two microtubules; then six gold beads; then 1,726 packed
+filaments and two microtubules; then six gold beads; then 1,684 packed
 proteins. The vesicles, filaments and beads keep their positions from stage
 to stage.
 ///
 
 Both targets, the human 80S ribosome (`6QZP`; Natchiar et al. 2017) and
 human apoferritin (`7VD8`; Fan et al. 2021), reached their exact counts. The
-filler stopped at 1,684 cytosolic copies of 11 species and 18 RuBisCO
+filler stopped at 1,644 cytosolic copies of 11 species and 16 RuBisCO
 complexes (`1BXN`; Hansen et al. 1999) in the two small lumens. In the final panel the dense protein fill lowers the contrast of the
 vesicles and microtubules, while the gold beads still stand out.
 
@@ -139,9 +139,9 @@ as copick-style (Ermel et al. 2026) `.ndjson` files:
 --8<-- "docs-includes/tutorials/cellular_specimens-ground-truth.txt"
 ```
 
-The 1,782 instance ids account for every placed object: 40 transmembrane
+The 1,740 instance ids account for every placed object: 40 transmembrane
 proteins, 8 actin filaments and 2 microtubules (one id each, however many
-monomers they contain), 6 beads, 24 targets and 1,702 filler proteins.
+monomers they contain), 6 beads, 24 targets and 1,660 filler proteins.
 Filaments and microtubules also get a `_path.ndjson` file, one entry per
 filament or tube, alongside the monomer picks. Filler picks are written by
 default; pass `include_filler=False` to keep only the targets.

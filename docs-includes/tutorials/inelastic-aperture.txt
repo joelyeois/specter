@@ -1,5 +1,5 @@
 aperture  None mrad  zero-loss 0.8811  exp(-t/λ_in - t/λ_ap) 0.8811
-aperture  30.0 mrad  zero-loss 0.8732  exp(-t/λ_in - t/λ_ap) 0.8731
-aperture  12.0 mrad  zero-loss 0.8510  exp(-t/λ_in - t/λ_ap) 0.8509
-aperture   5.0 mrad  zero-loss 0.8229  exp(-t/λ_in - t/λ_ap) 0.8228
+aperture  30.0 mrad  zero-loss 0.8731  exp(-t/λ_in - t/λ_ap) 0.8730
+aperture  12.0 mrad  zero-loss 0.8507  exp(-t/λ_in - t/λ_ap) 0.8506
+aperture   5.0 mrad  zero-loss 0.8223  exp(-t/λ_in - t/λ_ap) 0.8222
 a 5 mrad aperture passes spatial frequencies up to 0.254 1/Å

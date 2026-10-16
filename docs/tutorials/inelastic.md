@@ -154,7 +154,7 @@ potential as well.
 ///
 
 A 12 mrad aperture, about the 70 µm aperture of a Krios, lowers the
-transmission of 500 Å of ice from 0.8811 to 0.8510. An aperture narrower than
+transmission of 500 Å of ice from 0.8811 to 0.8507. An aperture narrower than
 the grid's Nyquist frequency also low-passes the potential at its own cut-off,
 so the scattering the grid does carry is not counted twice; beyond 0.254 Å⁻¹
 the 5 mrad image keeps a residual three orders of magnitude below the

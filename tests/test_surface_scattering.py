@@ -191,3 +191,19 @@ def test_reconstructor_trains_under_surface_and_refuses_lr_r() -> None:
     assert not torch.equal(model.V.detach(), before)
     with pytest.raises(ValueError, match="does not refine rotations"):
         _reconstructor("surface", lr=0.1, lr_R=1e-3)
+
+
+def test_symmetrization_reuses_the_surface_plan() -> None:
+    """Exact symmetrization at an epoch's end takes the plan the surface forward
+    already holds, rather than a second oversampled grid beside a training
+    step's cached memory (which ran a 560^3 run out of device memory)."""
+    from specter import nufft
+    from specter.symmetries import get_rotation_matrices, symmetrize_exact
+
+    nufft.clear_plan_cache()
+    volume = _compact_object(17)
+    _waves(volume, "surface", scattering_model="rytov", oversample=1)
+    held = set(nufft._PLANS)
+    symmetrize_exact(volume, get_rotation_matrices("C2"))
+    assert set(nufft._PLANS) == held
+    nufft.clear_plan_cache()

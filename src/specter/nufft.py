@@ -37,6 +37,12 @@ __all__ = ["GridTransform", "clear_plan_cache", "sample_transform"]
 #: speed only: the requested accuracy is kept either way.
 _UPSAMPFAC = 1.25
 
+# Plans, cached because building one costs 70-230 ms at 512^3, longer than the
+# transform itself, and holds the oversampled grid: one per (type, shape,
+# precision, device), shared by `GridTransform` and `sample_transform`, with
+# only the points changing between calls.
+_PLANS: dict[tuple[Any, ...], Any] = {}
+
 
 class GridTransform:
     """
@@ -49,7 +55,8 @@ class GridTransform:
     ``torch.fft.fftn(volume)`` only by the phase ``exp(+2j * pi * q . c)``.
 
     The plan, which holds FINUFFT's oversampled copy of the grid, is built once
-    and reused for every call; only the frequencies change.
+    per shape, precision and device and reused; only the frequencies change.
+    `clear_plan_cache` releases it.
 
     Parameters
     ----------
@@ -57,7 +64,8 @@ class GridTransform:
         Real or complex grid of shape (Z, Y, X). A CUDA tensor is transformed
         on its device with cuFINUFFT; any other with FINUFFT on the CPU. When
         cuFINUFFT cannot load, a CUDA tensor is transformed on the CPU with a
-        warning, and results are still returned on its device.
+        warning, and results are still returned on its device. The plan is
+        cached and shared with `sample_transform`.
         Single precision (float32/complex64) or double (float64/complex128).
     eps : float, optional
         Requested relative accuracy. Default 1e-6. Measured against a direct
@@ -87,44 +95,12 @@ class GridTransform:
             device=self.device,
         )
         values = volume.to(self.complex_dtype).contiguous()
-        dtype = "complex128" if double else "complex64"
-        self._gpu = False
-        if self.device.type == "cuda":
-            try:
-                import cufinufft
-
-                self._plan: Any = cufinufft.Plan(
-                    2,
-                    self.shape,
-                    eps=eps,
-                    isign=-1,
-                    dtype=dtype,
-                    modeord=0,
-                    upsampfac=_UPSAMPFAC,
-                    gpu_device_id=self.device.index or 0,
-                )
-                self._values: Any = values
-                self._gpu = True
-            except (ImportError, OSError, RuntimeError) as err:
-                warnings.warn(
-                    f"cuFINUFFT is unavailable ({err}); transforming on the CPU with "
-                    "FINUFFT, which is slower but gives the same result.",
-                    stacklevel=2,
-                )
-        if not self._gpu:
-            import finufft
-
-            self._plan = finufft.Plan(
-                2,
-                self.shape,
-                eps=eps,
-                isign=-1,
-                dtype=dtype,
-                modeord=0,
-                upsampfac=_UPSAMPFAC,
-                nthreads=torch.get_num_threads(),
-            )
-            self._values = values.cpu().numpy()
+        # The same cached plan `sample_transform` uses: a reconstruction that
+        # scatters with rotate_mode="surface" already holds it, and a second
+        # oversampled grid allocated beside a training step's cached memory is
+        # what ran a 560^3 symmetrization out of device memory.
+        self._plan, self._gpu = _cached_plan(2, self.shape, double, self.device, eps)
+        self._values: Any = values if self._gpu else values.cpu().numpy()
 
     def __call__(self, freqs: torch.Tensor) -> torch.Tensor:
         """
@@ -175,41 +151,93 @@ class GridTransform:
         return torch.exp(-2j * math.pi * (q @ self._centre)).to(self.complex_dtype)
 
 
-# Plans for `sample_transform`, which a training loop calls every step: building
-# one costs 70-230 ms at 512^3, longer than the transform itself, so each is
-# built once per (type, shape, precision, device) and only its points change.
-_PLANS: dict[tuple[Any, ...], Any] = {}
-
-
 def clear_plan_cache() -> None:
     """Release the NUFFT plans `sample_transform` keeps, and the device memory they hold."""
     _PLANS.clear()
 
 
+def _plan_bytes(shape: tuple[int, ...], double: bool) -> int:
+    """Device memory of one plan's oversampled grid."""
+    n = 1
+    for m in shape:
+        n *= math.ceil(_UPSAMPFAC * m)
+    return n * (16 if double else 8)
+
+
 def _cached_plan(
     kind: int, shape: tuple[int, ...], double: bool, device: torch.device, eps: float
 ) -> tuple[Any, bool]:
-    gpu = device.type == "cuda"
-    key = (kind, shape, double, gpu, device.index, eps)
-    if key not in _PLANS:
-        dtype = "complex128" if double else "complex64"
-        kwargs: dict[str, Any] = dict(
-            eps=eps, isign=-1 if kind == 2 else 1, dtype=dtype, modeord=0
-        )
-        kwargs["upsampfac"] = _UPSAMPFAC
-        if gpu:
-            import cufinufft
+    """
+    The cached FINUFFT plan for one transform type, shape, precision and device.
 
+    Returns the plan and whether it runs on the GPU. A CUDA device falls back to
+    a CPU plan, with a warning, only when cuFINUFFT cannot be loaded at all; a
+    plan that cannot be created on a working GPU is an out-of-memory error.
+    """
+    gpu = device.type == "cuda"
+    if gpu and not _cufinufft_loads():
+        gpu = False
+    key = (kind, shape, double, gpu, device.index if gpu else None, eps)
+    if key in _PLANS:
+        return _PLANS[key], gpu
+    dtype = "complex128" if double else "complex64"
+    kwargs: dict[str, Any] = dict(
+        eps=eps,
+        isign=-1 if kind == 2 else 1,
+        dtype=dtype,
+        modeord=0,
+        upsampfac=_UPSAMPFAC,
+    )
+    if not gpu:
+        import finufft
+
+        _PLANS[key] = finufft.Plan(
+            kind, shape, nthreads=torch.get_num_threads(), **kwargs
+        )
+        return _PLANS[key], False
+    import cufinufft
+
+    for attempt in range(2):
+        # cuFINUFFT allocates from the driver, not from torch's caching
+        # allocator, so memory torch has cached but no longer uses is invisible
+        # to it until released.
+        torch.cuda.empty_cache()
+        try:
             _PLANS[key] = cufinufft.Plan(
                 kind, shape, gpu_device_id=device.index or 0, **kwargs
             )
-        else:
-            import finufft
+            return _PLANS[key], True
+        except RuntimeError as err:
+            if attempt:
+                raise torch.OutOfMemoryError(
+                    f"cuFINUFFT could not create a type-{kind} plan for a "
+                    f"{shape} grid on {device} ({err}); it needs "
+                    f"{_plan_bytes(shape, double) / 2**30:.1f} GiB of free device "
+                    "memory beyond what torch holds"
+                ) from err
+            for other in [k for k in _PLANS if k[3] and k[4] == key[4]]:
+                del _PLANS[other]
+    raise AssertionError("unreachable")
 
-            _PLANS[key] = finufft.Plan(
-                kind, shape, nthreads=torch.get_num_threads(), **kwargs
+
+_CUFINUFFT_LOADS: list[bool] = []
+
+
+def _cufinufft_loads() -> bool:
+    """Whether cuFINUFFT imports; warns once when it does not."""
+    if not _CUFINUFFT_LOADS:
+        try:
+            import cufinufft  # noqa: F401
+
+            _CUFINUFFT_LOADS.append(True)
+        except (ImportError, OSError) as err:
+            warnings.warn(
+                f"cuFINUFFT is unavailable ({err}); transforming on the CPU with "
+                "FINUFFT, which is slower but gives the same result.",
+                stacklevel=3,
             )
-    return _PLANS[key], gpu
+            _CUFINUFFT_LOADS.append(False)
+    return _CUFINUFFT_LOADS[0]
 
 
 def _execute(

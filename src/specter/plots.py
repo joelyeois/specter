@@ -432,11 +432,12 @@ def fsc_resolution(
     k_max: float | None = None,
 ) -> str:
     """
-    Resolution at the last FSC threshold crossing, linearly interpolated.
+    Resolution at the first FSC threshold crossing, linearly interpolated.
 
-    The *last* crossing rather than the first: a noisy FSC can dip below the
-    threshold and recover, and the conservative reading is the highest
-    frequency beyond which it stays below.
+    The *first* crossing, as RELION and CryoSPARC report it. A masked FSC
+    rises again toward Nyquist when both maps share the mask, because the
+    mask correlates their noise; reading the last crossing then reports that
+    artefact as resolution (1.79 A against a true ~1.91 A on EMPIAR-13203).
 
     Parameters
     ----------
@@ -466,15 +467,13 @@ def fsc_resolution(
     """
     kf = k.cpu().float()
     ff = fsc.cpu().float()
-    last_k_cross: torch.Tensor | None = None
     for i in range(len(ff) - 1):
         if k_max is not None and kf[i] > k_max:
             break
         if ff[i] >= threshold > ff[i + 1]:
             t = (threshold - ff[i]) / (ff[i + 1] - ff[i])
-            last_k_cross = kf[i] + t * (kf[i + 1] - kf[i])
-    if last_k_cross is not None:
-        return f"{1.0 / last_k_cross.item():.3f} Å"
+            k_cross = kf[i] + t * (kf[i + 1] - kf[i])
+            return f"{1.0 / k_cross.item():.3f} Å"
     return ">Nyquist"
 
 

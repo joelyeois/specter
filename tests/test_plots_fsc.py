@@ -39,15 +39,15 @@ def test_fsc_resolution_k_max_ignores_crossing_in_tail():
     """`fourier_shell_correlation` returns shells past Nyquist (the corners of
     the Fourier cube). A threshold crossing there is aliasing, not signal, and
     `k_max` exists to keep it out of the reported resolution."""
-    # Crosses 0.5 at k = 0.18 (below Nyquist=0.25), recovers, crosses again at
-    # k = 0.38 -- deep in the corner tail.
+    # Stays above 0.5 to Nyquist (0.25) and only crosses at k = 0.35, in the
+    # corner tail.
     k = torch.tensor([0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
-    fsc = torch.tensor([1.0, 0.9, 0.4, 0.9, 0.4, 0.0])
+    fsc = torch.tensor([1.0, 0.9, 0.8, 0.7, 0.3, 0.0])
 
-    # Without k_max, fsc_resolution takes the *last* crossing -- the aliased one.
-    assert fsc_resolution(k, fsc, 0.5) == "2.632 Å"
-    # With it, the tail is ignored.
-    assert fsc_resolution(k, fsc, 0.5, k_max=0.25) == "5.556 Å"
+    # Without k_max, the aliased tail crossing is reported.
+    assert fsc_resolution(k, fsc, 0.5) == "2.857 Å"
+    # With it, the tail is ignored and the FSC never crosses below Nyquist.
+    assert fsc_resolution(k, fsc, 0.5, k_max=0.25) == ">Nyquist"
 
 
 def test_map_to_model_plot_resolution_matches_resolution_between():
@@ -125,3 +125,14 @@ def test_halfmap_plot_accepts_a_mask_on_another_device():
     )
     assert fig is not None
     assert resolutions == cpu_resolutions
+
+
+def test_fsc_resolution_reports_the_first_crossing():
+    """A masked FSC that drops through the threshold, then climbs back above it
+    toward Nyquist (shared-mask noise correlation), reports the first crossing,
+    not the artefact further out."""
+    k = torch.linspace(0.0, 0.5, 11)
+    fsc = torch.tensor([1.0, 0.9, 0.7, 0.4, 0.2, 0.10, 0.12, 0.16, 0.10, 0.20, 0.25])
+    # first crossing of 0.143 lies between k[4]=0.20 and k[5]=0.25
+    expected = 1.0 / (0.20 + (0.143 - 0.2) / (0.10 - 0.2) * 0.05)
+    assert fsc_resolution(k, fsc, 0.143) == f"{expected:.3f} Å"

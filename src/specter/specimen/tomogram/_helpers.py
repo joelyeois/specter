@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from scipy import ndimage
 
 from ...arrays import clip_insert_bounds
-from ...crowding import insert_particles_into_micrograph
+from ...crowding import fold_subvoxel_offsets, insert_particles_into_micrograph
 from ...rotations import rotate_volume
 from ..membrane import MembraneGenerator, membrane_bounding_radius
 
@@ -118,6 +118,11 @@ def _insert_rotated_copies(
     label_threshold = _INSTANCE_LABEL_REL_THRESHOLD * float(template.max())
     n_instances = positions.shape[0]
     step = chunk_size or n_instances
+    # Each copy is stamped at a whole voxel and the sub-voxel rest of its
+    # position rides on the rotation's own resample, so the copy and its
+    # label land on the recorded position rather than up to half a voxel
+    # from it. Folded once for all N, outside the chunk loop.
+    theta, whole = fold_subvoxel_offsets(theta, positions, voxel_size, template.shape)
     for start in range(0, n_instances, step):
         end = min(start + step, n_instances)
         rotated = rotate_volume(template, theta[start:end], padding_mode="zeros")
@@ -128,7 +133,7 @@ def _insert_rotated_copies(
         rotated = rotated.to(volume.device)
         volume = insert_particles_into_micrograph(
             rotated,
-            positions[start:end],
+            whole[start:end],
             pixel_size=voxel_size,
             micrograph=volume,
         )
@@ -137,7 +142,7 @@ def _insert_rotated_copies(
         ].to(volume.device).view(-1, 1, 1, 1)
         instance_labels = _insert_instance_labels(
             binarized,
-            positions[start:end],
+            whole[start:end],
             voxel_size=voxel_size,
             labels=instance_labels,
         )

@@ -428,3 +428,117 @@ def test_a_set_packing_seed_still_changes_a_seeded_packing() -> None:
     assert stages.packer_seed(7, None) == 7
     assert not torch.equal(packed(2), packed(3))
     assert torch.equal(packed(2), packed(2))
+
+
+# ---------------------------------------------------------------------------
+# sub-voxel placement
+# ---------------------------------------------------------------------------
+
+
+def _anisotropic_gaussian(shape: tuple[int, int, int]) -> torch.Tensor:
+    """An anisotropic Gaussian centred on index ``n // 2`` of every axis.
+
+    Anisotropic so that the rotation matters, centred on the rotation origin
+    so that the template's own centroid is at its insertion point.
+    """
+    z, y, x = torch.meshgrid(
+        *[torch.arange(n, dtype=torch.float32) - n // 2 for n in shape],
+        indexing="ij",
+    )
+    return torch.exp(-((x / 3.0) ** 2 + (y / 2.0) ** 2 + (z / 1.5) ** 2) / 2)
+
+
+def _centroid_xyz(volume: torch.Tensor) -> torch.Tensor:
+    """Density centroid (x, y, z) in voxels, origin at index ``n // 2``."""
+    mass = volume.sum()
+    coords = [
+        (volume.sum(dims) * (torch.arange(n) - n // 2)).sum() / mass
+        for dims, n in (((0, 1), volume.shape[2]), ((0, 2), volume.shape[1]))
+    ]
+    coords.append(
+        (volume.sum((1, 2)) * (torch.arange(volume.shape[0]) - volume.shape[0] // 2))
+        .sum()
+        .div(mass)
+    )
+    return torch.stack(coords)
+
+
+def _random_placements(trials: int) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """`trials` (position in voxels, rotation) pairs; positions off-grid."""
+    g = torch.Generator().manual_seed(1)
+    out = []
+    for t in range(trials):
+        pos = (torch.rand(1, 3, generator=g) - 0.5) * 20.0
+        specter.seed(t)
+        out.append((pos, rotations.random_rotation_matrix(1)))
+    return out
+
+
+@pytest.mark.parametrize("n", [25, 26])
+@pytest.mark.parametrize("dx", [1.0, 2.5])
+def test_a_crowding_duplicate_lands_on_its_off_grid_position(n: int, dx: float) -> None:
+    """
+    A duplicate's density centroid sits on its recorded position, not on the
+    nearest voxel.
+
+    The copy is stamped at a whole voxel, and until 2026-10-16 the remainder
+    was dropped, putting every duplicate up to half a voxel off on each axis
+    (0.49 voxel worst case here). The remainder now rides on the rotation's
+    own resample, and trilinear resampling conserves the first moment, so
+    what is left is interpolation error.
+    """
+    worst = 0.0
+    for pos, R in _random_placements(8):
+        crowd = CrowdWithDuplicates(
+            _anisotropic_gaussian((n, n, n)),
+            dx,
+            10.0,
+            nxy_out=64,
+            nz_out=64,
+            progressbars=False,
+        )
+        coords = pos * dx
+
+        def place(c: CrowdWithDuplicates = crowd, xyz: torch.Tensor = coords) -> None:
+            c.coords = xyz
+
+        def orient(c: CrowdWithDuplicates = crowd, rot: torch.Tensor = R) -> None:
+            c.N, c.theta = 1, rotations.build_affine_matrix(rot)
+
+        crowd.generate_coordinates = place  # type: ignore[method-assign]
+        crowd.generate_affine_matrices = orient  # type: ignore[method-assign]
+        err = (_centroid_xyz(crowd()) - pos[0]).abs().max().item()
+        worst = max(worst, err)
+    assert worst < 0.02, f"duplicate centroid {worst:.3f} voxel off its position"
+
+
+@pytest.mark.parametrize("shape", [(25, 25, 25), (26, 26, 26), (21, 31, 27)])
+def test_a_tomogram_copy_lands_on_its_off_grid_position(
+    shape: tuple[int, int, int],
+) -> None:
+    """
+    The tomogram's protein and filament stamping keeps the sub-voxel offset
+    too, on a non-cubic template as well (filament templates are not cubes),
+    and the instance label follows the density.
+    """
+    from specter.specimen.tomogram._helpers import _insert_rotated_copies
+
+    dx = 2.0
+    worst = 0.0
+    for pos, R in _random_placements(8):
+        volume = torch.zeros(64, 64, 64)
+        labels = torch.zeros(64, 64, 64, dtype=torch.int32)
+        volume, labels = _insert_rotated_copies(
+            _anisotropic_gaussian(shape),
+            rotations.build_affine_matrix(R),
+            pos * dx,
+            torch.ones(1, dtype=torch.int32),
+            volume,
+            labels,
+            dx,
+            None,
+        )
+        worst = max(worst, (_centroid_xyz(volume) - pos[0]).abs().max().item())
+        label_centroid = _centroid_xyz(labels.float())
+        assert (label_centroid - pos[0]).abs().max().item() < 0.5
+    assert worst < 0.02, f"copy centroid {worst:.3f} voxel off its position"

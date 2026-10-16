@@ -1228,9 +1228,15 @@ def test_a_placed_protein_records_the_rotation_its_density_was_given():
         cz - m // 2 : cz + m // 2, cy - m // 2 : cy + m // 2, cx - m // 2 : cx + m // 2
     ].flatten()
     crop = crop - crop.mean()
+    # The copy sits at its recorded position to sub-voxel accuracy, and the
+    # crop is centred on a whole voxel, so the reference carries the rest.
+    centre = (n + m) // 2
+    offset = placement.position_xyz - voxel_size * torch.tensor(
+        [cx - centre, cy - centre, cz - centre], dtype=torch.float32
+    )
 
     def correlation(coordinates: torch.Tensor) -> float:
-        expected = builder.forward(coordinates, method="analytic").flatten()
+        expected = builder.forward(coordinates + offset, method="analytic").flatten()
         expected = expected - expected.mean()
         return float(expected @ crop / (expected.norm() * crop.norm()))
 

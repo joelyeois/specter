@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 
 import math
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
 
 import lightning as L
@@ -29,6 +30,7 @@ __all__ = [
     "poisson_disk_neighbors",
     "poisson_disk_neighbors_3d",
     "insert_particles_into_micrograph",
+    "fold_subvoxel_offsets",
     "filter_by_z_density",
     "filter_by_local_z_density",
     "rotation_safe_crop",
@@ -77,6 +79,13 @@ def insert_particles_into_micrograph(
     -----
     If a particle extends beyond the micrograph boundaries, only the portion
     within bounds is inserted (clipping at edges).
+
+    Each volume is stamped at the whole voxel nearest its position, with its
+    index ``n // 2`` on that voxel; the remainder, up to half a voxel per
+    axis, is not applied here. A caller that resamples its copies anyway
+    (every rotated copy does) carries it through that resampling instead,
+    with :func:`fold_subvoxel_offsets`, and passes the whole-voxel positions
+    that function returns.
     """
     N, Zp, Yp, Xp = volumes.shape
     device = volumes.device
@@ -127,6 +136,70 @@ def insert_particles_into_micrograph(
             micrograph,
         )
     return micrograph
+
+
+def fold_subvoxel_offsets(
+    theta: torch.Tensor,
+    positions: torch.Tensor,
+    pixel_size: float,
+    template_shape: Sequence[int],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Move each copy's sub-voxel offset into the affine that resamples it.
+
+    :func:`insert_particles_into_micrograph` stamps at whole voxels, so on its
+    own a copy lands up to half a voxel from its recorded position on every
+    axis. A rotated copy is resampled anyway, and a translation in the same
+    affine costs nothing: this splits each position into the whole voxel the
+    copy is stamped at and the remainder, which the rotation then applies.
+
+    Parameters
+    ----------
+    theta : torch.Tensor
+        Affine matrices from :func:`~specter.rotations.build_affine_matrix`,
+        shape (N, 3, 4), applied to the template by
+        :func:`~specter.rotations.rotate_volume` (``origin="relion"``).
+    positions : torch.Tensor
+        Copy centres (x, y, z) in physical units, origin at the canvas centre,
+        shape (N, 3) or (N, 2) (z taken as zero).
+    pixel_size : float
+        Voxel size, in the units of `positions`.
+    template_shape : sequence of int
+        Shape (Z, Y, X) of the volume `theta` will be applied to; the
+        translation is normalised by its x width.
+
+    Returns
+    -------
+    theta : torch.Tensor
+        The affines with the remainder added as a lab-frame displacement,
+        shape (N, 3, 4).
+    positions_whole : torch.Tensor
+        Positions rounded to whole voxels, in physical units, shape (N, 3),
+        to pass to :func:`insert_particles_into_micrograph`.
+
+    Notes
+    -----
+    ``build_affine_matrix(R, T)`` displaces the density by ``-T`` in the lab
+    frame whatever ``R`` is, by pre-rotating ``T``; the remainder ``f`` is
+    therefore added as ``R @ (-f)`` in the normalised units of
+    :func:`~specter.rotations.translations_angstrom_to_torch`, on top of any
+    translation `theta` already carries. The rounding is the one
+    :func:`insert_particles_into_micrograph` applies, so the two parts add
+    back to the position exactly. Trilinear resampling conserves the first
+    moment of a shifted density, so the copy's centroid lands on its position
+    to interpolation accuracy rather than to the nearest voxel.
+    """
+    if positions.shape[1] == 2:
+        positions = torch.cat([positions, positions.new_zeros(len(positions), 1)], 1)
+    voxels = positions / pixel_size
+    whole = voxels.round()
+    remainder = (voxels - whole).to(device=theta.device, dtype=theta.dtype)
+    shift = rotations.translations_angstrom_to_torch(
+        -remainder, int(template_shape[-1]), 1.0
+    )
+    R = theta[..., :3]
+    t = theta[..., 3] + torch.einsum("bij,bj->bi", R, shift)
+    return torch.cat([R, t.unsqueeze(-1)], dim=-1), whole * pixel_size
 
 
 def _insert_all(
@@ -335,6 +408,10 @@ def filter_by_z_density(
 #: a whole micrograph-scale template.
 _CROP_RADIUS_CHUNK_VOXELS = 2**24
 
+#: Furthest :func:`fold_subvoxel_offsets` can move density, in voxels: half a
+#: voxel on each of three axes.
+_SUBVOXEL_SHIFT_REACH = math.sqrt(3.0) / 2
+
 
 def rotation_safe_crop(volume: torch.Tensor) -> torch.Tensor:
     """
@@ -348,7 +425,9 @@ def rotation_safe_crop(volume: torch.Tensor) -> torch.Tensor:
     6.3x more zeros into the canvas. Cropping first is exact rather than an
     approximation: rotation preserves distance from the centre, so every
     voxel that could carry density into the crop started inside it, and
-    everything outside was zero and rotates to zero.
+    everything outside was zero and rotates to zero. The crop also leaves room
+    for the sub-voxel offset each copy is resampled with
+    (:func:`fold_subvoxel_offsets`), so that shift cannot clip it either.
 
     Parameters
     ----------
@@ -404,8 +483,9 @@ def rotation_safe_crop(volume: torch.Tensor) -> torch.Tensor:
     # density at radius R + sqrt(3), one voxel diagonal further out.
     # Cropping at R alone clips that shell, which is not a rounding
     # difference -- it cost 20% of a blob's density in the test that pins
-    # this.
-    radius = math.sqrt(furthest_r2) + math.sqrt(3.0)
+    # this. And plus the sub-voxel offset `fold_subvoxel_offsets` folds into
+    # the same resample, at most half a voxel per axis.
+    radius = math.sqrt(furthest_r2) + math.sqrt(3.0) + _SUBVOXEL_SHIFT_REACH
 
     sides = []
     for n in (nz, ny, nx):
@@ -943,6 +1023,13 @@ class CrowdWithDuplicates(L.LightningModule):
             micrograph = torch.zeros(
                 self.nz_out, self.nxy_out, self.nxy_out, device=accumulator_device
             )
+        # Each duplicate is stamped at a whole voxel and the sub-voxel rest of
+        # its position rides on the rotation's own resample. Folded once for
+        # all N, so the chunk loop gains no per-chunk host transfer.
+        template = self._rotation_template()
+        theta, whole = fold_subvoxel_offsets(
+            self.theta.to(template.device), self.coords, self.dx, template.shape
+        )
         for start in track(
             range(0, self.N, self.chunk_size),
             description="Rotating duplicates and insert into micrograph",
@@ -950,15 +1037,14 @@ class CrowdWithDuplicates(L.LightningModule):
             disable=not self.progressbars,
         ):
             end = min(start + self.chunk_size, self.N)
-            template = self._rotation_template()
             volumes = rotations.rotate_volume(
                 template,
-                self.theta[start:end].to(template.device),
+                theta[start:end],
                 padding_mode="zeros",
             )
             micrograph = insert_particles_into_micrograph(
                 volumes.to(accumulator_device),
-                self.coords[start:end],
+                whole[start:end],
                 pixel_size=self.dx,
                 micrograph=micrograph,
             )

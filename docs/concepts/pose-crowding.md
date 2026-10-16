@@ -101,10 +101,22 @@ rather than for the molecule, so most of it is empty, and rotation preserves
 distance from the centre. The crop's half-width is the radius of the
 furthest occupied voxel plus \(\sqrt{3}\) voxels, because trilinear
 resampling can carry density from radius \(R\) to one voxel diagonal
-further out. Each axis keeps its parity, so the crop's centre stays where the
+further out, plus \(\sqrt{3}/2\) voxels for the sub-voxel offset described
+below. Each axis keeps its parity, so the crop's centre stays where the
 template's was. The crop changes the image only through the resampling
 grid's normalisation, at the \(10^{-5}\) relative level, and draws no
 random numbers, so a seeded specimen is unchanged.
+
+Each duplicate is placed at its sampled position to sub-voxel accuracy.
+The rotated copy is added into the canvas at the whole voxel nearest that
+position, and the remainder, up to half a voxel on each axis, is applied
+as a translation in the same affine resample that rotates the copy
+(`crowding.fold_subvoxel_offsets`), so it costs no additional
+interpolation pass. Trilinear resampling conserves the first moment of
+the density, so the copy's centroid lands on the sampled position to
+within interpolation error (about \(10^{-3}\) voxel for a smooth
+template), not to within half a voxel. A tomogram's proteins, filaments
+and microtubules are placed through the same function.
 
 ### Water–air interface adsorption
 

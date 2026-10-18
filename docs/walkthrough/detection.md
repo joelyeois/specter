@@ -131,7 +131,10 @@ Two further `detect` arguments describe the camera geometry.
 Fourier-cropped after recording, so the MTF is read at the right frequencies
 ([Images resampled after recording](../concepts/detector.md#images-resampled-after-recording)).
 `anisomag` applies an anisotropic magnification, one 2 × 2 matrix per image
-(Zivanov et al. 2020).
+(Zivanov et al. 2020). The image is resampled through its own trigonometric
+interpolant, evaluated at the distorted pixel positions by a non-uniform FFT,
+so the warp does not attenuate frequencies near Nyquist as an interpolation
+of the pixel grid does.
 
 ## Coincidence loss
 

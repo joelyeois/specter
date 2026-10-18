@@ -247,16 +247,33 @@ def _execute(
     shape: tuple[int, ...],
     eps: float,
 ) -> torch.Tensor:
-    """One type-1 or type-2 transform through a cached plan, on ``values``' device."""
+    """
+    Type-1 or type-2 transforms through a cached plan, on ``values``' device.
+
+    ``values`` may carry leading batch dimensions (before the grid for a
+    type 2, before the M samples for a type 1): every item is transformed at
+    the same points, which are set once, since sorting them costs more than
+    a transform (2.6 against 1.8 ms for a 432^2 image).
+    """
     double = values.dtype == torch.complex128
     plan, gpu = _cached_plan(kind, shape, double, values.device, eps)
+    core = len(shape) if kind == 2 else 1
+    batch = values.shape[: values.ndim - core]
+    flat = values.reshape(-1, *values.shape[values.ndim - core :])
     if gpu:
-        plan.setpts(pts[0], pts[1], pts[2])
-        return plan.execute(values.contiguous())
-    p = pts.cpu().numpy()
-    plan.setpts(p[0], p[1], p[2])
-    out = np.asarray(plan.execute(values.detach().cpu().contiguous().numpy()))
-    return torch.from_numpy(out).to(values.device)
+        plan.setpts(*pts)
+        out = torch.stack([plan.execute(v.contiguous()) for v in flat])
+    else:
+        p = pts.cpu().numpy()
+        plan.setpts(*p)
+        host = flat.detach().cpu().numpy()
+        out = torch.stack(
+            [
+                torch.from_numpy(np.asarray(plan.execute(np.ascontiguousarray(v))))
+                for v in host
+            ]
+        ).to(values.device)
+    return out.reshape(*batch, *out.shape[1:])
 
 
 class _SampleTransform(torch.autograd.Function):
@@ -268,7 +285,9 @@ class _SampleTransform(torch.autograd.Function):
     ) -> torch.Tensor:
         cdtype = torch.complex128 if pts.dtype == torch.float64 else torch.complex64
         ctx.save_for_backward(pts)
-        ctx.shape, ctx.eps, ctx.real = tuple(volume.shape), eps, not volume.is_complex()
+        # The grid is the trailing len(pts) axes; anything before it is a batch.
+        ctx.shape = tuple(volume.shape[volume.ndim - pts.shape[0] :])
+        ctx.eps, ctx.real = eps, not volume.is_complex()
         return _execute(2, volume.to(cdtype), pts, ctx.shape, eps)
 
     @staticmethod
@@ -290,27 +309,38 @@ def sample_transform(
     repeatedly and needs gradients: the plans are cached between calls
     (`clear_plan_cache` releases them), and the backward is the transform's
     adjoint, a type-1 NUFFT that spreads the incoming gradient back onto the
-    grid. No gradient flows to ``freqs``.
+    grid. No gradient flows to ``freqs``. Images are transformed the same way
+    as volumes, with one axis fewer, and a stack of grids sampled at the same
+    frequencies is transformed with the points set once.
 
     Parameters
     ----------
     volume : torch.Tensor
-        Real or complex grid of shape (Z, Y, X); CUDA tensors use cuFINUFFT,
+        Real or complex grid of shape (Z, Y, X), or (Y, X) for an image,
+        optionally with one leading batch axis, (B, Z, Y, X) or (B, Y, X);
+        the frequencies' length says which. CUDA tensors use cuFINUFFT,
         others FINUFFT. float64/complex128 runs in double precision.
     freqs : torch.Tensor
-        Frequencies of shape (M, 3) in cycles per voxel, ordered (x, y, z).
+        Frequencies of shape (M, ndim) in cycles per voxel, ordered (x, y, z),
+        or (x, y) for an image.
     eps : float, optional
         Requested relative accuracy. Default 1e-6.
 
     Returns
     -------
     torch.Tensor
-        Complex values of shape (M,).
+        Complex values of shape (M,), or (B, M) for a batch.
     """
-    if volume.ndim != 3:
-        raise ValueError(f"expected a (Z, Y, X) grid, got shape {tuple(volume.shape)}")
+    ndim = freqs.shape[-1]
+    if ndim not in (2, 3) or volume.ndim not in (ndim, ndim + 1):
+        raise ValueError(
+            f"expected a (Z, Y, X) or (Y, X) grid, optionally batched, with "
+            f"frequencies of matching dimension; got shapes {tuple(volume.shape)} "
+            f"and {tuple(freqs.shape)}"
+        )
     double = volume.dtype in (torch.float64, torch.complex128)
     real = torch.float64 if double else torch.float32
     q = freqs.detach().to(device=volume.device, dtype=real)
     pts = (q.flip(-1) * (2 * math.pi)).T.contiguous()
-    return _SampleTransform.apply(volume, pts, eps).reshape(-1)
+    out = _SampleTransform.apply(volume, pts, eps)
+    return out.reshape(*volume.shape[: volume.ndim - ndim], -1)

@@ -134,7 +134,7 @@ The check renders the particles noiselessly, without ice or neighbours,
 because only the view is under test. Aligned poses score 0.328 against 0.082
 for a random pairing, 55.6 standard deviations of the random pairings above
 them, and a matched pair beats a mismatched one in every comparison. The
-unaligned set scores 0.080 against 0.078 (z = 1.7), the level of a random
+unaligned set scores 0.080 against 0.077 (z = 1.7), the level of a random
 pairing, although its poses are
 not wrong in themselves: they differ from the aligned set by a single
 rotation of 142.3°, the same for every particle to within 0.001°. To fix such

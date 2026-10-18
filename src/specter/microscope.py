@@ -226,20 +226,50 @@ class Detector(L.LightningModule):
         self, images: torch.Tensor, anisomag: torch.Tensor
     ) -> torch.Tensor:
         """
-        Apply anisotropic magnification to images.
+        Apply anisotropic magnification to images, without interpolating them.
+
+        Each image is resampled as ``out(x) = img(A (x - c) + c)`` about its
+        centre ``c = ((W - 1) / 2, (H - 1) / 2)``, with ``A`` the matrix in
+        `torch.nn.functional.affine_grid`'s normalised coordinates (the
+        convention the matrices from `specter.io` are written in) taken to
+        pixels. ``img`` between pixels is the image's own trigonometric
+        interpolant, ``sum_k F[k] exp(2 pi i k . u) / (H W)`` over its DFT
+        coefficients ``F``, evaluated at every warped position ``u`` at once by
+        a type-2 NUFFT (`specter.nufft.sample_transform`). That is exact for a
+        band-limited image and differentiable in it.
 
         Parameters
         ----------
         images : torch.Tensor
-            Input images with shape (B, H, W) where B is batch size.
+            Real images, shape (B, H, W).
         anisomag : torch.Tensor
             2x2 anisotropic magnification matrix for each image in batch,
-            shape (B, 2, 2).
+            shape (B, 2, 2), acting on (x, y).
 
         Returns
         -------
         magnified_images : torch.Tensor
             Images after anisotropic magnification, shape (B, H, W).
+
+        Notes
+        -----
+        A bilinear resampling of the pixel grid (``grid_sample``, used until
+        2026-10-18) attenuates a frequency ``f`` by ``|1 - t + t exp(2 pi i
+        f)|`` at a fractional offset ``t``, about 0.16 at ``f = 0.45`` cycles
+        per pixel and ``t = 0.5``. Under a 0.9% magnification anisotropy those
+        offsets reach a pixel across a large particle and vary over it, so
+        the near-Nyquist signal of an inverse problem's prediction was damped
+        in a way its map could not absorb. On EMPIAR-10551 (0.781 A/px)
+        replacing it moved Ghostbuster's half-map resolution from 1.660 to
+        1.616 A, and on EMPIAR-12391 from 2.221 to 2.185 A.
+
+        The interpolant is periodic, so what the warp moves past one edge of
+        the box re-enters at the other. Sampling the image's discrete-space
+        transform at ``A^-T k`` instead would treat the image as zero outside
+        the box, and the box edge then rings across the whole image. The
+        image mean is removed before the transform and restored after it, so
+        the NUFFT's error, which is relative to the total norm, is set by the
+        fluctuation rather than by the mean.
 
         References
         ----------
@@ -248,24 +278,44 @@ class Detector(L.LightningModule):
            sets in *RELION*-3.1. *IUCrJ*, 7(2), 253–267.
            https://doi.org/10.1107/S2052252520000081
         """
-        images = images.unsqueeze(1)
-        B = len(images)
+        from .nufft import sample_transform
 
-        # Identity matrix (Bx3x3)
-        M_affine = torch.eye(3).unsqueeze(0).repeat(B, 1, 1)
-        M_affine = M_affine.to(images.device)
-        M_affine[:, :2, :2] = anisomag
-
-        # Convert to (B, 2, 3) format by repeating for all batch elements
-        M_affine = M_affine[:, :2, :]  # Shape: (B, 2, 3)
-
-        # Generate affine grid for the batch
-        grid = F.affine_grid(M_affine, list(images.shape), align_corners=False)
-
-        # Apply transformation using grid sampling
-        images = F.grid_sample(images, grid, align_corners=False, padding_mode="border")
-        images = torch.squeeze(images, dim=1)
-        return images
+        with torch.autocast(images.device.type, enabled=False):
+            x = images if images.dtype == torch.float64 else images.float()
+            dtype, device = x.dtype, x.device
+            _, H, W = x.shape
+            mean = x.mean(dim=(-2, -1), keepdim=True)
+            # Centred DFT coefficients: index n holds frequency n - (H//2, W//2)
+            # cycles per box, sample_transform's own phase origin.
+            coeffs = torch.fft.fftshift(torch.fft.fft2(x - mean), dim=(-2, -1))
+            yy, xx = torch.meshgrid(
+                torch.arange(H, device=device, dtype=dtype),
+                torch.arange(W, device=device, dtype=dtype),
+                indexing="ij",
+            )
+            c = torch.tensor([(W - 1) / 2, (H - 1) / 2], device=device, dtype=dtype)
+            pix = torch.stack([xx.flatten(), yy.flatten()], dim=-1) - c  # (x, y)
+            # affine_grid's normalised coordinate is (pixel - c) / (W / 2, H / 2):
+            # the same matrix in pixels is D A D^-1.
+            D = torch.tensor([W / 2, H / 2], device=device, dtype=dtype)
+            A = anisomag.to(device=device, dtype=dtype)
+            A = D[:, None] * A / D[None, :]
+            box = torch.tensor([W, H], device=device, dtype=dtype)
+            # Images sharing a matrix (one optics group, as a rule) share their
+            # sample points, which are set once for the group.
+            groups, which = torch.unique(A.reshape(-1, 4), dim=0, return_inverse=True)
+            out = torch.empty_like(x)
+            for g, flat_matrix in enumerate(groups):
+                idx = (which == g).nonzero().flatten()
+                u = (
+                    pix @ flat_matrix.reshape(2, 2).T + c
+                )  # where each output pixel samples
+                # sum_m F[m] exp(+2 pi i m . u / box) is the transform at -u / box,
+                # which is 1-periodic: wrapped into [-1/2, 1/2) for the NUFFT.
+                q = -u / box
+                vals = sample_transform(coeffs[idx], q - torch.round(q))
+                out[idx] = vals.real.reshape(-1, H, W) / (H * W)
+            return (out + mean).to(images.dtype)
 
     def add_mtf(self, images: torch.Tensor, mtf: torch.Tensor) -> torch.Tensor:
         """

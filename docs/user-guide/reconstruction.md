@@ -154,6 +154,65 @@ devices when `--device` names at least two, sequentially on one device
 otherwise. Only the first two devices are ever used, since there are only
 two halves to run.
 
+### The converged solve
+
+A gold-standard run has two stages. The first fits each half with Adam for
+`--epochs` passes over its particles, as described above. The second,
+selected by `--solver converged` (the default), solves each half to the
+minimum of the same image loss plus a Wiener prior:
+
+$$
+\frac{1}{2}\sum_i \lVert y_i - p_i(V) \rVert^2
++ \frac{1}{2}\sum_k \lambda(k)\,\lvert \hat V(k) \rvert^2,
+\qquad
+\lambda(k) = \frac{\bar W(k)}{\mathrm{SSNR}(k)},
+$$
+
+where $p_i$ is the forward model's prediction of image $i$, $\bar W(k)$ the
+curvature of the data term averaged over a Fourier shell, and
+$\mathrm{SSNR}(k) = \mathrm{FSC}(k) / (1 - \mathrm{FSC}(k))$ the
+signal-to-noise ratio of one half-map, computed from the FSC averaged over
+five shells and made non-increasing with resolution. Where the FSC hovers
+near zero, its shell-to-shell noise would otherwise change $\lambda$ by an
+order of magnitude between neighbouring shells. This is the prior RELION places on a
+reconstruction (Scheres 2012). The FSC comes from the two Adam
+half-maps after a mask: `--fsc_mask` when it is a map on the reconstruction's
+grid (a mask on any other grid is not used, with a warning, outside
+`--test_run`), otherwise an auto-tightened mask, written to `mask_auto.mrc`, built
+the way CryoSPARC's
+[resolution mask](https://guide.cryosparc.com/processing-data/tutorials-and-case-studies/tutorial-dynamic-masking-in-refinements-v5.0)
+is described. The mean of the halves, weighted by their FSC inside a soft
+sphere, is thresholded at half its maximum; the mask is 1 within $2r$ of
+that region and falls along a cosine to 0 at $5r$. The length $r$ starts at
+the soft-sphere FSC = 0.143 resolution and decreases in steps of 0.125 Å,
+and the mask kept is the tightest whose FSC crosses 0.143 within two Fourier
+shells of its noise-substituted FSC (Chen et al. 2013), the FSC of the
+halves with their phases randomised beyond FSC = 0.8, which measures the
+correlation a mask introduces by itself. On CryoSPARC's half-maps of
+EMPIAR-13202, 10551 and 12391 this mask agrees with the one CryoSPARC wrote
+to within 4% in volume, and the SSNR the two masks give differs by less than
+1% at the median. Each half is then minimised by preconditioned
+nonlinear conjugate gradients from its Adam map: every iteration sums the
+gradient over all of the half's particles, the step length comes from that
+gradient's slope along the search direction and the loss's curvature along
+it, measured on a random 5% of particles, and the preconditioner is
+$1 / (\bar W(k) + \lambda(k))$. Symmetry enters as part of the model: the
+solver varies a map $U$ and predicts the images of its point-group average
+$S(U)$, so it never assumes that averaging an averaged map leaves it
+unchanged, which for I1 holds only inside the inscribed sphere.
+
+Adam on mini-batches stops at a level set by its learning rate and batch
+size, and a map fitted without a prior over-fits the frequencies the data do
+not determine. The minimiser of the regularised loss is instead a
+Wiener-filtered map. Multiplying it by $1 + 1/\mathrm{SSNR}(k)$ undoes the
+filter and gives the unfiltered half-map, which is what an FSC and later
+sharpening expect. `--solver_iterations` (default 4) sets the number of
+iterations. On EMPIAR-13202 at 100 kV (125,000 particles per half, a
+300-voxel box) four iterations from five Adam epochs reached the same map as
+sixteen iterations, to $1 - \mathrm{FSC} \le 3 \times 10^{-6}$ in every band.
+An iteration costs about one Adam epoch. `--solver adam` keeps the Adam maps
+as the result.
+
 ### Sharing a reference between halves
 
 `--fsc_ref` and `--cryosparc_ref` log a map-to-model FSC against a known
@@ -170,14 +229,25 @@ stack).
 
 A gold-standard run writes, into its job directory:
 
-- `volume_A.mrc` / `volume_B.mrc`: the two half-map reconstructions.
+- `volume_A.mrc` / `volume_B.mrc`: the two half-map reconstructions. With
+  the converged solve these are the unfiltered half-maps.
+- `volume_A_filtered.mrc` / `volume_B_filtered.mrc`: the minimisers of the
+  regularised loss, which are Wiener-filtered.
+- `volume_A_adam.mrc` / `volume_B_adam.mrc`: the Adam stage's half-maps.
+- `fsc_gold_standard_adam.png`: the half-map FSC of the Adam stage.
+- `mask_auto.mrc`: the mask the SSNR was measured in, when `--fsc_mask` did
+  not supply one.
 - `epochs/<NNN>_A.mrc` / `epochs/<NNN>_B.mrc`: per-epoch snapshots of each
   half.
 - `epochs/volume_<NNN>_A.png` / `epochs/volume_<NNN>_B.png`: a preview
   figure of each half's volume at every epoch, for checking progress without
   opening the `.mrc` files.
 - `fsc_gold_standard.png`: the final half-map FSC, written once both
-  halves finish.
+  halves finish, with the masked FSC drawn as well when there is a mask:
+  the one the prior used, or `--fsc_mask` on the reconstruction's grid when
+  `--solver adam`. `job.json` records both crossings
+  (`resolution_gold_standard` and `resolution_gold_standard_masked`) and
+  which mask (`resolution_gold_standard_mask`).
 - `epochs/fsc_halfmap_<NNN>.png`: the half-map FSC recomputed after
   *every* epoch, not once at the end. Whichever worker finishes an epoch
   second finds its sibling's volume already on disk and computes the pair;
@@ -335,6 +405,18 @@ use the same sign.
 
 ## Limitations
 
+The converged solve holds poses, shifts and defocus fixed. A run that sets
+`--lr_R`, `--lr_T` or `--lr_D` therefore keeps the Adam result and skips
+the solve, with a warning. The solve also runs only for `--halfset gold`,
+since its prior needs both halves; `--halfset A`, `B` and `all` stop after
+the Adam stage. Each half runs on one device.
+
+The prior depends on the Adam half-maps' FSC, so it depends on the mask that
+FSC is measured in. Scaling every $\lambda(k)$ by a factor between 0.3 and 3
+(RELION's regularisation parameter $T$) left the half-map FSC, the
+map-to-model FSC and the cross-half FSC of the result unchanged on
+EMPIAR-13202.
+
 Pose, translation, and defocus refinement (`--lr_R`/`--lr_T`/`--lr_D`) are
 validated against ground truth only with the map held fixed (no `--lr`).
 Under that condition each group, and all three together, recover simulated
@@ -359,6 +441,12 @@ result.
   (2015). 2.8 Å resolution reconstruction of the *Thermoplasma acidophilum*
   20S proteasome using cryo-electron microscopy. *eLife*, 4, e06380.
   [doi:10.7554/eLife.06380](https://doi.org/10.7554/eLife.06380)
+- Chen, S., McMullan, G., Faruqi, A. R., Murshudov, G. N., Short, J. M.,
+  Scheres, S. H. W., & Henderson, R. (2013). High-resolution noise
+  substitution to measure overfitting and validate resolution in 3D structure
+  determination by single particle electron cryomicroscopy.
+  *Ultramicroscopy*, 135, 24–35.
+  [doi:10.1016/j.ultramic.2013.06.004](https://doi.org/10.1016/j.ultramic.2013.06.004)
 - Fromm, S. A., O'Connor, K. M., Purdy, M., Bhatt, P. R., Loughran, G.,
   Atkins, J. F., Jomaa, A., & Mattei, S. (2023). The translating bacterial
   ribosome at 1.55 Å resolution generated by cryo-EM imaging services.
@@ -378,6 +466,10 @@ result.
   orientation, absolute hand, and contrast loss in single-particle electron
   cryomicroscopy. *Journal of Molecular Biology*, 333(4), 721–745.
   [doi:10.1016/j.jmb.2003.07.013](https://doi.org/10.1016/j.jmb.2003.07.013)
+- Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian approach
+  to cryo-EM structure determination. *Journal of Structural Biology*,
+  180(3), 519–530.
+  [doi:10.1016/j.jsb.2012.09.006](https://doi.org/10.1016/j.jsb.2012.09.006)
 - Scheres, S. H. W., & Chen, S. (2012). Prevention of overfitting in cryo-EM
   structure determination. *Nature Methods*, 9(9), 853–854.
   [doi:10.1038/nmeth.2115](https://doi.org/10.1038/nmeth.2115)

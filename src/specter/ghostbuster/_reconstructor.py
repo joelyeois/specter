@@ -14,15 +14,12 @@ from dataclasses import asdict
 from typing import Any
 
 import mrcfile
-import roma
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler
 
-from .. import rotations
 from ..imaging import CTF, Exposure, Poses, Specimen
-from ..rotations import VolumeRotator
 from ..plots import (
     HALFMAP_FSC_THRESHOLD,
     MAP_TO_MODEL_FSC_THRESHOLD,
@@ -35,21 +32,9 @@ from ._io import (
     save_halfmap_fsc_figure,
     save_plot3d_preview,
 )
-from ._losses import (
-    mse_loss,
-    ncc_loss,
-    noise_weighted_loss,
-    nps_weighted_loss,
-    update_sigma2,
-)
+from ._losses import mse_loss
 from ..settings import Optics, Propagation
 from specter.options import Scheduler, SymmetryMode
-
-#: Largest table of projected 2D masks `Reconstructor` keeps on the device,
-#: in bytes. The table is ``n_particles * nxy**2`` float32 values, 1 MiB a
-#: particle at a 512 box, so this admits 2048 particles there, 8192 at 256
-#: and 32768 at 128. Above it the masks are projected per step, as before.
-MASK_2D_CACHE_MAX_BYTES = 2 * 2**30
 
 
 class Reconstructor(_BaseReconstructor):
@@ -110,8 +95,6 @@ class Reconstructor(_BaseReconstructor):
         aggressively over the configured run, which is useful for short
         screening jobs (the one-cycle policy of Smith & Topin [2]_).
         ``"CosineAnnealingWarmRestarts"`` is SGDR [1]_.
-    sparsity : float, optional
-        L1 regularisation weight on V. None disables sparsity.
     symmetry : str, optional
         Symmetry group to enforce (e.g. "C3", "D2"). None disables symmetry.
     propagation : Propagation, optional
@@ -128,13 +111,6 @@ class Reconstructor(_BaseReconstructor):
     run_dir : str or Path, optional
         Directory to write per-epoch volumes, final volume, and metadata into.
         ``None`` disables all file output.
-    use_2d_mask : bool
-        If True, rotate ``fsc_mask`` for each particle, project it to 2D, and
-        use that projected mask to weight the image-domain MSE loss. When the
-        poses are fixed (``lr_R`` and ``lr_T`` both None) every particle's
-        projection is computed once, on first use, and kept on the device, so
-        long as the table fits in :data:`MASK_2D_CACHE_MAX_BYTES`; with a pose
-        being refined it is recomputed each step from the current pose.
     halfset_label : str, optional
         Short label (e.g. ``"A"`` or ``"B"``) appended to saved filenames when
         two halfset runs share the same ``run_dir``.
@@ -163,7 +139,6 @@ class Reconstructor(_BaseReconstructor):
         bfactor: float | torch.Tensor | None = None,
         propagation: Propagation = Propagation(),
         optics: Optics = Optics(),
-        sparsity: float | None = None,
         lr: float | None = None,
         lr_R: float | None = None,
         lr_T: float | None = None,
@@ -171,15 +146,10 @@ class Reconstructor(_BaseReconstructor):
         lr_decay: float = 0.1,
         scheduler: Scheduler = "LambdaLR",
         kmask: torch.Tensor | None = None,
-        nps_weight: torch.Tensor | None = None,
         scale: torch.Tensor | None = None,
-        learn_noise_model: bool = False,
-        noise_ema_momentum: float = 0.9,
-        use_ncc: bool = False,
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
         cryosparc_ref: torch.Tensor | str | Path | None = None,
-        use_2d_mask: bool = False,
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
         symmetry_mode: SymmetryMode = "exact",
@@ -206,7 +176,6 @@ class Reconstructor(_BaseReconstructor):
                 "anisomag",
                 "bfactor",
                 "kmask",
-                "nps_weight",
                 "scale",
                 "fsc_ref",
                 "cryosparc_ref",
@@ -227,14 +196,11 @@ class Reconstructor(_BaseReconstructor):
         #: to its own `metrics<suffix>.json`.
         self._final_metrics: dict[str, Any] | None = None
 
-        self._setup_optimization_state(
-            lr, lr_R, lr_T, lr_D, sparsity, lr_decay, scheduler
-        )
+        self._setup_optimization_state(lr, lr_R, lr_T, lr_D, lr_decay, scheduler)
         self._setup_symmetry(
             symmetry, symmetry_batchsize, symmetry_mode, use_cpu_for_symmetry
         )
-        self._setup_masks(kmask, nps_weight, use_2d_mask)
-        self._setup_noise_model(V, learn_noise_model, noise_ema_momentum, use_ncc)
+        self.register_buffer("kmask", kmask)
         self._load_fsc_and_refs(fsc_ref, fsc_mask, cryosparc_ref)
 
         # model parameters
@@ -265,7 +231,6 @@ class Reconstructor(_BaseReconstructor):
         lr_R: float | None,
         lr_T: float | None,
         lr_D: float | None,
-        sparsity: float | None,
         lr_decay: float,
         scheduler: Scheduler,
     ) -> None:
@@ -279,7 +244,6 @@ class Reconstructor(_BaseReconstructor):
         else:
             logger.info("Multi-parameter optimization mode.")
 
-        self.sparsity = sparsity
         self.lr = lr
         self.lr_R = lr_R
         self.lr_T = lr_T
@@ -303,39 +267,6 @@ class Reconstructor(_BaseReconstructor):
             sym_rot_matrices = get_rotation_matrices(symmetry)
             self.register_buffer("sym_rot_matrices", sym_rot_matrices, persistent=False)
         self.use_cpu_for_symmetry = use_cpu_for_symmetry
-
-    def _setup_masks(
-        self,
-        kmask: torch.Tensor | None,
-        nps_weight: torch.Tensor | None,
-        use_2d_mask: bool,
-    ) -> None:
-        """Register the Fourier k-mask and NPS-weight buffers."""
-        self.register_buffer("kmask", kmask)
-        self.register_buffer("nps_weight", nps_weight)
-        self.use_2d_mask = use_2d_mask
-        #: Every particle's projected 2D mask, (N, H, W), when the poses are
-        #: fixed and the table fits -- see `_project_fsc_mask_2d`. A plain
-        #: attribute, not a buffer: derived state belongs in no checkpoint,
-        #: and DDP broadcasts every buffer (persistent or not) each step.
-        self._mask_2d_cache: torch.Tensor | None = None
-        #: The batch size `_mask_2d_cache`'s rows were projected in.
-        self._mask_2d_cache_batch = 0
-
-    def _setup_noise_model(
-        self,
-        V: torch.Tensor,
-        learn_noise_model: bool,
-        noise_ema_momentum: float,
-        use_ncc: bool,
-    ) -> None:
-        """Configure the learned noise model (RELION-style sigma^2(k) buffer)."""
-        self.learn_noise_model = learn_noise_model
-        self.noise_ema_momentum = noise_ema_momentum
-        self.use_ncc = use_ncc
-        n = V.shape[-1]
-        self.sigma2_k: torch.Tensor
-        self.register_buffer("sigma2_k", torch.ones(n, n // 2 + 1))
 
     def _load_fsc_and_refs(
         self,
@@ -555,8 +486,8 @@ class Reconstructor(_BaseReconstructor):
         """
         Compute the image-domain loss between simulated and experimental images.
 
-        Selects the active loss model in priority order: NCC → learned noise →
-        NPS-weighted → plain MSE. Sparsity regularisation on V is added on top.
+        The mean squared error between the images and the prediction, every
+        particle weighted equally.
 
         Parameters
         ----------
@@ -581,10 +512,7 @@ class Reconstructor(_BaseReconstructor):
         it instead (until 2026-10-17) modelled full-strength signal over
         noise of variance ``sigma^2 / scale``, which predicts held-out images
         worse (EMPIAR-10083: pooled held-out FRC 0.0389 against 0.0408 at
-        8-4.5 A) although the reconstructed map came out the same. A
-        normalised cross-correlation cannot see a scale, so under `use_ncc`
-        the only effect left is that a particle with no signal (scale <= 0)
-        is dropped.
+        8-4.5 A) although the reconstructed map came out the same.
 
         Under multi-GPU (DDP), the *logged* norm/total loss is
         gathered/averaged across ranks (see ``_gather_for_logging``) so it
@@ -593,169 +521,16 @@ class Reconstructor(_BaseReconstructor):
         value throughout; DDP synchronises gradients on its own.
         """
         scale = self.scale[idx]  # (B,)
-        if self.use_ncc:
-            # A correlation is blind to amplitude; only "no signal" survives.
-            loss = ((scale > 0).to(out.dtype) * ncc_loss(out, images)).mean()
-        else:
-            level = self.dose_per_angstrom * self.voxel_size**2
-            out = level + scale[:, None, None] * (out - level)
-            w = torch.ones_like(scale)
-            if self.learn_noise_model:
-                self.sigma2_k = update_sigma2(
-                    self.sigma2_k, images - out, self.noise_ema_momentum
-                )
-                loss = noise_weighted_loss(out, images, self.sigma2_k, w)
-            elif self.nps_weight is not None:
-                loss = nps_weighted_loss(out, images, self.nps_weight, w)
-            else:
-                mask = (
-                    self._project_fsc_mask_2d(idx, images.shape)
-                    if self.use_2d_mask
-                    else None
-                )
-                loss = mse_loss(out, images, w, mask=mask)
+        level = self.dose_per_angstrom * self.voxel_size**2
+        out = level + scale[:, None, None] * (out - level)
+        loss = mse_loss(out, images, torch.ones_like(scale))
         # Kept on the device: a `.cpu()` here is a sync per step, and with
         # three of them the step ran 270 ms where the same work runs 160 ms
         # asynchronously. The lists are read once, when the epoch's metrics
         # are built.
         self.log_norm_loss.append(self._gather_for_logging(loss).detach())
-
-        if self.sparsity is not None:
-            sparsity_loss = self.sparsity * torch.mean(torch.abs(self.V))
-            loss = loss + sparsity_loss
-            self.log_sparsity_loss.append(sparsity_loss.detach())
-
         self.log_total_loss.append(self._gather_for_logging(loss).detach())
         return loss
-
-    def _project_fsc_mask_2d(
-        self, idx: torch.Tensor, image_shape: torch.Size
-    ) -> torch.Tensor:
-        """
-        The batch's projected 2D masks, from the cached table when there is one.
-
-        With the poses fixed, a particle's projection never changes, and
-        rotating the whole 3D mask costs as much as another forward rotation
-        (13-17% of a rytov step at 256 and 512 boxes). So the first call
-        projects every particle once and later calls gather rows; see
-        `_build_mask_2d_cache` for why a row is bit-identical to projecting it
-        per step.
-        """
-        mask = self._checked_fsc_mask()
-        cache = self._mask_2d_cache
-        if cache is not None and cache.device != mask.device:
-            # The module moved, which `_apply` does not do for a plain
-            # attribute. Rebuilt rather than copied: the rows are what this
-            # device's rotation gives, as they would be uncached.
-            cache = self._mask_2d_cache = None
-        b = int(image_shape[0])
-        if cache is None and self._mask_2d_cacheable(image_shape):
-            cache = self._mask_2d_cache = self._build_mask_2d_cache(mask, image_shape)
-            self._mask_2d_cache_batch = b
-        if cache is None or b != self._mask_2d_cache_batch:
-            return self._project_fsc_mask_2d_uncached(idx, image_shape)
-        rows = cache[idx]
-        return rows.unsqueeze(0) if rows.ndim == 2 else rows
-
-    def _build_mask_2d_cache(
-        self, mask: torch.Tensor, image_shape: torch.Size
-    ) -> torch.Tensor:
-        """
-        Every particle's projection, each computed in a batch of ``image_shape[0]``.
-
-        On CUDA the rotation's batched matrix product picks its kernel by
-        batch size, so a projection is exact only against one made in a batch
-        of the same size (a batch of 1, or of 40, differs from one of 4 by
-        ~1e-6); within a size, which particles share the batch changes
-        nothing. So every chunk here is a full batch -- the last one overlaps
-        its predecessor instead of running short -- and the table is served
-        only to batches of that size. The epoch's short final batch is
-        projected directly, as it always was.
-        """
-        n = self.rotations.shape[0]
-        b = int(image_shape[0])
-        all_idx = torch.arange(n, device=mask.device)
-        table: torch.Tensor | None = None
-        for i in range(0, n, b):
-            start = min(i, n - b)
-            rows = self._project_fsc_mask_2d_uncached(
-                all_idx[start : start + b], image_shape
-            )
-            if table is None:
-                # The projection's own dtype, which autocast may choose.
-                table = rows.new_empty((n, *rows.shape[1:]))
-            table[start : start + b] = rows
-        assert table is not None
-        return table
-
-    def _checked_fsc_mask(self) -> torch.Tensor:
-        """``fsc_mask``, after checking it is a 3D tensor shaped like ``V``."""
-        if not isinstance(self.fsc_mask, torch.Tensor):
-            raise ValueError("use_2d_mask=True requires fsc_mask to be a 3D tensor.")
-        if self.fsc_mask.ndim != 3:
-            raise ValueError(
-                f"use_2d_mask=True requires a 3D fsc_mask, got shape {tuple(self.fsc_mask.shape)}."
-            )
-
-        mask = self.fsc_mask
-        if tuple(mask.shape) != tuple(self.V.shape[-3:]):
-            raise ValueError(
-                "use_2d_mask=True requires fsc_mask shape to match V shape; "
-                f"got {tuple(mask.shape)} and {tuple(self.V.shape[-3:])}."
-            )
-        return mask
-
-    def _mask_2d_cacheable(self, image_shape: torch.Size) -> bool:
-        """Whether the projected masks are fixed and small enough to keep."""
-        if isinstance(self.rotations, nn.Parameter) or isinstance(
-            self.translations, nn.Parameter
-        ):
-            return False
-        n = self.rotations.shape[0]
-        if not 1 <= image_shape[0] <= n:
-            return False
-        n_bytes = n * image_shape[-2] * image_shape[-1] * self.fsc_mask.element_size()
-        return n_bytes <= MASK_2D_CACHE_MAX_BYTES
-
-    def _project_fsc_mask_2d_uncached(
-        self, idx: torch.Tensor, image_shape: torch.Size | tuple[int, ...]
-    ) -> torch.Tensor:
-        """Rotate ``fsc_mask`` with the image generator geometry and max-project it."""
-        mask = self._checked_fsc_mask()
-        with torch.no_grad():
-            Q = self.rotations[idx]
-            T = self.translations[idx]
-            if len(Q.shape) < 2:
-                Q = Q.unsqueeze(0)
-            if len(T.shape) < 2:
-                T = T.unsqueeze(0)
-            R = roma.unitquat_to_rotmat(Q)
-            T = rotations.translations_angstrom_to_torch(
-                T, self.V.shape[-1], self.voxel_size
-            )
-            theta = rotations.build_affine_matrix(R, T)
-            nz, ny, nx = mask.shape
-            rotator = VolumeRotator(
-                nz,
-                ny,
-                nx,
-                origin="relion",
-                # A mask is projected only to weight the loss; the surface
-                # path has no rotated volume to share, so it takes "real".
-                mode=(
-                    "real"
-                    if self.propagation.rotate_mode == "surface"
-                    else self.propagation.rotate_mode
-                ),
-            ).to(mask.device)
-            projected = rotator(mask, theta).max(dim=1).values
-
-        if tuple(projected.shape) != tuple(image_shape):
-            raise ValueError(
-                "Projected 2D mask shape does not match image batch shape; "
-                f"got {tuple(projected.shape)} and {tuple(image_shape)}."
-            )
-        return projected
 
     def _common_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -806,7 +581,7 @@ class Reconstructor(_BaseReconstructor):
         assert self._run_dir is not None
 
         saved_arrays: list[str] = []
-        for name in ("nps_weight", "kmask"):
+        for name in ("kmask",):
             tensor = getattr(self, name, None)
             if isinstance(tensor, torch.Tensor):
                 torch.save(tensor.detach().cpu(), self._run_dir / f"{name}.pt")

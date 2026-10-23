@@ -33,6 +33,10 @@ halfset = "gold"           # "gold" reconstructs A and B and computes the halfma
 [optimisation]
 epochs = 5
 batchsize = 3
+solver = "converged"   # gold runs: after the Adam epochs, solve each half to the minimum
+                       # of the loss plus a Wiener prior from the Adam halves' FSC;
+                       # "adam" keeps the Adam maps
+solver_iterations = 4  # conjugate-gradient iterations per half, about an epoch each
 lr = 0.1               # volume learning rate; unset to freeze the volume
 scheduler = "LambdaLR"
 lr_decay = 0.1         # LambdaLR only: multiplier = 1 / (1 + lr_decay * sqrt(step))
@@ -78,7 +82,6 @@ num_workers = 0       # images are already resident; worker processes add IPC ov
 # fsc_ref = "path/to/reference.mrc"
 # fsc_mask = "path/to/mask.mrc"
 # cryosparc_ref = "path/to/cryosparc_volume.mrc"
-use_2d_mask = false
 
 # Rotation, translation and defocus refinement are wired in, but no test checks
 # the recovered values against ground truth. Treat a run with these set as an
@@ -95,9 +98,6 @@ scattering_model = "rytov"        # defaults to rytov rather than the simulator'
                                   # cheapest one that still carries Ewald-sphere curvature
 ews_curvature_sign = "negative"   # matches CryoSPARC
 rotate_mode = "real"
-learn_noise_model = false
-use_ncc = false
 # alpha = 0.1        # amplitude contrast; unset reads the .cs file's ctf/amp_contrast
 # bfactor = 100.0    # Angstrom^2 envelope damping high-resolution signal
 # klim = 0.2         # 1/Angstrom hard cutoff
-# sparsity = 1e-4    # L1 weight on the volume

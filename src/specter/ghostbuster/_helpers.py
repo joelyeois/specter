@@ -196,7 +196,6 @@ def _log_current_lr(trainer: L.Trainer, lr: float | None, log_lrs: list[float]) 
 def _build_epoch_metrics(
     total_loss: list[torch.Tensor],
     norm_loss: list[torch.Tensor],
-    sparsity_loss: list[torch.Tensor],
     lrs: list[float],
     current_epoch: int,
     include_loss_std: bool = False,
@@ -207,9 +206,8 @@ def _build_epoch_metrics(
 
     Parameters
     ----------
-    total_loss, norm_loss, sparsity_loss : list of torch.Tensor
-        Per-batch scalar losses logged during training. ``sparsity_loss`` may
-        be empty if sparsity regularisation was disabled.
+    total_loss, norm_loss : list of torch.Tensor
+        Per-batch scalar losses logged during training.
     lrs : list of float
         Per-batch learning rate of the volume optimiser.
     current_epoch : int
@@ -265,11 +263,6 @@ def _build_epoch_metrics(
             },
             "lr": lr_stats,
         }
-        if sparsity_loss:
-            ep_sparsity = [float(v) for v in sparsity_loss[start:end]]
-            epochs[key]["sparsity_loss"] = {
-                "mean": sum(ep_sparsity) / len(ep_sparsity) if ep_sparsity else None,
-            }
 
     return {
         "total_batches": len(total_loss),

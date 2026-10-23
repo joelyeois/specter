@@ -32,6 +32,8 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
         [
             "epochs",
             "batchsize",
+            "solver",
+            "solver_iterations",
             "lr",
             "scheduler",
             "lr_decay",
@@ -43,7 +45,7 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Sanity check", ["test_run", "bin_factor"]),
     ("Compute", ["device", "precision", "num_workers"]),
     ("Output & job tracking", ["output_dir", "project", "job_id"]),
-    ("Reference maps", ["fsc_ref", "fsc_mask", "cryosparc_ref", "use_2d_mask"]),
+    ("Reference maps", ["fsc_ref", "fsc_mask", "cryosparc_ref"]),
     (
         "Refinement",
         ["lr_R", "lr_T", "lr_D", "defocus_offset"],
@@ -56,10 +58,7 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
             "alpha",
             "bfactor",
             "klim",
-            "sparsity",
             "rotate_mode",
-            "learn_noise_model",
-            "use_ncc",
         ],
     ),
 ]

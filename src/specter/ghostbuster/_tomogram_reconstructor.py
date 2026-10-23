@@ -72,8 +72,6 @@ class TomogramReconstructor(_BaseReconstructor):
         to V before each forward pass. Default ``TiltGeometry()``.
     lr : float, optional
         Learning rate for volume V.  ``None`` freezes V.
-    sparsity : float, optional
-        L1 regularisation weight on V.
     use_fov_mask : bool
         If ``True``, the loss at each tilt is restricted to the pixels the
         forward model can predict: the central strip corresponding to real
@@ -123,7 +121,6 @@ class TomogramReconstructor(_BaseReconstructor):
         dose_per_angstrom: float | torch.Tensor,
         tilt: TiltGeometry = TiltGeometry(),
         lr: float | None = None,
-        sparsity: float | None = None,
         use_fov_mask: bool = True,
         propagation: Propagation = Propagation(),
         optics: Optics = Optics(),
@@ -160,7 +157,6 @@ class TomogramReconstructor(_BaseReconstructor):
         self.lr = lr
         self.lr_decay = lr_decay
         self.scheduler = scheduler
-        self.sparsity = sparsity
         self.taper_width = tilt.taper_width
         self.z_taper_width = tilt.z_taper_width
         self.use_fov_mask = use_fov_mask
@@ -495,9 +491,7 @@ class TomogramReconstructor(_BaseReconstructor):
         chi-squared under Poisson statistics. Shot noise then contributes
         about one per pixel at any dose, while a real misfit weighs in
         proportion to the dose, as the evidence for it does. Without the
-        division both would scale with the square of the dose, and the
-        ``sparsity`` term added in `training_step` would carry a different
-        weight on every dataset.
+        division both would scale with the square of the dose.
         """
         mse = F.mse_loss(sim, obs, reduction="none") / self.dose_per_pixel[tilt_idx]
         if self.use_fov_mask:
@@ -552,11 +546,6 @@ class TomogramReconstructor(_BaseReconstructor):
 
         norm_loss = total_norm_loss / max(len(tilt_indices), 1)
         loss = norm_loss
-
-        if self.sparsity is not None:
-            sparsity_loss = self.sparsity * torch.mean(torch.abs(self.V))
-            loss = loss + sparsity_loss
-            self.log_sparsity_loss.append(sparsity_loss.detach())
 
         # Gathered/averaged across ranks under multi-GPU (DDP) for logging
         # only -- `loss` itself (fed to manual_backward below) stays the

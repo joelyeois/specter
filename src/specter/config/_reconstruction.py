@@ -29,10 +29,9 @@ class ReconstructionConfig:
     run writes, and `test_run`/`bin_factor`, which pick `test_run()` over
     `run()`.
 
-    Two of `Ghostbuster`'s arguments have no field here. `nps_weight` is a
-    per-frequency tensor and `lpp_params` a nested table of laser-phase-plate
-    settings; neither has a spelling a config field or a CLI flag can carry,
-    so both remain Python-API-only.
+    One of `Ghostbuster`'s arguments has no field here: `lpp_params`, a nested
+    table of laser-phase-plate settings, has no spelling a config field or a
+    CLI flag can carry, so it remains Python-API-only.
     """
 
     # --- Data ---
@@ -119,6 +118,26 @@ class ReconstructionConfig:
     )
     batchsize: int = setting(
         3, help="Particles per optimisation step.", check="positive"
+    )
+    # What follows the Adam epochs in a gold run. "converged" minimises the
+    # same loss plus a Wiener prior built from the Adam halves' FSC, by
+    # preconditioned conjugate gradients over every particle, and writes the
+    # unfiltered (volume_<h>.mrc) and filtered (volume_<h>_filtered.mrc)
+    # minimiser; the Adam maps stay as volume_<h>_adam.mrc. Four iterations
+    # from five Adam epochs matched a sixteen-iteration solve to 1 - FSC
+    # <= 3e-6 (EMPIAR-13202, 100 kV).
+    solver: Literal["converged", "adam"] = setting(
+        "converged",
+        help=(
+            "converged (the default): after the Adam epochs, solve each half "
+            "to the minimum of the image loss plus a Wiener prior from the "
+            "Adam half-maps' FSC. adam: keep the Adam maps. Gold runs only."
+        ),
+    )
+    solver_iterations: int = setting(
+        4,
+        help="Conjugate-gradient iterations of the converged solve, per half.",
+        check="positive",
     )
     # Volume learning rate. None freezes the volume, which is what refining
     # poses alone means.
@@ -305,15 +324,6 @@ class ReconstructionConfig:
             "wants; a single path is used for whichever halfset runs."
         ),
     )
-    # Rotate fsc_mask per particle, project it to 2D, and weight the
-    # image-domain loss by it.
-    use_2d_mask: bool = setting(
-        False,
-        help=(
-            "Rotate --fsc_mask per particle, project it to 2D, and "
-            "weight the image-domain loss by it."
-        ),
-    )
 
     # --- Refinement ---
     # Pose and defocus refinement. Validated against ground truth with the map
@@ -402,9 +412,6 @@ class ReconstructionConfig:
         help="Hard frequency cutoff (1/Angstrom) applied to the simulated images.",
         check="non_negative",
     )
-    sparsity: float | None = setting(
-        None, help="L1 regularisation weight on the volume.", check="non_negative"
-    )
     rotate_mode: PoseMode = setting(
         "real",
         help=(
@@ -413,16 +420,6 @@ class ReconstructionConfig:
             "transform on the posed Ewald surface, with no interpolation "
             "(projection, firstborn, rytov and ctf only; no lr_R)."
         ),
-    )
-    learn_noise_model: bool = setting(
-        False,
-        help=(
-            "Estimate sigma^2(k) from the residuals during "
-            "training (RELION-style) instead of assuming it."
-        ),
-    )
-    use_ncc: bool = setting(
-        False, help="Use a normalised cross-correlation loss instead of MSE."
     )
 
 

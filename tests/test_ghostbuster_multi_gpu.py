@@ -74,7 +74,6 @@ def _build_model(problem, lr_R):
         lr=0.1,
         lr_R=lr_R,
         symmetry=None,
-        sparsity=0,
         propagation=Propagation(
             alpha=0.0,
             scattering_model="rytov",

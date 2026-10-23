@@ -9,6 +9,7 @@ on disk.
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import json
 import subprocess as proc
@@ -479,6 +480,53 @@ def test_run_reconstruction_gold_standard_default(
     assert not [e for e in epochs if "resolution_map_to_model" in e], (
         "no reference => no map-to-model"
     )
+
+    # The default solver follows the Adam epochs with the converged solve:
+    # the Adam maps are kept beside the filtered and unfiltered minimisers,
+    # and its record joins job.json rather than a file of its own.
+    for h in "AB":
+        for name in (f"volume_{h}_adam.mrc", f"volume_{h}_filtered.mrc"):
+            assert (job_dir / name).exists()
+        assert len(results["converged"][h]["iterations"]) >= 1
+    assert (job_dir / "fsc_gold_standard_adam.png").exists()
+    assert (job_dir / "mask_auto.mrc").exists()
+    prior = results["converged"]["prior"]
+    assert prior["mask"] == "auto"
+    # The final half-map FSC is also reported inside the mask the prior used.
+    assert job["params"]["resolution_gold_standard_mask"] == "auto"
+    assert job["params"]["resolution_gold_standard_masked"]
+    # ... and its noise-substituted ("corrected") counterpart, the check
+    # that the mask does not correlate the halves by itself.
+    assert job["params"]["resolution_gold_standard_corrected"]
+    assert "too_tight" in job["params"]["mask_check"]
+    # One SSNR per Fourier shell of the binned (bin_factor=4) test-run box.
+    assert len(prior["ssnr"]) == _BOX // 4 // 2 + 1
+
+
+@pytest.mark.parametrize("test_run", [False, True])
+def test_a_mask_off_the_grid_warns_unless_binning_explains_it(
+    tmp_path: Path, test_run: bool
+) -> None:
+    """A mask on another grid is replaced, which changes the prior and the
+    masked resolution, so it warns -- except in a test run, whose binning
+    leaves a full-size mask mismatched by design."""
+    import warnings
+
+    from specter.pipelines._reconstruct import _user_mask
+
+    path = tmp_path / "mask.mrc"
+    with mrcfile.new(str(path)) as m:
+        m.set_data(np.ones((_BOX, _BOX, _BOX), dtype=np.float32))
+    config = dataclasses.replace(
+        ReconstructionConfig(cs_file="x.cs", mrc_file="x.mrcs", dose_per_angstrom=40.0),
+        fsc_mask=str(path),
+        test_run=test_run,
+    )
+    assert _user_mask(config, (_BOX,) * 3) is not None
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert _user_mask(config, (_BOX // 4,) * 3) is None
+    assert len(caught) == (0 if test_run else 1)
 
 
 def _job_params(job_dir: Path) -> dict[str, Any]:

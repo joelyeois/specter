@@ -77,8 +77,6 @@ class TomogramGhostbuster(_GhostbusterBase):
         is an error, since counts have a physical sign.
     lr : float, optional
         Learning rate for V.  ``None`` disables optimisation.
-    sparsity : float, optional
-        L1 regularisation weight on V.
     epochs : int
         Training epochs.  Default 5.
     batchsize : int
@@ -136,7 +134,6 @@ class TomogramGhostbuster(_GhostbusterBase):
         V_init: torch.Tensor | None = None,
         flip_contrast: bool | None = None,
         lr: float | None = None,
-        sparsity: float | None = None,
         epochs: int = 5,
         batchsize: int = 1,
         propagation: Propagation = Propagation(),
@@ -199,7 +196,6 @@ class TomogramGhostbuster(_GhostbusterBase):
         self._dose_per_angstrom = dose
 
         self.lr = lr
-        self.sparsity = sparsity
         self.epochs = epochs
         self.batchsize = batchsize
         self.propagation = propagation
@@ -301,7 +297,6 @@ class TomogramGhostbuster(_GhostbusterBase):
             self._dose_per_angstrom,
             tilt=self.tilt,
             lr=self.lr,
-            sparsity=self.sparsity,
             use_fov_mask=self.use_fov_mask,
             propagation=self.propagation,
             optics=self.optics,

@@ -23,14 +23,16 @@ References
 
 from __future__ import annotations
 
+import contextlib
 import math
 import warnings
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
 import torch
 
-__all__ = ["GridTransform", "clear_plan_cache", "sample_transform"]
+__all__ = ["GridTransform", "adjoint_tolerance", "clear_plan_cache", "sample_transform"]
 
 #: Oversampling of FINUFFT's internal grid. 1.25 holds a 560^3 single-precision
 #: plan in 2.7 GB where the library default, 2.0, needs 11 GB, at a cost in
@@ -42,6 +44,10 @@ _UPSAMPFAC = 1.25
 # precision, device), shared by `GridTransform` and `sample_transform`, with
 # only the points changing between calls.
 _PLANS: dict[tuple[Any, ...], Any] = {}
+
+#: Accuracy `sample_transform`'s backward requests instead of its forward's,
+#: while `adjoint_tolerance` is active; None otherwise.
+_ADJOINT_EPS: float | None = None
 
 
 class GridTransform:
@@ -294,8 +300,42 @@ class _SampleTransform(torch.autograd.Function):
     def backward(ctx: Any, grad: torch.Tensor) -> tuple[Any, ...]:  # type: ignore[override]
         (pts,) = ctx.saved_tensors
         cdtype = torch.complex128 if pts.dtype == torch.float64 else torch.complex64
-        g = _execute(1, grad.to(cdtype), pts, ctx.shape, ctx.eps)
+        eps = ctx.eps if _ADJOINT_EPS is None else max(ctx.eps, _ADJOINT_EPS)
+        g = _execute(1, grad.to(cdtype), pts, ctx.shape, eps)
         return (g.real if ctx.real else g), None, None
+
+
+@contextlib.contextmanager
+def adjoint_tolerance(eps: float) -> Iterator[None]:
+    """
+    Loosen the accuracy of `sample_transform`'s backward within a block.
+
+    The backward is a type-1 transform, which spreads every sample onto the
+    grid, and its cost grows with the spreading kernel's width, which the
+    requested accuracy sets. A gradient that is summed over many images
+    tolerates a looser adjoint than a single forward needs: on a 300^3
+    Rytov reconstruction, 1e-4 made the forward-plus-backward 24% faster
+    and moved the gradient by less than its own float32 rounding between
+    two exact methods (3e-4). The forward keeps its own accuracy. Applies
+    to backwards run inside the block, whichever forward produced them.
+
+    Parameters
+    ----------
+    eps : float
+        Relative accuracy for the backward. A tighter value than the
+        forward's is ignored.
+
+    Yields
+    ------
+    None
+    """
+    global _ADJOINT_EPS
+    previous = _ADJOINT_EPS
+    _ADJOINT_EPS = eps
+    try:
+        yield
+    finally:
+        _ADJOINT_EPS = previous
 
 
 def sample_transform(

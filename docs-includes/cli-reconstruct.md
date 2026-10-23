@@ -44,6 +44,8 @@ specter reconstruct particle [OPTIONS]
 | --- | --- | --- | --- |
 | `--epochs` | `INTEGER` | `5` | Number of passes over the particle stack. |
 | `--batchsize` | `INTEGER` | `3` | Particles per optimisation step. |
+| `--solver` | `converged` \| `adam` | `converged` | converged (the default): after the Adam epochs, solve each half to the minimum of the image loss plus a Wiener prior from the Adam half-maps' FSC. adam: keep the Adam maps. Gold runs only. |
+| `--solver_iterations` | `INTEGER` | `4` | Conjugate-gradient iterations of the converged solve, per half. |
 | `--lr` | `FLOAT` | `0.1` | Learning rate for the volume. Unset (None) freezes the volume, which is what refining poses alone means. |
 | `--scheduler` | `LambdaLR` \| `OneCycleLR` \| `CosineAnnealingWarmRestarts` \| `MultiplicativeLR` | `LambdaLR` | Learning-rate schedule for the volume optimiser. |
 | `--lr_decay` | `FLOAT` | `0.1` | Decay rate for the LambdaLR schedule: multiplier = 1 / (1 + lr_decay * sqrt(global_step)). Unused by other schedulers. |
@@ -88,7 +90,6 @@ specter reconstruct particle [OPTIONS]
 | `--fsc_ref` | `TEXT` | _none_ | Reference volume (.mrc) for map-to-model FSC logging. Never optimised against -- reporting only. |
 | `--fsc_mask` | `TEXT` | _none_ | Mask volume (.mrc) applied before the FSC is computed. |
 | `--cryosparc_ref` | `TEXT` | _none_ | CryoSPARC's own reconstruction (.mrc), plotted alongside --fsc_ref for comparison. Only used when --fsc_ref is given too. Accepts a comma-separated '&lt;A&gt;,&lt;B&gt;' pair to compare each halfset against CryoSPARC's matching half-map, which is what --halfset gold wants; a single path is used for whichever halfset runs. |
-| `--use_2d_mask` | `True` \| `False` | `False` | Rotate --fsc_mask per particle, project it to 2D, and weight the image-domain loss by it. |
 
 **Refinement**{ #specter-reconstruct-particle-refinement }
 
@@ -108,10 +109,7 @@ specter reconstruct particle [OPTIONS]
 | `--alpha` | `FLOAT` | _none_ | Amplitude contrast ratio for the forward model, overriding the .cs file's ctf/amp_contrast. Unset uses the .cs file's value. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2 damping high-resolution signal in the forward model. |
 | `--klim` | `FLOAT` | _none_ | Hard frequency cutoff (1/Angstrom) applied to the simulated images. |
-| `--sparsity` | `FLOAT` | _none_ | L1 regularisation weight on the volume. |
 | `--rotate_mode` | `real` \| `fourier` \| `surface` | `real` | How each particle's pose is applied. real/fourier: rotate the volume with trilinear interpolation. surface: sample the unrotated volume's transform on the posed Ewald surface, with no interpolation (projection, firstborn, rytov and ctf only; no lr_R). |
-| `--learn_noise_model` | `True` \| `False` | `False` | Estimate sigma^2(k) from the residuals during training (RELION-style) instead of assuming it. |
-| `--use_ncc` | `True` \| `False` | `False` | Use a normalised cross-correlation loss instead of MSE. |
 
 ## `specter ghostbuster` { #specter-ghostbuster }
 

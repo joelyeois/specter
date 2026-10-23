@@ -116,14 +116,6 @@ class Ghostbuster(_GhostbusterBase):
     symmetry_mode : {"exact", "real", "fourier"}
         How the point group is averaged; see `specter.symmetries.apply_symmetry`.
         Default ``"exact"``.
-    sparsity : float, optional
-        L1 regularisation weight on V.
-    nps_weight : torch.Tensor, optional
-        Per-frequency noise power spectrum weight for the loss.
-    learn_noise_model : bool
-        Whether to estimate sigma²(k) from residuals (RELION-style [3]_).
-    use_ncc : bool
-        Whether to use normalised cross-correlation loss instead of MSE.
     fsc_ref : torch.Tensor, str, Path, or None
         Reference volume for map-to-model FSC logging. Can be a tensor or a
         path to a .mrc file to load.
@@ -134,9 +126,6 @@ class Ghostbuster(_GhostbusterBase):
         CryoSPARC reference volume for FSC comparison. Can be a tensor or a
         path to a .mrc file to load. Only plotted alongside fsc_ref when
         both are provided. Default is None.
-    use_2d_mask : bool
-        If True, rotate ``fsc_mask`` for each particle, max-project it to 2D,
-        and use that projected mask to weight the image-domain MSE loss.
     precision : str
         Lightning ``Trainer`` precision (e.g. ``"16-mixed"``, ``"32"``).
         Falls back to ``"32"`` automatically on CPU.
@@ -199,14 +188,9 @@ class Ghostbuster(_GhostbusterBase):
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
         symmetry_mode: SymmetryMode = "exact",
-        sparsity: float | None = None,
-        nps_weight: torch.Tensor | None = None,
-        learn_noise_model: bool = False,
-        use_ncc: bool = False,
         fsc_ref: torch.Tensor | str | Path | None = None,
         fsc_mask: torch.Tensor | float | str | Path | None = None,
         cryosparc_ref: torch.Tensor | str | Path | None = None,
-        use_2d_mask: bool = False,
         precision: str = "16-mixed",
         num_workers: int = 0,
         n_particles: int | None = None,
@@ -299,14 +283,9 @@ class Ghostbuster(_GhostbusterBase):
         self.symmetry = symmetry
         self.symmetry_batchsize = symmetry_batchsize
         self.symmetry_mode = symmetry_mode
-        self.sparsity = sparsity
-        self.nps_weight = nps_weight
-        self.learn_noise_model = learn_noise_model
-        self.use_ncc = use_ncc
         self.fsc_ref = fsc_ref
         self.fsc_mask = fsc_mask
         self.cryosparc_ref = cryosparc_ref
-        self.use_2d_mask = use_2d_mask
         self.precision = precision
         self.num_workers = num_workers
         self.n_particles = n_particles
@@ -546,17 +525,12 @@ class Ghostbuster(_GhostbusterBase):
             scheduler=self.scheduler,
             lr_decay=self.lr_decay,
             kmask=kmask,
-            nps_weight=self.nps_weight,
-            learn_noise_model=self.learn_noise_model,
-            use_ncc=self.use_ncc,
-            sparsity=self.sparsity,
             symmetry=self.symmetry,
             symmetry_batchsize=self.symmetry_batchsize,
             symmetry_mode=self.symmetry_mode,
             fsc_ref=self.fsc_ref,
             fsc_mask=self.fsc_mask,
             cryosparc_ref=self.cryosparc_ref,
-            use_2d_mask=self.use_2d_mask,
             run_dir=self.run_dir,
             halfset_label=self.halfset_label,
         )

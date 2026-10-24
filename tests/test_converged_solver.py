@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 
 import numpy as np
 import pytest
@@ -41,7 +40,6 @@ def _problem(
     n_particles: int = 24,
     noise: float = 1.0,
     symmetry: str | None = None,
-    absorption: torch.Tensor | None = None,
 ) -> tuple[Reconstructor, torch.Tensor, torch.Tensor]:
     """A Reconstructor, its noisy images of a known map, and that map."""
     torch.manual_seed(0)
@@ -62,21 +60,14 @@ def _problem(
         voltage=300.0,
         dose_per_angstrom=50.0,
         scale=0.8 + 0.4 * torch.rand(n_particles),
-        propagation=(
-            Propagation(scattering_model=scattering_model)
-            if absorption is None
-            else Propagation(
-                scattering_model=scattering_model, rotate_mode="surface", alpha=0.0
-            )
-        ),
+        propagation=Propagation(scattering_model=scattering_model),
         kmask=ball3d(N, N),
         lr=0.1,
         symmetry=symmetry,
     )
     solver = ConvergedSolver(model, torch.zeros(n_particles, N, N), np.ones(N // 2 + 1))
     with torch.no_grad():
-        potential = truth if absorption is None else torch.complex(truth, absorption)
-        clean = solver._predict(torch.arange(n_particles), potential)
+        clean = solver._predict(torch.arange(n_particles), truth)
     images = clean + noise * clean.std() * torch.randn_like(clean)
     return model, images, truth
 
@@ -262,79 +253,12 @@ def test_rytov_solve_lowers_the_objective(symmetry: str | None) -> None:
     assert result.unfiltered.shape == (N, N, N)
 
 
-def test_absorption_map_is_recovered() -> None:
-    """Images of a complex potential V + iW: the joint solve lowers the
-    objective every iteration and finds a W that correlates with the
-    absorption the images were made with."""
-    absorption = 0.8 * _blob(N, 1.5)
-    model, images, truth = _problem("rytov", absorption=absorption, noise=0.05)
-    solver = ConvergedSolver(
-        model,
-        images,
-        np.linspace(4.0, 0.05, N // 2 + 1),
-        line_search_fraction=1.0,
-        absorption_resolution=2 * VOXEL,
-    )
-    result = solver.solve(_start(truth), n_iter=12)
-    objectives = [e["objective"] for e in result.log]
-    assert all(b <= a * (1 + 1e-6) for a, b in zip(objectives, objectives[1:]))
-    assert result.absorption is not None
-    w = result.absorption.flatten()
-    corr = float(torch.corrcoef(torch.stack([w, absorption.flatten()]))[0, 1])
-    assert corr > 0.8, corr
-
-
-def test_absorption_needs_zero_amplitude_contrast_and_the_surface_path() -> None:
-    """W replaces alpha * V, and only the surface path samples a complex grid."""
-    model, images, _ = _problem("rytov", absorption=0.1 * _blob(N, 1.5))
-    model.propagation = dataclasses.replace(model.propagation, alpha=0.1)
-    with pytest.raises(ValueError, match="alpha"):
-        ConvergedSolver(model, images, np.ones(N // 2 + 1), absorption_resolution=8.0)
-    model, images, _ = _problem("rytov")
-    with pytest.raises(ValueError, match="surface"):
-        ConvergedSolver(model, images, np.ones(N // 2 + 1), absorption_resolution=8.0)
-
-
-def test_support_confines_the_map_and_still_lowers_the_objective() -> None:
-    """With a support, the model sees support * S(U): nothing grows outside
-    it, and the objective still falls every iteration."""
-    model, images, truth = _problem("rytov")
-    support = (_blob(N, 2.5) > 0.05).float()
-    solver = ConvergedSolver(
-        model, images, np.linspace(4.0, 0.05, N // 2 + 1), support=support
-    )
-    result = solver.solve(_start(truth), n_iter=4)
-    assert float(result.volume[support == 0].abs().max()) == 0.0
-    objectives = [e["objective"] for e in result.log]
-    assert all(b <= a * (1 + 1e-6) for a, b in zip(objectives, objectives[1:]))
-
-
-def test_noise_weighting_measures_coloured_noise() -> None:
-    """Images with low-pass (coloured) noise: the measured weighting rises
-    with frequency, as 1 / sigma(k) should, and the weighted solve still
-    lowers its objective every iteration."""
-    model, images, truth = _problem("ctf", noise=0.0)
-    torch.manual_seed(1)
-    white = torch.randn_like(images)
-    k = torch.fft.rfftfreq(N)[None, :] ** 2 + torch.fft.fftfreq(N)[:, None] ** 2
-    coloured = torch.fft.irfft2(torch.fft.rfft2(white) / (1 + 40 * k), s=(N, N))
-    images = images + images.std() * coloured
-    solver = ConvergedSolver(
-        model, images, np.linspace(4.0, 0.05, N // 2 + 1), noise_weighting=True
-    )
-    result = solver.solve(_start(truth), n_iter=4)
-    sigma2 = np.array(result.info["noise_power"])
-    assert sigma2[1] > 3 * sigma2[-1]
-    objectives = [e["objective"] for e in result.log]
-    assert all(b <= a * (1 + 1e-6) for a, b in zip(objectives, objectives[1:]))
-
-
 def test_a_pass_that_runs_out_of_memory_is_redone_with_smaller_batches() -> None:
     """Another process can take GPU memory mid-solve: the pass is redone with
     half the batch, and its result does not depend on the batch size."""
     model, images, truth = _problem("ctf")
     solver = ConvergedSolver(model, images, np.ones(N // 2 + 1), batchsize=8)
-    V = solver._project(_start(truth))[None]
+    V = solver._project(_start(truth))
     expected, _ = solver._gradient(V)
     real_pass = solver._gradient_pass
     calls = {"n": 0}

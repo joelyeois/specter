@@ -45,7 +45,6 @@ turn that class into a command:
 from __future__ import annotations
 
 import dataclasses
-import math
 import itertools
 import multiprocessing
 import queue
@@ -605,32 +604,11 @@ def _wiener_prior(config: ReconstructionConfig, run_dir: Path) -> dict[str, Any]
     return record
 
 
-def _write_support_mask(run_dir: Path) -> Path:
-    """
-    The soft mask the converged solve confines the map to, from the Adam halves.
-
-    `ghostbuster._converge.support_mask`: CryoSPARC's refinement-mask
-    defaults. Written to ``mask_support.mrc``.
-    """
-    from ..ghostbuster._converge import support_mask
-
-    vol_a, voxel_size = _load_volume(run_dir / "volume_A_adam.mrc")
-    vol_b, _ = _load_volume(run_dir / "volume_B_adam.mrc")
-    mask, _ = support_mask(vol_a, vol_b, voxel_size)
-    path = run_dir / "mask_support.mrc"
-    _write_volume(path, mask, voxel_size)
-    return path
-
-
 def _run_converged_halfset(
     config: ReconstructionConfig,
     run_dir: Path,
     result_queue: multiprocessing.Queue[tuple[str, dict[str, Any]]],
     ssnr: list[float],
-    absorption_resolution: float | None = None,
-    support_path: str | None = None,
-    noise_weighting: bool = False,
-    amplitude_contrast_in_ctf: bool = False,
 ) -> None:
     """
     Solve one halfset to convergence from its Adam map; a spawn worker.
@@ -669,47 +647,17 @@ def _run_converged_halfset(
         images, voxel_size = gb._images, gb._voxel_size
     model, _ = gb._build_reconstructor_and_loader(images, voxel_size, 1)
     model = model.to(device)
-    amplitude_contrast = float(model.propagation.alpha)
-    if amplitude_contrast_in_ctf:
-        # Amplitude contrast as the transfer function's phase offset on the
-        # scattered wave, arcsin(a), as a linear CTF applies it, rather than
-        # as absorption in the specimen: the same image for a weak object
-        # except at zero frequency, where absorption would darken an image
-        # whose mean the stack's normalisation has already removed.
-        model.propagation = dataclasses.replace(model.propagation, alpha=0.0)
-        model.phaseshift.data += math.asin(amplitude_contrast)
-        amplitude_contrast = 0.0
-    if absorption_resolution is not None:
-        # The absorption map takes the amplitude contrast's place; the start
-        # carries the Adam fit's absorption over into it.
-        model.propagation = dataclasses.replace(model.propagation, alpha=0.0)
-    support = None
-    if support_path is not None:
-        support, _ = _load_volume(Path(support_path))
-        if tuple(support.shape) != tuple(model.V.shape[-3:]):
-            # test_run bins the images, and the mask was made at full size.
-            support = torch.nn.functional.interpolate(
-                support[None, None], size=tuple(model.V.shape[-3:]), mode="trilinear"
-            )[0, 0]
     solver = ConvergedSolver(
         model,
         images,
         np.asarray(ssnr),
-        support=support,
-        noise_weighting=noise_weighting,
         seed=0 if h == "A" else 1,
         label=h,
-        absorption_resolution=absorption_resolution,
-        amplitude_contrast=amplitude_contrast,
     )
     n_iter = 1 if config.test_run else config.solver_iterations
     result = solver.solve(model.V.detach(), n_iter)
     _write_volume(run_dir / f"volume_{h}_filtered.mrc", result.volume, voxel_size)
     _write_volume(run_dir / f"volume_{h}.mrc", result.unfiltered, voxel_size)
-    if result.absorption is not None:
-        _write_volume(
-            run_dir / f"volume_{h}_absorption.mrc", result.absorption, voxel_size
-        )
     summary = {
         "iterations": result.log,
         **{k: v for k, v in result.info.items() if k != "ssnr"},
@@ -742,8 +690,6 @@ def _converge_halfsets(config: ReconstructionConfig, run_dir: Path) -> dict[str,
         f"(Adam half-map FSC {resolution_adam_masked} masked, {resolution_adam} "
         f"unmasked; mask: {prior['mask']})"
     )
-    # A support mask (`_write_support_mask`) is not applied: on EMPIAR-10083
-    # it improved the bands below 3.6 Å and lowered the top band.
     logs = _run_both_halfsets(
         config,
         run_dir,

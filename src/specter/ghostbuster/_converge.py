@@ -375,30 +375,6 @@ def resolution_mask(
     )
 
 
-def _distance_from_density(
-    a: torch.Tensor, b: torch.Tensor, voxel_size: float, threshold: float
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Distance in Å from the region where two half-maps' density is high.
-
-    The half-map mean is weighted by the halves' FSC inside a soft sphere (a
-    Wiener-like low-pass that keeps what the halves agree on), and
-    thresholded at `threshold` times its maximum. Returns the distance map
-    and that spherical-mask FSC.
-    """
-    from scipy.ndimage import distance_transform_edt
-
-    n = a.shape[-1]
-    fsc_sphere = masked_fsc(a, b, spherical_mask(n).to(a.device))
-    _, shell, _ = frequency_shells(n, a.device)
-    weight = torch.as_tensor(
-        np.clip(fsc_sphere, 0.0, 1.0), dtype=torch.float32, device=a.device
-    )[shell]
-    average = torch.fft.irfftn(torch.fft.rfftn(0.5 * (a + b)) * weight, s=a.shape)
-    inside = (average > threshold * average.max()).cpu().numpy()
-    return distance_transform_edt(~inside) * voxel_size, fsc_sphere
-
-
 def _distance_from_shared_signal(
     a: torch.Tensor, b: torch.Tensor, voxel_size: float, threshold: float
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -429,48 +405,6 @@ def _distance_from_shared_signal(
     shared = torch.fft.irfftn(torch.fft.rfftn(fa * fb) * smooth, s=a.shape)
     inside = (shared > threshold * shared.max()).cpu().numpy()
     return distance_transform_edt(~inside) * voxel_size, fsc_sphere
-
-
-def support_mask(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    voxel_size: float,
-    threshold: float = 0.2,
-    near_multiplier: float = 2.0,
-    far_multiplier: float = 5.0,
-) -> tuple[torch.Tensor, dict[str, float]]:
-    """
-    The soft mask the solved map is confined to, from two half-maps.
-
-    CryoSPARC's refinement ("dynamic") mask with its defaults: the
-    FSC-weighted half-map mean thresholded at 0.2 of its maximum, 1 within
-    ``2 r`` of that region and a cosine to 0 at ``5 r``, ``r`` the halves'
-    FSC = 0.143 resolution inside a soft sphere. Looser than the resolution
-    mask by design: it only has to keep noise from growing in the solvent.
-
-    Parameters
-    ----------
-    a, b : torch.Tensor
-        Half-maps, ``(n, n, n)``.
-    voxel_size : float
-        Voxel size in Å.
-    threshold, near_multiplier, far_multiplier : float
-        As in CryoSPARC's dynamic refinement mask.
-
-    Returns
-    -------
-    mask : torch.Tensor
-        Mask in [0, 1].
-    info : dict
-        ``near`` and ``far`` in Å.
-    """
-    n = a.shape[-1]
-    distance, fsc_sphere = _distance_from_density(a, b, voxel_size, threshold)
-    r = n * voxel_size / max(fsc_crossing(fsc_sphere), 1.0)
-    near, far = near_multiplier * r, far_multiplier * r
-    return resolution_mask(distance, near, far, a.device), dict(
-        near=float(near), far=float(far)
-    )
 
 
 def auto_mask(
@@ -590,14 +524,11 @@ class SolveResult:
         One entry per iteration: objective, step length, seconds.
     info : dict
         Batch size, particle counts and setup timings.
-    absorption : torch.Tensor or None
-        The absorption map W, when the solver was asked for one.
     """
 
     volume: torch.Tensor
     unfiltered: torch.Tensor
     log: list[dict[str, Any]] = field(default_factory=list)
-    absorption: torch.Tensor | None = None
     info: dict[str, Any] = field(default_factory=dict)
 
 
@@ -626,33 +557,6 @@ class ConvergedSolver:
         Seeds the probes and line-search subsets.
     label : str
         Prefixed to progress messages, e.g. the half-set's name.
-    absorption_resolution : float, optional
-        Also solve for an absorption map W, band-limited to this resolution
-        in Å, added to the amplitude contrast's absorption: the model sees
-        ``V (sqrt(1 - a^2) + i a) + i W``. W carries a weak ridge prior, a
-        thousandth of its typical data curvature, and the point-group
-        symmetry, and starts at zero, so the solve starts at the starting
-        map's own model. The solver applies the amplitude contrast itself,
-        so `model`'s must be 0.
-    noise_weighting : bool
-        Weight the data term by the inverse noise power per image frequency
-        shell, ``1 / sigma^2(k)``, measured once from the residuals of the
-        starting map on 2% of the particles: the likelihood of noise that is
-        Gaussian but not white, as CryoSPARC and RELION fit it. Plain squared
-        error assumes white noise; on EMPIAR-10083 the residual power falls
-        40-fold from 20 to 3.1 Å.
-    support : torch.Tensor, optional
-        A soft mask, ``(n, n, n)``, the map is confined to: the model sees
-        ``support * S(U)``. Without it the solvent, which no prior that
-        depends on resolution alone can tell from the particle, collects
-        noise as the solve converges (on EMPIAR-10083 the 3.6-2.9 Å solvent
-        noise grew to 1.8 times an Adam map's, and kept growing). See
-        `support_mask`.
-    amplitude_contrast : float
-        ``a`` above: the amplitude contrast the data were fitted with, when
-        an absorption map is solved for. Kept rather than replaced by W:
-        W is band-limited, and dropping ``a`` changes the transfer at every
-        resolution above W's band, which cost EMPIAR-10083 its top band.
 
     Notes
     -----
@@ -673,10 +577,6 @@ class ConvergedSolver:
         line_search_fraction: float = 0.05,
         seed: int = 0,
         label: str = "",
-        absorption_resolution: float | None = None,
-        amplitude_contrast: float = 0.0,
-        support: torch.Tensor | None = None,
-        noise_weighting: bool = False,
     ) -> None:
         self.model = model.eval()
         self.images = images
@@ -695,99 +595,15 @@ class ConvergedSolver:
                 f"ssnr has {len(self.ssnr)} shells; a {self.n}^3 volume has {self.n // 2 + 1}"
             )
         self._kmask_half = model._kmask_half()
-        self.absorption_resolution = absorption_resolution
-        self.amplitude_contrast = amplitude_contrast
-        self.support = (
-            None if support is None else support.to(self.device, torch.float32)
-        )
-        self.noise_weighting = noise_weighting
-        #: ``1 / sigma(k)`` on the images' half spectrum, normalised to a
-        #: mean square of 1; None for white noise.
-        self._whitening: torch.Tensor | None = None
-        self._wband: torch.Tensor | None = None
-        if absorption_resolution is not None:
-            if model.propagation.alpha != 0:
-                raise ValueError(
-                    "an absorption map replaces the amplitude contrast: build the "
-                    f"model with alpha = 0, not {model.propagation.alpha}"
-                )
-            if model.propagation.rotate_mode != "surface":
-                raise ValueError(
-                    "an absorption map needs rotate_mode='surface', which samples a "
-                    "complex potential's transform"
-                )
-            #: W's band limit on the half spectrum, in Fourier voxels.
-            cutoff = self.n * float(model.voxel_size) / absorption_resolution
-            self._wband = (self.radius <= cutoff).float()
-        self.channels = 1 if absorption_resolution is None else 2
 
     # ------------------------------------------------------------------
     # The forward model and the passes over particles
 
-    def _predict(self, idx: torch.Tensor, X: torch.Tensor) -> torch.Tensor:
-        """The predicted images of state `X`: channel 0 the map V, and channel
-        1, when present, the absorption map W, added to the amplitude
-        contrast's own: ``V (sqrt(1 - a^2) + i a) + i W``."""
-        if X.ndim == 3:
-            V = X
-        elif self.channels == 1:
-            V = X[0]
-        else:
-            a = self.amplitude_contrast
-            V = torch.complex(math.sqrt(1 - a**2) * X[0], a * X[0] + X[1])
+    def _predict(self, idx: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
+        """The predicted images of map `V`, with the per-particle scale."""
         f = functional_call(self.model, {"V": V}, (idx,))
         scale = self.model.scale[idx][:, None, None]
         return self.level + scale * (f - self.level)
-
-    def _whiten(self, x: torch.Tensor) -> torch.Tensor:
-        """Images (or residuals) times ``1 / sigma(k)``; unchanged for white noise."""
-        if self._whitening is None:
-            return x
-        return torch.fft.irfft2(torch.fft.rfft2(x) * self._whitening, s=x.shape[-2:])
-
-    def _image_rings(self) -> torch.Tensor:
-        n = self.images.shape[-1]
-        f = torch.fft.fftfreq(n, device=self.device)
-        fr = torch.fft.rfftfreq(n, device=self.device)
-        radius = torch.sqrt(f[:, None] ** 2 + fr[None] ** 2) * n
-        return torch.round(radius).long().clamp(max=n // 2)
-
-    def estimate_noise(self, V: torch.Tensor) -> np.ndarray:
-        """The residual power per image ring at `V` (see `_estimate_noise_pass`)."""
-        result: np.ndarray = self._retrying(lambda: self._estimate_noise_pass(V))
-        return result
-
-    @torch.no_grad()
-    def _estimate_noise_pass(self, V: torch.Tensor) -> np.ndarray:
-        """
-        The residual power per image frequency ring at `V`, and the whitening it implies.
-
-        Measured on 2% of the particles (256 to 4096); sets the weighting the
-        data term uses from then on. Returns sigma^2 per ring.
-        """
-        cpu_gen = torch.Generator().manual_seed(self.seed + 4)
-        idx = self._subset(0.02, 256, 4096, cpu_gen)
-        ring = self._image_rings()
-        n_rings = int(ring.max()) + 1
-        power = torch.zeros(n_rings, device=self.device, dtype=torch.float64)
-        count = torch.zeros(n_rings, device=self.device, dtype=torch.float64)
-        count.index_add_(
-            0, ring.flatten(), torch.ones_like(ring, dtype=torch.float64).flatten()
-        )
-        for b in self._batches(idx):
-            r = self._predict(b, V) - self._batch_images(b)
-            p = torch.fft.rfft2(r).abs().pow(2).double().sum(0)
-            power.index_add_(0, ring.flatten(), p.flatten())
-        sigma2 = (power / (count * len(idx))).clamp(min=1e-30)
-        weight = sigma2.rsqrt()[ring].float()
-        # Mean square 1 over the full spectrum, so the loss keeps its scale.
-        full = torch.full_like(weight, 2.0)
-        full[..., 0] = 1.0
-        if self.images.shape[-1] % 2 == 0:
-            full[..., -1] = 1.0
-        weight = weight / torch.sqrt((weight**2 * full).sum() / full.sum())
-        self._whitening = weight
-        return sigma2.cpu().numpy()
 
     def _batch_images(self, idx: torch.Tensor) -> torch.Tensor:
         return self.images[idx.to(self.images.device)].to(
@@ -806,7 +622,7 @@ class ConvergedSolver:
             X = V.detach().clone().requires_grad_(True)
             try:
                 with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
-                    r = self._whiten(self._predict(idx, X) - self._batch_images(idx))
+                    r = self._predict(idx, X) - self._batch_images(idx)
                     (0.5 * (r**2).sum()).backward()
                 return
             except torch.cuda.OutOfMemoryError:
@@ -868,7 +684,7 @@ class ConvergedSolver:
             for idx in self._batches(
                 torch.arange(self.n_particles, device=self.device)
             ):
-                r = self._whiten(self._predict(idx, X) - self._batch_images(idx))
+                r = self._predict(idx, X) - self._batch_images(idx)
                 loss = 0.5 * (r**2).sum()
                 loss.backward()
                 total += loss.detach().double()
@@ -889,9 +705,8 @@ class ConvergedSolver:
         """``sum_i ||J_i d||^2`` over `idx`, by a central difference of size `step`."""
         total = torch.zeros((), device=self.device, dtype=torch.float64)
         for b in self._batches(idx):
-            jd = self._whiten(
-                (self._predict(b, V + step * d) - self._predict(b, V - step * d))
-                / (2 * step)
+            jd = (self._predict(b, V + step * d) - self._predict(b, V - step * d)) / (
+                2 * step
             )
             total += (jd.double() ** 2).sum()
         return float(total)
@@ -925,11 +740,7 @@ class ConvergedSolver:
             for k, a in enumerate(steps):
                 pa = self._predict(b, V + a * d)
                 totals[k] += (
-                    0.5
-                    * (
-                        self._whiten(pa - p0).double()
-                        * self._whiten(pa + p0 - 2 * y).double()
-                    ).sum()
+                    0.5 * ((pa - p0).double() * (pa + p0 - 2 * y).double()).sum()
                 )
         return [float(t) for t in totals]
 
@@ -952,13 +763,12 @@ class ConvergedSolver:
     # ------------------------------------------------------------------
     # Fourier-space operators
 
-    def _filter(self, X: torch.Tensor, multiplier: torch.Tensor) -> torch.Tensor:
-        """A Fourier multiplier on each channel (or on one volume)."""
-        dims = (-3, -2, -1)
-        f = torch.fft.rfftn(X, dim=dims) * multiplier
-        return torch.fft.irfftn(f, s=X.shape[-3:], dim=dims)
+    def _filter(self, V: torch.Tensor, multiplier: torch.Tensor) -> torch.Tensor:
+        """A Fourier multiplier on the half spectrum."""
+        return torch.fft.irfftn(torch.fft.rfftn(V) * multiplier, s=V.shape)
 
-    def _project_one(self, V: torch.Tensor, band: torch.Tensor | None) -> torch.Tensor:
+    def _project(self, V: torch.Tensor) -> torch.Tensor:
+        """S: onto the point group and the band limit, as an Adam step does."""
         model = self.model
         if model.symmetry is not None:
             V = apply_symmetry(
@@ -968,26 +778,8 @@ class ConvergedSolver:
                 method=model.symmetry_mode,
             )
         V = V.contiguous()
-        _apply_kmask_inplace(V, band)
+        _apply_kmask_inplace(V, self._kmask_half)
         return V
-
-    def _project(self, X: torch.Tensor) -> torch.Tensor:
-        """S: each channel onto the point group and its band limit, as an
-        Adam step does for the map."""
-        if X.ndim == 3:
-            return self._project_one(X, self._kmask_half)
-        bands = [self._kmask_half, self._wband]
-        return torch.stack([self._project_one(X[c], bands[c]) for c in range(len(X))])
-
-    def _to_map(self, X: torch.Tensor) -> torch.Tensor:
-        """The map(s) the model sees for unknowns `X`: ``support * S(X)``."""
-        X = self._project(X)
-        return X if self.support is None else X * self.support
-
-    def _to_map_adjoint(self, G: torch.Tensor) -> torch.Tensor:
-        """The adjoint of `_to_map`, ``S(support * G)``: a gradient in the
-        map, taken back to the unknowns."""
-        return self._project(G if self.support is None else G * self.support)
 
     def _random_direction(
         self, selection: torch.Tensor, generator: torch.Generator
@@ -1003,11 +795,6 @@ class ConvergedSolver:
     def _step_size(self, V: torch.Tensor, d: torch.Tensor) -> float:
         return 1e-2 * max(float(V.norm()), 1e-12) / float(d.norm())
 
-    def _in_channel(self, d: torch.Tensor, channel: int) -> torch.Tensor:
-        out = torch.zeros((self.channels, *d.shape), device=d.device, dtype=d.dtype)
-        out[channel] = d
-        return out
-
     def measure_curvature(
         self,
         V: torch.Tensor,
@@ -1022,7 +809,7 @@ class ConvergedSolver:
         Parameters
         ----------
         V : torch.Tensor
-            State the curvature is measured at, ``(channels, n, n, n)``.
+            Map the curvature is measured at, ``(n, n, n)``.
         n_bands : int
             Radial bands between 0 and Nyquist (at most ``n // 2``).
         n_probes : int
@@ -1049,7 +836,7 @@ class ConvergedSolver:
         for b in range(nb):
             selection = (self.radius >= edges[b]) & (self.radius < edges[b + 1])
             for _ in range(n_probes):
-                d = self._in_channel(self._random_direction(selection, gen), 0)
+                d = self._random_direction(selection, gen)
                 bands[b] += (
                     self._curvature(V, d, self._step_size(V, d), particles)
                     * per_particle
@@ -1065,43 +852,10 @@ class ConvergedSolver:
                 d = d / d.norm()
             else:
                 d = self._random_direction(selection, gen)
-            d = self._in_channel(d, 0)
             low.append(
                 self._curvature(V, d, self._step_size(V, d), particles) * per_particle
             )
         return bands, low
-
-    def measure_absorption_curvature(
-        self, X: torch.Tensor
-    ) -> tuple[list[int], list[float]]:
-        """
-        The data term's curvature along W, at a ladder of shells inside W's band.
-
-        Measured on 2% of the particles (256 to 4096), one random direction
-        per shell, and interpolated between shells for the preconditioner.
-        """
-        assert self._wband is not None
-        gen = torch.Generator(device=self.device).manual_seed(self.seed + 3)
-        cpu_gen = torch.Generator().manual_seed(self.seed + 3)
-        top = int(self.radius[self._wband > 0].max())
-        ladder = sorted(
-            {s for s in (0, 1, 2, 3, 4, 6, 8, 12, 16, 20, 28) if s < top} | {top}
-        )
-        particles = self._subset(0.02, 256, 4096, cpu_gen)
-        per_particle = self.n_particles / len(particles)
-        values = []
-        for s in ladder:
-            selection = self.shell == s
-            if s == 0:
-                d = torch.fft.irfftn(selection.to(torch.complex64), s=(self.n,) * 3)
-                d = d / d.norm()
-            else:
-                d = self._random_direction(selection, gen)
-            d = self._in_channel(d, 1)
-            values.append(
-                self._curvature(X, d, self._step_size(X, d), particles) * per_particle
-            )
-        return ladder, values
 
     # ------------------------------------------------------------------
 
@@ -1130,21 +884,10 @@ class ConvergedSolver:
         # carry the cube's corners onto themselves, so the noise there (16% of
         # an Adam map's norm on EMPIAR-12391) changes 14% per application, the
         # whole map 2%, and the projected iteration walked uphill.
-        V0 = V.to(self.device, torch.float32)
-        if self.channels == 1:
-            start = V0[None]
-        else:
-            # W corrects the amplitude contrast; it starts at none, which is
-            # the starting map's own model.
-            start = torch.stack([V0, torch.zeros_like(V0)])
-        V = self._to_map(start)  # the map for U = the start, (channels, n, n, n)
-        del V0, start
+        V = self._project(V.to(self.device, torch.float32))  # the map for U = the start
         self._fit_batchsize(V)
 
         t0 = time.perf_counter()
-        noise_info: dict[str, Any] = {}
-        if self.noise_weighting:
-            noise_info["noise_power"] = self.estimate_noise(V).tolist()
         bands, low = self.measure_curvature(V)
         nb = len(bands)
         centres = (np.arange(nb) + 0.5) * (self.n / 2) / nb
@@ -1163,25 +906,6 @@ class ConvergedSolver:
         #: The prior's per-voxel weight on the half spectrum, ``W(k) / SSNR(k)``.
         self.prior_weight = lam
         del W, ssnr
-        absorption_info: dict[str, Any] = {}
-        if self.channels == 2:
-            assert self._wband is not None
-            ladder, values = self.measure_absorption_curvature(V)
-            Hw = torch.as_tensor(
-                np.interp(self.radius.cpu().numpy(), ladder, values),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            # A weak ridge inside the band; W is zero outside it anyway.
-            lam_w = 1e-3 * float(np.median(values)) * self._wband + (1 - self._wband)
-            lam = torch.stack([lam, lam_w])
-            precondition = torch.stack([precondition, self._wband / (Hw + lam_w)])
-            absorption_info = dict(
-                absorption_ladder=ladder, absorption_curvature=values
-            )
-            del Hw, lam_w
-        else:
-            lam, precondition = lam[None], precondition[None]
         t_curvature = time.perf_counter() - t0
         logger.info(
             f"{self._tag}: curvature measured in {t_curvature:.0f} s, batch size {self.batchsize}"
@@ -1199,7 +923,7 @@ class ConvergedSolver:
             objective = data_loss + 0.5 * float((V * lam_V).sum())
             grad_V = grad + lam_V  # dObjective/dV
             del grad, lam_V
-            g = self._to_map_adjoint(grad_V)  # dObjective/dU
+            g = self._project(grad_V)  # dObjective/dU
             # Preconditioner S M S: M is radial, diagonal on the DFT grid, but
             # an exact rotation average is not (quarter turns of an even box
             # land off-grid), so M alone puts the search direction into what S
@@ -1219,11 +943,11 @@ class ConvergedSolver:
             # from the full gradient in V, not as g.d, which equals it only
             # as far as S is self-adjoint (1e-5 on a real map, 1.6e-3 for I1
             # on an 8^3 box, enough near convergence to flip its sign).
-            d_map = self._to_map(d)
+            d_map = self._project(d)
             slope = float((grad_V * d_map).sum())
             if slope >= 0 and not steepest:
                 d = -z
-                d_map = self._to_map(d)
+                d_map = self._project(d)
                 slope = float((grad_V * d_map).sum())
             del grad_V
             d_lam_d = float((d_map * self._filter(d_map, lam)).sum())
@@ -1278,13 +1002,7 @@ class ConvergedSolver:
             band_curvature=bands.tolist(),
             low_shell_curvature=low,
             ssnr=self.ssnr.tolist(),
-            **absorption_info,
-            **noise_info,
         )
         return SolveResult(
-            volume=V[0],
-            unfiltered=unfilter(V[0], self.ssnr),
-            log=log,
-            info=info,
-            absorption=V[1] if self.channels == 2 else None,
+            volume=V, unfiltered=unfilter(V, self.ssnr), log=log, info=info
         )

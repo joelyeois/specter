@@ -88,6 +88,7 @@ def aberration_engine(
             dose_envelope=dose_envelope,
             dose_weighted=dose_weighted,
             lpp_params=None if lpp_params is None else dict(lpp_params),
+            amplitude_contrast=alpha if linear and alpha is not None else 0.0,
         )
     else:
         engine = Aberration(

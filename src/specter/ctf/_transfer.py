@@ -39,7 +39,10 @@ class TransferFunction(nn.Module):
         Pixel size in Å.
     aberration_model : {"nonlinear", "linear"}, optional
         ``"nonlinear"`` returns the full complex aberrated wave;
-        ``"linear"`` returns its real part. Both use the *complex* torch-ctf
+        ``"linear"`` returns its negated imaginary part, the weak-phase
+        contrast of a real projected potential (``aberrations.Aberration``
+        forms the same image from the negated real part of a transfer
+        function offset by ``acos(alpha)``). Both use the *complex* torch-ctf
         transfer function (``return_complex_ctf=True``), matching
         ``aberrations.Aberration``'s existing behaviour exactly. Adopting
         torch-ctf's dedicated real ``-sin(chi)`` weak-phase-object formula
@@ -376,7 +379,18 @@ class TransferFunction(nn.Module):
         """
         transfer = self.transfer_function(ctf_params, idx=idx)
         aberrated = ifft2(fft2(exitwave) * transfer)
-        return torch.real(aberrated) if self.aberration_model == "linear" else aberrated
+        if self.aberration_model != "linear":
+            return aberrated
+        if self.specimen_absorption:
+            # No amplitude-contrast offset on either backend: the same
+            # transfer function as aberrations.Aberration, same sign.
+            return -torch.real(aberrated)
+        # torch-ctf's complex CTF is exp(-i (chi - asin(amplitude_contrast))),
+        # i times aberrations.Aberration's (offset by acos), so the weak-phase
+        # contrast of a real projection is its NEGATED IMAGINARY part:
+        # sqrt(1 - a^2) sin(chi) - a cos(chi) in specter's chi, which is
+        # negative for underfocus -- the image every other model forms.
+        return -torch.imag(aberrated)
 
 
 def _collapse_if_uniform(coeff: torch.Tensor) -> torch.Tensor:

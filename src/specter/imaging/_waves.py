@@ -181,6 +181,7 @@ class ExitWave:
                 dose_envelope=dose_envelope is not None,
                 dose_weighted=weighted,
                 lpp_params=lpp_params,
+                amplitude_contrast=self.alpha if self.linear else 0.0,
             ).to(device)
         else:
             if lpp_params is not None and backend != "torch_ctf":

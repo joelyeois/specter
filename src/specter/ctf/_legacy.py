@@ -97,6 +97,7 @@ def ctf_params_dict_to_parameters(
     image_shape: tuple[int, int],
     voltage: float,
     lpp_params: dict[str, float] | None = None,
+    amplitude_contrast: float = 0.0,
 ) -> CTFParameters:
     """Convert a legacy Å/radian-based ``ctf_params`` dict (the
     ``aberrations.Aberration`` / ``imaging.CTF.params`` convention)
@@ -218,6 +219,7 @@ def ctf_params_dict_to_parameters(
         odd_zernike=odd_zernike or None,
         lpp_params=lpp_params,
         dose=dose,
+        amplitude_contrast=amplitude_contrast,
     )
 
 
@@ -281,8 +283,10 @@ class LegacyAberrationAdapter(nn.Module):
         dose_envelope: bool = False,
         dose_weighted: bool = True,
         lpp_params: dict[str, float] | None = None,
+        amplitude_contrast: float = 0.0,
     ) -> None:
         super().__init__()
+        self.amplitude_contrast = amplitude_contrast
         self.pixel_size = pixel_size
         self.voltage = voltage
         self.image_shape = (n_pixels, n_pixels)
@@ -311,5 +315,6 @@ class LegacyAberrationAdapter(nn.Module):
             self.image_shape,
             self.voltage,
             lpp_params=self.lpp_params,
+            amplitude_contrast=self.amplitude_contrast,
         )
         return self.transfer_function_module(exitwave, params)

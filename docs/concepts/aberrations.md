@@ -143,8 +143,14 @@ unchanged, matching every `scattering_model` except `"ctf"`, which
 returns a real-valued exit wave with no absorptive component of its own.
 Amplitude contrast has nowhere else to live, so `Aberration` folds it
 into \(\chi\) via `specimen_absorption=False`. `"linear"` instead takes the
-real part of the aberrated field, matching `Scattering.ctf`'s projected
-potential input -- a weak-phase-object, linear-in-potential image
+negated real part of the aberrated field, matching `Scattering.ctf`'s projected
+potential input. The sign follows from the convention: \(\chi\) is negative for
+underfocus, so with the \(\arccos\alpha\) offset
+\(\mathrm{Re}[e^{-i\chi'}] = \cos(\gamma - \arccos\alpha)\) with
+\(\gamma = -\chi\), the negative of the weak-phase CTF
+\(-\sqrt{1-\alpha^2}\sin\gamma - \alpha\cos\gamma\). Negated, a weak object
+images with the same contrast under `"ctf"` as under every other
+`scattering_model`. The model is a weak-phase-object, linear-in-potential image
 formation model (Erickson & Klug 1971), as opposed to `"nonlinear"`'s full wave-optics
 propagation (`image = |exitwave|^2` is nonlinear in the specimen
 potential; `image = 1 + 2 \cdot \mathrm{CTF} \otimes \mathrm{potential}` is
@@ -447,17 +453,15 @@ per-particle quantity; `"legacy"` has no equivalent.
   CryoSPARC `.cs` file carries tetrafoil, and silently ignoring it would give
   a plausible image at the wrong transfer function. A zero-valued term is
   accepted, since it has no effect either way.
-- **`torch_ctf` never receives `alpha`, and reads `specimen_absorption`
-  differently.** `ExitWave.apply_ctf` passes neither to
-  `LegacyAberrationAdapter`, so under that backend amplitude contrast is absent
-  from the transfer function whatever the config sets. The two engines also
-  disagree on what `specimen_absorption=False` means: `Aberration` adds
-  \(-\arccos\alpha\) to \(\chi\), which at \(\alpha=0\) is a
-  \(-\pi/2\) rotation turning a cosine-type transfer into the sine-type one
-  a phase-contrast CTF needs, while `TransferFunction` only zeroes a *nonzero*
-  `amplitude_contrast` and so does nothing at \(\alpha=0\). The `"legacy"`
-  path is unaffected: `_init_optics` passes both to `Aberration`, and every
-  shipped config sets `alpha = 0.1`.
+- **`torch_ctf` and `Aberration` place amplitude contrast differently.**
+  For the linear model `ExitWave.apply_ctf` passes \(\alpha\) to both, but
+  `Aberration` adds \(\arccos\alpha\) to \(\chi\) while torch-ctf's complex
+  CTF is \(e^{-i(\chi - \arcsin\alpha)}\), \(i\) times the former. Each
+  therefore reads the weak-phase contrast off a different part of the
+  aberrated field (negated real part for `Aberration`, negated imaginary part
+  for `TransferFunction` under `specimen_absorption=False`), and the two give
+  the same image. Under `specimen_absorption=True` neither applies an offset
+  and both take the negated real part.
 - **`torch_ctf` has no native-units entry point.** A caller with
   parameters already in torch-ctf's own units, or in RELION's convention,
   can only reach `CTFParameters` by constructing it directly; there is no

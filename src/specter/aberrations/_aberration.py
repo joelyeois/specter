@@ -378,13 +378,19 @@ class Aberration(L.LightningModule):
         -----
         Applies transfer function in Fourier space:
         ψ_aberrated = FFT⁻¹[FFT[ψ] * T(CTF)]
+
+        The linear model returns ``-Re(ψ_aberrated)``: with ``chi`` negative
+        for underfocus and the ``acos(alpha)`` offset, ``Re[exp(-i chi')]`` is
+        ``cos(gamma - acos(alpha))``, the negative of the weak-phase CTF
+        ``-sqrt(1 - alpha^2) sin(gamma) - alpha cos(gamma)``. Without the sign
+        the linear image would be the exact negative of every other model's.
         """
         if self.bfactor is not None:
             ctf_params = {**ctf_params, "bfactor": self.bfactor}
         self.tf = self.transfer_function(ctf_params)
         aberrated_exitwaves = ifft2(fft2(exitwave) * self.tf)
         if self.aberration_model == "linear":
-            return torch.real(aberrated_exitwaves)
+            return -torch.real(aberrated_exitwaves)
         elif self.aberration_model == "nonlinear":
             return aberrated_exitwaves
         else:

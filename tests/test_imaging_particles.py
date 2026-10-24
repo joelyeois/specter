@@ -374,3 +374,40 @@ def test_poses_and_ctf_draw_from_their_own_seed() -> None:
     assert all(torch.equal(ctf.params[k], same.params[k]) for k in ctf.params)
     differs = CTF.sample(4, defocus=[10000.0, 20000.0], seed=1)
     assert not torch.equal(ctf.params["dfu"], differs.params["dfu"])
+
+
+@pytest.mark.parametrize("backend", ["legacy", "torch_ctf"])
+@pytest.mark.parametrize("defocus", [5000.0, 15000.0])
+def test_linear_ctf_model_has_the_physical_contrast_sign(backend, defocus):
+    """A weak object images with the same contrast under ``"ctf"`` as under projection.
+
+    The linear model's transfer function is ``Re[exp(-i chi')]`` with the
+    amplitude-contrast offset folded in, which is the NEGATIVE of the weak-phase
+    CTF; until 2026-10-25 nothing negated it, so every ``"ctf"`` image was the
+    exact negative of the physical one (correlation -1.0000 against projection,
+    first Born and Rytov) and a reconstruction under it came out as ``-V``.
+    """
+    n = 48
+    z, y, x = torch.meshgrid(*[torch.arange(n) - n / 2] * 3, indexing="ij")
+    V = 2.0 * torch.exp(-(x**2 + y**2 + z**2) / (2 * 3.0**2))
+    ids = torch.zeros(1, dtype=torch.long)
+    poses = Poses(torch.tensor([[1.0, 0, 0, 0]]), torch.zeros(1, 2), ids)
+    ctf = CTF(
+        {
+            "dfu": torch.tensor([defocus]),
+            "dfv": torch.tensor([defocus]),
+            "dfang": torch.tensor([0.0]),
+            "cs": torch.tensor([2.7e7]),
+        },
+        ids=ids,
+    )
+    images = {}
+    for model in ("projection", "ctf"):
+        wave = Specimen(V, voxel_size=1.0).scatter(
+            poses, voltage=VOLTAGE, scattering_model=model, alpha=0.1
+        )
+        image = wave.apply_ctf(ctf, backend=backend).intensity(cc=None).pixels()
+        a = image[0].double()
+        images[model] = a - a.mean()
+    p, c = images["projection"], images["ctf"]
+    assert float((p * c).sum() / (p.norm() * c.norm())) > 0.999

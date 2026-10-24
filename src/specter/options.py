@@ -120,6 +120,10 @@ CarbonEdgeSide = Literal["random", "left", "right", "top", "bottom"]
 #: Axis a tilt series is tilted about.
 TiltAxis = Literal["x", "y"]
 
+#: Shape of a specimen's beam-induced bending (`settings.Deformation`): a
+#: film over a support hole, clamped at the rim, or none.
+DeformationModel = Literal["dome", "none"]
+
 #: What an observed image's values mean, for a reconstruction: electron
 #: counts per pixel, or a stack normalised to zero mean and unit variance (a
 #: CryoSPARC/RELION particle stack) that is converted back to counts from the
@@ -140,6 +144,7 @@ __all__ = [
     "ConvBackend",
     "ConvBoundary",
     "ConvMode",
+    "DeformationModel",
     "DetectorModel",
     "EwaldSphereSign",
     "GridConvention",

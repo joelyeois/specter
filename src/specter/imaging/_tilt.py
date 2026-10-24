@@ -14,6 +14,7 @@ wave, which the lens and camera stages image like any other.
 from __future__ import annotations
 
 import contextlib
+import math
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -34,9 +35,10 @@ from ..potential import aperture_lowpass_isotropic, dose_damage_envelope
 from ..progress import status
 from ..random_seed import derive_seed, seeded_rng
 from ..scattering import IterativeScattering
-from ..settings import Camera, Ice, Optics, Propagation, TiltGeometry
+from ..settings import Camera, Deformation, Ice, Optics, Propagation, TiltGeometry
 from . import _stages as stages
 from ._data import Exposure, Poses, settings_group
+from ._deformation import specimen_warp
 from ._waves import ExitWave
 
 __all__ = [
@@ -290,6 +292,12 @@ class TiltSeries:
         it, plus the ice. Default False.
     tilt : TiltGeometry, optional
         Tilt axis and the XY/Z cosine tapers.
+    deformation : Deformation, optional
+        The specimen's beam-induced bending. Tilt ``i`` samples the volume
+        bent to the exposure at the middle of its own, its pre-exposure plus
+        half its dose. The bend is centred on the volume's rotation centre,
+        its midplane the volume's middle z slice, and the volume gains its
+        height in vacuum above and below. Default: rigid.
     edge_margin : int, optional
         Pixels added on each side of the geometric coverage. Default 8.
     pad_volume : bool, optional
@@ -349,6 +357,7 @@ class TiltSeries:
         icemaker: IceBank | RandomIcemaker | None = None,
         damaged: bool = False,
         tilt: TiltGeometry = TiltGeometry(),
+        deformation: Deformation = Deformation(),
         edge_margin: int = 8,
         pad_volume: bool = True,
         fft_pad_margin: int = 32,
@@ -394,6 +403,7 @@ class TiltSeries:
         self.nxy = micrograph_size
         self.propagation = p
         self.damaged = damaged
+        self.deformation = deformation
         n_tilts = len(poses)
         self.doses = exposure.doses(n_tilts)
         self.pre_exposure = (
@@ -478,6 +488,20 @@ class TiltSeries:
         else:
             volume = blended
 
+        # The bend lifts the specimen by up to its height, so the volume
+        # gains that much vacuum above and below, or the material lifted past
+        # a face would be lost. Symmetric, so the midplane and the rotation
+        # centre stay where they were; the defocus shift is measured from the
+        # midplane to whichever face the volume has, so vacuum leaves every
+        # image unchanged.
+        self._half_depth = volume.shape[-3] * voxel_size / 2.0
+        deformation.check_depth(self._half_depth)
+        lift = (
+            0
+            if deformation.model is None or deformation.height is None
+            else math.ceil(abs(deformation.height) / voxel_size) + 1
+        )
+
         def fit(v: torch.Tensor, log: bool = log) -> torch.Tensor:
             fitted, coverage = fit_volume_to_tilt(
                 v,
@@ -490,6 +514,8 @@ class TiltSeries:
                 log=log,
             )
             self.coverage = coverage
+            if lift:
+                fitted = torch.nn.functional.pad(fitted, (0, 0, 0, 0, lift, lift))
             return fitted
 
         def lowpass(v: torch.Tensor) -> torch.Tensor:
@@ -724,6 +750,12 @@ class TiltSeries:
             self.poses.shifts[i].unsqueeze(0).to(device),
             self.volume.shape[-1],
             self.voxel_size,
+        )
+        self.scattering.warp = specimen_warp(
+            self.deformation,
+            float(self.pre_exposure[i]) + float(self.doses[i]) / 2.0,
+            self.voxel_size,
+            self._half_depth,
         )
         if self.absorption is None:
             wave = self.scattering(volume, theta, slice_batchsize=slice_batchsize)

@@ -20,6 +20,8 @@ image formation, and which of them a class accepts says what it models:
 - `Camera`: the detector chain, likewise forward-only.
 - `TiltGeometry`: the tilt axis and edge tapers a tilt series is imaged
   with, shared by `imaging.TiltSeries` and `TomogramReconstructor`.
+- `Deformation`: how the specimen bends under the beam over a tilt series,
+  forward-only.
 - `Ice`: the amorphous ice a specimen is embedded in, forward-only.
 - `Crowding` and `Packing`: how duplicates of a particle template are
   placed around it, and which collision test decides where they fit.
@@ -42,6 +44,7 @@ from typing import Any, Literal, TypeVar
 
 from specter.options import (
     AbsorptionModel,
+    DeformationModel,
     DetectorModel,
     DoseEnvelopeTarget,
     EwaldSphereSign,
@@ -60,6 +63,7 @@ __all__ = [
     "AberrationBackend",
     "Camera",
     "Crowding",
+    "Deformation",
     "Envelopes",
     "Ice",
     "Optics",
@@ -69,6 +73,13 @@ __all__ = [
     "bundle_from_config",
 ]
 
+
+#: Largest displacement gradient a `Deformation` may give the specimen: the
+#: film's slope plus the bending strain at the specimen's faces. Its
+#: thin-plate kinematics are linear in the gradient, which leaves an error of
+#: order its square (4% at this bound); measured domes over thin ice stay
+#: below 0.07.
+MAX_DEFORMATION_GRADIENT = 0.2
 
 #: Chromatic aberration coefficient of the Titan Krios objective lens, 2.7 mm,
 #: in Angstrom: the forward simulators' default (`Envelopes.cc`), so a
@@ -457,6 +468,134 @@ class TiltGeometry:
         object.__setattr__(self, "tilt_axis", axis)
         if self.taper_width < 0 or self.z_taper_width < 0:
             raise ValueError("taper_width and z_taper_width must be non-negative")
+
+
+@dataclass(frozen=True)
+class Deformation:
+    """
+    The specimen's beam-induced bending over a tilt series.
+
+    Irradiation releases the stress a vitrified film is frozen with, and the
+    film relieves it by bending out of its plane: a burst of motion in the
+    first few e-/A^2, after which the shape holds [1]_ [2]_. The bend is a
+    deflection ``w(x, y)`` of the specimen's midplane, and every point of the
+    specimen moves with it as in a thin plate, ``u = (-z dw/dx, -z dw/dy, w)``
+    with ``z`` the height above the midplane: the film's top and bottom
+    faces slide in opposite directions where it slopes, and a particle on it
+    turns with the local slope. The field is attached to the specimen, so
+    every tilt sees the same bend from its own angle, grown to the exposure
+    that tilt was recorded at.
+
+    Parameters
+    ----------
+    model : DeformationModel, optional
+        ``"dome"``: a film over a circular support hole, clamped at the rim,
+        ``w = height * (1 - r^2 / hole_radius^2)^2`` inside the hole and zero
+        over the support. Default None (or ``"none"``): a rigid specimen.
+    height : float, optional
+        The deflection at the hole's centre once the burst is over, in
+        Angstrom; positive moves the film towards the volume's last z slice.
+        Required with a model. Measured central deflections are 150-250 A
+        over holey carbon [1]_ and below 1 A on gold foil with holes no
+        wider than 11 ice thicknesses [2]_.
+    hole_radius : float
+        Radius of the support hole in Angstrom. Default 6000.0, a 1.2 um
+        hole.
+    hole_offset : tuple of float
+        Centre of the hole relative to the volume's centre, ``(x, y)`` in
+        Angstrom. A tilt series images a patch of a hole, so this decides
+        whether the patch sees the dome's crown, its flank or its rim.
+        Default (0.0, 0.0).
+    burst_dose : float
+        Exposure in e-/A^2 over which the burst completes: the deflection is
+        ``height * (1 - exp(-D / burst_dose))`` at an accumulated exposure
+        ``D``. Default 2.0, from the burst Naydenova et al. see in the first
+        ~4 e-/A^2 [2]_.
+
+    References
+    ----------
+    .. [1] Brilot, A. F., Chen, J. Z., Cheng, A., Pan, J., Harrison, S. C.,
+       Potter, C. S., Carragher, B., Henderson, R., & Grigorieff, N. (2012).
+       Beam-induced motion of vitrified specimen on holey carbon film.
+       *Journal of Structural Biology*, 177(3), 630–637.
+       https://doi.org/10.1016/j.jsb.2012.02.003
+    .. [2] Naydenova, K., Jia, P., & Russo, C. J. (2020). Cryo-EM with sub–1 Å
+       specimen movement. *Science*, 370(6513), 223–226.
+       https://doi.org/10.1126/science.abb7927
+    """
+
+    model: DeformationModel | None = None
+    height: float | None = None
+    hole_radius: float = 6000.0
+    hole_offset: tuple[float, float] = (0.0, 0.0)
+    burst_dose: float = 2.0
+
+    def __post_init__(self) -> None:
+        if self.model == "none":
+            object.__setattr__(self, "model", None)
+        if self.model not in (None, "dome"):
+            raise ValueError(f"model={self.model!r} must be 'dome' or None")
+        if self.model is not None and self.height is None:
+            raise ValueError(
+                "a deformation model needs its height: the central deflection "
+                "in Angstrom, which ranges from below 1 A to 250 A by support"
+            )
+        if self.hole_radius <= 0:
+            raise ValueError(f"hole_radius={self.hole_radius} must be positive")
+        if self.burst_dose <= 0:
+            raise ValueError(f"burst_dose={self.burst_dose} must be positive")
+        object.__setattr__(
+            self, "hole_offset", tuple(float(v) for v in self.hole_offset)
+        )
+        self.check_depth(0.0)
+
+    @property
+    def max_slope(self) -> float:
+        """
+        The steepest slope of the full deflection, ``|dw/dr|`` at
+        ``r = hole_radius / sqrt(3)``, in radians.
+        """
+        if self.model is None or self.height is None:
+            return 0.0
+        return 8.0 * abs(self.height) / (3.0 * 3.0**0.5 * self.hole_radius)
+
+    @property
+    def max_curvature(self) -> float:
+        """
+        The largest second derivative of the full deflection,
+        ``|d2w/dx2| = 8 height / hole_radius^2`` at the rim, in 1/Angstrom.
+        """
+        if self.model is None or self.height is None:
+            return 0.0
+        return 8.0 * abs(self.height) / self.hole_radius**2
+
+    def max_gradient(self, half_depth: float) -> float:
+        """
+        A bound on the displacement gradient over a specimen `half_depth`
+        Angstrom either side of its midplane: the slope plus the bending
+        strain at its faces.
+        """
+        return self.max_slope + half_depth * self.max_curvature
+
+    def check_depth(self, half_depth: float) -> None:
+        """
+        Refuse a bend the thin-plate kinematics cannot carry through a
+        specimen `half_depth` Angstrom either side of its midplane.
+
+        Raises
+        ------
+        ValueError
+            If `max_gradient` exceeds `MAX_DEFORMATION_GRADIENT`.
+        """
+        gradient = self.max_gradient(half_depth)
+        if gradient > MAX_DEFORMATION_GRADIENT:
+            raise ValueError(
+                f"height={self.height} A over hole_radius={self.hole_radius} A "
+                f"through a specimen {2 * half_depth:g} A deep gives a "
+                f"displacement gradient of up to {gradient:.3f}; the "
+                f"thin-plate kinematics hold to {MAX_DEFORMATION_GRADIENT}, "
+                "and measured domes over thin ice stay below 0.07"
+            )
 
 
 @dataclass(frozen=True)

@@ -6,6 +6,7 @@ gradients.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal, Sequence
 
 import lightning as L
@@ -548,6 +549,7 @@ class VolumeRotator(L.LightningModule):
         padding_mode: GridSamplePadding | None = None,
         device: str | torch.device | None = None,
         window_margin: int = 2,
+        warp: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None = None,
     ) -> torch.Tensor:
         """
         Sample multiple Z-slices from a rotated volume, restricted to a ROI in XY.
@@ -592,6 +594,14 @@ class VolumeRotator(L.LightningModule):
             Only used when `device` triggers the windowed path above: extra
             padding (px) around the query's exact pixel-space bounding box,
             for bilinear interpolation's 1px neighbor footprint. Default 2.
+        warp : callable, optional
+            A deformation of `V`, applied where it is sampled: maps the
+            sample points, ``(..., 3)`` as ``(x, y, z)`` in voxels from the
+            rotation centre in `V`'s own frame, to the points of `V` they
+            read and a weight each value read is multiplied by
+            (:func:`~specter.imaging._deformation.specimen_warp`). It moves
+            the points the one interpolation already samples, so it adds
+            none of its own. Default None.
 
         Returns
         -------
@@ -635,6 +645,15 @@ class VolumeRotator(L.LightningModule):
             points_norm = points_pix_flat / scale
         grid = self._rotate_normalized_grid(points_norm, R, t, scale)
 
+        weight: torch.Tensor | None = None
+        if warp is not None:
+            # The rotated grid holds V-frame positions; the warp moves them
+            # in voxels from the rotation centre, the frame it is defined in.
+            centre = self.center.to(V.device, dtype) if self.origin == "relion" else 0.0
+            source, weight = warp((grid - centre) * scale)
+            grid = source / scale + centre
+            weight = weight.view(B, K, ny_roi, nx_roi).to(target_device)
+
         grid = grid.view(B, K, ny_roi, nx_roi, 3)
 
         # -------------------------------
@@ -644,17 +663,17 @@ class VolumeRotator(L.LightningModule):
             V_in = _prepare_volume_for_grid_sample(V, B)
             slices_roi = F.grid_sample(
                 V_in, grid, align_corners=self.align_corners, padding_mode=padding_mode
+            )[:, 0]  # (B, K, ny_roi, nx_roi)
+        else:
+            slices_roi = _windowed_grid_sample(
+                V,
+                grid,
+                self.nz,
+                ny,
+                nx,
+                self.align_corners,
+                padding_mode,
+                target_device,
+                window_margin,
             )
-            return slices_roi[:, 0]  # (B, K, ny_roi, nx_roi)
-
-        return _windowed_grid_sample(
-            V,
-            grid,
-            self.nz,
-            ny,
-            nx,
-            self.align_corners,
-            padding_mode,
-            target_device,
-            window_margin,
-        )
+        return slices_roi if weight is None else slices_roi * weight

@@ -172,6 +172,12 @@ class IterativeScattering(L.LightningModule):
         self.pad_fft = pad_fft
         self.fft_pad_margin = fft_pad_margin
         self.keep_pad = keep_pad
+        #: A deformation of the volume, applied where each slice samples it
+        #: (see ``VolumeRotator.sample_rotated_slices``' ``warp``). Set per
+        #: tilt by `imaging.TiltSeries`; None samples the volume as it is.
+        self.warp: (
+            Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None
+        ) = None
 
         k = frequency_grid(nxy, pixel_size)
         self.register_buffer("k2", k**2, persistent=False)
@@ -308,7 +314,8 @@ class IterativeScattering(L.LightningModule):
             None for the identity transform (slices are read directly from V).
         is_identity : bool
         """
-        is_identity = self._is_identity(theta_matrix)
+        # A warped volume is resampled even at the identity pose.
+        is_identity = self.warp is None and self._is_identity(theta_matrix)
         if is_identity:
             return V.shape[1], None, is_identity
         nz_new, rotator = self._setup_tilt(V, theta_matrix)
@@ -407,6 +414,7 @@ class IterativeScattering(L.LightningModule):
             roi_size=(size, size),
             padding_mode=self.roi_padding_mode,
             device=device,
+            warp=self.warp,
         )
 
     def _iter_slices(

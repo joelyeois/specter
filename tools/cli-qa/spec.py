@@ -110,6 +110,23 @@ NOISELESS = ["--noise_model", "none"]
 # The tilt baseline's 6 A voxels put Nyquist where the focal spread barely
 # acts (~1e-5 relative, under the sweep's 5e-3 tolerance); at 2 A it is plain.
 TILT_FINE = ["--voxel_size", "2.0", *NOISELESS]
+# A bend gentle enough for the QA volume's depth (the thin-plate check).
+DOME = [
+    "--deformation_model",
+    "dome",
+    "--deformation_height",
+    "30.0",
+    "--deformation_hole_radius",
+    "2000.0",
+]
+RANDOM_BEND = [
+    "--deformation_model",
+    "random",
+    "--deformation_height",
+    "20.0",
+    "--deformation_correlation_length",
+    "1000.0",
+]
 MFP = ["--absorption_model", "inelastic_mfp", "--alpha", "0.0"]
 SHAPE = ["--packing_backend", "shape"]
 
@@ -543,6 +560,19 @@ TILTSERIES = CommandSpec(
         Flag("max_tilt_angle", "30.0"),
         Flag("n_tilts", "5", expect="changes"),
         Flag("tilt_axis", "x"),
+        Flag("deformation_model", "dome", context=DOME[2:]),
+        Flag("deformation_model", "random", context=RANDOM_BEND[2:]),
+        Flag("deformation_height", "60.0", context=DOME),
+        Flag("deformation_hole_radius", "3000.0", context=DOME),
+        Flag("deformation_hole_offset", "500,0", context=DOME),
+        Flag("deformation_correlation_length", "2000.0", context=RANDOM_BEND),
+        Flag("deformation_burst_dose", "10.0", context=DOME),
+        Flag(
+            "deformation_picks_dir",
+            None,
+            expect="skip",
+            note="needs pick files; tests/test_pipelines.py",
+        ),
         Flag("scattering_model", "firstborn"),
         Flag("scattering_model", "projection"),
         Flag("scattering_model", "ctf"),

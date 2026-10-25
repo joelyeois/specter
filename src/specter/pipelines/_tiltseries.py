@@ -10,9 +10,11 @@ writes a `.mrc` volume this pipeline then loads directly.
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import os
 import time
+from pathlib import Path
 
 import torch
 
@@ -22,7 +24,8 @@ from specter.config import (
     TomogramConfig,
     validate_config,
 )
-from specter.imaging import CTF, Exposure, Poses, Sample
+from specter.config._scalar_range import parse_scalar_or_range
+from specter.imaging import CTF, Exposure, Poses, Sample, TiltSeries
 from specter.imaging._stages import SEED_STAGE_SPECIMEN, read_dose_weights
 from specter.random_seed import derive_seed
 from specter.io import create_micrograph_starfile
@@ -31,6 +34,7 @@ from specter.specimen import load_specimen_volume
 from specter.devices import parse_device, resolve_available_device
 from specter.settings import (
     Camera,
+    Deformation,
     Envelopes,
     Ice,
     Propagation,
@@ -158,6 +162,17 @@ def run_tilt_series(
         )
 
     validate_config(config)
+    deformation = bundle_from_config(
+        Deformation,
+        config,
+        prefix="deformation_",
+        hole_offset=parse_scalar_or_range(config.deformation_hole_offset),
+    )
+    if config.deformation_picks_dir is not None and deformation.model is None:
+        raise ValueError(
+            "deformation_picks_dir is set but deformation_model is 'none': "
+            "there is no bend to move the picks by"
+        )
 
     specter.set_verbosity(logging.INFO)
     devices = parse_device(resolve_available_device(config.device))
@@ -231,6 +246,7 @@ def run_tilt_series(
         ice=ice,
         damaged=envelopes.dose_envelope and not damage_on_lens,
         tilt=tilt,
+        deformation=deformation,
         seed=run_seed,
         objective_aperture=config.objective_aperture,
         propagation=bundle_from_config(Propagation, config, alpha=alpha),
@@ -309,6 +325,16 @@ def run_tilt_series(
             tilt_angles=angles,
         )
 
+        if series.deflection is not None:
+            _save_deformation_truth(
+                series,
+                tuple(volume.shape[-3:]),
+                angles,
+                run_seed,
+                output_dir,
+                config,
+            )
+
         if exitwaves is not None:
             ew_prefix = "exitwave" if ice.model is not None else "clean_exitwave"
             section(f"Saving {ew_prefix.replace('_', ' ')}")
@@ -323,3 +349,117 @@ def run_tilt_series(
             )
 
     _print_total_time(t_start)
+
+
+def _save_deformation_truth(
+    series: TiltSeries,
+    shape: tuple[int, ...],
+    angles: torch.Tensor,
+    seed: int,
+    output_dir: str,
+    config: TiltSeriesConfig,
+) -> None:
+    """
+    Write the bend each tilt imaged: the full deflection as an ``.mrc``, a
+    ``.json`` of how much of it each tilt saw, and, with
+    ``deformation_picks_dir``, the specimen's picks moved per tilt.
+
+    Positions are in Angstrom from voxel ``(nz // 2, ny // 2, nx // 2)`` of
+    the specimen volume, the rotation centre, whose z slice is the bend's
+    midplane; a pick file's corner-relative location ``i * voxel_size`` is
+    shifted by that voxel's.
+    """
+    import mrcfile
+
+    nz, ny, nx = shape
+    dx = config.voxel_size
+    deflection = series.deflection
+    assert deflection is not None
+
+    y = (torch.arange(ny, dtype=torch.float64) - ny // 2) * dx
+    x = (torch.arange(nx, dtype=torch.float64) - nx // 2) * dx
+    gy, gx = torch.meshgrid(y, x, indexing="ij")
+    w = deflection(gx, gy)[0]
+    map_path = os.path.join(output_dir, config.filename + "_deflection.mrc")
+    with mrcfile.new(map_path, overwrite=True) as mrc:
+        mrc.set_data(w.numpy().astype("float32")[None])
+        mrc.voxel_size = dx
+    console.print(f"  [green]✓[/green] {map_path}")
+
+    d = series.deformation
+    record = {
+        "model": d.model,
+        "height": d.height,
+        "hole_radius": d.hole_radius if d.model == "dome" else None,
+        "hole_offset": list(d.hole_offset) if d.model == "dome" else None,
+        "correlation_length": (d.correlation_length if d.model == "random" else None),
+        "burst_dose": d.burst_dose,
+        "seed": seed,
+        "voxel_size": dx,
+        "origin_voxel_zyx": [nz // 2, ny // 2, nx // 2],
+        "half_depth": nz * dx / 2.0,
+        "deflection_map": os.path.basename(map_path),
+        "kinematics": (
+            "A specimen point (x, y, z), in Angstrom from origin_voxel_zyx with "
+            "z from the midplane, is imaged by tilt i at (x - f_i z' dw/dx, "
+            "y - f_i z' dw/dy, z + f_i w), w(x, y) the deflection map and z' = "
+            "z clamped to +-half_depth; its material is turned about x by "
+            "f_i dw/dy and about y by -f_i dw/dx."
+        ),
+        "tilts": [
+            {
+                "index": i,
+                "angle": float(angles[i]),
+                "dose": float(series.pre_exposure[i]) + float(series.doses[i]) / 2,
+                "fraction": series.bend_fraction(i),
+            }
+            for i in range(len(series))
+        ],
+    }
+    json_path = os.path.join(output_dir, config.filename + "_deformation.json")
+    with open(json_path, "w") as f:
+        json.dump(record, f, indent=2)
+    console.print(f"  [green]✓[/green] {json_path}")
+
+    if config.deformation_picks_dir is None:
+        return
+    sources = sorted(Path(config.deformation_picks_dir).glob("*.ndjson"))
+    if not sources:
+        raise FileNotFoundError(
+            f"deformation_picks_dir={config.deformation_picks_dir!r} holds no "
+            ".ndjson pick files"
+        )
+    origin = torch.tensor([nx // 2, ny // 2, nz // 2], dtype=torch.float64) * dx
+    root = Path(output_dir) / (config.filename + "_picks")
+    for source in sources:
+        rows = [json.loads(line) for line in source.read_text().splitlines() if line]
+        for i in range(len(series)):
+            out = root / f"tilt_{i:03d}" / source.name
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with open(out, "w") as f:
+                for row in rows:
+                    f.write(json.dumps(_deform_pick(series, row, i, origin)) + "\n")
+    console.print(
+        f"  [green]✓[/green] {root}/ ({len(sources)} pick files x {len(series)} tilts)"
+    )
+
+
+def _deform_pick(series: TiltSeries, row: dict, i: int, origin: torch.Tensor) -> dict:
+    """One copick row as tilt `i` imaged it."""
+
+    def point(p: dict) -> torch.Tensor:
+        return torch.tensor([p["x"], p["y"], p["z"]], dtype=torch.float64) - origin
+
+    def moved(p: torch.Tensor) -> dict:
+        x, y, z = (series.displaced(p, i) + origin).tolist()
+        return {"x": x, "y": y, "z": z}
+
+    row = dict(row)
+    at = point(row["location"])
+    row["location"] = moved(at)
+    if "path" in row:
+        row["path"] = [moved(point(p)) for p in row["path"]]
+    if "xyz_rotation_matrix" in row:
+        rotation = torch.tensor(row["xyz_rotation_matrix"], dtype=torch.float64)
+        row["xyz_rotation_matrix"] = (series.rotation(at, i) @ rotation).tolist()
+    return row

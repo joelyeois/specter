@@ -163,6 +163,18 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
         ["min_tilt_angle", "max_tilt_angle", "n_tilts", "tilt_axis"],
     ),
     (
+        "Specimen deformation",
+        [
+            "deformation_model",
+            "deformation_height",
+            "deformation_hole_radius",
+            "deformation_hole_offset",
+            "deformation_correlation_length",
+            "deformation_burst_dose",
+            "deformation_picks_dir",
+        ],
+    ),
+    (
         "Absorption",
         [
             "absorption_model",

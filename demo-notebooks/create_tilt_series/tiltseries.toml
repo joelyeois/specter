@@ -22,6 +22,15 @@ max_tilt_angle = 45.0
 n_tilts = 5              # quick smoke test; use ~41-61 for a real tilt scheme
 tilt_axis = "y"
 
+[specimen_deformation]
+# The beam bends the specimen as it exposes it. A dome over a 1.2 µm hole,
+# the field 400 nm from the hole's centre, so the series sees its flank.
+deformation_model = "dome"         # none | dome | random
+deformation_height = 150.0         # Å, central deflection (150-250 Å on holey carbon)
+deformation_hole_radius = 6000.0   # Å
+deformation_hole_offset = [-4000.0, 0.0]  # Å, hole centre from the volume's centre
+deformation_burst_dose = 2.0       # e⁻/Å² over which the bend develops
+
 [absorption]
 absorption_model = "alpha"         # alpha | inelastic_mfp -- inelastic_mfp derives the
                                    # imaginary potential per material and sets alpha to 0

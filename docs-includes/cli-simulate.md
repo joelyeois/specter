@@ -340,6 +340,18 @@ specter simulate tiltseries [OPTIONS]
 | `--n_tilts` | `INTEGER` | `61` | Number of tilt angles (evenly spaced from min to max). |
 | `--tilt_axis` | `x` \| `y` | `y` | Tilt axis. |
 
+**Specimen deformation**{ #specter-simulate-tiltseries-specimen-deformation }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--deformation_model` | `dome` \| `random` \| `none` | `none` | Beam-induced bending of the specimen over the series: 'dome' (a film over a circular support hole, clamped at its rim), 'random' (a smooth random deflection with no support geometry, for a cell or a lamella), or 'none'. Every point moves with the bent midplane as in a thin plate, and each tilt sees the bend grown to the exposure it was recorded at. |
+| `--deformation_height` | `FLOAT` | _none_ | Scale of the bend once the burst is over, in Angstrom: the dome's central deflection (positive towards the volume's last z slice) or the random deflection's RMS. Required with a model. Measured: 150-250 A over holey carbon (Brilot et al. 2012), below 1 A on gold foil with narrow holes (Naydenova et al. 2020). |
+| `--deformation_hole_radius` | `FLOAT` | `6000.0` | deformation_model='dome' only: support hole radius in Angstrom. |
+| `--deformation_hole_offset` | `TEXT` | `0.0` | deformation_model='dome' only: the hole's centre relative to the volume's centre as 'x,y' in Angstrom ([x, y] in TOML). A tilt series images a patch of a hole, so this decides whether it sees the dome's crown, its flank or its rim. |
+| `--deformation_correlation_length` | `FLOAT` | `10000.0` | deformation_model='random' only: length over which the deflection decorrelates, in Angstrom. Default 1 um, within the 0.33-2.9 um fitted to beam-induced motion (Zivanov et al. 2019). |
+| `--deformation_burst_dose` | `FLOAT` | `2.0` | Exposure in e-/Angstrom^2 over which the bend develops: the deflection at accumulated exposure D is height * (1 - exp(-D / burst_dose)). |
+| `--deformation_picks_dir` | `TEXT` | _none_ | Directory of copick .ndjson picks for the specimen, e.g. `specter build tomogram`'s output directory. Each pick file is written again per tilt with the positions and orientations the bend gave its particles at that tilt. |
+
 **Absorption**{ #specter-simulate-tiltseries-absorption }
 
 | Flag | Type | Default | Description |

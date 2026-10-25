@@ -491,21 +491,31 @@ class Deformation:
     model : DeformationModel, optional
         ``"dome"``: a film over a circular support hole, clamped at the rim,
         ``w = height * (1 - r^2 / hole_radius^2)^2`` inside the hole and zero
-        over the support. Default None (or ``"none"``): a rigid specimen.
+        over the support. ``"random"``: a smooth random deflection with no
+        support geometry, for a whole cell or a lamella, drawn per series
+        from a Gaussian process with a squared-exponential covariance of
+        standard deviation `height` and length `correlation_length`.
+        Default None (or ``"none"``): a rigid specimen.
     height : float, optional
-        The deflection at the hole's centre once the burst is over, in
-        Angstrom; positive moves the film towards the volume's last z slice.
-        Required with a model. Measured central deflections are 150-250 A
-        over holey carbon [1]_ and below 1 A on gold foil with holes no
-        wider than 11 ice thicknesses [2]_.
+        The deflection's scale once the burst is over, in Angstrom: the
+        dome's central deflection, positive towards the volume's last z
+        slice, or the random deflection's root-mean-square value. Required
+        with a model. Measured central deflections are 150-250 A over holey
+        carbon [1]_ and below 1 A on gold foil with holes no wider than 11
+        ice thicknesses [2]_.
     hole_radius : float
-        Radius of the support hole in Angstrom. Default 6000.0, a 1.2 um
-        hole.
+        Radius of the support hole in Angstrom (``"dome"``). Default 6000.0,
+        a 1.2 um hole.
     hole_offset : tuple of float
         Centre of the hole relative to the volume's centre, ``(x, y)`` in
-        Angstrom. A tilt series images a patch of a hole, so this decides
-        whether the patch sees the dome's crown, its flank or its rim.
-        Default (0.0, 0.0).
+        Angstrom (``"dome"``). A tilt series images a patch of a hole, so
+        this decides whether the patch sees the dome's crown, its flank or
+        its rim. Default (0.0, 0.0).
+    correlation_length : float
+        Length over which the random deflection decorrelates, in Angstrom
+        (``"random"``). Default 10000.0, the middle of the 0.33-2.9 um
+        correlation lengths Zivanov et al. fitted to beam-induced motion
+        across three datasets [3]_.
     burst_dose : float
         Exposure in e-/A^2 over which the burst completes: the deflection is
         ``height * (1 - exp(-D / burst_dose))`` at an accumulated exposure
@@ -522,80 +532,51 @@ class Deformation:
     .. [2] Naydenova, K., Jia, P., & Russo, C. J. (2020). Cryo-EM with sub–1 Å
        specimen movement. *Science*, 370(6513), 223–226.
        https://doi.org/10.1126/science.abb7927
+    .. [3] Zivanov, J., Nakane, T., & Scheres, S. H. W. (2019). A Bayesian
+       approach to beam-induced motion correction in cryo-EM single-particle
+       analysis. *IUCrJ*, 6(1), 5–17.
+       https://doi.org/10.1107/S205225251801463X
     """
 
     model: DeformationModel | None = None
     height: float | None = None
     hole_radius: float = 6000.0
     hole_offset: tuple[float, float] = (0.0, 0.0)
+    correlation_length: float = 10000.0
     burst_dose: float = 2.0
 
     def __post_init__(self) -> None:
         if self.model == "none":
             object.__setattr__(self, "model", None)
-        if self.model not in (None, "dome"):
-            raise ValueError(f"model={self.model!r} must be 'dome' or None")
+        if self.model not in (None, "dome", "random"):
+            raise ValueError(f"model={self.model!r} must be 'dome', 'random' or None")
         if self.model is not None and self.height is None:
             raise ValueError(
-                "a deformation model needs its height: the central deflection "
+                "a deformation model needs its height: the deflection's scale "
                 "in Angstrom, which ranges from below 1 A to 250 A by support"
             )
         if self.hole_radius <= 0:
             raise ValueError(f"hole_radius={self.hole_radius} must be positive")
+        if self.correlation_length <= 0:
+            raise ValueError(
+                f"correlation_length={self.correlation_length} must be positive"
+            )
         if self.burst_dose <= 0:
             raise ValueError(f"burst_dose={self.burst_dose} must be positive")
         object.__setattr__(
             self, "hole_offset", tuple(float(v) for v in self.hole_offset)
         )
-        self.check_depth(0.0)
-
-    @property
-    def max_slope(self) -> float:
-        """
-        The steepest slope of the full deflection, ``|dw/dr|`` at
-        ``r = hole_radius / sqrt(3)``, in radians.
-        """
-        if self.model is None or self.height is None:
-            return 0.0
-        return 8.0 * abs(self.height) / (3.0 * 3.0**0.5 * self.hole_radius)
-
-    @property
-    def max_curvature(self) -> float:
-        """
-        The largest second derivative of the full deflection,
-        ``|d2w/dx2| = 8 height / hole_radius^2`` at the rim, in 1/Angstrom.
-        """
-        if self.model is None or self.height is None:
-            return 0.0
-        return 8.0 * abs(self.height) / self.hole_radius**2
-
-    def max_gradient(self, half_depth: float) -> float:
-        """
-        A bound on the displacement gradient over a specimen `half_depth`
-        Angstrom either side of its midplane: the slope plus the bending
-        strain at its faces.
-        """
-        return self.max_slope + half_depth * self.max_curvature
-
-    def check_depth(self, half_depth: float) -> None:
-        """
-        Refuse a bend the thin-plate kinematics cannot carry through a
-        specimen `half_depth` Angstrom either side of its midplane.
-
-        Raises
-        ------
-        ValueError
-            If `max_gradient` exceeds `MAX_DEFORMATION_GRADIENT`.
-        """
-        gradient = self.max_gradient(half_depth)
-        if gradient > MAX_DEFORMATION_GRADIENT:
-            raise ValueError(
-                f"height={self.height} A over hole_radius={self.hole_radius} A "
-                f"through a specimen {2 * half_depth:g} A deep gives a "
-                f"displacement gradient of up to {gradient:.3f}; the "
-                f"thin-plate kinematics hold to {MAX_DEFORMATION_GRADIENT}, "
-                "and measured domes over thin ice stay below 0.07"
-            )
+        if self.model == "dome" and self.height is not None:
+            # The steepest slope, at r = hole_radius / sqrt(3). The bending
+            # strain adds to it with the specimen's depth, which TiltSeries
+            # checks once it knows the depth.
+            slope = 8.0 * abs(self.height) / (3.0 * 3.0**0.5 * self.hole_radius)
+            if slope > MAX_DEFORMATION_GRADIENT:
+                raise ValueError(
+                    f"height={self.height} A over hole_radius={self.hole_radius} "
+                    f"A slopes by up to {slope:.3f}, a displacement gradient the "
+                    f"thin-plate kinematics hold to {MAX_DEFORMATION_GRADIENT}"
+                )
 
 
 @dataclass(frozen=True)

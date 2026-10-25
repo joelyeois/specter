@@ -121,8 +121,9 @@ CarbonEdgeSide = Literal["random", "left", "right", "top", "bottom"]
 TiltAxis = Literal["x", "y"]
 
 #: Shape of a specimen's beam-induced bending (`settings.Deformation`): a
-#: film over a support hole, clamped at the rim, or none.
-DeformationModel = Literal["dome", "none"]
+#: film over a support hole, clamped at the rim, a smooth random deflection, or
+#: none.
+DeformationModel = Literal["dome", "random", "none"]
 
 #: What an observed image's values mean, for a reconstruction: electron
 #: counts per pixel, or a stack normalised to zero mean and unit variance (a

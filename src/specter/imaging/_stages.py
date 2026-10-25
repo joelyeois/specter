@@ -331,6 +331,7 @@ SEED_STAGE_CROWD = 0
 SEED_STAGE_ICE = 1
 SEED_STAGE_DETECTOR = 2
 SEED_STAGE_SPECIMEN = 3
+SEED_STAGE_DEFORMATION = 4
 
 
 def packer_seed(item_seed: int, packing_seed: int | None) -> int:

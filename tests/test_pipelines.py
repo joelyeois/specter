@@ -685,3 +685,91 @@ def test_run_micrograph_writes_clean_exit_waves_without_ice(tmp_path: Path) -> N
         with mrcfile.open(tmp_path / f"micrographs_clean_exitwave_{part}.mrcs") as m:
             clean = m.data.copy()
         assert np.array_equal(wave, clean)
+
+
+def test_run_tilt_series_writes_the_bend_each_tilt_imaged(tmp_path: Path) -> None:
+    """
+    A deformed series writes its full deflection, the fraction of it each
+    tilt saw, and the specimen's picks moved per tilt, all in the frame the
+    bend is defined in; checked against the dome's formula evaluated here.
+    """
+    import json
+    import math
+
+    nz, n, dx = 16, 32, 4.0
+    height, radius, offset = 20.0, 400.0, (-60.0, 20.0)
+    volume_path = tmp_path / "volume.pt"
+    torch.save(torch.rand(nz, n, n) * 0.01, volume_path)
+    picks = tmp_path / "picks"
+    picks.mkdir()
+    origin = np.array([n // 2, n // 2, nz // 2]) * dx
+    at = origin + np.array([40.0, -12.0, 20.0])  # above the midplane, on the flank
+    row = {
+        "type": "orientedPoint",
+        "location": dict(zip("xyz", at.tolist(), strict=True)),
+        "xyz_rotation_matrix": np.eye(3).tolist(),
+        "path": [dict(zip("xyz", at.tolist(), strict=True))],
+    }
+    (picks / "thing-1.0_orientedPoint.ndjson").write_text(json.dumps(row) + "\n")
+    config = TiltSeriesConfig(
+        volume_path=str(volume_path),
+        voxel_size=dx,
+        n_tilts=3,
+        dose_per_tilt=1.0,
+        ice_model="none",
+        noise_model="none",
+        scattering_model="projection",
+        deformation_model="dome",
+        deformation_height=height,
+        deformation_hole_radius=radius,
+        deformation_hole_offset=list(offset),
+        deformation_picks_dir=str(picks),
+        seed=0,
+        device="cpu",
+        output_dir=str(tmp_path / "out"),
+        filename="ts",
+    )
+    run_tilt_series(config)
+    out = tmp_path / "out"
+
+    def dome(x: float, y: float) -> tuple[float, float, float]:
+        x, y = x - offset[0], y - offset[1]
+        q = max(1.0 - (x * x + y * y) / radius**2, 0.0)
+        return (
+            height * q * q,
+            -4 * height * q * x / radius**2,
+            -4 * height * q * y / radius**2,
+        )
+
+    with mrcfile.open(out / "ts_deflection.mrc") as m:
+        deflection = m.data[0].astype(np.float64)
+    iy, ix = 5, 22
+    expected = dome((ix - n // 2) * dx, (iy - n // 2) * dx)[0]
+    assert deflection[iy, ix] == pytest.approx(expected, rel=1e-5)
+
+    record = json.loads((out / "ts_deformation.json").read_text())
+    assert record["origin_voxel_zyx"] == [nz // 2, n // 2, n // 2]
+    for i, tilt in enumerate(record["tilts"]):
+        dose = i * 1.0 + 0.5
+        fraction = -math.expm1(-dose / 2.0)
+        assert tilt["fraction"] == pytest.approx(fraction)
+        moved = json.loads(
+            (out / "ts_picks" / f"tilt_{i:03d}" / "thing-1.0_orientedPoint.ndjson")
+            .read_text()
+            .splitlines()[0]
+        )
+        x, y, z = at - origin
+        w, w_x, w_y = dome(x, y)
+        truth = origin + np.array(
+            [x - fraction * z * w_x, y - fraction * z * w_y, z + fraction * w]
+        )
+        got = np.array([moved["location"][k] for k in "xyz"])
+        np.testing.assert_allclose(got, truth, atol=1e-6)
+        np.testing.assert_allclose(
+            [moved["path"][0][k] for k in "xyz"], truth, atol=1e-6
+        )
+        rotation = np.array(moved["xyz_rotation_matrix"])
+        # A vertical line turns with the slope: its top moves by -dw/dx per A.
+        np.testing.assert_allclose(
+            rotation[:2, 2], [-fraction * w_x, -fraction * w_y], rtol=1e-3
+        )

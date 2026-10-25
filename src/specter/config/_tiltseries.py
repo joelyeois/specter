@@ -17,9 +17,11 @@ from ._common_fields import (
     seed_setting,
 )
 from ._field import help_of, setting
+from ._scalar_range import ScalarOrRange
 from typing import Literal
 from specter.options import (
     AbsorptionModel,
+    DeformationModel,
     DetectorModel,
     DoseEnvelopeTarget,
     IceModel,
@@ -169,6 +171,71 @@ class TiltSeriesConfig:
         check="positive",
     )
     tilt_axis: TiltAxis = setting("y", help="Tilt axis.")
+
+    # --- Specimen deformation ---
+    # settings.Deformation, spelled with a `deformation_` prefix. Off by
+    # default: a rigid specimen, as every series before it.
+    deformation_model: DeformationModel = setting(
+        "none",
+        help=(
+            "Beam-induced bending of the specimen over the series: 'dome' (a film "
+            "over a circular support hole, clamped at its rim), 'random' (a smooth "
+            "random deflection with no support geometry, for a cell or a lamella), "
+            "or 'none'. Every point moves with the bent midplane as in a thin plate, "
+            "and each tilt sees the bend grown to the exposure it was recorded at."
+        ),
+    )
+    deformation_height: float | None = setting(
+        None,
+        help=(
+            "Scale of the bend once the burst is over, in Angstrom: the dome's "
+            "central deflection (positive towards the volume's last z slice) or "
+            "the random deflection's RMS. Required with a model. Measured: "
+            "150-250 A over holey carbon (Brilot et al. 2012), below 1 A on gold "
+            "foil with narrow holes (Naydenova et al. 2020)."
+        ),
+    )  # Å
+    deformation_hole_radius: float = setting(
+        6000.0,
+        help="deformation_model='dome' only: support hole radius in Angstrom.",
+        check="positive",
+    )  # Å
+    deformation_hole_offset: ScalarOrRange = setting(
+        0.0,
+        help=(
+            "deformation_model='dome' only: the hole's centre relative to the "
+            "volume's centre as 'x,y' in Angstrom ([x, y] in TOML). A tilt series "
+            "images a patch of a hole, so this decides whether it sees the "
+            "dome's crown, its flank or its rim."
+        ),
+    )  # Å, [x, y]
+    deformation_correlation_length: float = setting(
+        10000.0,
+        help=(
+            "deformation_model='random' only: length over which the deflection "
+            "decorrelates, in Angstrom. Default 1 um, within the 0.33-2.9 um "
+            "fitted to beam-induced motion (Zivanov et al. 2019)."
+        ),
+        check="positive",
+    )  # Å
+    deformation_burst_dose: float = setting(
+        2.0,
+        help=(
+            "Exposure in e-/Angstrom^2 over which the bend develops: the "
+            "deflection at accumulated exposure D is height * (1 - exp(-D / "
+            "burst_dose))."
+        ),
+        check="positive",
+    )  # e⁻/Å²
+    deformation_picks_dir: str | None = setting(
+        None,
+        help=(
+            "Directory of copick .ndjson picks for the specimen, e.g. `specter "
+            "build tomogram`'s output directory. Each pick file is written again "
+            "per tilt with the positions and orientations the bend gave its "
+            "particles at that tilt."
+        ),
+    )
 
     # --- Models ---
     scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = setting(

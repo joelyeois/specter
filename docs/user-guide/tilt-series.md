@@ -61,6 +61,15 @@ tomogram`](#chaining-with-specter-build-tomogram) below.
   or `none`), `detector_model` (`none`, `perfect`, `k3_300kv`, `k3_200kv`,
   `k2_300kv`, `falcon4i_300kv`, `falcon4i_200kv`, `falcon3ec_300kv`).
 
+- **Specimen deformation**: `deformation_model` (`none` default, `dome`,
+  or `random`) bends the specimen as the beam exposes it, and
+  `deformation_height` (Å) sets the bend's scale: the dome's central
+  deflection, or the random deflection's RMS. `deformation_hole_radius` and
+  `deformation_hole_offset` place a dome's support hole relative to the
+  field of view, `deformation_correlation_length` sets a random
+  deflection's length scale, and `deformation_burst_dose` (e⁻/Å²) how fast
+  either develops. See [Specimen deformation](../concepts/specimen-deformation.md).
+
 Everything else (envelopes, ice, output naming) lives under its own panel
 in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
 
@@ -126,6 +135,15 @@ writes the complex exit wave as two separate `.mrcs` files:
 `{filename}_exitwave_magnitude.mrcs`/`{filename}_exitwave_phase.mrcs` (or
 `clean_exitwave_*` when `ice_model="none"`). `normalize_tilt_series`
 zero-means and unit-normalizes each tilt image independently before saving.
+
+A deformed series also writes its ground truth: `{filename}_deflection.mrc`
+(the full midplane deflection in Å on the volume's xy grid) and
+`{filename}_deformation.json` (the parameters, the seed, the origin voxel,
+and per tilt the fraction of the bend it imaged). With
+`deformation_picks_dir` naming a directory of copick `.ndjson` picks, such
+as `specter build tomogram`'s output directory, each pick file is written
+again per tilt under `{filename}_picks/tilt_NNN/`, positions displaced and
+orientations turned by the bend.
 
 The CLI collects exit waves only when `save_exitwaves=true` and does not
 retain the additional noiseless image stack. In the Python API the three
@@ -271,6 +289,8 @@ same calls.
   [Aberrations](../concepts/aberrations.md),
   [Detector](../concepts/detector.md): the physics behind each stage.
 - [Ice structure](../concepts/ice.md): the `ice_model` options.
+- [Specimen deformation](../concepts/specimen-deformation.md): the
+  `deformation_*` options.
 
 ## References
 

@@ -31,6 +31,17 @@ max_tilt_angle = 45.0              # degrees
 n_tilts = 61
 tilt_axis = "y"                    # x | y
 
+[specimen_deformation]
+deformation_model = "none"         # none | dome | random -- beam-induced bending, grown
+                                   # with each tilt's exposure (thin-plate kinematics)
+# deformation_height = 150.0       # Å; dome: central deflection, random: RMS. Required
+                                   # with a model (150-250 Å holey carbon, <1 Å gold foil)
+# deformation_hole_radius = 6000.0         # Å, dome only (1.2 µm hole)
+# deformation_hole_offset = [-4000.0, 0.0] # Å, dome only: hole centre from the volume's centre
+# deformation_correlation_length = 10000.0 # Å, random only
+# deformation_burst_dose = 2.0     # e⁻/Å² over which the bend develops
+# deformation_picks_dir = "tomograms"      # copick .ndjson picks to move per tilt
+
 [absorption]
 absorption_model = "alpha"         # alpha | inelastic_mfp -- inelastic_mfp derives the
                                    # imaginary potential per material and sets alpha to 0

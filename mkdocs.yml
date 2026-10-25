@@ -135,6 +135,7 @@ nav:
               - Rytov: concepts/scattering/rytov.md
               - Other modes: concepts/scattering/other-modes.md
               - Frozen plasmon (inelastic): concepts/scattering/frozen-plasmon.md
+          - Specimen deformation: concepts/specimen-deformation.md
           - Aberrations: concepts/aberrations.md
           - Detector: concepts/detector.md
   - Reference:

@@ -38,7 +38,14 @@ from ..scattering import IterativeScattering
 from ..settings import Camera, Deformation, Ice, Optics, Propagation, TiltGeometry
 from . import _stages as stages
 from ._data import Exposure, Poses, settings_group
-from ._deformation import specimen_warp
+from ._deformation import (
+    Deflection,
+    burst_fraction,
+    deflection_field,
+    displace,
+    material_rotation,
+    specimen_warp,
+)
 from ._waves import ExitWave
 
 __all__ = [
@@ -255,6 +262,18 @@ class _TiltSolvent:
         self.spectrum.filter_into(ice, envelope)
         ice.mul_(self.free[0])
         return self.fit(ice[None])
+
+
+def _draw_deflection(
+    deformation: Deformation, half_width: float, voxel_size: float, seed: int | None
+) -> Deflection | None:
+    """A series' deflection over a footprint `half_width` A wide each way."""
+    generator = None
+    if seed is not None and deformation.model == "random":
+        generator = torch.Generator().manual_seed(
+            derive_seed(seed, 0, stages.SEED_STAGE_DEFORMATION)
+        )
+    return deflection_field(deformation, half_width, voxel_size, generator)
 
 
 class TiltSeries:
@@ -488,21 +507,20 @@ class TiltSeries:
         else:
             volume = blended
 
-        # The bend lifts the specimen by up to its height, so the volume
-        # gains that much vacuum above and below, or the material lifted past
-        # a face would be lost. Symmetric, so the midplane and the rotation
-        # centre stay where they were; the defocus shift is measured from the
-        # midplane to whichever face the volume has, so vacuum leaves every
-        # image unchanged.
+        # The bend is tabulated over the footprint the tilts sample, known
+        # once the volume is fitted to them, and lifts the specimen by up to
+        # its height, so the volume gains that much vacuum above and below,
+        # or the material lifted past a face would be lost. Symmetric, so
+        # the midplane and the rotation centre stay where they were; the
+        # defocus shift is measured from the midplane to whichever face the
+        # volume has, so vacuum leaves every image unchanged.
         self._half_depth = volume.shape[-3] * voxel_size / 2.0
-        deformation.check_depth(self._half_depth)
-        lift = (
-            0
-            if deformation.model is None or deformation.height is None
-            else math.ceil(abs(deformation.height) / voxel_size) + 1
-        )
+        self.deflection: Deflection | None = None
+        lift = 0
+        drawn = False
 
         def fit(v: torch.Tensor, log: bool = log) -> torch.Tensor:
+            nonlocal lift, drawn
             fitted, coverage = fit_volume_to_tilt(
                 v,
                 micrograph_size,
@@ -514,6 +532,17 @@ class TiltSeries:
                 log=log,
             )
             self.coverage = coverage
+            if not drawn:
+                drawn = True
+                self.deflection = _draw_deflection(
+                    deformation,
+                    max(fitted.shape[-2:]) * voxel_size / 2.0,
+                    voxel_size,
+                    seed,
+                )
+                if self.deflection is not None:
+                    self.deflection.check_depth(self._half_depth)
+                    lift = math.ceil(self.deflection.max_height / voxel_size) + 1
             if lift:
                 fitted = torch.nn.functional.pad(fitted, (0, 0, 0, 0, lift, lift))
             return fitted
@@ -705,6 +734,71 @@ class TiltSeries:
             self._warned_on_host = True
 
     # ------------------------------------------------------------------ #
+    # Deformation                                                          #
+    # ------------------------------------------------------------------ #
+
+    def bend_fraction(self, i: int) -> float:
+        """
+        The fraction of the specimen's full bend tilt `i` sees: the burst
+        reached at the middle of its exposure, its pre-exposure plus half
+        its dose. Zero for a rigid specimen.
+        """
+        if self.deflection is None:
+            return 0.0
+        dose = float(self.pre_exposure[i]) + float(self.doses[i]) / 2.0
+        return burst_fraction(dose, self.deformation.burst_dose)
+
+    def displaced(self, points: torch.Tensor, i: int) -> torch.Tensor:
+        """
+        Where the bend has carried specimen points by tilt `i`.
+
+        Parameters
+        ----------
+        points : torch.Tensor
+            ``(..., 3)`` positions in the undeformed specimen, ``(x, y, z)``
+            in Angstrom from voxel ``(nz // 2, ny // 2, nx // 2)`` of the
+            volume the series was built from, the rotation centre; the bend's
+            midplane is that voxel's z slice.
+        i : int
+            The tilt.
+
+        Returns
+        -------
+        torch.Tensor
+            The positions in the deformed specimen tilt `i` imaged, in the
+            same frame; `points` unchanged for a rigid specimen.
+        """
+        if self.deflection is None:
+            return points
+        return displace(
+            self.deflection, self.bend_fraction(i), points, self._half_depth
+        )
+
+    def rotation(self, points: torch.Tensor, i: int) -> torch.Tensor:
+        """
+        How the bend has turned the material at specimen points by tilt `i`.
+
+        Parameters
+        ----------
+        points : torch.Tensor
+            ``(..., 3)`` positions in the undeformed specimen, in the frame of
+            `displaced`.
+        i : int
+            The tilt.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(..., 3, 3)`` rotations, applied to a vector on the left: a
+            particle's template-to-specimen rotation ``R`` becomes
+            ``rotation @ R``. The identity for a rigid specimen.
+        """
+        if self.deflection is None:
+            eye = torch.eye(3, dtype=points.dtype, device=points.device)
+            return eye.expand(*points.shape[:-1], 3, 3)
+        return material_rotation(self.deflection, self.bend_fraction(i), points)
+
+    # ------------------------------------------------------------------ #
     # Scattering                                                           #
     # ------------------------------------------------------------------ #
 
@@ -752,10 +846,7 @@ class TiltSeries:
             self.voxel_size,
         )
         self.scattering.warp = specimen_warp(
-            self.deformation,
-            float(self.pre_exposure[i]) + float(self.doses[i]) / 2.0,
-            self.voxel_size,
-            self._half_depth,
+            self.deflection, self.bend_fraction(i), self.voxel_size, self._half_depth
         )
         if self.absorption is None:
             wave = self.scattering(volume, theta, slice_batchsize=slice_batchsize)

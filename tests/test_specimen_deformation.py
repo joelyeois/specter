@@ -16,7 +16,13 @@ import pytest
 import torch
 
 from specter.imaging import CTF, Exposure, Poses, Sample
-from specter.imaging._deformation import burst_fraction, specimen_warp
+from specter.imaging._deformation import (
+    RandomDeflection,
+    burst_fraction,
+    deflection_field,
+    displace,
+    specimen_warp,
+)
 from specter.settings import Deformation, Propagation
 
 NZ, NXY, PIXEL = 40, 96, 10.0
@@ -51,6 +57,15 @@ def _images(
         ),
     )
     return [torch.angle(series.scatter(i).pixels()[0]) for i in range(len(ANGLES))]
+
+
+def _warp(deformation: Deformation, half_depth: float = 200.0):
+    """The full bend's sampling map, in voxels of `PIXEL`."""
+    warp = specimen_warp(
+        deflection_field(deformation, 2000.0, PIXEL), 1.0, PIXEL, half_depth
+    )
+    assert warp is not None
+    return warp
 
 
 def _centroid(image: torch.Tensor, r: int = 10) -> torch.Tensor:
@@ -125,8 +140,7 @@ def test_the_weight_is_the_pull_back_jacobian(point: tuple[float, float, float])
     deformation = Deformation(
         model="dome", height=20.0, hole_radius=600.0, burst_dose=1e-3
     )
-    warp = specimen_warp(deformation, 100.0, PIXEL, 200.0)
-    assert warp is not None
+    warp = _warp(deformation)
     s = torch.tensor([point], dtype=torch.float64)
     _, weight = warp(s)
     eps = 1e-4
@@ -152,8 +166,7 @@ def test_the_film_does_not_tear_at_the_rim():
     deformation = Deformation(
         model="dome", height=30.0, hole_radius=radius, burst_dose=1e-3
     )
-    warp = specimen_warp(deformation, 100.0, PIXEL, 200.0)
-    assert warp is not None
+    warp = _warp(deformation)
     r = radius / PIXEL
     points = torch.tensor(
         [[r - 1e-3, 0.0, 15.0], [r + 1e-3, 0.0, 15.0]], dtype=torch.float64
@@ -210,9 +223,12 @@ def test_vacuum_above_and_below_leaves_a_defocused_image_unchanged():
 
 
 def test_a_rigid_specimen_samples_nothing_differently():
-    assert specimen_warp(Deformation(), 10.0, PIXEL, 200.0) is None
-    flat = Deformation(model="dome", height=0.0)
-    assert specimen_warp(flat, 10.0, PIXEL, 200.0) is None
+    assert deflection_field(Deformation(), 2000.0, PIXEL) is None
+    assert (
+        deflection_field(Deformation(model="dome", height=0.0), 2000.0, PIXEL) is None
+    )
+    dome = deflection_field(Deformation(model="dome", height=10.0), 2000.0, PIXEL)
+    assert specimen_warp(dome, 0.0, PIXEL, 200.0) is None
 
 
 @pytest.mark.parametrize(
@@ -222,8 +238,141 @@ def test_a_rigid_specimen_samples_nothing_differently():
         ({"model": "dome", "height": 600.0, "hole_radius": 1000.0}, "gradient"),
         ({"model": "dome", "height": 10.0, "burst_dose": 0.0}, "burst_dose"),
         ({"model": "wedge", "height": 10.0}, "model"),
+        ({"model": "random", "height": 10.0, "correlation_length": 0.0}, "corr"),
     ],
 )
 def test_deformation_refuses_what_it_cannot_model(kwargs: dict, match: str):
     with pytest.raises(ValueError, match=match):
         Deformation(**kwargs)
+
+
+def test_a_random_deflection_has_the_covariance_it_is_drawn_from():
+    """
+    Over many draws, the field's variance is ``rms^2`` and its correlation
+    at one correlation length is ``exp(-1/2)``; its slope variance per axis
+    is ``rms^2 / l^2``, as a squared-exponential covariance implies.
+    """
+    rms, length = 30.0, 1000.0
+    generator = torch.Generator().manual_seed(0)
+    w0, w1, slopes = [], [], []
+    for _ in range(400):
+        field = RandomDeflection(rms, length, 1000.0, PIXEL, generator)
+        x = torch.tensor([-500.0, 500.0], dtype=torch.float64)
+        w, w_x, _ = field(x, torch.zeros_like(x))
+        w0.append(w[0])
+        w1.append(w[1])
+        slopes.append(w_x[0])
+    w0, w1, slopes = torch.stack(w0), torch.stack(w1), torch.stack(slopes)
+    assert float(w0.std()) == pytest.approx(rms, rel=0.1)
+    correlation = float((w0 * w1).mean() / (w0.std() * w1.std()))
+    assert correlation == pytest.approx(math.exp(-0.5), abs=0.08)
+    assert float(slopes.std()) == pytest.approx(rms / length, rel=0.1)
+
+
+@pytest.mark.parametrize("point", [(20.0, 0.0, 6.0), (-31.0, 12.0, -8.0)])
+def test_a_random_bend_is_weighted_by_its_own_jacobian(
+    point: tuple[float, float, float],
+):
+    """
+    The random field's slope and curvature are tabulated from exact values
+    rather than differentiated from the tabulated deflection, so the weight
+    is the Jacobian of the smooth map. The map is differenced over half a
+    voxel, across several table cells: a narrower difference sees the
+    bilinear table's cell-local slope, ~1e-4 off. What remains, ~2e-5, is
+    the table's resolution; a wrong term would cost ~1e-3.
+    """
+    deformation = Deformation(
+        model="random", height=15.0, correlation_length=400.0, burst_dose=1e-3
+    )
+    field = deflection_field(
+        deformation, 1000.0, PIXEL, torch.Generator().manual_seed(3)
+    )
+    warp = specimen_warp(field, 1.0, PIXEL, 200.0)
+    assert warp is not None
+    s = torch.tensor([point], dtype=torch.float64)
+    _, weight = warp(s)
+    eps = 0.5
+    columns = []
+    for k in range(3):
+        step = torch.zeros(1, 3, dtype=torch.float64)
+        step[0, k] = eps
+        columns.append((warp(s + step)[0] - warp(s - step)[0])[0] / (2 * eps))
+    jacobian = torch.det(torch.stack(columns, dim=1))
+    assert float(weight[0]) == pytest.approx(float(jacobian), abs=5e-5)
+    assert abs(float(weight[0]) - 1.0) > 1e-3
+
+
+def test_the_sampling_map_inverts_the_displacement():
+    """`displace` is the forward map whose pull-back each tilt samples."""
+    field = deflection_field(
+        Deformation(model="random", height=20.0, correlation_length=500.0),
+        1000.0,
+        PIXEL,
+        torch.Generator().manual_seed(1),
+    )
+    assert field is not None
+    torch.manual_seed(0)
+    points = (torch.rand(50, 3, dtype=torch.float64) - 0.5) * torch.tensor(
+        [1200.0, 1200.0, 300.0], dtype=torch.float64
+    )
+    moved = displace(field, 0.7, points, 200.0)
+    warp = specimen_warp(field, 0.7, PIXEL, 200.0)
+    assert warp is not None
+    source, _ = warp(moved / PIXEL)
+    assert torch.allclose(source * PIXEL, points, atol=2e-2)
+    assert float((moved - points).norm(dim=-1).max()) > 5.0
+
+
+def test_a_bead_on_a_random_bend_lands_where_the_series_says():
+    """
+    Every tilt images the bead where `TiltSeries.displaced` puts it at that
+    tilt's exposure: the series' own ground truth agrees with its images.
+    The realization is the series' own, drawn from its seed.
+    """
+    deformation = Deformation(
+        model="random", height=12.0, correlation_length=500.0, burst_dose=4.0
+    )
+    start = torch.tensor([150.0, -100.0, 60.0])
+
+    def series(volume: torch.Tensor, deformation: Deformation, seed: int = 7):
+        return Sample.from_volume(volume, PIXEL).tilt_series(
+            Poses.tilt_series(ANGLES),
+            Exposure.tilt_series(DOSE, len(ANGLES)),
+            voltage=300.0,
+            micrograph_size=NXY,
+            deformation=deformation,
+            pad_volume=False,
+            log=False,
+            seed=seed,
+            propagation=Propagation(
+                scattering_model="projection", alpha=0.0, oversample=1, pad_fft=False
+            ),
+        )
+
+    bent = series(_bead(tuple(start.tolist())), deformation)
+    for i in range(len(ANGLES)):
+        moved = bent.displaced(start.double(), i)
+        assert float((moved - start).norm()) > 0.5  # 0.05 px of tolerance
+        image = torch.angle(bent.scatter(i).pixels()[0])
+        reference = series(_bead(tuple(moved.tolist())), Deformation())
+        expected = torch.angle(reference.scatter(i).pixels()[0])
+        assert torch.allclose(_centroid(image), _centroid(expected), atol=0.02), i
+    again = series(_bead(tuple(start.tolist())), deformation)
+    other = series(_bead(tuple(start.tolist())), deformation, seed=8)
+    assert torch.equal(again.displaced(start, 2), bent.displaced(start, 2))
+    assert not torch.equal(other.displaced(start, 2), bent.displaced(start, 2))
+
+
+def test_a_series_refuses_a_random_bend_too_steep_for_its_depth():
+    with pytest.raises(ValueError, match="gradient"):
+        Sample.from_volume(torch.zeros(1, NZ, NXY, NXY), PIXEL).tilt_series(
+            Poses.tilt_series([0.0]),
+            Exposure.tilt_series(DOSE, 1),
+            voltage=300.0,
+            micrograph_size=NXY,
+            deformation=Deformation(
+                model="random", height=100.0, correlation_length=200.0
+            ),
+            log=False,
+            seed=0,
+        )

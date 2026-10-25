@@ -12,5 +12,17 @@ Loading particle stack from particles.mrcs ...
   500 images  |  box 128×128  |  dtype torch.float32
 Starting reconstruction: 500 particles  |  box 128³  |  rytov  |  5 epochs  |  
 batch 3  |  GPU 0
+Converged solve: 4 iterations per half from the Adam maps (Adam half-map FSC 
+>Nyquist masked, 6.572 Å unmasked; mask: auto)
+Loading particle parameters from particles.cs ...
+  500 particles  |  300 kV  |  2.924 Å/px
+Loading particle stack from particles.mrcs ...
+  500 images  |  box 128×128  |  dtype torch.float32
+  starting volume: reconstructions/J001/volume_A_adam.mrc
+Loading particle parameters from particles.cs ...
+  500 particles  |  300 kV  |  2.924 Å/px
+Loading particle stack from particles.mrcs ...
+  500 images  |  box 128×128  |  dtype torch.float32
+  starting volume: reconstructions/J001/volume_B_adam.mrc
 ───────────────────────────────────── Done ─────────────────────────────────────
-  reconstructions/J001  |  57s
+  reconstructions/J001  |  2m 20s

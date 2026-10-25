@@ -280,8 +280,8 @@ model as `--fsc_ref`:
 ///caption
 The model the stack was simulated from and the average of the two
 half-maps, each projected along z, with the FSC curves up to the 5.85 Å
-Nyquist frequency. After five epochs on 500 particles per half, the
-half-maps correlate to 0.143 (Rosenthal & Henderson 2003) at 6.6 Å, the
+Nyquist frequency. After five epochs on 500 particles per half and the
+converged solve, the half-maps correlate to 0.143 (Rosenthal & Henderson 2003) at 6.5 Å, the
 `resolution_gold_standard` that `job.json` records, and the average of the
 halves correlates with the model to 0.5 at 6.6 Å.
 ///

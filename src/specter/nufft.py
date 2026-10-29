@@ -162,6 +162,23 @@ def clear_plan_cache() -> None:
     _PLANS.clear()
 
 
+#: Device memory one stacked plan's oversampled grids may take (see `_stack_size`).
+_STACK_BYTES = 2**30
+
+
+def _stack_size(n: int, shape: tuple[int, ...], double: bool) -> int:
+    """
+    Grids per execute for a stack of `n`: the power of two at or above it.
+
+    A power of two keeps the plans a changing stack size builds to a few per
+    shape; it is capped so that the plan's oversampled grids stay within
+    `_STACK_BYTES`, which for a volume means one at a time.
+    """
+    k = 1 << max(n - 1, 0).bit_length()
+    cap = max(1, _STACK_BYTES // _plan_bytes(shape, double))
+    return min(k, 1 << (cap.bit_length() - 1))
+
+
 def _plan_bytes(shape: tuple[int, ...], double: bool) -> int:
     """Device memory of one plan's oversampled grid."""
     n = 1
@@ -171,7 +188,12 @@ def _plan_bytes(shape: tuple[int, ...], double: bool) -> int:
 
 
 def _cached_plan(
-    kind: int, shape: tuple[int, ...], double: bool, device: torch.device, eps: float
+    kind: int,
+    shape: tuple[int, ...],
+    double: bool,
+    device: torch.device,
+    eps: float,
+    n_trans: int = 1,
 ) -> tuple[Any, bool]:
     """
     The cached FINUFFT plan for one transform type, shape, precision and device.
@@ -179,11 +201,15 @@ def _cached_plan(
     Returns the plan and whether it runs on the GPU. A CUDA device falls back to
     a CPU plan, with a warning, only when cuFINUFFT cannot be loaded at all; a
     plan that cannot be created on a working GPU is an out-of-memory error.
+    `n_trans` is the number of grids a GPU plan transforms per execute, at the
+    same points; CPU plans always take one.
     """
     gpu = device.type == "cuda"
     if gpu and not _cufinufft_loads():
         gpu = False
-    key = (kind, shape, double, gpu, device.index if gpu else None, eps)
+    if not gpu:
+        n_trans = 1
+    key = (kind, shape, double, gpu, device.index if gpu else None, eps, n_trans)
     if key in _PLANS:
         return _PLANS[key], gpu
     dtype = "complex128" if double else "complex64"
@@ -210,7 +236,7 @@ def _cached_plan(
         torch.cuda.empty_cache()
         try:
             _PLANS[key] = cufinufft.Plan(
-                kind, shape, gpu_device_id=device.index or 0, **kwargs
+                kind, shape, n_trans, gpu_device_id=device.index or 0, **kwargs
             )
             return _PLANS[key], True
         except RuntimeError as err:
@@ -218,7 +244,7 @@ def _cached_plan(
                 raise torch.OutOfMemoryError(
                     f"cuFINUFFT could not create a type-{kind} plan for a "
                     f"{shape} grid on {device} ({err}); it needs "
-                    f"{_plan_bytes(shape, double) / 2**30:.1f} GiB of free device "
+                    f"{n_trans * _plan_bytes(shape, double) / 2**30:.1f} GiB of free device "
                     "memory beyond what torch holds"
                 ) from err
             for other in [k for k in _PLANS if k[3] and k[4] == key[4]]:
@@ -259,16 +285,30 @@ def _execute(
     ``values`` may carry leading batch dimensions (before the grid for a
     type 2, before the M samples for a type 1): every item is transformed at
     the same points, which are set once, since sorting them costs more than
-    a transform (2.6 against 1.8 ms for a 432^2 image).
+    a transform (2.6 against 1.8 ms for a 432^2 image). On the GPU the items
+    also go through one execute per `_stack_size` of them, not one each:
+    cuFINUFFT's per-execute setup costs ~1.5 ms of host time, which one per
+    image made most of a converged-solver pass on EMPIAR-13202, whose
+    batches, in file order, hold a few anisomag groups of ~40 images each.
     """
     double = values.dtype == torch.complex128
-    plan, gpu = _cached_plan(kind, shape, double, values.device, eps)
     core = len(shape) if kind == 2 else 1
     batch = values.shape[: values.ndim - core]
     flat = values.reshape(-1, *values.shape[values.ndim - core :])
+    k = _stack_size(len(flat), shape, double)
+    plan, gpu = _cached_plan(kind, shape, double, values.device, eps, k)
     if gpu:
         plan.setpts(*pts)
-        out = torch.stack([plan.execute(v.contiguous()) for v in flat])
+        if k == 1:
+            out = torch.stack([plan.execute(v.contiguous()) for v in flat])
+        else:
+            parts = []
+            for chunk in flat.split(k):
+                n = len(chunk)
+                if n < k:  # the plan's fixed stack size; zero grids transform to zero
+                    chunk = torch.cat([chunk, chunk.new_zeros(k - n, *chunk.shape[1:])])
+                parts.append(plan.execute(chunk.contiguous())[:n])
+            out = torch.cat(parts)
     else:
         p = pts.cpu().numpy()
         plan.setpts(*p)

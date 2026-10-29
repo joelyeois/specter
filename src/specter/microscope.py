@@ -42,6 +42,79 @@ from specter.options import AberrationModel, NoiseModel
 # arriving electron. Sparse frames and tiny radii retain the sorting path.
 _COINCIDENCE_MAX_DENSE_CELLS = 2**20
 
+#: Cost of one anisomag group's 2D transform relative to one image of the
+#: batched 3D transform: a group's setpts-and-execute costs ~3 ms however few
+#: images it holds, the 3D transform ~1 ms per image (300 px, H100). A batch
+#: with more groups than images / 3 takes the batched path.
+_ANISOMAG_GROUP_COST = 3
+
+#: Accuracy of the batched anisomag transform. In single precision 1e-5 matches
+#: the per-group transform's accuracy at 1e-6 (2.9e-5 against 2.3e-5 of a
+#: float64 reference) and is faster; double precision is for references.
+_ANISOMAG_BATCHED_EPS = {torch.float32: 1e-5, torch.float64: 1e-12}
+
+
+def _warp_grouped(
+    coeffs: torch.Tensor,
+    groups: torch.Tensor,
+    which: torch.Tensor,
+    pix: torch.Tensor,
+    c: torch.Tensor,
+    box: torch.Tensor,
+) -> torch.Tensor:
+    """
+    `Detector.anisomagnify`'s warp as one 2D transform per distinct matrix.
+
+    Images sharing a matrix share their sample points, which are set once
+    for the group.
+    """
+    from .nufft import sample_transform
+
+    B, H, W = coeffs.shape
+    out = torch.empty(B, H, W, device=coeffs.device, dtype=pix.dtype)
+    for g, flat_matrix in enumerate(groups):
+        idx = (which == g).nonzero().flatten()
+        u = pix @ flat_matrix.reshape(2, 2).T + c  # where each output pixel samples
+        # sum_m F[m] exp(+2 pi i m . u / box) is the transform at -u / box,
+        # which is 1-periodic: wrapped into [-1/2, 1/2) for the NUFFT.
+        q = -u / box
+        vals = sample_transform(coeffs[idx], q - torch.round(q))
+        out[idx] = vals.real.reshape(-1, H, W) / (H * W)
+    return out
+
+
+def _warp_batched(
+    coeffs: torch.Tensor,
+    A: torch.Tensor,
+    pix: torch.Tensor,
+    c: torch.Tensor,
+    box: torch.Tensor,
+) -> torch.Tensor:
+    """
+    `Detector.anisomagnify`'s warp as one 3D transform over (image, y, x).
+
+    The batch is padded to a power of two P, so that a changing batch size
+    reuses a few cached plans. Along that axis the coefficients are replaced
+    by their centred DFT divided by P; the transform at z-frequency ``-b / P``
+    then sums them back to image ``b``'s own coefficients, exactly, and its
+    (x, y) frequencies are that image's warped sample points.
+    """
+    from .nufft import sample_transform
+
+    B, H, W = coeffs.shape
+    dtype, device = pix.dtype, pix.device
+    P = 1 << max(B - 1, 0).bit_length()
+    padded = torch.nn.functional.pad(coeffs, (0, 0, 0, 0, 0, P - B))
+    grid = torch.fft.fftshift(torch.fft.fft(padded, dim=0), dim=0) / P
+    u = torch.einsum("pj,bij->bpi", pix, A) + c  # (B, H W, 2)
+    q = -u / box
+    q = q - torch.round(q)
+    qz = -torch.arange(B, device=device, dtype=dtype) / P
+    qz = (qz - torch.round(qz))[:, None, None].expand(B, H * W, 1)
+    freqs = torch.cat([q, qz], dim=-1).reshape(-1, 3)
+    vals = sample_transform(grid, freqs, eps=_ANISOMAG_BATCHED_EPS[dtype])
+    return vals.real.reshape(B, H, W) / (H * W)
+
 
 class Detector(L.LightningModule):
     """
@@ -263,6 +336,18 @@ class Detector(L.LightningModule):
         replacing it moved Ghostbuster's half-map resolution from 1.660 to
         1.616 A, and on EMPIAR-12391 from 2.221 to 2.185 A.
 
+        Images that share a matrix share their sample points, so each such
+        group is one 2D transform. A batch whose images carry many matrices
+        (CryoSPARC refines one per exposure group: 226 in a batch of 256 on
+        EMPIAR-13202) is instead one 3D transform over (image, y, x), which
+        is the same sum: a DFT along the batch axis makes the image index a
+        frequency, and evaluating at ``-b / B`` reads out image ``b`` exactly.
+        That replaces a setpts-and-execute per group, whose fixed cost
+        dominated the step, with one per batch: 262 ms against 689 ms forward
+        plus backward for that batch on an H100, at the same accuracy
+        (2.9e-5 against 2.3e-5 of a float64 reference). Its cost is per
+        image rather than per group, so few groups keep the 2D transforms.
+
         The interpolant is periodic, so what the warp moves past one edge of
         the box re-enters at the other. Sampling the image's discrete-space
         transform at ``A^-T k`` instead would treat the image as zero outside
@@ -278,8 +363,6 @@ class Detector(L.LightningModule):
            sets in *RELION*-3.1. *IUCrJ*, 7(2), 253–267.
            https://doi.org/10.1107/S2052252520000081
         """
-        from .nufft import sample_transform
-
         with torch.autocast(images.device.type, enabled=False):
             x = images if images.dtype == torch.float64 else images.float()
             dtype, device = x.dtype, x.device
@@ -301,20 +384,11 @@ class Detector(L.LightningModule):
             A = anisomag.to(device=device, dtype=dtype)
             A = D[:, None] * A / D[None, :]
             box = torch.tensor([W, H], device=device, dtype=dtype)
-            # Images sharing a matrix (one optics group, as a rule) share their
-            # sample points, which are set once for the group.
             groups, which = torch.unique(A.reshape(-1, 4), dim=0, return_inverse=True)
-            out = torch.empty_like(x)
-            for g, flat_matrix in enumerate(groups):
-                idx = (which == g).nonzero().flatten()
-                u = (
-                    pix @ flat_matrix.reshape(2, 2).T + c
-                )  # where each output pixel samples
-                # sum_m F[m] exp(+2 pi i m . u / box) is the transform at -u / box,
-                # which is 1-periodic: wrapped into [-1/2, 1/2) for the NUFFT.
-                q = -u / box
-                vals = sample_transform(coeffs[idx], q - torch.round(q))
-                out[idx] = vals.real.reshape(-1, H, W) / (H * W)
+            if len(groups) * _ANISOMAG_GROUP_COST > x.shape[0]:
+                out = _warp_batched(coeffs, A, pix, c, box)
+            else:
+                out = _warp_grouped(coeffs, groups, which, pix, c, box)
             return (out + mean).to(images.dtype)
 
     def add_mtf(self, images: torch.Tensor, mtf: torch.Tensor) -> torch.Tensor:

@@ -119,3 +119,48 @@ def test_a_batch_warps_each_image_by_its_own_matrix() -> None:
     together = det.anisomagnify(x, A)
     alone = torch.cat([det.anisomagnify(x[i : i + 1], A[i : i + 1]) for i in range(4)])
     assert torch.allclose(together, alone, atol=1e-10)
+
+
+def _many_matrices(n: int, dtype: torch.dtype) -> torch.Tensor:
+    """n distinct matrices of a few tenths of a percent, as per-exposure-group refinement gives."""
+    g = torch.Generator().manual_seed(2)
+    return (
+        torch.eye(2, dtype=torch.float64)
+        + 0.004 * torch.randn(n, 2, 2, generator=g, dtype=torch.float64)
+    ).to(dtype)
+
+
+@pytest.mark.parametrize("dtype, tol", [(torch.float32, 1e-4), (torch.float64, 1e-9)])
+def test_the_batched_transform_matches_one_transform_per_matrix(
+    dtype: torch.dtype, tol: float
+) -> None:
+    """Many matrices take one 3D transform over (image, y, x); it gives every image its own warp.
+
+    Six images pad to a batch axis of eight, so the padding is exercised too.
+    """
+    g = torch.Generator().manual_seed(3)
+    x = (
+        (10 + torch.randn(6, 48, 40, generator=g, dtype=torch.float64))
+        .to(dtype)
+        .to(DEVICE)
+    )
+    A = _many_matrices(6, dtype).to(DEVICE)
+    det = _detector()
+    batched = det.anisomagnify(x, A)  # 6 groups in 6 images: the batched path
+    alone = torch.cat([det.anisomagnify(x[i : i + 1], A[i : i + 1]) for i in range(6)])
+    fluct = alone - alone.mean()
+    assert float((batched - alone).norm() / fluct.norm()) < tol
+
+
+def test_the_batched_transform_has_a_consistent_adjoint() -> None:
+    g = torch.Generator().manual_seed(4)
+    x = (
+        torch.randn(5, 32, 32, generator=g, dtype=torch.float64)
+        .to(DEVICE)
+        .requires_grad_(True)
+    )
+    r = torch.randn(5, 32, 32, generator=g, dtype=torch.float64).to(DEVICE)
+    y = _detector().anisomagnify(x, _many_matrices(5, torch.float64).to(DEVICE))
+    (gx,) = torch.autograd.grad((y * r).sum(), x)
+    lhs, rhs = float((y * r).sum()), float((x * gx).sum())
+    assert abs(lhs - rhs) < 1e-8 * max(abs(lhs), 1.0)

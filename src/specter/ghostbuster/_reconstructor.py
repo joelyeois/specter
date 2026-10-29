@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler
 
+from .. import nufft
 from ..imaging import CTF, Exposure, Poses, Specimen
 from ..plots import (
     HALFMAP_FSC_THRESHOLD,
@@ -27,6 +28,7 @@ from ..plots import (
 )
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
+from ._converge import ADJOINT_TOLERANCE
 from ._io import (
     save_fsc_figure,
     save_halfmap_fsc_figure,
@@ -559,7 +561,12 @@ class Reconstructor(_BaseReconstructor):
             Scalar loss for the current batch.
         """
         loss, _, _ = self._common_step(batch, batch_idx)
-        self._optimise(loss)
+        # The NUFFT adjoints of the backward (surface sampling, anisomag warp)
+        # at the converged solver's tolerance: on EMPIAR-13202 100 kV the 3D
+        # spreading was 66% of an Adam step's GPU time at 1e-6, and 1e-4 made
+        # the step 1.4x faster.
+        with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
+            self._optimise(loss)
         return loss
 
     def _metrics_path_suffix(self) -> str:

@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-import mrcfile
 import numpy as np
 import pandas as pd
 import roma
@@ -16,6 +15,7 @@ import starfile
 import torch
 from rich.console import Console
 
+from ._mrc import write_mrc
 from ._common import _select_particles, _uniform_scalar
 
 _console = Console()
@@ -477,10 +477,7 @@ def create_particle_starfile(
 
     # create projections mrcs file
     mrcs_path = os.path.join(output_dir, filename + ".mrcs")
-    with mrcfile.new(mrcs_path, overwrite=True) as mrc:
-        mrc.set_data(particles.numpy().astype(np.float32))
-        if dx is not None:
-            mrc.voxel_size = dx
+    write_mrc(mrcs_path, particles, dx)
 
     _console.print(f"  [green]✓[/green] {mrcs_path}")
 

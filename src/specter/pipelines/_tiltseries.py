@@ -28,7 +28,7 @@ from specter.config._scalar_range import parse_scalar_or_range
 from specter.imaging import CTF, Exposure, Poses, Sample, TiltSeries
 from specter.imaging._stages import SEED_STAGE_SPECIMEN, read_dose_weights
 from specter.random_seed import derive_seed
-from specter.io import create_micrograph_starfile
+from specter.io import create_micrograph_starfile, write_mrc
 from specter.specimen import load_specimen_volume
 
 from specter.devices import parse_device, resolve_available_device
@@ -297,15 +297,12 @@ def run_tilt_series(
 
     # --- Saving ---
     section("Saving")
-    import mrcfile
 
     with _tracked_output_dir(config, "tiltseries") as output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
         mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
-        with mrcfile.new(mrcs_path, overwrite=True) as mrc:
-            mrc.set_data(images.numpy().astype("float32"))
-            mrc.voxel_size = dx
+        write_mrc(mrcs_path, images, dx)
         console.print(f"  [green]✓[/green] {mrcs_path}")
 
         ctf_params_broadcast = {
@@ -369,7 +366,6 @@ def _save_deformation_truth(
     midplane; a pick file's corner-relative location ``i * voxel_size`` is
     shifted by that voxel's.
     """
-    import mrcfile
 
     nz, ny, nx = shape
     dx = config.voxel_size
@@ -381,9 +377,7 @@ def _save_deformation_truth(
     gy, gx = torch.meshgrid(y, x, indexing="ij")
     w = deflection(gx, gy)[0]
     map_path = os.path.join(output_dir, config.filename + "_deflection.mrc")
-    with mrcfile.new(map_path, overwrite=True) as mrc:
-        mrc.set_data(w.numpy().astype("float32")[None])
-        mrc.voxel_size = dx
+    write_mrc(map_path, w[None], dx)
     console.print(f"  [green]✓[/green] {map_path}")
 
     d = series.deformation

@@ -32,6 +32,7 @@ import torch.nn.functional as F
 import lightning as L
 
 from .aberrations import FocalSpread
+from .arrays import center_crop
 from .fft import fft2, ifft2
 from .scattering._kernels import fourier_crop_xy
 from .progress import track
@@ -500,15 +501,7 @@ class Detector(L.LightningModule):
 
         # Crop if needed
         if nxy != images.shape[2]:
-            H, W = images.shape[1], images.shape[2]
-            cy, cx = H // 2, W // 2
-
-            half = nxy // 2
-            images = images[
-                :,
-                cy - half : cy + half + (nxy % 2),
-                cx - half : cx + half + (nxy % 2),
-            ]
+            images = center_crop(images, nxy, dim=(-2, -1))
 
         # Apply anisomagnification
         if anisomag is not None:

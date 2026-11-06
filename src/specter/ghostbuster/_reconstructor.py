@@ -13,12 +13,12 @@ from pathlib import Path
 from dataclasses import asdict, replace
 from typing import Any
 
-import mrcfile
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler
 
+from ..io import read_mrc
 from .. import nufft
 from ..imaging import CTF, Exposure, Poses, Specimen
 from ..plots import MAP_TO_MODEL_FSC_THRESHOLD, FSCCurve, fsc_curve
@@ -282,9 +282,9 @@ class Reconstructor(_BaseReconstructor):
     ) -> None:
         """Load fsc_ref/fsc_mask/cryosparc_ref from file paths, if given, and store them."""
         if isinstance(fsc_ref, (str, Path)):
-            fsc_ref = torch.as_tensor(mrcfile.read(str(fsc_ref)))
+            fsc_ref = read_mrc(fsc_ref)[0]
         if isinstance(fsc_mask, (str, Path)):
-            fsc_mask = torch.as_tensor(mrcfile.read(str(fsc_mask)))
+            fsc_mask = read_mrc(fsc_mask)[0]
         if isinstance(fsc_mask, torch.Tensor):
             self.register_buffer("fsc_mask", fsc_mask)
         else:
@@ -292,7 +292,7 @@ class Reconstructor(_BaseReconstructor):
         self.fsc_ref = fsc_ref
 
         if isinstance(cryosparc_ref, (str, Path)):
-            cryosparc_ref = torch.as_tensor(mrcfile.read(str(cryosparc_ref)))
+            cryosparc_ref = read_mrc(cryosparc_ref)[0]
         self.cryosparc_ref = cryosparc_ref
 
     def _register_volume(self, V: torch.Tensor, lr: float | None) -> None:
@@ -826,8 +826,8 @@ class Reconstructor(_BaseReconstructor):
 
         try:
             own_path = epochs_dir / f"{epoch:03d}_{self._halfset_label}.mrc"
-            own = torch.as_tensor(mrcfile.read(str(own_path)).copy())
-            sib = torch.as_tensor(mrcfile.read(str(sibling_path)).copy())
+            own, _ = read_mrc(own_path)
+            sib, _ = read_mrc(sibling_path)
             # Keep A first regardless of which worker got here second. The FSC
             # is symmetric, so this is for the figure's labelling, not the number.
             volume_a, volume_b = (

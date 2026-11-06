@@ -10,7 +10,6 @@ from specter import logger
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import mrcfile
 import torch
 
 if TYPE_CHECKING:
@@ -19,25 +18,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Volume/figure saving helpers shared by Reconstructor and TomogramReconstructor
 # ---------------------------------------------------------------------------
-
-
-def save_volume_mrc(path: Path, v: torch.Tensor, voxel_size: float) -> None:
-    """
-    Save a reconstructed volume as an MRC file.
-
-    Parameters
-    ----------
-    path : Path
-        Output ``.mrc`` file path.
-    v : torch.Tensor
-        Volume, shape ``(Z, Y, X)``. Moved to CPU/float32 if not already.
-    voxel_size : float
-        Voxel size in Å, written into the MRC header.
-    """
-    v = v.detach().cpu().float()
-    with mrcfile.new(str(path), overwrite=True) as mrc:
-        mrc.set_data(v.numpy())
-        mrc.voxel_size = voxel_size
 
 
 def save_plot3d_preview(path: Path, v: torch.Tensor, title: str) -> None:

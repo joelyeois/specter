@@ -25,7 +25,7 @@ from ._helpers import (
     _kmask_half_spectrum,
     _log_current_lr,
 )
-from ._io import save_volume_mrc
+from ..io import write_mrc
 from specter.options import Scheduler
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ class _BaseReconstructor(L.LightningModule):
 
     def _save_volume(self, v: torch.Tensor, path: Path) -> None:
         """Write ``v`` as an MRC at this module's voxel size."""
-        save_volume_mrc(path, v, self.voxel_size)
+        write_mrc(path, v, self.voxel_size)
 
     def reciprocal_lr_scheduler(self, *args: Any) -> float:
         """

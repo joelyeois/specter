@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from specter.arrays import (
+    center_crop,
     soft_voxelize_coordinates,
     soft_voxelize_xy_coordinates,
     tile_volume_from_blocks_blended,
@@ -171,3 +172,15 @@ def test_a_cpu_splat_adds_duplicates_in_a_fixed_order():
     assert torch.equal(volumes[0], volumes[1])
     assert torch.equal(volumes[1], volumes[2])
     assert torch.equal(transposed.transpose(0, 2), volumes[0])
+
+
+@pytest.mark.parametrize("length", [9, 10])
+@pytest.mark.parametrize("size", [3, 4])
+def test_center_crop_keeps_the_fftshift_centre(length: int, size: int) -> None:
+    """Index ``L // 2`` lands at ``size // 2`` for every parity pair, including
+    an even axis cropped to an odd size, where a ``(L - size) // 2`` start puts
+    it one index off. The detector and the inelastic forward model crop with it."""
+    x = torch.arange(length * length, dtype=torch.float32).reshape(length, length)
+    crop = center_crop(x, size)
+    assert crop.shape == (size, size)
+    assert crop[size // 2, size // 2] == x[length // 2, length // 2]

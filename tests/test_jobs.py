@@ -243,11 +243,12 @@ def test_job_log_merges(tmp_path: Path) -> None:
 def test_job_save_mrc(tmp_path: Path) -> None:
     tensor = torch.ones(8, 8, 8)
     with Job("ghostbuster", project="p", base_dir=tmp_path) as job:
-        out = job.save(tensor, "vol.mrc")
+        out = job.save(tensor, "vol.mrc", voxel_size=1.25)
     assert out.exists()
     with mrcfile.open(str(out)) as mrc:
         assert mrc.data.shape == (8, 8, 8)
         assert np.allclose(mrc.data, 1.0)
+        assert float(mrc.voxel_size.x) == 1.25
 
 
 def test_job_save_pt(tmp_path: Path) -> None:

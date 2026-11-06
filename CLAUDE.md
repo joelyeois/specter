@@ -275,6 +275,7 @@ src/specter/                  # Main source package
     _cryosparc.py             # extract_parameters_from_csfile() — reads CryoSPARC .cs files
     _relion.py                # RELION .star read/write: extract_parameters_from_starfile(), create_particle_starfile(), create_micrograph_starfile()
     _common.py                # _select_particles() — shared per-particle mask/truncate helper for both backends
+    _mrc.py                   # write_mrc()/read_mrc() — whole-file MRC I/O with the voxel size (memory-mapped stacks use mrcfile directly)
   jobs/                       # Job management and persistence; jobs/_cli.py's build_jobs_group() is wired
                               # into cli/_cli.py as `specter jobs`
     _job.py                   # Job class

@@ -371,7 +371,9 @@ class Job:
 
         return cls(**arguments)
 
-    def save(self, tensor: torch.Tensor, filename: str) -> Path:
+    def save(
+        self, tensor: torch.Tensor, filename: str, voxel_size: float | None = None
+    ) -> Path:
         """
         Save a tensor to the job folder.
 
@@ -381,15 +383,16 @@ class Job:
             Data to save.
         filename : str
             Target filename. ``.mrc``/``.mrcs`` use mrcfile; ``.pt`` uses torch.save.
+        voxel_size : float, optional
+            Voxel size in Å for an MRC header; without it the header says 1 Å.
         """
-        import mrcfile  # type: ignore[import-untyped]
         import torch
 
         path = self.dir / filename
         if filename.endswith((".mrc", ".mrcs")):
-            data = tensor.cpu().numpy()
-            with mrcfile.new(str(path), overwrite=True) as mrc:
-                mrc.set_data(data)
+            from ..io import write_mrc
+
+            write_mrc(path, tensor, voxel_size)
         elif filename.endswith(".pt"):
             torch.save(tensor, path)
         else:

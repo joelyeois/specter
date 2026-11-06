@@ -12,6 +12,7 @@ from typing import Any, Iterator
 import torch
 
 import specter
+from specter.arrays import center_crop
 from specter.progress import console, format_elapsed
 from specter.config import (
     default_output_dir,
@@ -290,16 +291,6 @@ def _print_total_time(t_start: float) -> None:
     console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
 
 
-def _crop_center(t: torch.Tensor, nxy: int) -> torch.Tensor:
-    """Center-crop a (..., H, W) tensor to (..., nxy, nxy). Matches Detector.forward crop."""
-    H, W = t.shape[-2], t.shape[-1]
-    if H == nxy and W == nxy:
-        return t
-    cy, cx = H // 2, W // 2
-    half = nxy // 2
-    return t[..., cy - half : cy + half + (nxy % 2), cx - half : cx + half + (nxy % 2)]
-
-
 class _HostStack:
     """Copy batches into one CPU stack without retaining or concatenating them."""
 
@@ -346,18 +337,14 @@ def _save_exitwave_pair(
     Save an exit-wave tensor's magnitude and phase as separate .mrcs files,
     with `pixel_size` (Angstrom) in each header.
     """
-    import mrcfile
+    from specter.io import write_mrc
 
     if pad_fft:
-        ew = _crop_center(ew, n_pixels)
+        ew = center_crop(ew, n_pixels, dim=(-2, -1))
     os.makedirs(output_dir, exist_ok=True)
     mag_path = os.path.join(output_dir, f"{filename}_{suffix}_magnitude.mrcs")
     phase_path = os.path.join(output_dir, f"{filename}_{suffix}_phase.mrcs")
-    with mrcfile.new(mag_path, overwrite=True) as mrc:
-        mrc.set_data(ew.abs().numpy().astype("float32"))
-        mrc.voxel_size = pixel_size
+    write_mrc(mag_path, ew.abs(), pixel_size)
     console.print(f"  [green]✓[/green] {mag_path}")
-    with mrcfile.new(phase_path, overwrite=True) as mrc:
-        mrc.set_data(ew.angle().numpy().astype("float32"))
-        mrc.voxel_size = pixel_size
+    write_mrc(phase_path, ew.angle(), pixel_size)
     console.print(f"  [green]✓[/green] {phase_path}")

@@ -27,7 +27,7 @@ from specter.ice import IceProfile, resolve_icemaker
 from specter.imaging import CTF, Exposure, Field
 from specter.imaging._data import sample_uniform
 from specter.imaging._stages import read_dose_weights
-from specter.io import create_micrograph_starfile
+from specter.io import create_micrograph_starfile, write_mrc
 from specter.pdb import PDB
 from specter.potential import PotentialBuilder, molecular_mass_from_atoms
 from specter.devices import resolve_available_device
@@ -326,14 +326,11 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # --- Saving ---
     section("Saving .mrcs + .star")
-    import mrcfile
 
     with _tracked_output_dir(config, "micrographs") as output_dir:
         os.makedirs(output_dir, exist_ok=True)
         mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
-        with mrcfile.new(mrcs_path, overwrite=True) as mrc:
-            mrc.set_data(images_t.numpy().astype("float32"))
-            mrc.voxel_size = config.pixel_size
+        write_mrc(mrcs_path, images_t, config.pixel_size)
         console.print(f"  [green]✓[/green] {mrcs_path}")
 
         create_micrograph_starfile(

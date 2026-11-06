@@ -9,6 +9,7 @@ from torch import nn
 
 from specter.scattering import IterativeScattering
 from specter.scattering._kernels import fourier_crop_xy
+from specter.arrays import center_crop
 from specter.microscope import Detector
 from ._exposure import ExposureStep, exposure_steps
 from ._specimen import PotentialState
@@ -112,13 +113,7 @@ class FrozenPlasmonForward(nn.Module):
             )
         if nxy is None or nxy == intensity.shape[-1]:
             return intensity
-        cy, cx = intensity.shape[-2] // 2, intensity.shape[-1] // 2
-        half = nxy // 2
-        return intensity[
-            ...,
-            cy - half : cy + half + (nxy % 2),
-            cx - half : cx + half + (nxy % 2),
-        ]
+        return center_crop(intensity, nxy, dim=(-2, -1))
 
     def forward(
         self,

@@ -5,13 +5,15 @@ a CryoSPARC particle set to a trained `Reconstructor`.
 
 from __future__ import annotations
 
+import mrcfile
+
+from ..io import read_mrc
 from ..progress import console
 
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
-import mrcfile
 import torch
 import torch.utils.data
 
@@ -456,8 +458,7 @@ class Ghostbuster(_GhostbusterBase):
         if isinstance(self.init_volume, torch.Tensor):
             volume = self.init_volume.detach().to("cpu", torch.float32).clone()
         else:
-            with mrcfile.open(str(self.init_volume), permissive=True) as mrc:
-                volume = torch.as_tensor(mrc.data.astype("float32"))
+            volume, _ = read_mrc(self.init_volume)
         if volume.ndim != 3 or len(set(volume.shape)) != 1:
             raise ValueError(
                 f"init_volume must be a cube, got shape {tuple(volume.shape)}"

@@ -35,10 +35,9 @@ def load_specimen_volume(path: str) -> torch.Tensor:
     """
     ext = os.path.splitext(path)[1].lower()
     if ext in (".mrc", ".mrcs"):
-        import mrcfile
+        from ..io import read_mrc
 
-        with mrcfile.open(path, permissive=True) as mrc:
-            volume = torch.as_tensor(mrc.data.copy(), dtype=torch.float32)
+        volume, _ = read_mrc(path)
     elif ext == ".pt":
         volume = torch.as_tensor(torch.load(path), dtype=torch.float32)
     else:

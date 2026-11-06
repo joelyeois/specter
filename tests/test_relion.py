@@ -379,3 +379,22 @@ def test_extract_parameters_from_starfile_refuses_non_uniform_pixel_size(
     starfile.write(df, star_path, overwrite=True)
     with pytest.raises(ValueError, match=r"rlnImagePixelSize.*0\.8.*1\.2"):
         extract_parameters_from_starfile(str(star_path))
+
+
+def test_mrc_round_trip_keeps_values_and_voxel_size(tmp_path) -> None:
+    """`write_mrc` stores float32 with the voxel size, and `read_mrc` gives both
+    back, from a tensor (on any device, detached) or an array."""
+    import numpy as np
+    import torch
+
+    from specter.io import read_mrc, write_mrc
+
+    volume = torch.randn(6, 7, 8, dtype=torch.float64, requires_grad=True)
+    write_mrc(tmp_path / "v.mrc", volume, 0.78)
+    data, voxel_size = read_mrc(tmp_path / "v.mrc")
+    assert data.dtype == torch.float32
+    assert torch.equal(data, volume.detach().float())
+    assert voxel_size == pytest.approx(0.78)
+
+    write_mrc(tmp_path / "a.mrcs", np.ones((2, 4, 4)))
+    assert read_mrc(tmp_path / "a.mrcs")[0].shape == (2, 4, 4)

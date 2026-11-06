@@ -354,6 +354,11 @@ def center_crop(
     """
     Center crop a tensor along the specified axes (supports negative axes).
 
+    The centre is the ``fftshift`` one: index ``L // 2`` of an axis of
+    length ``L`` lands at index ``size // 2`` of the crop, whatever the two
+    lengths' parities. (``(L - size) // 2`` as the start would put it one
+    index off when an even axis is cropped to an odd size.)
+
     Parameters
     ----------
     data : torch.Tensor
@@ -392,7 +397,7 @@ def center_crop(
         L = data.shape[d]
         if cs > L:
             raise ValueError(f"Crop size {cs} is larger than axis {d} length {L}")
-        start = (L - cs) // 2
+        start = L // 2 - cs // 2
         slices[d] = slice(start, start + cs)
 
     return data[tuple(slices)]

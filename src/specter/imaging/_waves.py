@@ -11,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
-import mrcfile
 import torch
 
 from ..aberrations import FocalSpread
@@ -404,9 +403,9 @@ class Image:
 
     def save(self, path: str) -> None:
         """Write the stack as an MRC file."""
-        with mrcfile.new(path, overwrite=True) as mrc:
-            mrc.set_data(self.array.detach().cpu().float().numpy())
-            mrc.voxel_size = self.pixel_size
+        from ..io import write_mrc
+
+        write_mrc(path, self.array, self.pixel_size)
 
     @staticmethod
     def cat(images: list[Image]) -> Image:

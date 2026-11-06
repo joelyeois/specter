@@ -5,12 +5,12 @@ a tilt series and its geometry to a trained `TomogramReconstructor`.
 
 from __future__ import annotations
 
+from ..io import read_mrc
 from ..progress import console
 
 from pathlib import Path
 from typing import Any, Sequence
 
-import mrcfile
 import roma
 import torch
 import torch.nn as nn
@@ -216,8 +216,7 @@ class TomogramGhostbuster(_GhostbusterBase):
         """Load a tilt series from a tensor or an .mrc file path."""
         if isinstance(tilt_series, (str, Path)):
             console.print(f"Loading tilt series from {Path(tilt_series).name} ...")
-            with mrcfile.open(str(tilt_series)) as mrc:
-                images = torch.as_tensor(mrc.data.copy()).float()
+            images, _ = read_mrc(tilt_series)
         else:
             images = torch.as_tensor(tilt_series).float()
         return images

@@ -461,16 +461,11 @@ def _compute_and_save_gold_standard_fsc(
         is too tight, its FSC curve dropped; None without a mask.
     """
     import matplotlib.pyplot as plt
-    import mrcfile
-    import torch
-
+    from ..io import read_mrc
     from ..plots import HALFMAP_FSC_THRESHOLD, fsc_curve, plot_fsc_curves
 
-    with mrcfile.open(str(run_dir / f"volume_A{suffix}.mrc")) as mrc:
-        vol_a = torch.as_tensor(mrc.data.copy())
-        voxel_size = float(mrc.voxel_size.x)
-    with mrcfile.open(str(run_dir / f"volume_B{suffix}.mrc")) as mrc:
-        vol_b = torch.as_tensor(mrc.data.copy())
+    vol_a, voxel_size = read_mrc(run_dir / f"volume_A{suffix}.mrc")
+    vol_b, _ = read_mrc(run_dir / f"volume_B{suffix}.mrc")
 
     curve = fsc_curve(vol_a, vol_b, voxel_size, HALFMAP_FSC_THRESHOLD, mask)
     fig = plot_fsc_curves(
@@ -523,22 +518,6 @@ def _uses_converged_solver(config: ReconstructionConfig) -> bool:
     return True
 
 
-def _load_volume(path: Path) -> tuple[Any, float]:
-    import mrcfile
-    import torch
-
-    with mrcfile.open(str(path), permissive=True) as mrc:
-        return torch.as_tensor(mrc.data.astype("float32")), float(mrc.voxel_size.x)
-
-
-def _write_volume(path: Path, volume: Any, voxel_size: float) -> None:
-    import mrcfile
-
-    with mrcfile.new(str(path), overwrite=True) as mrc:
-        mrc.set_data(volume.detach().cpu().numpy().astype("float32"))
-        mrc.voxel_size = voxel_size
-
-
 def _user_mask(config: ReconstructionConfig, shape: tuple[int, ...]) -> Any:
     """
     `fsc_mask` as a tensor when it is a map on the reconstruction's grid.
@@ -548,9 +527,11 @@ def _user_mask(config: ReconstructionConfig, shape: tuple[int, ...]) -> Any:
     masked resolution: that warns, except under `test_run`, whose binning
     is expected to leave a full-size mask mismatched.
     """
+    from ..io import read_mrc
+
     if config.fsc_mask is None:
         return None
-    mask, _ = _load_volume(Path(config.fsc_mask))
+    mask, _ = read_mrc(Path(config.fsc_mask))
     if tuple(mask.shape) == tuple(shape):
         return mask
     if not config.test_run:
@@ -574,15 +555,16 @@ def _wiener_prior(config: ReconstructionConfig, run_dir: Path) -> dict[str, Any]
     JSON file.
     """
     from ..ghostbuster._converge import auto_mask, masked_fsc, ssnr_from_fsc
+    from ..io import read_mrc, write_mrc
 
-    vol_a, voxel_size = _load_volume(run_dir / "volume_A_adam.mrc")
-    vol_b, _ = _load_volume(run_dir / "volume_B_adam.mrc")
+    vol_a, voxel_size = read_mrc(run_dir / "volume_A_adam.mrc")
+    vol_b, _ = read_mrc(run_dir / "volume_B_adam.mrc")
     mask = _user_mask(config, tuple(vol_a.shape))
     source = config.fsc_mask if mask is not None else "auto"
     tightening: dict[str, Any] = {}
     if mask is None:
         mask, tightening = auto_mask(vol_a, vol_b, voxel_size)
-        _write_volume(run_dir / "mask_auto.mrc", mask, voxel_size)
+        write_mrc(run_dir / "mask_auto.mrc", mask, voxel_size)
     fsc = masked_fsc(vol_a, vol_b, mask)
     record = {
         "mask": source,
@@ -616,6 +598,7 @@ def _run_converged_halfset(
     import specter
     from specter.ghostbuster import Ghostbuster
     from specter.ghostbuster._converge import ConvergedSolver
+    from specter.io import write_mrc
     from specter.jobs._job import _serialize_value
 
     assert config.halfset in ("A", "B")
@@ -647,8 +630,8 @@ def _run_converged_halfset(
     )
     n_iter = 1 if config.test_run else config.solver_iterations
     result = solver.solve(model.V.detach(), n_iter)
-    _write_volume(run_dir / f"volume_{h}_filtered.mrc", result.volume, voxel_size)
-    _write_volume(run_dir / f"volume_{h}.mrc", result.unfiltered, voxel_size)
+    write_mrc(run_dir / f"volume_{h}_filtered.mrc", result.volume, voxel_size)
+    write_mrc(run_dir / f"volume_{h}.mrc", result.unfiltered, voxel_size)
     summary = {
         "iterations": result.log,
         **{k: v for k, v in result.info.items() if k != "ssnr"},
@@ -759,11 +742,13 @@ def _report_mask(
     on the grid, else ``mask_auto.mrc``); otherwise `fsc_mask` when it is on
     the grid, else none.
     """
+    from ..io import read_mrc
+
     if converged is not None:
         source = converged["prior"]["mask"]
         path = run_dir / "mask_auto.mrc" if source == "auto" else Path(source)
-        return _load_volume(path)[0], source
-    with_shape = _load_volume(run_dir / "volume_A.mrc")[0].shape
+        return read_mrc(path)[0], source
+    with_shape = read_mrc(run_dir / "volume_A.mrc")[0].shape
     mask = _user_mask(config, tuple(with_shape))
     return mask, (config.fsc_mask if mask is not None else None)
 

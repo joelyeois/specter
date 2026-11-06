@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from ..fft import fft3, ifft3
+from ._exact import DEFAULT_EXACT_TOLERANCE, rotate_volume_exact
 from ._volume import (
     _isotropic_half_widths,
     _translation_per_axis,
@@ -200,6 +201,7 @@ class VolumeRotator(L.LightningModule):
         align_corners: bool = False,
         padding_mode: GridSamplePadding = "border",
         mode: RotateMode = "real",
+        tolerance: float = DEFAULT_EXACT_TOLERANCE,
     ):
         """
         Initialize a 3D VolumeRotator with a cached rotation center.
@@ -231,12 +233,20 @@ class VolumeRotator(L.LightningModule):
             Default rotation mode for `forward`. Options:
             - "real": rotate in real space.
             - "fourier": rotate in Fourier space.
+            - "exact": no interpolation; the volume's transform is evaluated
+              at rotated frequencies (:func:`~specter.rotations.rotate_volume_exact`).
+              Whole volumes only, about the RELION origin.
             Default is "real".
+        tolerance : float, optional
+            Requested accuracy of the NUFFTs behind ``mode="exact"``.
+            Default 1e-4.
 
         Raises
         ------
         ValueError
-            If `origin` is not one of ("relion", "center") or `mode` is not one of ("real", "fourier").
+            If `origin` is not one of ("relion", "center"), `mode` is not one
+            of ("real", "fourier", "exact"), or ``mode="exact"`` is asked for
+            about the "center" origin.
 
         Attributes
         ----------
@@ -248,8 +258,12 @@ class VolumeRotator(L.LightningModule):
         # Validate inputs
         if origin not in ("relion", "center"):
             raise ValueError(f"Unknown origin: {origin}. Must be 'relion' or 'center'.")
-        if mode not in ("real", "fourier"):
-            raise ValueError(f"Unknown mode: {mode}. Must be 'real' or 'fourier'.")
+        if mode not in ("real", "fourier", "exact"):
+            raise ValueError(
+                f"Unknown mode: {mode}. Must be 'real', 'fourier' or 'exact'."
+            )
+        if mode == "exact" and origin != "relion":
+            raise ValueError("mode='exact' rotates about the RELION origin only")
 
         self.nz = nz
         self.ny = ny
@@ -258,6 +272,7 @@ class VolumeRotator(L.LightningModule):
         self.align_corners = align_corners
         self.padding_mode = padding_mode
         self.mode = mode  # default rotation mode
+        self.tolerance = tolerance
 
         # -------------------------------
         # Rotation center
@@ -523,18 +538,25 @@ class VolumeRotator(L.LightningModule):
     ) -> torch.Tensor:
         """
         Forward pass with optional mode override.
-        mode: "real" or "fourier"; defaults to self.mode
+        mode: "real", "fourier" or "exact"; defaults to self.mode
         """
         if mode is None:
             mode = self.mode
 
-        if mode not in ("real", "fourier"):
-            raise ValueError(f"Unknown mode: {mode}. Must be 'real' or 'fourier'.")
+        if mode not in ("real", "fourier", "exact"):
+            raise ValueError(
+                f"Unknown mode: {mode}. Must be 'real', 'fourier' or 'exact'."
+            )
 
         if mode == "real":
             return self.rotate_real(V, theta)
-        else:
-            return self.rotate_fourier(V, theta)
+        if mode == "exact":
+            if self.origin != "relion":
+                raise ValueError("mode='exact' rotates about the RELION origin only")
+            return rotate_volume_exact(
+                V, theta, eps=self.tolerance, align_corners=self.align_corners
+            )
+        return self.rotate_fourier(V, theta)
 
     # ------------------------------------------------------------------
     # Sample a single tilted slice

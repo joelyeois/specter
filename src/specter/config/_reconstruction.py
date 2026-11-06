@@ -416,7 +416,9 @@ class ReconstructionConfig:
         "real",
         help=(
             "How each particle's pose is applied. real/fourier: rotate the volume "
-            "with trilinear interpolation. surface: sample the unrotated volume's "
+            "with trilinear interpolation. exact: rotate it without interpolation, "
+            "through its transform at rotated frequencies (no lr_R or lr_T). "
+            "surface: sample the unrotated volume's "
             "transform on the posed Ewald surface, with no interpolation "
             "(projection, firstborn, rytov and ctf only; no lr_R)."
         ),

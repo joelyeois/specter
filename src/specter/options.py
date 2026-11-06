@@ -88,14 +88,16 @@ DoseEnvelopeTarget = Literal["transfer_function", "specimen"]
 #: over the focal spread, or as an envelope on the transfer function.
 TemporalCoherence = Literal["integrated", "envelope"]
 
-#: Whether a volume is rotated in real or Fourier space.
-RotateMode = Literal["real", "fourier"]
+#: How a volume is rotated: trilinear in real or Fourier space, or exactly,
+#: through its own transform at rotated frequencies (a NUFFT).
+RotateMode = Literal["real", "fourier", "exact"]
 
 #: How a pose is applied to a volume before it is scattered: rotate the volume
-#: (trilinear in real or Fourier space), or sample its transform on the posed
-#: Ewald surface with no interpolation (`specter.scattering.surface_slice_sum`;
-#: single-scatter models and an undressed template only).
-PoseMode = Literal["real", "fourier", "surface"]
+#: (trilinear in real or Fourier space, or exactly through a NUFFT), or sample
+#: its transform on the posed Ewald surface with no interpolation
+#: (`specter.scattering.surface_slice_sum`; single-scatter models and an
+#: undressed template only).
+PoseMode = Literal["real", "fourier", "exact", "surface"]
 
 #: How a point group is averaged: exactly through the volume's own transform
 #: (`specter.symmetries.symmetrize_exact`), or by rotating the volume with

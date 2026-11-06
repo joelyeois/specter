@@ -478,10 +478,15 @@ class ParticleStackConfig:
         check="positive",
     )
     rotate_mode: RotateMode = setting(
-        "real",
+        "exact",
         help=(
-            "Volume rotation method: 'real' (trilinear interpolation) or "
-            "'fourier' (no boundary artifacts)."
+            "How the template is rotated to each particle's pose. 'exact' (default): no "
+            "interpolation; the template's transform is evaluated at the rotated "
+            "frequencies with a NUFFT. The transform is periodic, so density a rotation "
+            "and shift carry past a face re-enters at the opposite one; it warns when "
+            "more than 1% of the template could. 'real': trilinear "
+            "interpolation, which keeps about half the amplitude near Nyquist. "
+            "'fourier': trilinear on the spectrum, about 0.8 of it in every band."
         ),
     )
 

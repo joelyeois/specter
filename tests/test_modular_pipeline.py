@@ -61,7 +61,8 @@ def test_modular_pipeline_matches_image_generator():
     nz = compute_nz(nxy, None, pixel_size)
     pad_nxy = nxy + (nxy // 2) * 2
 
-    rotator = VolumeRotator(nz, nxy, nxy, origin="relion")
+    # The chain's default rotation: exact, through the template's transform.
+    rotator = VolumeRotator(nz, nxy, nxy, origin="relion", mode="exact")
     R = roma.unitquat_to_rotmat(quaternions)
     T = rotations.translations_angstrom_to_torch(translations, nxy, pixel_size)
     theta = rotations.build_affine_matrix(R, T)

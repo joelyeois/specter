@@ -109,7 +109,7 @@ specter reconstruct particle [OPTIONS]
 | `--alpha` | `FLOAT` | _none_ | Amplitude contrast ratio for the forward model, overriding the .cs file's ctf/amp_contrast. Unset uses the .cs file's value. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2 damping high-resolution signal in the forward model. |
 | `--klim` | `FLOAT` | _none_ | Hard frequency cutoff (1/Angstrom) applied to the simulated images. |
-| `--rotate_mode` | `real` \| `fourier` \| `surface` | `real` | How each particle's pose is applied. real/fourier: rotate the volume with trilinear interpolation. surface: sample the unrotated volume's transform on the posed Ewald surface, with no interpolation (projection, firstborn, rytov and ctf only; no lr_R). |
+| `--rotate_mode` | `real` \| `fourier` \| `exact` \| `surface` | `real` | How each particle's pose is applied. real/fourier: rotate the volume with trilinear interpolation. exact: rotate it without interpolation, through its transform at rotated frequencies (no lr_R or lr_T). surface: sample the unrotated volume's transform on the posed Ewald surface, with no interpolation (projection, firstborn, rytov and ctf only; no lr_R). |
 
 ## `specter ghostbuster` { #specter-ghostbuster }
 

@@ -162,18 +162,23 @@ Conversion into `specter`'s representation:
 
 ## Applying a pose: real space or Fourier space
 
-You apply a pose to a volume by one of three methods, selected by the
+You apply a pose to a volume by one of four methods, selected by the
 `rotate_mode` field of the `Propagation` settings group, passed as
 `Specimen.scatter(..., rotate_mode=...)`, or as
 `propagation=Propagation(rotate_mode=...)` to `Reconstructor` or
 `Ghostbuster`. In a TOML config or on the command line it is the flat field
-`rotate_mode` of `ParticleStackConfig` and `ReconstructionConfig`. All three
+`rotate_mode` of `ParticleStackConfig` and `ReconstructionConfig`. All four
 express the same convention and start from the same affine built above.
-`"real"` and `"fourier"` rotate the volume and differ only in where the
-interpolation happens; `"surface"` never rotates it (see
-[Sampling the Ewald surface](#sampling-the-ewald-surface)).
+`"exact"`, `"real"` and `"fourier"` rotate the volume; `"exact"` does so
+without interpolation (see
+[Rotating through the transform](#rotating-through-the-transform)), while
+`"real"` and `"fourier"` interpolate trilinearly and differ only in where.
+`"surface"` never rotates the volume (see
+[Sampling the Ewald surface](#sampling-the-ewald-surface)). Simulation
+defaults to `"exact"`; `Reconstructor`, `Ghostbuster` and
+`ReconstructionConfig` default to `"real"`.
 
-`"real"`, the default, resamples the density with `grid_sample`, applying the
+`"real"` resamples the density with `grid_sample`, applying the
 rotation and the translation together in one trilinear pass. `"fourier"`
 transforms the volume, rotates the spectrum's real and imaginary parts, and
 applies the translation as a phase ramp \(\exp(-2\pi i\,\mathbf{f}\cdot
@@ -209,6 +214,63 @@ above. In Fourier space, the rotation necessarily centres on the
 spectrum's DC term, which `fft3(..., shift=True)` places at `n // 2`. You
 reach `"center"` by folding the half-voxel offset into the same phase
 ramp; it works for cubic volumes only.
+
+### Rotating through the transform
+
+A rigid motion of a band-limited density is a rigid motion of its spectrum.
+With the posed volume \(U(\mathbf{x}) = V(R(\mathbf{x} + \mathbf{t}))\),
+
+\[
+\hat U(\mathbf{q}) = \hat V(R\,\mathbf{q})\,
+e^{2\pi i\,\mathbf{q}\cdot\mathbf{t}},
+\]
+
+where \(\hat V\) is the discrete-space Fourier transform of the volume about
+its centre voxel. `rotate_mode="exact"`
+(`specter.rotations.rotate_volume_exact`) evaluates \(\hat V\) at the rotated
+half-spectrum frequencies with a type-2 non-uniform FFT (Barnett et al. 2019;
+Shih et al. 2021), multiplies by the phase of the shift and of the move of the
+origin from voxel \(n/2\) to voxel 0, and inverts with one real FFT. No step
+resamples the grid. The spectrum is kept inside the Nyquist sphere,
+\(|\mathbf{q}| < 1/2\) cycles per voxel, the band every orientation samples
+in full; the corners of the cube beyond it are set to zero. The backward pass
+is the adjoint, a type-1 transform of the incoming gradient, so the posed
+volume is differentiable in the template. It carries no gradient to \(R\) or
+\(\mathbf{t}\), and `Reconstructor` refuses `lr_R` and `lr_T` under it.
+
+The reference for a rotated template is the same atoms rendered at the pose
+(`Specimen.from_atoms`). The renderer takes each voxel's average of the atomic
+potential, so its output is the band-limited potential times a box aperture,
+plus the content beyond Nyquist that the sampling folds back. The table scores
+each method against the band-limited atomic potential (Peng factors per
+element, evaluated exactly by a type-1 transform) times the same aperture,
+over eight random poses of apoferritin (22FX, \(256^3\) at 0.78 Å), as the
+ratio of the recovered to the true amplitude in a resolution shell:
+
+| Shell | per-pose render | `"exact"` | `"real"` | `"fourier"` |
+|---|---|---|---|---|
+| 8 Å | 1.000 | 0.997 | 0.969 | 0.781 |
+| 4 Å | 1.000 | 0.999 | 0.882 | 0.791 |
+| 1.56 Å (Nyquist) | 1.000 | 1.003 | 0.431 | 0.792 |
+
+The residual of the exactly rotated template equals that of the per-pose
+render in every shell (0.020 at 8 Å, 0.042 at 4 Å, 0.64 at Nyquist): both
+carry the renderer's folded content, at different orientations, and the
+rotation adds nothing to it. Trilinear interpolation in real space attenuates
+by an amount that grows with frequency and depends on the pose; in Fourier
+space it attenuates every shell by about a fifth, by an amount that depends on
+the object's distance from the box centre. 6BDF and 4HHB at 1 Å give the same
+pattern (`"real"` 0.43 at Nyquist, `"exact"` 1.00). The same holds in images
+formed by multislice and Rytov propagation, bare and in 500 Å of ice, at 100
+and 300 kV.
+
+The transform is periodic. Density that a rotation, or a rotation followed by
+a shift, carries across a face of the box re-enters on the opposite face,
+where `"real"` clips it. A template whose density stays inside the box's
+inscribed sphere loses nothing. `rotate_volume_exact` bounds the fraction
+that can cross (`specter.rotations.wrapped_fraction`) and warns when it
+exceeds 1%; below that bound the exactly rotated template was measured closer
+to the per-pose render than `"real"`, and above it a larger box is required.
 
 ### Sampling the Ewald surface
 

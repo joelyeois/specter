@@ -54,6 +54,8 @@ def truth() -> tuple[torch.Tensor, Poses, CTF, torch.Tensor]:
     poses = Poses.random(N, shift=4.0, seed=0)
     ctf = CTF.sample(N, defocus=[10000.0, 20000.0], seed=0)
     with torch.no_grad():
+        # Rotated as the Reconstructor rotates (trilinear): this tests
+        # refinement under a matched forward model.
         images = simulate_particles(
             Specimen(V, VOXEL),
             poses,
@@ -61,6 +63,7 @@ def truth() -> tuple[torch.Tensor, Poses, CTF, torch.Tensor]:
             Exposure(DOSE),
             voltage=VOLTAGE,
             batch_size=N,
+            scatter=dict(rotate_mode="real"),
             coherence=dict(cc=None),
             camera=dict(noise=None),
         ).array

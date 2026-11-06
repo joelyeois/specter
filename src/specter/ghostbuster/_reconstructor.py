@@ -10,7 +10,7 @@ from specter import logger
 
 import os
 from pathlib import Path
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 import mrcfile
@@ -103,8 +103,11 @@ class Reconstructor(_BaseReconstructor):
         How the forward model computes the exit wave, including the
         amplitude contrast ratio. The same object the simulator that
         produced the data was built with, when it was simulated. Default
-        ``Propagation()``. ``absorption_model="inelastic_mfp"`` is rejected;
-        absorption comes from `alpha` alone.
+        ``Propagation()``, whose unset ``rotate_mode`` means ``"real"`` here.
+        ``absorption_model="inelastic_mfp"`` is rejected; absorption comes
+        from `alpha` alone. ``rotate_mode="exact"`` and ``"surface"`` carry
+        no gradient to the rotations, so they refuse `lr_R`; ``"exact"``
+        refuses `lr_T` too.
     optics : Optics, optional
         The aberration engine and phase plate. Default ``Optics()``.
         `Envelopes` and `Camera` are deliberately not accepted: neither can
@@ -217,11 +220,18 @@ class Reconstructor(_BaseReconstructor):
         self._register_anisomag_and_scale(anisomag, scale, quaternions.shape[0])
 
         # imaging models
-        if propagation.rotate_mode == "surface" and lr_R is not None:
+        # Reconstruction keeps trilinear rotation unless asked otherwise.
+        propagation = replace(propagation, rotate_mode=propagation.rotation("real"))
+        if propagation.rotate_mode in ("surface", "exact") and lr_R is not None:
             raise ValueError(
-                "rotate_mode='surface' does not refine rotations: the sampled "
-                "transform carries no gradient to the pose. Leave lr_R unset or "
-                "use rotate_mode='real'."
+                f"rotate_mode={propagation.rotate_mode!r} does not refine "
+                "rotations: the sampled transform carries no gradient to the "
+                "pose. Leave lr_R unset or use rotate_mode='real'."
+            )
+        if propagation.rotate_mode == "exact" and lr_T is not None:
+            raise ValueError(
+                "rotate_mode='exact' does not refine shifts: no gradient reaches "
+                "them. Leave lr_T unset or use rotate_mode='real'."
             )
         self.propagation = propagation
         self.optics = optics

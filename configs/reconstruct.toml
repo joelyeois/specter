@@ -97,7 +97,7 @@ scattering_model = "rytov"        # defaults to rytov rather than the simulator'
                                   # the model runs once per particle per step, and rytov is the
                                   # cheapest one that still carries Ewald-sphere curvature
 ews_curvature_sign = "negative"   # matches CryoSPARC
-rotate_mode = "real"
+rotate_mode = "real"              # real | fourier | exact | surface
 # alpha = 0.1        # amplitude contrast; unset reads the .cs file's ctf/amp_contrast
 # bfactor = 100.0    # Angstrom^2 envelope damping high-resolution signal
 # klim = 0.2         # 1/Angstrom hard cutoff

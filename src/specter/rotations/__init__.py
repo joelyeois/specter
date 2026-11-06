@@ -9,6 +9,7 @@ Split across:
     _rotation.py        - translate_coordinates, rotate_coordinates (thin roma wrappers), rotation_aligning
     _random.py           - random quaternion/matrix generators (thin roma wrappers)
     _volume.py           - rotate_volume, rotate_volume_fourier, affine matrix helpers
+    _exact.py            - rotate_volume_exact (NUFFT, no interpolation), wrapped_fraction
     _volume_rotator.py   - VolumeRotator (LightningModule) and its private helpers
 
 Everything is re-exported here so existing `from .rotations import X` /
@@ -37,6 +38,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ._exact import (
+    DEFAULT_EXACT_TOLERANCE,
+    rotate_volume_exact,
+    wrapped_fraction,
+)
 from ._random import (
     random_quaternion,
     random_rotation_matrix,
@@ -128,6 +134,9 @@ __all__ = [
     "random_rotation_matrix_from_generator",
     "rotate_volume",
     "rotate_volume_fourier",
+    "rotate_volume_exact",
+    "wrapped_fraction",
+    "DEFAULT_EXACT_TOLERANCE",
     "split_affine_translation",
     "apply_fourier_translation",
     "fourier_origin_displacement",

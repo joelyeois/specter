@@ -179,11 +179,13 @@ def _stack_size(n: int, shape: tuple[int, ...], double: bool) -> int:
     return min(k, 1 << (cap.bit_length() - 1))
 
 
-def _plan_bytes(shape: tuple[int, ...], double: bool) -> int:
+def _plan_bytes(
+    shape: tuple[int, ...], double: bool, upsampfac: float = _UPSAMPFAC
+) -> int:
     """Device memory of one plan's oversampled grid."""
     n = 1
     for m in shape:
-        n *= math.ceil(_UPSAMPFAC * m)
+        n *= math.ceil(upsampfac * m)
     return n * (16 if double else 8)
 
 
@@ -194,6 +196,8 @@ def _cached_plan(
     device: torch.device,
     eps: float,
     n_trans: int = 1,
+    upsampfac: float = _UPSAMPFAC,
+    gpu_method: int | None = None,
 ) -> tuple[Any, bool]:
     """
     The cached FINUFFT plan for one transform type, shape, precision and device.
@@ -202,14 +206,28 @@ def _cached_plan(
     a CPU plan, with a warning, only when cuFINUFFT cannot be loaded at all; a
     plan that cannot be created on a working GPU is an out-of-memory error.
     `n_trans` is the number of grids a GPU plan transforms per execute, at the
-    same points; CPU plans always take one.
+    same points; CPU plans always take one. `upsampfac` and `gpu_method`
+    (cuFINUFFT's spreading algorithm; None for the library's choice) let a
+    caller with its own measured settings share the cache.
     """
     gpu = device.type == "cuda"
     if gpu and not _cufinufft_loads():
         gpu = False
     if not gpu:
         n_trans = 1
-    key = (kind, shape, double, gpu, device.index if gpu else None, eps, n_trans)
+    if not gpu:
+        gpu_method = None
+    key = (
+        kind,
+        shape,
+        double,
+        gpu,
+        device.index if gpu else None,
+        eps,
+        n_trans,
+        upsampfac,
+        gpu_method,
+    )
     if key in _PLANS:
         return _PLANS[key], gpu
     dtype = "complex128" if double else "complex64"
@@ -218,7 +236,7 @@ def _cached_plan(
         isign=-1 if kind == 2 else 1,
         dtype=dtype,
         modeord=0,
-        upsampfac=_UPSAMPFAC,
+        upsampfac=upsampfac,
     )
     if not gpu:
         import finufft
@@ -235,8 +253,14 @@ def _cached_plan(
         # to it until released.
         torch.cuda.empty_cache()
         try:
+            extra = {} if gpu_method is None else {"gpu_method": gpu_method}
             _PLANS[key] = cufinufft.Plan(
-                kind, shape, n_trans, gpu_device_id=device.index or 0, **kwargs
+                kind,
+                shape,
+                n_trans,
+                gpu_device_id=device.index or 0,
+                **kwargs,
+                **extra,
             )
             return _PLANS[key], True
         except RuntimeError as err:
@@ -244,7 +268,7 @@ def _cached_plan(
                 raise torch.OutOfMemoryError(
                     f"cuFINUFFT could not create a type-{kind} plan for a "
                     f"{shape} grid on {device} ({err}); it needs "
-                    f"{n_trans * _plan_bytes(shape, double) / 2**30:.1f} GiB of free device "
+                    f"{n_trans * _plan_bytes(shape, double, upsampfac) / 2**30:.1f} GiB of free device "
                     "memory beyond what torch holds"
                 ) from err
             for other in [k for k in _PLANS if k[3] and k[4] == key[4]]:
@@ -278,6 +302,8 @@ def _execute(
     pts: torch.Tensor,
     shape: tuple[int, ...],
     eps: float,
+    upsampfac: float = _UPSAMPFAC,
+    gpu_method: int | None = None,
 ) -> torch.Tensor:
     """
     Type-1 or type-2 transforms through a cached plan, on ``values``' device.
@@ -296,7 +322,9 @@ def _execute(
     batch = values.shape[: values.ndim - core]
     flat = values.reshape(-1, *values.shape[values.ndim - core :])
     k = _stack_size(len(flat), shape, double)
-    plan, gpu = _cached_plan(kind, shape, double, values.device, eps, k)
+    plan, gpu = _cached_plan(
+        kind, shape, double, values.device, eps, k, upsampfac, gpu_method
+    )
     if gpu:
         plan.setpts(*pts)
         if k == 1:

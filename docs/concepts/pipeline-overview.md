@@ -87,9 +87,10 @@ differently but hand it to the same downstream chain.
   voxelizes them. This is the more expensive path per image, and the one
   that keeps gradients with respect to the atomic coordinates.
 - **`Specimen`** with a pre-built volume rotates the *volume* itself for
-  each image (`grid_sample`, or a Fourier-space rotation when
-  `rotate_mode="fourier"`; see
-  [Conventions](conventions.md#applying-a-pose-real-space-or-fourier-space)).
+  each image: by default exactly, through the volume's transform
+  (`rotate_mode="exact"`), or with trilinear interpolation (`"real"`,
+  `"fourier"`); see
+  [Conventions](conventions.md#applying-a-pose-real-space-or-fourier-space).
   It is cheaper per image than the coordinate path, at the cost of losing
   per-atom gradients. `Specimen.crowd`, `Specimen.damage` and
   `Specimen.solvate` record stages 3, 5 and 6, which `scatter` applies to

@@ -21,6 +21,10 @@ from specter.imaging import CTF, Exposure, Poses, Specimen, simulate_particles
 from specter.ice import RandomIcemaker
 
 REFERENCES = Path(__file__).parent / "test_data"
+#: The retired generator rotated the template trilinearly; the comparisons hold
+#: the rest of the chain to it, so they rotate the same way. Exact rotation, the
+#: chain's default, is tested in test_rotate_exact.py.
+RETIRED = dict(rotate_mode="real")
 
 N = 4
 NXY = 24
@@ -64,7 +68,7 @@ def test_noiseless_images_match_image_generator() -> None:
             Exposure(DOSE),
             voltage=VOLTAGE,
             batch_size=N,
-            scatter=dict(pad_fft=True),
+            scatter=dict(**RETIRED, pad_fft=True),
             camera=dict(noise=None),
         )
     assert got.array.shape == want.shape
@@ -90,7 +94,7 @@ def test_crowded_solvated_noisy_images_match_image_generator() -> None:
             voltage=VOLTAGE,
             seed=7,
             batch_size=2,
-            scatter=dict(pad_fft=True),
+            scatter=dict(**RETIRED, pad_fft=True),
         )
     assert torch.equal(got.array, want)
 
@@ -109,7 +113,7 @@ def test_specimen_damage_matches_image_generator() -> None:
             voltage=VOLTAGE,
             seed=7,
             batch_size=N,
-            scatter=dict(pad_fft=True),
+            scatter=dict(**RETIRED, pad_fft=True),
             camera=dict(noise=None),
         )
     assert torch.equal(got.array, want)
@@ -118,7 +122,7 @@ def test_specimen_damage_matches_image_generator() -> None:
 def test_a_slice_of_the_stack_draws_what_the_stack_drew() -> None:
     poses, ctf = _inputs()
     specimen = Specimen(_template(), PIXEL).crowd(min_distance=12.0)
-    kwargs = dict(voltage=VOLTAGE, seed=3, scatter=dict(pad_fft=True))
+    kwargs = dict(voltage=VOLTAGE, seed=3, scatter=dict(**RETIRED, pad_fft=True))
     with torch.no_grad():
         whole = simulate_particles(specimen, poses, ctf, Exposure(DOSE), **kwargs)
         part = simulate_particles(
@@ -190,7 +194,7 @@ def test_the_cc_envelope_matches_the_generator_s() -> None:
             Exposure(DOSE),
             voltage=VOLTAGE,
             batch_size=N,
-            scatter=dict(pad_fft=True),
+            scatter=dict(**RETIRED, pad_fft=True),
             coherence=dict(temporal_coherence="envelope"),
             camera=dict(noise=None),
         )
@@ -216,7 +220,7 @@ def _compare(
             voltage=VOLTAGE,
             seed=7,
             batch_size=batch_size,
-            **{"camera": dict(noise=None), **recipe_kwargs},
+            **{"camera": dict(noise=None), "scatter": RETIRED, **recipe_kwargs},
         )
     if exact:
         assert torch.equal(got.array, want)
@@ -228,7 +232,7 @@ def _compare(
 def test_every_wave_model_matches_the_generator(scattering_model: str) -> None:
     _compare(
         f"model_{scattering_model}",
-        dict(scatter=dict(scattering_model=scattering_model, alpha=0.1)),
+        dict(scatter=dict(**RETIRED, scattering_model=scattering_model, alpha=0.1)),
     )
 
 
@@ -237,11 +241,14 @@ def test_the_linear_model_matches_the_generator() -> None:
     real contrast rather than inside the transfer function, the same product."""
     _compare(
         "linear_coherent",
-        dict(scatter=dict(scattering_model="ctf", alpha=0.1), coherence=dict(cc=None)),
+        dict(
+            scatter=dict(**RETIRED, scattering_model="ctf", alpha=0.1),
+            coherence=dict(cc=None),
+        ),
     )
     _compare(
         "linear_cc",
-        dict(scatter=dict(scattering_model="ctf", alpha=0.1)),
+        dict(scatter=dict(**RETIRED, scattering_model="ctf", alpha=0.1)),
         exact=False,
     )
 
@@ -258,7 +265,7 @@ def test_per_image_settings_reach_their_own_images() -> None:
     anisomag = torch.tensor([[1.01, 0.002], [0.0, 0.99]]).expand(N, 2, 2).clone()
     anisomag[2] = torch.tensor([[0.99, 0.0], [0.003, 1.02]])
     specimen = Specimen(_template(), PIXEL)
-    common = dict(voltage=VOLTAGE, scatter=dict(pad_fft=True))
+    common = dict(voltage=VOLTAGE, scatter=dict(**RETIRED, pad_fft=True))
     with torch.no_grad():
         batched = simulate_particles(
             specimen,
@@ -294,7 +301,7 @@ def test_material_absorption_and_aperture_match_the_generator() -> None:
     propagation = dict(absorption_model="inelastic_mfp", inelastic_mfp_specimen=2460.0)
     _compare(
         "material_absorption",
-        dict(scatter=dict(objective_aperture=12.0, **propagation)),
+        dict(scatter=dict(**RETIRED, objective_aperture=12.0, **propagation)),
         specimen=Specimen(_template(), PIXEL).solvate(icemaker=icemaker),
     )
 
@@ -313,7 +320,9 @@ def test_the_dry_specimen_is_the_generator_s_clean_reference() -> None:
         Specimen(_template(), PIXEL).crowd(min_distance=12.0).solvate(icemaker=icemaker)
     )
     with torch.no_grad():
-        dry = specimen.dry().scatter(poses[:2], voltage=VOLTAGE, seed=7, pad_fft=True)
+        dry = specimen.dry().scatter(
+            poses[:2], voltage=VOLTAGE, seed=7, pad_fft=True, **RETIRED
+        )
     assert torch.equal(dry.pixels(), _reference("dry_clean"))
 
 

@@ -53,7 +53,9 @@ def _inputs(n_particles: int = 4, box: int = 16):
     )
 
 
-def _simulate(inputs: dict, scattering_model: str, idx: torch.Tensor) -> torch.Tensor:
+def _simulate(
+    inputs: dict, scattering_model: str, idx: torch.Tensor, rotate_mode: str = "real"
+) -> torch.Tensor:
     """
     The forward model as `specter simulate` runs it, noiseless, Cc off.
 
@@ -69,13 +71,19 @@ def _simulate(inputs: dict, scattering_model: str, idx: torch.Tensor) -> torch.T
         Exposure(inputs["dose_per_angstrom"]),
         voltage=inputs["voltage"],
         batch_size=len(idx),
-        scatter=dict(scattering_model=scattering_model, alpha=inputs["alpha"]),
+        scatter=dict(
+            scattering_model=scattering_model,
+            alpha=inputs["alpha"],
+            rotate_mode=rotate_mode,
+        ),
         coherence=dict(cc=None),
         camera=dict(noise=None),
     ).array
 
 
-def _inverse(inputs: dict, scattering_model: str, **kwargs) -> Reconstructor:
+def _inverse(
+    inputs: dict, scattering_model: str, rotate_mode: str = "real", **kwargs
+) -> Reconstructor:
     """The same forward model as `specter reconstruct` builds it."""
     return Reconstructor(
         V=inputs["volume"],
@@ -87,21 +95,29 @@ def _inverse(inputs: dict, scattering_model: str, **kwargs) -> Reconstructor:
         dose_per_angstrom=inputs["dose_per_angstrom"],
         **kwargs,
         propagation=Propagation(
-            alpha=inputs["alpha"], scattering_model=scattering_model
+            alpha=inputs["alpha"],
+            scattering_model=scattering_model,
+            rotate_mode=rotate_mode,
         ),
     )
 
 
 @pytest.mark.parametrize("scattering_model", SCATTERING_MODELS)
-def test_forward_matches_between_simulator_and_inverse(scattering_model: str) -> None:
+# How the pose is interpolated is a modelling choice each side makes (the
+# simulators default to exact, the inverse to trilinear), so each is compared
+# with itself.
+@pytest.mark.parametrize("rotate_mode", ["real", "exact"])
+def test_forward_matches_between_simulator_and_inverse(
+    scattering_model: str, rotate_mode: str
+) -> None:
     """Identical inputs must give identical images through either entry point."""
     inputs = _inputs()
     idx = torch.arange(inputs["quaternions"].shape[0])
 
     torch.manual_seed(0)
-    simulated = _simulate(inputs, scattering_model, idx)
+    simulated = _simulate(inputs, scattering_model, idx, rotate_mode)
     torch.manual_seed(0)
-    inverted = _inverse(inputs, scattering_model).forward(idx)
+    inverted = _inverse(inputs, scattering_model, rotate_mode).forward(idx)
 
     assert simulated.shape == inverted.shape
     # Exact, not approximate: `Reconstructor` runs the simulators' chain

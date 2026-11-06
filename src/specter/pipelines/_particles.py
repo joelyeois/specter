@@ -691,10 +691,17 @@ def _resolve_batchsize(
         n_particles=n,
         oversample=config.oversample,
         ice=ice,
+        rotate_mode=config.rotate_mode,
     )
     peak_gib = (
         estimate_peak_bytes(
-            batchsize, config.n_pixels, nz, pad_nxy, config.oversample, ice
+            batchsize,
+            config.n_pixels,
+            nz,
+            pad_nxy,
+            config.oversample,
+            ice,
+            config.rotate_mode,
         )
         / 1024**3
     )

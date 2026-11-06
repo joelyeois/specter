@@ -23,7 +23,7 @@ from ..arrays import compute_nz, pad_volume
 from ..cpu_threads import limited_cpu_threads
 from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank, RandomIcemaker, resolve_icemaker
-from ..options import ConvBackend, PotentialMethod, ScatteringFactors
+from ..options import ConvBackend, PotentialMethod, RotateMode, ScatteringFactors
 from ..pdb import DEFAULT_PDB_CACHE_DIR, PDB
 from ..potential import (
     PotentialBuilder,
@@ -42,6 +42,11 @@ from ._engines import scattering_engine
 from ._waves import ExitWave
 
 __all__ = ["Specimen", "Structure"]
+
+
+def _resolve(p: Propagation) -> Propagation:
+    """`p` with its rotation mode settled: a simulation rotates exactly by default."""
+    return p if p.rotate_mode is not None else replace(p, rotate_mode="exact")
 
 
 def _seeds(seed: int | None, ids: torch.Tensor, stage: int) -> list[int] | None:
@@ -348,7 +353,7 @@ class Specimen:
         **settings: Any,
     ) -> list[str]:
         """What :meth:`scatter` will do to each image, in order."""
-        p = settings_group(Propagation, propagation, settings)
+        p = _resolve(settings_group(Propagation, propagation, settings))
         nz, nxy, pad = self.nz, self.nxy, self.pad_nxy(p.pads(False))
         if p.rotate_mode == "surface":
             steps = [
@@ -394,7 +399,7 @@ class Specimen:
 
         Takes :meth:`scatter`'s arguments and draws the same specimens.
         """
-        p = settings_group(Propagation, propagation, settings)
+        p = _resolve(settings_group(Propagation, propagation, settings))
         return self._volume(poses, voltage, exposure, seed, objective_aperture, p)[0]
 
     def scatter(
@@ -428,7 +433,9 @@ class Specimen:
         propagation : Propagation, optional
             How the exit wave is computed, or its fields as keywords
             (``scattering_model``, ``alpha``, ``absorption_model``,
-            ``oversample``, ``pad_fft``, ...).
+            ``oversample``, ``pad_fft``, ...). An unset ``rotate_mode`` is
+            ``"exact"``: the template is turned through its own transform,
+            without interpolation.
 
         Returns
         -------
@@ -436,7 +443,7 @@ class Specimen:
             On the propagation grid, ``oversample`` times finer than the
             pixels, or on the pixel grid for the models that never leave it.
         """
-        p = settings_group(Propagation, propagation, settings)
+        p = _resolve(settings_group(Propagation, propagation, settings))
         device = self.potential.device
         uniform = 0.0
         if p.absorption_model == "inelastic_mfp" and p.inelastic_mfp_specimen is None:
@@ -551,7 +558,7 @@ class Specimen:
         thickness = None if self.ice is None else self.ice.thickness
         nz_t, ny_t, nx_t = template.shape
         rotator = VolumeRotator(
-            nz_t, ny_t, nx_t, origin="relion", mode=p.rotate_mode
+            nz_t, ny_t, nx_t, origin="relion", mode=cast(RotateMode, p.rotate_mode)
         ).to(device)
         crowd = self._build_crowd(p.pads(False))
         if not self.absorbs:

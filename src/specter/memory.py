@@ -175,6 +175,7 @@ def estimate_peak_bytes(
     pad_nxy: int,
     oversample: int = 1,
     ice: bool = True,
+    rotate_mode: str = "real",
 ) -> int:
     """
     Estimate peak memory for one forward pass of the particle pipeline.
@@ -196,6 +197,12 @@ def estimate_peak_bytes(
     ice : bool, optional
         Whether the run solvates (an icemaker is set), which adds the ice
         path's own working set. Default True.
+    rotate_mode : str, optional
+        How the template is posed. ``"exact"`` adds its NUFFT plan, held on
+        the device outside torch's allocator (1 GiB at a 256 box); its
+        per-particle workspace (the posed volume, the half-spectrum and a
+        chunk's points) is within the trilinear grid's fitted copies.
+        Default ``"real"``.
 
     Returns
     -------
@@ -218,8 +225,14 @@ def estimate_peak_bytes(
         * _BYTES_PER_ELEMENT
     )
     ice_column = max(nz - nxy, 0) * nxy**2 * _BYTES_PER_ELEMENT if ice else 0
+    plan = 0
+    if rotate_mode == "exact":
+        from .rotations._exact import plan_bytes
+
+        plan = plan_bytes((nxy, nxy, nxy))
     return int(
-        _PADDED_COPIES_PER_PARTICLE * batchsize * padded_volume
+        plan
+        + _PADDED_COPIES_PER_PARTICLE * batchsize * padded_volume
         + _TEMPLATE_COPIES_PER_PARTICLE * batchsize * template_volume
         + _TEMPLATE_COPIES * template_volume
         + batchsize * fine_grid
@@ -268,6 +281,7 @@ def recommend_batchsize(
     n_particles: int | None = None,
     oversample: int = 1,
     ice: bool = True,
+    rotate_mode: str = "real",
 ) -> int:
     """
     Largest batch size worth running on `device`, given the free memory there.
@@ -303,6 +317,8 @@ def recommend_batchsize(
         *smallest*-free device: every rank builds the same-sized batch.
     n_particles : int, optional
         Total particles in the run. A batch never needs to exceed this.
+    oversample, ice, rotate_mode
+        As in :func:`estimate_peak_bytes`.
 
     Returns
     -------
@@ -319,8 +335,9 @@ def recommend_batchsize(
     )
     budget = free_bytes * fraction
 
-    overhead = estimate_peak_bytes(0, nxy, nz, pad_nxy, oversample, ice)
-    per_particle = estimate_peak_bytes(1, nxy, nz, pad_nxy, oversample, ice) - overhead
+    args = (nxy, nz, pad_nxy, oversample, ice, rotate_mode)
+    overhead = estimate_peak_bytes(0, *args)
+    per_particle = estimate_peak_bytes(1, *args) - overhead
     batchsize = int(math.floor((budget - overhead) / per_particle))
 
     # Past saturation a bigger batch is not faster, so this is a ceiling on

@@ -262,6 +262,7 @@ PARTICLES = CommandSpec(
         Flag("ews_curvature_sign", "negative"),
         Flag("klim", "0.10"),
         Flag("rotate_mode", "fourier"),
+        Flag("rotate_mode", "real"),
         # --- ice (cache-backed paths only) ------------------------------
         Flag("ice_model", "random"),
         Flag("ice_model", "none"),

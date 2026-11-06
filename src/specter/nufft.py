@@ -214,9 +214,7 @@ def _cached_plan(
     if gpu and not _cufinufft_loads():
         gpu = False
     if not gpu:
-        n_trans = 1
-    if not gpu:
-        gpu_method = None
+        n_trans, gpu_method = 1, None
     key = (
         kind,
         shape,

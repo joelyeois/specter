@@ -19,10 +19,10 @@ instead of leaving it. :func:`wrapped_fraction` bounds how much can, and
 
 from __future__ import annotations
 
+import functools
 import math
 import warnings
 import weakref
-from collections import OrderedDict
 from typing import Any
 
 import torch
@@ -83,8 +83,7 @@ class _Grid:
         inside = p.norm(dim=-1) < 0.5
         self.idx = torch.nonzero(inside).flatten()
         p = p[inside]
-        self.q = p.to(real).contiguous()
-        self.qT = self.q.T.contiguous()
+        self.qT = p.T.to(real).contiguous()
         self.M = len(self.idx)
         # The DFT's origin is voxel 0, the NUFFT's the centre voxel c = n // 2:
         # exp(-2 pi i p . c), from integer indices so it is exact at any size.
@@ -95,7 +94,7 @@ class _Grid:
         cplx = torch.complex128 if double else torch.complex64
         self.origin = torch.exp(-2j * math.pi * turns.sum(-1)).to(cplx)
         self.real, self.complex = real, cplx
-        self.bins = nz * ny * (nx // 2 + 1)
+        self.upsampfac = _plan_settings(shape, double)
 
     # Both geometry helpers loop over poses with fixed-shape products: a
     # batched matmul or einsum picks its blocking from the batch size, which
@@ -117,19 +116,9 @@ class _Grid:
         return self.origin * torch.polar(torch.ones_like(arg), arg)
 
 
-_GRIDS: OrderedDict[tuple[Any, ...], _Grid] = OrderedDict()
-_GRIDS_MAX = 4
-
-
+@functools.lru_cache(maxsize=4)
 def _grid(shape: tuple[int, int, int], device: torch.device, double: bool) -> _Grid:
-    key = (shape, str(device), double)
-    if key in _GRIDS:
-        _GRIDS.move_to_end(key)
-        return _GRIDS[key]
-    _GRIDS[key] = _Grid(shape, device, double)
-    while len(_GRIDS) > _GRIDS_MAX:
-        _GRIDS.popitem(last=False)
-    return _GRIDS[key]
+    return _Grid(shape, device, double)
 
 
 def _plan_settings(shape: tuple[int, int, int], double: bool) -> float:
@@ -177,17 +166,18 @@ class _ExactRotate(torch.autograd.Function):
         shape = tuple(V.shape)
         double = V.dtype == torch.float64
         g = _grid(shape, V.device, double)  # type: ignore[arg-type]
-        up = _plan_settings(shape, double)  # type: ignore[arg-type]
         ctx.save_for_backward(R, tau)
-        ctx.shape, ctx.eps, ctx.dtype, ctx.double = shape, eps, V.dtype, double
+        ctx.shape, ctx.eps, ctx.double = shape, eps, double
+        nz, ny, nx = shape
         values = V.detach().to(g.complex).contiguous()
-        spec = torch.zeros(len(R), g.bins, dtype=g.complex, device=V.device)
+        spec = torch.zeros(
+            len(R), nz * ny * (nx // 2 + 1), dtype=g.complex, device=V.device
+        )
         for s, e in _chunks(len(R), g.M, V.is_cuda):
             vals = nufft._execute(
-                2, values, g.points(R[s:e]), shape, eps, up, _GPU_METHOD[2]
+                2, values, g.points(R[s:e]), shape, eps, g.upsampfac, _GPU_METHOD[2]
             )
             spec[s:e, g.idx] = vals.reshape(e - s, g.M) * g.phase(R[s:e], tau[s:e])
-        nz, ny, nx = shape
         return spec.reshape(len(R), nz, ny, nx // 2 + 1)
 
     @staticmethod
@@ -202,7 +192,6 @@ class _ExactRotate(torch.autograd.Function):
         R, tau = ctx.saved_tensors
         shape, double = ctx.shape, ctx.double
         g = _grid(shape, grad.device, double)
-        up = _plan_settings(shape, double)
         eps = (
             ctx.eps if nufft._ADJOINT_EPS is None else max(ctx.eps, nufft._ADJOINT_EPS)
         )
@@ -216,10 +205,11 @@ class _ExactRotate(torch.autograd.Function):
                 g.points(R[s:e]),
                 shape,
                 eps,
-                up,
+                g.upsampfac,
                 _GPU_METHOD[1],
             ).real
-        return out.to(ctx.dtype), None, None, None
+        # rotate_volume_exact hands V over already in its working precision.
+        return out, None, None, None
 
 
 class _ContiguousGrad(torch.autograd.Function):
@@ -241,11 +231,8 @@ class _ContiguousGrad(torch.autograd.Function):
 # The last template's histogram, held against a weak reference to the tensor
 # itself: a key on its address would hand a freed template's histogram to a
 # new tensor that the allocator puts at the same address.
-_RADIAL: list[Any] = [
-    None,
-    -1,
-    None,
-]  # [weakref to the volume, its _version, histogram]
+# [weakref to the volume, its _version, histogram]
+_RADIAL: list[Any] = [None, -1, None]
 
 
 def _radial_histogram(V: torch.Tensor) -> torch.Tensor:
@@ -261,9 +248,9 @@ def _radial_histogram(V: torch.Tensor) -> torch.Tensor:
             + axes[1][None, :, None] ** 2
             + axes[2][None, None, :] ** 2
         )
-        bins = (r * _RADIAL_BINS_PER_VOXEL).long().reshape(-1)
-        weights = V.detach().abs().reshape(-1).to(torch.float64)
-        hist = torch.bincount(bins, weights=weights).cpu()
+        bins = (r * _RADIAL_BINS_PER_VOXEL).to(torch.int32).reshape(-1)
+        weights = V.detach().abs().reshape(-1).float()
+        hist = torch.bincount(bins, weights=weights).cpu().double()
         _RADIAL[:] = [weakref.ref(V), V._version, hist]
     return hist
 

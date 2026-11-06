@@ -72,6 +72,7 @@ from typing import Literal
 import psutil
 import torch
 
+from .options import RotateMode
 from .scattering._kernels import _MULTISLICE_SLICE_CHUNK
 
 __all__ = [
@@ -175,7 +176,7 @@ def estimate_peak_bytes(
     pad_nxy: int,
     oversample: int = 1,
     ice: bool = True,
-    rotate_mode: str = "real",
+    rotate_mode: RotateMode = "real",
 ) -> int:
     """
     Estimate peak memory for one forward pass of the particle pipeline.
@@ -197,7 +198,7 @@ def estimate_peak_bytes(
     ice : bool, optional
         Whether the run solvates (an icemaker is set), which adds the ice
         path's own working set. Default True.
-    rotate_mode : str, optional
+    rotate_mode : RotateMode, optional
         How the template is posed. ``"exact"`` adds its NUFFT plan, held on
         the device outside torch's allocator (1 GiB at a 256 box); its
         per-particle workspace (the posed volume, the half-spectrum and a
@@ -281,7 +282,7 @@ def recommend_batchsize(
     n_particles: int | None = None,
     oversample: int = 1,
     ice: bool = True,
-    rotate_mode: str = "real",
+    rotate_mode: RotateMode = "real",
 ) -> int:
     """
     Largest batch size worth running on `device`, given the free memory there.

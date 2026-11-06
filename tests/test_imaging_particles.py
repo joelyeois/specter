@@ -23,7 +23,7 @@ from specter.ice import RandomIcemaker
 REFERENCES = Path(__file__).parent / "test_data"
 #: The retired generator rotated the template trilinearly; the comparisons hold
 #: the rest of the chain to it, so they rotate the same way. Exact rotation, the
-#: chain's default, is tested in test_rotate_exact.py.
+#: chain's default, is tested in test_exact_rotation.py.
 RETIRED = dict(rotate_mode="real")
 
 N = 4

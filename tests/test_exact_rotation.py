@@ -18,6 +18,7 @@ import pytest
 import roma
 import torch
 
+from conftest import blob
 from specter.imaging import Poses, Specimen
 from specter.rotations import (
     VolumeRotator,
@@ -208,27 +209,7 @@ def test_wrapped_content_reenters_at_the_opposite_face() -> None:
     assert float(tri[low].abs().sum()) < 1e-3 * float(V.sum())
 
 
-def _gauss(n: int, sigma: float) -> torch.Tensor:
-    f = torch.fft.fftfreq(n)
-    k2 = (
-        f[:, None, None] ** 2
-        + f[None, :, None] ** 2
-        + torch.fft.rfftfreq(n)[None, None] ** 2
-    )
-    return torch.exp(-2 * math.pi**2 * sigma**2 * k2)
-
-
-def _atoms(
-    n_atoms: int = 300, radius: float = 9.0
-) -> tuple[torch.Tensor, torch.Tensor]:
-    g = torch.Generator().manual_seed(5)
-    d = torch.randn(n_atoms, 3, generator=g)
-    r = radius * torch.rand(n_atoms, 1, generator=g) ** (1 / 3)
-    coords = d / d.norm(dim=-1, keepdim=True) * r
-    return coords, torch.full((n_atoms,), 6, dtype=torch.long)
-
-
-def _band(V: torch.Tensor, lo: float, hi: float) -> tuple[torch.Tensor, torch.Tensor]:
+def _band(V: torch.Tensor, lo: float, hi: float) -> torch.Tensor:
     n = V.shape[-1]
     f = torch.fft.fftfreq(n)
     k = torch.sqrt(
@@ -237,14 +218,15 @@ def _band(V: torch.Tensor, lo: float, hi: float) -> tuple[torch.Tensor, torch.Te
         + torch.fft.rfftfreq(n)[None, None] ** 2
     )
     sel = (k >= lo) & (k < hi)
-    return torch.fft.rfftn(V, dim=(-3, -2, -1))[..., sel], sel
+    return torch.fft.rfftn(V, dim=(-3, -2, -1))[..., sel]
 
 
 def test_keeps_the_top_band_of_an_atom_rendered_specimen_where_trilinear_loses_it() -> (
     None
 ):
     """Against per-pose atom rendering, the reference `Specimen.from_atoms` gives."""
-    coords, numbers = _atoms()
+    coords = blob(300, 9.0, seed=5)
+    numbers = torch.full((300,), 6, dtype=torch.long)
     n, voxel = 40, 0.8
     atoms = Specimen.from_atoms(coords, numbers, voxel, n)
     template = Specimen(atoms.potential, voxel)
@@ -253,11 +235,11 @@ def test_keeps_the_top_band_of_an_atom_rendered_specimen_where_trilinear_loses_i
         roma.random_unitquat(4), (torch.rand(4, 2) - 0.5) * 3.0, torch.arange(4)
     )
     ref = atoms.materialize(poses, voltage=300.0)
-    Fref, _ = _band(ref, 0.3, 0.5)
+    Fref = _band(ref, 0.3, 0.5)
 
     def ratio(mode: str) -> float:
         V = template.materialize(poses, voltage=300.0, rotate_mode=mode)
-        F, _ = _band(V, 0.3, 0.5)
+        F = _band(V, 0.3, 0.5)
         return float((F * Fref.conj()).real.sum() / (Fref.abs() ** 2).sum())
 
     exact, real = ratio("exact"), ratio("real")

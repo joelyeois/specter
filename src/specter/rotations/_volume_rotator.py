@@ -27,6 +27,14 @@ from ._volume import (
 from specter.options import GridOrigin, GridSamplePadding, RotateMode
 
 
+def _check_mode(mode: str, origin: str) -> None:
+    """Refuse an unknown rotation mode, or ``"exact"`` about any origin but RELION's."""
+    if mode not in ("real", "fourier", "exact"):
+        raise ValueError(f"Unknown mode: {mode}. Must be 'real', 'fourier' or 'exact'.")
+    if mode == "exact" and origin != "relion":
+        raise ValueError("mode='exact' rotates about the RELION origin only")
+
+
 def _normalize_slice_indices(
     slice_indices: torch.Tensor | Sequence[int] | int, device: str | torch.device
 ) -> torch.Tensor:
@@ -258,12 +266,7 @@ class VolumeRotator(L.LightningModule):
         # Validate inputs
         if origin not in ("relion", "center"):
             raise ValueError(f"Unknown origin: {origin}. Must be 'relion' or 'center'.")
-        if mode not in ("real", "fourier", "exact"):
-            raise ValueError(
-                f"Unknown mode: {mode}. Must be 'real', 'fourier' or 'exact'."
-            )
-        if mode == "exact" and origin != "relion":
-            raise ValueError("mode='exact' rotates about the RELION origin only")
+        _check_mode(mode, origin)
 
         self.nz = nz
         self.ny = ny
@@ -542,17 +545,11 @@ class VolumeRotator(L.LightningModule):
         """
         if mode is None:
             mode = self.mode
-
-        if mode not in ("real", "fourier", "exact"):
-            raise ValueError(
-                f"Unknown mode: {mode}. Must be 'real', 'fourier' or 'exact'."
-            )
+        _check_mode(mode, self.origin)
 
         if mode == "real":
             return self.rotate_real(V, theta)
         if mode == "exact":
-            if self.origin != "relion":
-                raise ValueError("mode='exact' rotates about the RELION origin only")
             return rotate_volume_exact(
                 V, theta, eps=self.tolerance, align_corners=self.align_corners
             )

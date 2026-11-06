@@ -46,7 +46,7 @@ __all__ = ["Specimen", "Structure"]
 
 def _resolve(p: Propagation) -> Propagation:
     """`p` with its rotation mode settled: a simulation rotates exactly by default."""
-    return p if p.rotate_mode is not None else replace(p, rotate_mode="exact")
+    return replace(p, rotate_mode=p.rotation("exact"))
 
 
 def _seeds(seed: int | None, ids: torch.Tensor, stage: int) -> list[int] | None:

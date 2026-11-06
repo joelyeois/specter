@@ -5,6 +5,7 @@ and FSC curves with their resolution readouts.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from typing import Any
 
 import matplotlib.axes
@@ -14,7 +15,7 @@ import torch
 
 from .arrays import radial_profile_2d, radial_symmetrize
 from .coords import radial_distribution_function
-from .fft import fourier_shell_correlation
+from .fft import fourier_shell_correlation, fsc_crossing
 
 # seaborn's "deep" categorical palette, hardcoded to avoid a seaborn dependency
 # for two matplotlib-only plotting helpers.
@@ -378,10 +379,11 @@ def fsc_resolution(
     """
     Resolution at the first FSC threshold crossing, linearly interpolated.
 
-    The *first* crossing, as RELION and CryoSPARC report it. A masked FSC
-    rises again toward Nyquist when both maps share the mask, because the
-    mask correlates their noise; reading the last crossing then reports that
-    artefact as resolution (1.79 A against a true ~1.91 A on EMPIAR-13203).
+    The *first* crossing, as RELION and CryoSPARC report it
+    (`specter.fft.fsc_crossing`). A masked FSC rises again toward Nyquist
+    when both maps share the mask, because the mask correlates their noise;
+    reading the last crossing then reports that artefact as resolution
+    (1.79 A against a true ~1.91 A on EMPIAR-13203).
 
     Parameters
     ----------
@@ -393,8 +395,8 @@ def fsc_resolution(
         Crossing to interpolate -- `HALFMAP_FSC_THRESHOLD` for two half-sets,
         `MAP_TO_MODEL_FSC_THRESHOLD` against a known reference.
     k_max : float, optional
-        Ignore shells above this frequency (pass the Nyquist frequency to stop
-        a crossing in the aliased tail from being reported as a resolution).
+        Ignore shells above this frequency, for a curve that runs past
+        Nyquist. `specter.fft.fourier_shell_correlation`'s stops there.
 
     Returns
     -------
@@ -409,16 +411,82 @@ def fsc_resolution(
        single-particle electron cryomicroscopy. *Journal of Molecular
        Biology*, 333(4), 721–745. https://doi.org/10.1016/j.jmb.2003.07.013
     """
-    kf = k.cpu().float()
-    ff = fsc.cpu().float()
-    for i in range(len(ff) - 1):
-        if k_max is not None and kf[i] > k_max:
-            break
-        if ff[i] >= threshold > ff[i + 1]:
-            t = (threshold - ff[i]) / (ff[i + 1] - ff[i])
-            k_cross = kf[i] + t * (kf[i + 1] - kf[i])
-            return f"{1.0 / k_cross.item():.3f} Å"
-    return ">Nyquist"
+    kf = k.detach().cpu().double()
+    ff = fsc.detach().cpu()
+    if k_max is not None:
+        keep = int((kf <= k_max).sum())
+        kf, ff = kf[:keep], ff[:keep]
+    if len(ff) < 2 or not bool((ff[1:] < threshold).any()):
+        return ">Nyquist"
+    shell = fsc_crossing(ff, threshold)
+    i = min(int(shell), len(kf) - 2)
+    k_cross = kf[i] + (shell - i) * (kf[i + 1] - kf[i])
+    return f"{1.0 / float(k_cross):.3f} Å"
+
+
+@dataclass(frozen=True)
+class FSCCurve:
+    """
+    One FSC between two volumes and its resolution, optionally also masked.
+
+    Attributes
+    ----------
+    k, fsc : torch.Tensor
+        Frequencies (1/Å) and the unmasked FSC, from
+        `specter.fft.fourier_shell_correlation`.
+    resolution : str
+        At the curve's threshold, as `fsc_resolution` formats it.
+    fsc_masked : torch.Tensor or None
+        The FSC inside the mask, when one was given.
+    resolution_masked : str or None
+        Its resolution.
+    """
+
+    k: torch.Tensor
+    fsc: torch.Tensor
+    resolution: str
+    fsc_masked: torch.Tensor | None = None
+    resolution_masked: str | None = None
+
+
+def fsc_curve(
+    volume_a: torch.Tensor,
+    volume_b: torch.Tensor,
+    voxel_size: float,
+    threshold: float,
+    mask: torch.Tensor | None = None,
+) -> FSCCurve:
+    """
+    The FSC of two volumes and its resolution, plus the masked pair with a mask.
+
+    Parameters
+    ----------
+    volume_a, volume_b : torch.Tensor
+        Volumes to correlate, shape ``(N, N, N)``; `volume_b` is moved to
+        `volume_a`'s device.
+    voxel_size : float
+        Voxel size in Å.
+    threshold : float
+        `HALFMAP_FSC_THRESHOLD` or `MAP_TO_MODEL_FSC_THRESHOLD`.
+    mask : torch.Tensor, optional
+        Gives the masked curve as well.
+
+    Returns
+    -------
+    FSCCurve
+    """
+    a = volume_a.detach().float()
+    b = volume_b.detach().to(a.device).float()
+    k, fsc = fourier_shell_correlation(a, b, pixel_size=voxel_size)
+    curve = FSCCurve(k, fsc, fsc_resolution(k, fsc, threshold))
+    if mask is None:
+        return curve
+    _, fsc_m = fourier_shell_correlation(
+        a, b, pixel_size=voxel_size, mask=mask.detach().float()
+    )
+    return replace(
+        curve, fsc_masked=fsc_m, resolution_masked=fsc_resolution(k, fsc_m, threshold)
+    )
 
 
 def resolution_between(
@@ -430,11 +498,6 @@ def resolution_between(
 ) -> str:
     """
     Resolution at an FSC threshold between two volumes, optionally masked.
-
-    The numeric counterpart to `plot_map_to_model_fsc`/`plot_halfmap_fsc`,
-    for callers that want to record a resolution rather than draw one. Those
-    two return only the *unmasked* resolution even when given a mask, so a
-    masked figure and a masked number cannot come from the same call.
 
     Parameters
     ----------
@@ -455,13 +518,88 @@ def resolution_between(
     str
         Resolution formatted as ``"1.397 Å"``, or ``">Nyquist"``.
     """
-    a = volume_a.detach().cpu().float()
-    b = volume_b.detach().cpu().float()
-    if mask is not None:
-        m = mask.detach().cpu().float()
-        a, b = a * m, b * m
-    k, fsc = fourier_shell_correlation(a, b, pixel_size=voxel_size)
-    return fsc_resolution(k, fsc, threshold, k_max=1.0 / (2.0 * voxel_size))
+    a = volume_a.detach().float()
+    b = volume_b.detach().to(a.device).float()
+    m = None if mask is None else mask.detach().float()
+    k, fsc = fourier_shell_correlation(a, b, pixel_size=voxel_size, mask=m)
+    return fsc_resolution(k, fsc, threshold)
+
+
+def plot_fsc_curves(
+    curves: list[FSCCurve],
+    labels: list[str],
+    voxel_size: float,
+    threshold: float,
+    title: str,
+) -> matplotlib.figure.Figure:
+    """
+    Draw FSC curves, a dashed masked curve beside each that has one.
+
+    Parameters
+    ----------
+    curves : list of FSCCurve
+        From `fsc_curve`.
+    labels : list of str
+        One per curve; each legend entry adds the curve's resolution.
+    voxel_size : float
+        Voxel size in Å, which sets the Nyquist frequency the axis ends at.
+    threshold : float
+        Drawn as a dotted line.
+    title : str
+        The axes' title.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The caller closes it.
+    """
+    nyquist = 1.0 / (2.0 * voxel_size)
+    palette = _deep_palette(max(len(curves), 1))
+    fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
+    for color, curve, label in zip(palette, curves, labels):
+        k = curve.k.cpu()
+        ax.plot(
+            k,
+            curve.fsc.cpu(),
+            color=color,
+            ls="-",
+            lw=1.8,
+            label=f"{label} ({curve.resolution})",
+        )
+        if curve.fsc_masked is not None:
+            ax.plot(
+                k,
+                curve.fsc_masked.cpu(),
+                color=color,
+                ls="--",
+                lw=1.8,
+                label=f"{label} masked ({curve.resolution_masked})",
+            )
+    ax.axhline(threshold, color="#888888", ls=":", lw=1.0, zorder=0)
+
+    # X-axis: evenly spaced frequency ticks from 0 to Nyquist, labelled in Å
+    tick_k = torch.linspace(0, nyquist, 6).tolist()
+    tick_labels = ["∞"] + [f"{1.0 / k:.2f}" for k in tick_k[1:]]
+    ax.set(
+        xticks=tick_k,
+        xticklabels=tick_labels,
+        xlabel="resolution (Å)",
+        title=title,
+        ylim=[-0.05, 1.05],
+        xlim=[0, nyquist],
+    )
+    ax.grid(True, alpha=0.25, linewidth=0.6)
+    ax.legend(frameon=True, fontsize=8, loc="upper right", framealpha=0.8)
+    _despine(ax, offset=6)
+    fig.tight_layout()
+    return fig
+
+
+def _volume_list(volumes: torch.Tensor | list[torch.Tensor]) -> list[torch.Tensor]:
+    """A ``(B, Z, Y, X)`` batch or a list of ``(Z, Y, X)`` volumes, as a list."""
+    if isinstance(volumes, torch.Tensor):
+        return list(volumes) if volumes.ndim == 4 else [volumes]
+    return list(volumes)
 
 
 def plot_map_to_model_fsc(
@@ -494,7 +632,7 @@ def plot_map_to_model_fsc(
         (masked) FSC is computed for each volume by multiplying both the input
         and the reference with the mask before correlation.
     labels : list of str, optional
-        One label per volume. Defaults to ``["volume 0", "volume 1", ...]``.
+        One label per volume. Defaults to ``["vol 0", "vol 1", ...]``.
     show : bool, optional
         Whether to display the figure immediately. Set ``False`` to get the
         figure object back (e.g. for saving to disk). Default is True.
@@ -513,72 +651,16 @@ def plot_map_to_model_fsc(
        single-particle electron cryomicroscopy. *Journal of Molecular
        Biology*, 333(4), 721–745. https://doi.org/10.1016/j.jmb.2003.07.013
     """
-    # Normalise to a flat list of (Z, Y, X) tensors
-    if isinstance(volumes, torch.Tensor):
-        volume_list: list[torch.Tensor] = (
-            list(volumes) if volumes.ndim == 4 else [volumes]
-        )
-    else:
-        volume_list = list(volumes)
-
-    n_volumes = len(volume_list)
+    volume_list = _volume_list(volumes)
     if labels is None:
-        labels = [f"vol {i}" for i in range(n_volumes)]
-
-    nyquist = 1.0 / (2.0 * voxel_size)
-
-    palette = _deep_palette(max(n_volumes, 1))
-
-    fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
-
-    for i, (volume, label) in enumerate(zip(volume_list, labels)):
-        color = palette[i]
-        volume_f = volume.float()
-        ref_f = reference.float()
-
-        k, fsc = fourier_shell_correlation(volume_f, ref_f, pixel_size=voxel_size)
-        ax.plot(
-            k.cpu(),
-            fsc.cpu(),
-            color=color,
-            ls="-",
-            lw=1.8,
-            label=f"{label} ({fsc_resolution(k, fsc, MAP_TO_MODEL_FSC_THRESHOLD, k_max=nyquist)})",
-        )
-
-        if mask is not None:
-            m = mask.float()
-            k_m, fsc_m = fourier_shell_correlation(
-                volume_f * m, ref_f * m, pixel_size=voxel_size
-            )
-            ax.plot(
-                k_m.cpu(),
-                fsc_m.cpu(),
-                color=color,
-                ls="--",
-                lw=1.8,
-                label=f"{label} masked ({fsc_resolution(k_m, fsc_m, MAP_TO_MODEL_FSC_THRESHOLD, k_max=nyquist)})",
-            )
-
-    # FSC = 0.5 criterion line
-    ax.axhline(0.5, color="#888888", ls=":", lw=1.0, zorder=0)
-
-    # X-axis: evenly spaced frequency ticks from 0 to Nyquist, labelled in Å
-    tick_k = torch.linspace(0, nyquist, 6).tolist()
-    tick_labels = ["∞"] + [f"{1.0 / k:.2f}" for k in tick_k[1:]]
-
-    ax.set(
-        xticks=tick_k,
-        xticklabels=tick_labels,
-        xlabel="resolution (Å)",
-        title="Map-to-model FSCs",
-        ylim=[-0.05, 1.05],
-        xlim=[0, nyquist],
+        labels = [f"vol {i}" for i in range(len(volume_list))]
+    curves = [
+        fsc_curve(v, reference, voxel_size, MAP_TO_MODEL_FSC_THRESHOLD, mask)
+        for v in volume_list
+    ]
+    fig = plot_fsc_curves(
+        curves, labels, voxel_size, MAP_TO_MODEL_FSC_THRESHOLD, "Map-to-model FSCs"
     )
-    ax.grid(True, alpha=0.25, linewidth=0.6)
-    ax.legend(frameon=True, fontsize=8, loc="upper right", framealpha=0.8)
-    _despine(ax, offset=6)
-    fig.tight_layout()
     if show:
         plt.show()
         plt.close(fig)
@@ -632,7 +714,8 @@ def plot_halfmap_fsc(
     resolutions : list of str
         Unmasked resolution at the FSC=0.143 crossing for each volume pair,
         e.g. ``"3.201 Å"`` or ``">Nyquist"`` if the curve never drops below
-        0.143 within the Nyquist limit. Same order as ``labels``.
+        0.143 within the Nyquist limit. Same order as ``labels``. For the
+        masked resolutions as well, use `fsc_curve`.
 
     Raises
     ------
@@ -646,95 +729,23 @@ def plot_halfmap_fsc(
        single-particle electron cryomicroscopy. *Journal of Molecular
        Biology*, 333(4), 721–745. https://doi.org/10.1016/j.jmb.2003.07.013
     """
-    # Normalise to flat lists of (Z, Y, X) tensors
-    if isinstance(volumes_A, torch.Tensor):
-        volume_list_A: list[torch.Tensor] = (
-            list(volumes_A) if volumes_A.ndim == 4 else [volumes_A]
-        )
-    else:
-        volume_list_A = list(volumes_A)
-
-    if isinstance(volumes_B, torch.Tensor):
-        volume_list_B: list[torch.Tensor] = (
-            list(volumes_B) if volumes_B.ndim == 4 else [volumes_B]
-        )
-    else:
-        volume_list_B = list(volumes_B)
-
-    # Check that the number of volumes matches
+    volume_list_A = _volume_list(volumes_A)
+    volume_list_B = _volume_list(volumes_B)
     if len(volume_list_A) != len(volume_list_B):
         raise ValueError(
             f"Number of volumes in volumes_A ({len(volume_list_A)}) must match "
             f"the number in volumes_B ({len(volume_list_B)})"
         )
-
-    n_volumes = len(volume_list_A)
     if labels is None:
-        labels = [f"pair {i}" for i in range(n_volumes)]
-
-    nyquist = 1.0 / (2.0 * voxel_size)
-
-    palette = _deep_palette(max(n_volumes, 1))
-
-    fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
-    resolutions: list[str] = []
-
-    for i, (volume_a, volume_b, label) in enumerate(
-        zip(volume_list_A, volume_list_B, labels)
-    ):
-        color = palette[i]
-        volume_a_f = volume_a.float()
-        volume_b_f = volume_b.float()
-
-        k, fsc = fourier_shell_correlation(
-            volume_a_f, volume_b_f, pixel_size=voxel_size
-        )
-        resolution = fsc_resolution(k, fsc, HALFMAP_FSC_THRESHOLD, k_max=nyquist)
-        resolutions.append(resolution)
-        ax.plot(
-            k.cpu(),
-            fsc.cpu(),
-            color=color,
-            ls="-",
-            lw=1.8,
-            label=f"{label} ({resolution})",
-        )
-
-        if mask is not None:
-            # A reconstructor's fsc_mask is a registered buffer on the GPU,
-            # while half-maps read back from disk are on the CPU.
-            m = mask.detach().to(volume_a_f.device).float()
-            k_m, fsc_m = fourier_shell_correlation(
-                volume_a_f * m, volume_b_f * m, pixel_size=voxel_size
-            )
-            ax.plot(
-                k_m.cpu(),
-                fsc_m.cpu(),
-                color=color,
-                ls="--",
-                lw=1.8,
-                label=f"{label} masked ({fsc_resolution(k_m, fsc_m, HALFMAP_FSC_THRESHOLD, k_max=nyquist)})",
-            )
-
-    # FSC = 0.143 criterion line
-    ax.axhline(0.143, color="#888888", ls=":", lw=1.0, zorder=0)
-
-    # X-axis: evenly spaced frequency ticks from 0 to Nyquist, labelled in Å
-    tick_k = torch.linspace(0, nyquist, 6).tolist()
-    tick_labels = ["∞"] + [f"{1.0 / k:.2f}" for k in tick_k[1:]]
-
-    ax.set(
-        xticks=tick_k,
-        xticklabels=tick_labels,
-        xlabel="resolution (Å)",
-        title="Half-map FSCs",
-        ylim=[-0.05, 1.05],
-        xlim=[0, nyquist],
+        labels = [f"pair {i}" for i in range(len(volume_list_A))]
+    curves = [
+        fsc_curve(a, b, voxel_size, HALFMAP_FSC_THRESHOLD, mask)
+        for a, b in zip(volume_list_A, volume_list_B)
+    ]
+    fig = plot_fsc_curves(
+        curves, labels, voxel_size, HALFMAP_FSC_THRESHOLD, "Half-map FSCs"
     )
-    ax.grid(True, alpha=0.25, linewidth=0.6)
-    ax.legend(frameon=True, fontsize=8, loc="upper right", framealpha=0.8)
-    _despine(ax, offset=6)
-    fig.tight_layout()
+    resolutions = [c.resolution for c in curves]
     if show:
         plt.show()
         plt.close(fig)

@@ -117,9 +117,8 @@ truth = reference.potential.cpu()
 
 k, fsc_halves = fourier_shell_correlation(half_a, half_b, PIXEL)
 _, fsc_model = fourier_shell_correlation((half_a + half_b) / 2, truth, PIXEL)
-# Shells past Nyquist reach only the corners of the Fourier cube, which the
-# reconstruction's k-space mask leaves empty.
-keep = (np.asarray(k) > 0) & (np.asarray(k) <= 1 / (2 * PIXEL) + 1e-6)
+# The curve runs from DC to Nyquist; the DC shell has no resolution to plot.
+keep = np.asarray(k) > 0
 k, fsc_halves, fsc_model = (
     np.asarray(x, dtype=float)[keep] for x in (k, fsc_halves, fsc_model)
 )

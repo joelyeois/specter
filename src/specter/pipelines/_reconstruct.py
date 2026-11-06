@@ -464,7 +464,7 @@ def _compute_and_save_gold_standard_fsc(
     import mrcfile
     import torch
 
-    from ..plots import HALFMAP_FSC_THRESHOLD, plot_halfmap_fsc, resolution_between
+    from ..plots import HALFMAP_FSC_THRESHOLD, fsc_curve, plot_fsc_curves
 
     with mrcfile.open(str(run_dir / f"volume_A{suffix}.mrc")) as mrc:
         vol_a = torch.as_tensor(mrc.data.copy())
@@ -472,23 +472,14 @@ def _compute_and_save_gold_standard_fsc(
     with mrcfile.open(str(run_dir / f"volume_B{suffix}.mrc")) as mrc:
         vol_b = torch.as_tensor(mrc.data.copy())
 
-    fig, resolutions = plot_halfmap_fsc(
-        [vol_a],
-        [vol_b],
-        voxel_size=voxel_size,
-        labels=[label],
-        mask=mask,
-        show=False,
+    curve = fsc_curve(vol_a, vol_b, voxel_size, HALFMAP_FSC_THRESHOLD, mask)
+    fig = plot_fsc_curves(
+        [curve], [label], voxel_size, HALFMAP_FSC_THRESHOLD, "Half-map FSCs"
     )
-    assert fig is not None
-    masked = None
     check = None
     if mask is not None:
         from ..ghostbuster._converge import mask_check
 
-        masked = resolution_between(
-            vol_a, vol_b, voxel_size, HALFMAP_FSC_THRESHOLD, mask
-        )
         check = mask_check(vol_a, vol_b, mask, voxel_size)
         corrected = check.pop("corrected_fsc")
         n = vol_a.shape[-1]
@@ -505,7 +496,7 @@ def _compute_and_save_gold_standard_fsc(
         ax.legend(frameon=True, fontsize=8, loc="upper right", framealpha=0.8)
     fig.savefig(run_dir / f"fsc_gold_standard{suffix}.png")
     plt.close(fig)
-    return resolutions[0], masked, check
+    return curve.resolution, curve.resolution_masked, check
 
 
 def _uses_converged_solver(config: ReconstructionConfig) -> bool:

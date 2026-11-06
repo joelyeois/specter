@@ -23,16 +23,37 @@ def test_fsc_of_a_volume_with_itself_is_one():
 
 
 def test_fsc_frequency_axis_is_physical():
-    """Shell spacing is 1/(N * pixel_size), and shells run past Nyquist out to
-    the corners of the Fourier cube (sqrt(3) * Nyquist)."""
+    """Shell spacing is 1/(N * pixel_size), and the last shell is Nyquist."""
     n, pixel_size = 16, 2.0
     volume = torch.randn(n, n, n)
     k, _ = fourier_shell_correlation(volume, volume, pixel_size=pixel_size)
 
     assert k[0] == 0.0
     assert k[1] == pytest.approx(1.0 / (n * pixel_size))
-    nyquist = 1.0 / (2.0 * pixel_size)
-    assert k[-1] == pytest.approx(3.0**0.5 * nyquist, rel=0.05)
+    assert k[-1] == pytest.approx(1.0 / (2.0 * pixel_size))
+
+
+@pytest.mark.parametrize("n", [15, 16])
+def test_fsc_half_spectrum_matches_the_full_spectrum(n):
+    """The half spectrum, each column it stands in for twice weighted 2, gives
+    the full spectrum's shell sums: below Nyquist, the FSC of the whole
+    transform shell by shell, for an odd box and an even one (whose Nyquist
+    plane has no partner)."""
+    torch.manual_seed(n)
+    a = torch.randn(n, n, n, dtype=torch.float64)
+    b = a + torch.randn(n, n, n, dtype=torch.float64)
+    _, fsc = fourier_shell_correlation(a, b)
+
+    fa, fb = torch.fft.fftn(a), torch.fft.fftn(b)
+    f = torch.fft.fftfreq(n, dtype=torch.float64) * n
+    shell = torch.round(
+        torch.sqrt(f[:, None, None] ** 2 + f[None, :, None] ** 2 + f[None, None] ** 2)
+    ).long()
+    for s in range(n // 2):
+        inside = shell == s
+        num = (fa[inside] * fb[inside].conj()).real.sum()
+        den = torch.sqrt((fa[inside].abs() ** 2).sum() * (fb[inside].abs() ** 2).sum())
+        assert fsc[s] == pytest.approx(float(num / den), abs=1e-12)
 
 
 @pytest.mark.parametrize(

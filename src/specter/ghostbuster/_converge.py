@@ -44,6 +44,7 @@ from torch.func import functional_call
 from specter import logger
 
 from .. import nufft
+from ..fft import fourier_shell_correlation, frequency_shells, fsc_crossing
 from ..symmetries import apply_symmetry
 from ._helpers import _apply_kmask_inplace
 
@@ -57,53 +58,6 @@ ADJOINT_TOLERANCE = 1e-4
 #: FSC is clipped to this range before it becomes an SSNR, so the prior is
 #: finite where the halves agree perfectly and bounded where they do not.
 FSC_CLIP = (1e-3, 0.999)
-
-
-def frequency_shells(
-    n: int, device: torch.device | str = "cpu"
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Radius, shell index and Hermitian weight of every half-spectrum voxel.
-
-    Parameters
-    ----------
-    n : int
-        Box size of a cubic volume.
-    device : torch.device or str
-        Device of the returned grids.
-
-    Returns
-    -------
-    radius : torch.Tensor
-        ``|k|`` in voxels of the Fourier grid, shape ``(n, n, n // 2 + 1)``.
-    shell : torch.Tensor
-        ``round(radius)``, clamped to ``n // 2``, as int64.
-    weight : torch.Tensor
-        2 for the columns the half spectrum stands in for twice, else 1, so
-        a weighted sum over it is the sum over the full spectrum.
-    """
-    fz = torch.fft.fftfreq(n, device=device)
-    fx = torch.fft.rfftfreq(n, device=device)
-    radius = (
-        torch.sqrt(
-            fx[None, None] ** 2 + fz[None, :, None] ** 2 + fz[:, None, None] ** 2
-        )
-        * n
-    )
-    shell = torch.round(radius).long().clamp(max=n // 2)
-    weight = torch.full_like(radius, 2.0)
-    weight[..., 0] = 1.0
-    if n % 2 == 0:
-        weight[..., -1] = 1.0
-    return radius, shell, weight
-
-
-def _shell_sum(
-    x: torch.Tensor, shell: torch.Tensor, weight: torch.Tensor
-) -> torch.Tensor:
-    n_shells = int(shell.max()) + 1
-    out = torch.zeros(n_shells, device=x.device, dtype=x.dtype)
-    return out.index_add_(0, shell.flatten(), (x * weight).flatten())
 
 
 def masked_fsc(
@@ -124,16 +78,7 @@ def masked_fsc(
     numpy.ndarray
         FSC per shell of one Fourier voxel, ``n // 2 + 1`` values.
     """
-    if mask is not None:
-        a, b = a * mask, b * mask
-    _, shell, weight = frequency_shells(a.shape[-1], a.device)
-    fa, fb = torch.fft.rfftn(a), torch.fft.rfftn(b)
-    num = _shell_sum((fa * fb.conj()).real, shell, weight)
-    den = torch.sqrt(
-        _shell_sum(fa.abs() ** 2, shell, weight)
-        * _shell_sum(fb.abs() ** 2, shell, weight)
-    )
-    return (num / den.clamp(min=torch.finfo(den.dtype).tiny)).cpu().numpy()
+    return fourier_shell_correlation(a, b, mask=mask)[1].cpu().numpy()
 
 
 def ssnr_from_fsc(fsc: np.ndarray, smooth: int = 5) -> np.ndarray:
@@ -197,29 +142,6 @@ def unfilter(volume: torch.Tensor, ssnr: np.ndarray | torch.Tensor) -> torch.Ten
         ]
     )
     return torch.fft.irfftn(torch.fft.rfftn(volume) * factor, s=volume.shape)
-
-
-def fsc_crossing(fsc: np.ndarray, threshold: float = 0.143) -> float:
-    """
-    The shell, interpolated, where an FSC first falls below `threshold`.
-
-    Parameters
-    ----------
-    fsc : numpy.ndarray
-        FSC per shell.
-    threshold : float
-        Crossing level.
-
-    Returns
-    -------
-    float
-        Shell index (Fourier voxels); the last shell when it never falls below.
-    """
-    below = np.nonzero(fsc[1:] < threshold)[0]
-    if len(below) == 0:
-        return float(len(fsc) - 1)
-    i = int(below[0]) + 1
-    return (i - 1) + (fsc[i - 1] - threshold) / (fsc[i - 1] - fsc[i])
 
 
 def spherical_mask(n: int, inner: float = 0.85, outer: float = 0.99) -> torch.Tensor:

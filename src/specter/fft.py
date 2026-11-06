@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Sequence
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.fft import next_fast_len
@@ -502,17 +503,66 @@ def _centered(
     return arr[tuple(myslice)]
 
 
+def frequency_shells(
+    n: int, device: torch.device | str = "cpu"
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Radius, shell index and Hermitian weight of every half-spectrum voxel.
+
+    Parameters
+    ----------
+    n : int
+        Box size of a cubic volume.
+    device : torch.device or str
+        Device of the returned grids.
+
+    Returns
+    -------
+    radius : torch.Tensor
+        ``|k|`` in voxels of the Fourier grid, shape ``(n, n, n // 2 + 1)``.
+    shell : torch.Tensor
+        ``round(radius)``, clamped to ``n // 2``, as int64: the cube's corners
+        count towards the Nyquist shell.
+    weight : torch.Tensor
+        2 for the columns the half spectrum stands in for twice, else 1, so
+        a weighted sum over it is the sum over the full spectrum.
+    """
+    fz = torch.fft.fftfreq(n, device=device)
+    fx = torch.fft.rfftfreq(n, device=device)
+    radius = (
+        torch.sqrt(
+            fx[None, None] ** 2 + fz[None, :, None] ** 2 + fz[:, None, None] ** 2
+        )
+        * n
+    )
+    shell = torch.round(radius).long().clamp(max=n // 2)
+    weight = torch.full_like(radius, 2.0)
+    weight[..., 0] = 1.0
+    if n % 2 == 0:
+        weight[..., -1] = 1.0
+    return radius, shell, weight
+
+
+def _shell_sum(
+    x: torch.Tensor, shell: torch.Tensor, weight: torch.Tensor
+) -> torch.Tensor:
+    n_shells = int(shell.max()) + 1
+    out = torch.zeros(n_shells, device=x.device, dtype=x.dtype)
+    return out.index_add_(0, shell.flatten(), (x * weight).flatten())
+
+
 def fourier_shell_correlation(
     volume1: torch.Tensor,
     volume2: torch.Tensor,
     pixel_size: float = 1.0,
+    mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute the Fourier Shell Correlation (FSC) between two 3D volumes.
 
     The FSC of Harauz & van Heel (1986) [1]_: the normalised cross-correlation
     of the two volumes' Fourier coefficients over each shell of constant
-    spatial frequency.
+    spatial frequency, one shell per Fourier voxel (`frequency_shells`).
 
     Parameters
     ----------
@@ -520,17 +570,16 @@ def fourier_shell_correlation(
         Real-space 3D volumes of shape (N, N, N).
     pixel_size : float, optional
         Pixel size in Å (or consistent units). Default is 1.
+    mask : torch.Tensor, optional
+        Multiplied into both volumes first, moved to their device.
 
     Returns
     -------
     k : torch.Tensor
-        Spatial frequency axis (units: 1/pixelsize). Shells run out to the
-        *corners* of the Fourier cube, so the axis extends past Nyquist by a
-        factor of sqrt(3); those trailing shells are sampled from the corner
-        directions alone. Pass ``k_max=1/(2*pixel_size)`` to `plots.fsc_resolution`
-        to keep a crossing in that aliased tail out of a reported resolution.
+        Spatial frequency of each shell (units: 1/pixelsize), from 0 to
+        Nyquist; the corners of the Fourier cube count towards the last shell.
     fsc : torch.Tensor
-        FSC curve, one value per Fourier shell.
+        FSC curve, one value per shell, ``N // 2 + 1`` values.
 
     Raises
     ------
@@ -545,9 +594,6 @@ def fourier_shell_correlation(
     .. [1] Harauz, G., & van Heel, M. (1986). Exact filters for general
        geometry three dimensional reconstruction. *Optik*, 73, 146–156.
     """
-    # Lazy import to avoid circular dependency (arrays imports fft)
-    from .arrays import radial_profile_3d
-
     if volume1.shape != volume2.shape:
         raise ValueError(
             f"Volumes must have the same shape, got {tuple(volume1.shape)} "
@@ -558,31 +604,51 @@ def fourier_shell_correlation(
             "fourier_shell_correlation requires cubic (N, N, N) volumes, got "
             f"{tuple(volume1.shape)}."
         )
+    if mask is not None:
+        mask = mask.to(volume1.device)
+        volume1, volume2 = volume1 * mask, volume2 * mask
 
     n = volume1.shape[0]
-    device = volume1.device
-
-    volume1_f = fft3(volume1, shift=True)
-    volume2_f = fft3(volume2, shift=True)
-
-    # Cross-spectrum F1 * conj(F2) and power spectra.
-    cross = volume1_f * volume2_f.conj()
-    norm1 = volume1_f.real**2 + volume1_f.imag**2  # |F1|^2, avoids sqrt in .abs()
-    norm2 = volume2_f.real**2 + volume2_f.imag**2
-
-    # Radial averages — DC is at (n//2, n//2, n//2), matching the default center.
-    cross_r = radial_profile_3d(cross.real)
-    norm1_r = radial_profile_3d(norm1)
-    norm2_r = radial_profile_3d(norm2)
-
-    denom = torch.sqrt(norm1_r * norm2_r).clamp(min=1e-10)
-    fsc = cross_r / denom
-
-    # Frequency axis: shell index × frequency spacing (1 / (N * pixel_size))
-    dk = 1.0 / (n * float(pixel_size))
-    k = torch.arange(len(fsc), device=device) * dk
-
+    _, shell, weight = frequency_shells(n, volume1.device)
+    f1, f2 = torch.fft.rfftn(volume1), torch.fft.rfftn(volume2)
+    num = _shell_sum((f1 * f2.conj()).real, shell, weight)
+    den = torch.sqrt(
+        _shell_sum(f1.abs() ** 2, shell, weight)
+        * _shell_sum(f2.abs() ** 2, shell, weight)
+    )
+    fsc = num / den.clamp(min=torch.finfo(den.dtype).tiny)
+    k = torch.arange(len(fsc), device=fsc.device) / (n * float(pixel_size))
     return k, fsc
+
+
+def fsc_crossing(fsc: np.ndarray | torch.Tensor, threshold: float = 0.143) -> float:
+    """
+    The shell, interpolated, where an FSC first falls below `threshold`.
+
+    The *first* crossing, as RELION and CryoSPARC report it: a masked FSC
+    can rise again toward Nyquist when both maps share the mask, and reading
+    the last crossing would report that artefact as resolution.
+
+    Parameters
+    ----------
+    fsc : array_like
+        FSC per shell.
+    threshold : float
+        Crossing level.
+
+    Returns
+    -------
+    float
+        Shell index (Fourier voxels); the last shell when it never falls below.
+    """
+    # In the curve's own precision: the solver's mask search compares
+    # crossings computed this way, and float64 would move them in the last bits.
+    f = fsc.detach().cpu().numpy() if isinstance(fsc, torch.Tensor) else np.asarray(fsc)
+    below = np.nonzero(f[1:] < threshold)[0]
+    if len(below) == 0:
+        return float(len(f) - 1)
+    i = int(below[0]) + 1
+    return float((i - 1) + (f[i - 1] - threshold) / (f[i - 1] - f[i]))
 
 
 def _apply_conv_mode(

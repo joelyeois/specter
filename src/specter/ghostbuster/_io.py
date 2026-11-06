@@ -8,9 +8,13 @@ from __future__ import annotations
 from specter import logger
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import mrcfile
 import torch
+
+if TYPE_CHECKING:
+    from ..plots import FSCCurve
 
 # ---------------------------------------------------------------------------
 # Volume/figure saving helpers shared by Reconstructor and TomogramReconstructor
@@ -67,8 +71,8 @@ def save_halfmap_fsc_figure(
     volume_a: torch.Tensor,
     volume_b: torch.Tensor,
     voxel_size: float,
-    fsc_mask: torch.Tensor | float | None = None,
-) -> str | None:
+    fsc_mask: torch.Tensor | None = None,
+) -> FSCCurve | None:
     """
     Compute and save a gold-standard half-map FSC figure. Silently skips on failure.
 
@@ -80,33 +84,23 @@ def save_halfmap_fsc_figure(
         The two half-set volumes, shape ``(Z, Y, X)``.
     voxel_size : float
         Voxel size in Å.
-    fsc_mask : torch.Tensor or float, optional
-        Mask applied before the FSC is computed.
+    fsc_mask : torch.Tensor, optional
+        Gives a masked curve as well.
 
     Returns
     -------
-    str or None
-        Resolution at the FSC = 0.143 crossing (e.g. ``"1.397 Å"``), or None
-        if the figure could not be produced.
+    FSCCurve or None
+        The curve drawn, with its resolutions at FSC = 0.143, or None if the
+        figure could not be produced.
     """
     try:
-        import matplotlib.pyplot as plt
+        from ..plots import HALFMAP_FSC_THRESHOLD, fsc_curve
 
-        from ..plots import plot_halfmap_fsc
-
-        mask = fsc_mask if isinstance(fsc_mask, torch.Tensor) else None
-        fig, resolutions = plot_halfmap_fsc(
-            [volume_a.float()],
-            [volume_b.float()],
-            voxel_size=voxel_size,
-            mask=mask,
-            labels=["gold-standard"],
-            show=False,
+        curve = fsc_curve(
+            volume_a, volume_b, voxel_size, HALFMAP_FSC_THRESHOLD, fsc_mask
         )
-        assert fig is not None
-        fig.savefig(path, bbox_inches="tight")
-        plt.close(fig)
-        return resolutions[0]
+        save_fsc_figure(path, [curve], ["gold-standard"], voxel_size, halfmap=True)
+        return curve
     except Exception as exc:
         logger.warning(f"half-map FSC plot skipped: {exc}")
         return None
@@ -114,70 +108,42 @@ def save_halfmap_fsc_figure(
 
 def save_fsc_figure(
     path: Path,
-    v: torch.Tensor,
-    fsc_ref: torch.Tensor,
+    curves: list[FSCCurve],
+    labels: list[str],
     voxel_size: float,
-    label: str,
-    fsc_mask: torch.Tensor | float | None = None,
-    cryosparc_ref: torch.Tensor | None = None,
+    halfmap: bool = False,
 ) -> None:
     """
-    Compute and save a map-to-model FSC figure. Silently skips on failure.
+    Draw FSC curves already computed and save the figure. Silently skips on failure.
 
     Parameters
     ----------
     path : Path
         Output image path.
-    v : torch.Tensor
-        Reconstructed volume, shape ``(Z, Y, X)``.
-    fsc_ref : torch.Tensor
-        Reference volume to compute FSC against.
+    curves : list of FSCCurve
+        From `specter.plots.fsc_curve`.
+    labels : list of str
+        One legend label per curve.
     voxel_size : float
         Voxel size in Å.
-    label : str
-        Legend label for ``v`` in the figure.
-    fsc_mask : torch.Tensor or float, optional
-        Mask applied before FSC computation.
-    cryosparc_ref : torch.Tensor, optional
-        Additional CryoSPARC reference volume, plotted alongside ``v`` when given.
+    halfmap : bool
+        Half-map curves (FSC = 0.143) rather than map-to-model (0.5).
     """
     try:
         import matplotlib.pyplot as plt
 
-        from ..plots import plot_map_to_model_fsc
-
-        # Move references to volume's device for GPU FSC computation.
-        device = v.device
-        fsc_ref_dev = (
-            fsc_ref.detach().to(device).float()
-            if isinstance(fsc_ref, torch.Tensor)
-            else fsc_ref
-        )
-        fsc_mask_dev = (
-            fsc_mask.detach().to(device) if isinstance(fsc_mask, torch.Tensor) else None
+        from ..plots import (
+            HALFMAP_FSC_THRESHOLD,
+            MAP_TO_MODEL_FSC_THRESHOLD,
+            plot_fsc_curves,
         )
 
-        volumes = [v]
-        labels = [label]
-
-        if cryosparc_ref is not None:
-            cs_ref_dev = (
-                cryosparc_ref.detach().to(device).float()
-                if isinstance(cryosparc_ref, torch.Tensor)
-                else cryosparc_ref
-            )
-            volumes.append(cs_ref_dev)
-            labels.append("CryoSPARC")
-
-        fig = plot_map_to_model_fsc(
-            volumes,
-            fsc_ref_dev,
-            voxel_size=voxel_size,
-            mask=fsc_mask_dev,
-            labels=labels,
-            show=False,
+        threshold, title = (
+            (HALFMAP_FSC_THRESHOLD, "Half-map FSCs")
+            if halfmap
+            else (MAP_TO_MODEL_FSC_THRESHOLD, "Map-to-model FSCs")
         )
-        assert fig is not None
+        fig = plot_fsc_curves(curves, labels, voxel_size, threshold, title)
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
     except Exception as exc:

@@ -21,11 +21,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from .. import nufft
 from ..imaging import CTF, Exposure, Poses, Specimen
-from ..plots import (
-    HALFMAP_FSC_THRESHOLD,
-    MAP_TO_MODEL_FSC_THRESHOLD,
-    resolution_between,
-)
+from ..plots import MAP_TO_MODEL_FSC_THRESHOLD, FSCCurve, fsc_curve
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
 from ._converge import ADJOINT_TOLERANCE
@@ -193,6 +189,9 @@ class Reconstructor(_BaseReconstructor):
         #: Per-epoch FSC resolutions, accumulated in memory rather than written
         #: to their own file per epoch -- see `results_summary`.
         self._epoch_resolutions: list[dict[str, Any]] = []
+        #: The CryoSPARC map against `fsc_ref`, drawn beside every epoch's
+        #: curve; neither changes during a run, so it is computed once.
+        self._cryosparc_curve: FSCCurve | None = None
         #: Hyperparameters and array-save metadata from `on_fit_start`,
         #: accumulated rather than written to their own `params<suffix>.json`.
         self._extra_params: dict[str, Any] = {}
@@ -624,10 +623,7 @@ class Reconstructor(_BaseReconstructor):
         self._save_volume(v, volume_path)
         logger.info(f"Saved final volume → {volume_path}")
 
-        if self.fsc_ref is not None:
-            self._save_fsc_figure(
-                v, suffix, self._run_dir / f"fsc{suffix}.png", label=f"final{suffix}"
-            )
+        self._map_to_model_fsc(v, self._run_dir / f"fsc{suffix}.png", f"final{suffix}")
 
     def on_train_epoch_end(self) -> None:
         """Enforce symmetry, save per-epoch volume, plot3d preview, and FSC.
@@ -649,14 +645,12 @@ class Reconstructor(_BaseReconstructor):
         self._save_volume(v, self._run_dir / "epochs" / f"{epoch:03d}{suffix}.mrc")
 
         self._save_plot3d(v, suffix=suffix, epoch=epoch)
-        if self.fsc_ref is not None:
-            self._save_fsc_figure(
-                v,
-                suffix,
-                self._run_dir / "epochs" / f"fsc_{epoch:03d}{suffix}.png",
-                label=f"epoch {epoch}{suffix}",
-            )
-        self._record_map_to_model_resolutions(v, epoch)
+        self._map_to_model_fsc(
+            v,
+            self._run_dir / "epochs" / f"fsc_{epoch:03d}{suffix}.png",
+            f"epoch {epoch}{suffix}",
+            epoch=epoch,
+        )
         self._record_halfmap_resolutions(epoch)
 
     def results_summary(self) -> dict[str, Any]:
@@ -728,52 +722,67 @@ class Reconstructor(_BaseReconstructor):
             return None
         return mask
 
-    def _record_map_to_model_resolutions(self, v: torch.Tensor, epoch: int) -> None:
+    def _map_to_model_fsc(
+        self, v: torch.Tensor, path: Path, label: str, epoch: int | None = None
+    ) -> None:
         """
-        Record this epoch's map-to-model resolution, masked and unmasked.
+        Draw `v`'s map-to-model FSC and, given an `epoch`, record its resolutions.
 
-        Skipped entirely without ``fsc_ref`` -- map-to-model is a comparison
-        against a known reference, so with no reference there is nothing to
-        report. The masked entry is additionally skipped without ``fsc_mask``.
-        Neither is an error: a run with no reference maps is a perfectly
-        ordinary run, it just has no map-to-model resolution to log.
+        One curve serves the figure and both recorded resolutions, masked and
+        unmasked; the CryoSPARC map's curve, when there is one, is computed
+        on first use and drawn beside it. Skipped entirely without
+        ``fsc_ref`` -- map-to-model is a comparison against a known
+        reference, so with no reference there is nothing to report -- and
+        when ``fsc_ref``'s shape differs from `v`'s, which is what a
+        ``test_run``'s binned volume gives. The masked curve is skipped
+        without a usable ``fsc_mask``. None of these is an error, and a
+        failure here only logs a warning: a diagnostic must not end a run.
 
         Parameters
         ----------
         v : torch.Tensor
-            This epoch's volume, shape ``(Z, Y, X)``.
-        epoch : int
-            One-based epoch number just completed.
+            The volume, shape ``(Z, Y, X)``.
+        path : Path
+            Where the figure goes.
+        label : str
+            `v`'s legend label.
+        epoch : int, optional
+            One-based epoch number just completed; None records nothing.
         """
         if self._run_dir is None or self.fsc_ref is None:
             return
         if tuple(self.fsc_ref.shape) != tuple(v.shape):
-            # Same binning mismatch _mask_for guards against: a test_run's
-            # volume is smaller than the reference it was given.
             return
-
         mask = self._mask_for(v)
-        record: dict[str, Any] = {"epoch": epoch, "halfset": self._halfset_label}
         try:
-            record["resolution_map_to_model"] = resolution_between(
-                v, self.fsc_ref, self.voxel_size, MAP_TO_MODEL_FSC_THRESHOLD
+            curve = fsc_curve(
+                v, self.fsc_ref, self.voxel_size, MAP_TO_MODEL_FSC_THRESHOLD, mask
             )
-            record["resolution_map_to_model_masked"] = (
-                resolution_between(
-                    v,
-                    self.fsc_ref,
-                    self.voxel_size,
-                    MAP_TO_MODEL_FSC_THRESHOLD,
-                    mask=mask,
-                )
-                if mask is not None
-                else None
-            )
+            curves, labels = [curve], [label]
+            if self.cryosparc_ref is not None:
+                if self._cryosparc_curve is None:
+                    self._cryosparc_curve = fsc_curve(
+                        self.cryosparc_ref,
+                        self.fsc_ref,
+                        self.voxel_size,
+                        MAP_TO_MODEL_FSC_THRESHOLD,
+                        mask,
+                    )
+                curves.append(self._cryosparc_curve)
+                labels.append("CryoSPARC")
         except Exception as exc:
-            logger.warning(f"map-to-model resolution skipped: {exc}")
+            logger.warning(f"map-to-model FSC skipped: {exc}")
             return
-
-        self._epoch_resolutions.append(record)
+        save_fsc_figure(path, curves, labels, self.voxel_size)
+        if epoch is not None:
+            self._epoch_resolutions.append(
+                {
+                    "epoch": epoch,
+                    "halfset": self._halfset_label,
+                    "resolution_map_to_model": curve.resolution,
+                    "resolution_map_to_model_masked": curve.resolution_masked,
+                }
+            )
 
     def _record_halfmap_resolutions(self, epoch: int) -> None:
         """
@@ -826,35 +835,16 @@ class Reconstructor(_BaseReconstructor):
             )
             # save_halfmap_fsc_figure swallows its own errors and returns None,
             # which would otherwise leave the empty claim file standing.
-            if (
-                save_halfmap_fsc_figure(
-                    figure_path,
-                    volume_a,
-                    volume_b,
-                    self.voxel_size,
-                    fsc_mask=self.fsc_mask,
-                )
-                is None
-            ):
+            curve = save_halfmap_fsc_figure(
+                figure_path,
+                volume_a,
+                volume_b,
+                self.voxel_size,
+                fsc_mask=self._mask_for(volume_a),
+            )
+            if curve is None:
                 raise RuntimeError("half-map FSC figure could not be produced")
-            # Computed rather than taken from the figure: plot_halfmap_fsc
-            # returns the unmasked resolution even when it draws a masked
-            # curve, so the masked number has to come from its own call.
-            mask = self._mask_for(volume_a)
-            resolution = resolution_between(
-                volume_a, volume_b, self.voxel_size, HALFMAP_FSC_THRESHOLD
-            )
-            masked = (
-                resolution_between(
-                    volume_a,
-                    volume_b,
-                    self.voxel_size,
-                    HALFMAP_FSC_THRESHOLD,
-                    mask=mask,
-                )
-                if mask is not None
-                else None
-            )
+            resolution, masked = curve.resolution, curve.resolution_masked
             self._epoch_resolutions.append(
                 {
                     "epoch": epoch,
@@ -882,30 +872,4 @@ class Reconstructor(_BaseReconstructor):
             self._run_dir / "epochs" / f"volume_{epoch:03d}{suffix}.png",
             v,
             title=f"Epoch {epoch}{suffix}",
-        )
-
-    def _save_fsc_figure(
-        self,
-        v: torch.Tensor,
-        suffix: str,
-        path: Path,
-        label: str,
-    ) -> None:
-        """Compute and save an FSC figure with optional CryoSPARC reference. Silently skips on failure."""
-        assert self.fsc_ref is not None, (
-            "_save_fsc_figure requires self.fsc_ref to be set"
-        )
-        cryosparc_ref = (
-            self.cryosparc_ref
-            if self.cryosparc_ref is not None and self.fsc_ref is not None
-            else None
-        )
-        save_fsc_figure(
-            path,
-            v,
-            self.fsc_ref,
-            self.voxel_size,
-            label,
-            fsc_mask=self.fsc_mask,
-            cryosparc_ref=cryosparc_ref,
         )

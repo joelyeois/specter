@@ -36,9 +36,9 @@ def _band_limited_pair(
 
 
 def test_fsc_resolution_k_max_ignores_crossing_in_tail():
-    """`fourier_shell_correlation` returns shells past Nyquist (the corners of
-    the Fourier cube). A threshold crossing there is aliasing, not signal, and
-    `k_max` exists to keep it out of the reported resolution."""
+    """A curve running past Nyquist (the corners of the Fourier cube) can cross
+    the threshold there, which is aliasing, not signal; `k_max` keeps it out of
+    the reported resolution."""
     # Stays above 0.5 to Nyquist (0.25) and only crosses at k = 0.35, in the
     # corner tail.
     k = torch.tensor([0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
@@ -53,11 +53,10 @@ def test_fsc_resolution_k_max_ignores_crossing_in_tail():
 def test_map_to_model_plot_resolution_matches_resolution_between():
     """`plot_map_to_model_fsc` labels each curve with a resolution, and
     `resolution_between` returns the same number without drawing. They must
-    agree: both are the map-to-model resolution of the same pair, and only one
-    of them capping the curve at Nyquist would report the aliased corner tail."""
-    # This particular pair is chosen because the two paths *disagreed* before
-    # the k_max fix: the plot labelled a genuinely 5.065 Å map as 1.749 Å,
-    # read off a spurious crossing in the corner shells past Nyquist (3.0 Å).
+    agree: both are the map-to-model resolution of the same pair."""
+    # This particular pair is chosen because the two paths once *disagreed*:
+    # the plot labelled a genuinely 5.065 Å map as 1.749 Å, read off a
+    # spurious crossing in the corner shells past Nyquist (3.0 Å).
     n, voxel_size = 48, 1.5
     a, b = _band_limited_pair(n, voxel_size, seed=5)
 

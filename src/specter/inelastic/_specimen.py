@@ -9,9 +9,8 @@ import torch
 from torch import nn
 
 from specter.arrays import soft_voxelize_coordinates
-from specter.fft import fftconvolve
 from specter.potential import PotentialBuilder, potential_occupancy
-from specter.ice._kernels import build_water_kernel
+from specter.ice._kernels import build_water_kernel, ice_potential_from_deltas
 from ._exposure import BrownianCoordinates, ExposureStep
 
 
@@ -178,9 +177,7 @@ class AtomicPlasmonSpecimen(nn.Module):
                 raise ValueError(
                     "solvent fraction must match the volume and lie in [0,1]"
                 )
-            ice = fftconvolve(
-                deltas[None], self.water_kernel[None], mode="same", axes=(-3, -2, -1)
-            )[0]
+            ice = ice_potential_from_deltas(deltas, self.water_kernel)
             elastic = elastic + fraction * ice
             source = source + fraction * deltas * (
                 self.water_strength / self.pixel_size**3

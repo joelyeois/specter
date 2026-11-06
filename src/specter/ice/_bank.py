@@ -24,10 +24,7 @@ from ..arrays import (
 from ..progress import track
 from ..rotations import random_rotation_matrix_from_generator
 from ._energy import mlbop_energy_summary
-from ..potential import (
-    potential_from_deltas,
-)
-from ._kernels import build_water_kernel
+from ._kernels import build_water_kernel, ice_potential_from_deltas
 from specter.options import IceModel, ScatteringFactors
 
 if TYPE_CHECKING:
@@ -414,11 +411,8 @@ class IceBank(_IceTiling, L.LightningModule):
         )
         assert self.current_icedeltas is not None
         kernel = self._get_kernel(dx)
-        return potential_from_deltas(
-            self.current_icedeltas.to(device),
-            kernel.to(device),
-            backend="auto",
-            boundary="periodic",
+        return ice_potential_from_deltas(
+            self.current_icedeltas.to(device), kernel.to(device)
         )
 
     def mlbop_energy(self, pbc: bool = False) -> dict[str, float]:

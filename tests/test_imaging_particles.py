@@ -7,6 +7,12 @@ these exact inputs and seeds, written once while both existed. The chain was
 bit-identical to them then, so the exact comparisons here still hold it to
 the generator's draws and noise; the inexact ones are the two places the
 chain applies the same product in a different order.
+
+The cases with random ice (``crowded_solvated_noisy``, ``specimen_damage``,
+``material_absorption``, ``atoms``) were re-recorded from the chain on
+2026-11-07, when `RandomIcemaker` began convolving its waters periodically
+(the generator's linear convolution left each face plane at 85-94% of the
+interior's potential): from then on they pin the chain, not the generator.
 """
 
 from __future__ import annotations

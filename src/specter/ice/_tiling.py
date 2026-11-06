@@ -18,9 +18,7 @@ from ..arrays import (
 from ..cpu_threads import limited_cpu_threads
 from ..progress import track
 from ._energy import LDA_ENERGY_PER_ATOM_EV, MLBOP
-from ..potential import (
-    potential_from_deltas,
-)
+from ._kernels import ice_potential_from_deltas
 
 if TYPE_CHECKING:
     pass
@@ -541,11 +539,9 @@ class _IceTiling:
         # `out=deltas`: the deltas are consumed here and nothing reads them
         # afterwards, so the potential overwrites them instead of taking a
         # second canvas.
-        # `boundary="periodic"`: the canvas is a piece of bulk ice, not a
-        # molecule in a box, so a face molecule's kernel wraps rather than
-        # being cut off -- see potential_from_deltas for what the cut cost.
-        potential = potential_from_deltas(
-            deltas, kernel.to(device), backend="auto", out=deltas, boundary="periodic"
-        )
+        # Periodic: the canvas is a piece of bulk ice, not a molecule in a
+        # box, so a face molecule's kernel wraps rather than being cut off
+        # (see ice_potential_from_deltas).
+        potential = ice_potential_from_deltas(deltas, kernel.to(device), out=deltas)
         del deltas
         return potential

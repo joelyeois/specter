@@ -21,7 +21,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from specter.ice import IceBank
+from specter.ice import IceBank, RandomIcemaker
 from specter.ice._kernels import build_water_kernel
 from specter.potential._builders import (
     build_atomic_potential_kernel,
@@ -131,3 +131,54 @@ def test_ice_canvas_faces_are_bulk():
         interior_std = float(planes[6:-6].std())
         for face in (planes[0], planes[1], planes[-1], planes[-2]):
             assert abs(float(face) - m) < 4 * interior_std + 0.05 * m
+
+
+def test_random_ice_faces_are_bulk():
+    """
+    `RandomIcemaker` splats its waters periodically, so it must convolve them
+    periodically too: a linear convolution left the face planes at 85-94% of
+    the interior's potential, the deficit `IceBank` had. The six faces' mean
+    has ~1.5% sampling noise here; the deficit was ~13%.
+    """
+    torch.manual_seed(0)
+    ice = RandomIcemaker(dx=1.0, n=64, nz=48).generate_ice(batchsize=8)
+    interior = float(ice[:, 8:-8, 8:-8, 8:-8].mean())
+    faces = torch.stack(
+        [
+            ice[:, 0].mean(),
+            ice[:, -1].mean(),
+            ice[:, :, 0].mean(),
+            ice[:, :, -1].mean(),
+            ice[..., 0].mean(),
+            ice[..., -1].mean(),
+        ]
+    )
+    assert float(faces.mean()) / interior == pytest.approx(1.0, abs=0.05)
+
+
+def test_a_slab_thinner_than_the_kernel_spills_past_its_surfaces():
+    """
+    A slab shallower than the water kernel cannot wrap in z, so its top and
+    bottom are real surfaces: its potential is the same slab's cut out of a
+    deep volume of vacuum, while y and x still wrap.
+    """
+    from specter.ice._kernels import ice_potential_from_deltas
+
+    k = build_water_kernel(0.5)
+    nz, margin = 4, k.shape[0]
+    assert k.shape[0] > nz
+    torch.manual_seed(0)
+    thin = torch.zeros(nz, 24, 24)
+    thin[0, 0, 5] = 1.0  # on a face in z and in y
+    thin[nz - 1, 12, 12] = 2.0
+    deep = torch.nn.functional.pad(thin, (0, 0, 0, 0, margin, margin))
+    want = ice_potential_from_deltas(deep, k)[margin : margin + nz]
+    got = ice_potential_from_deltas(thin, k)
+    assert torch.allclose(got, want, atol=1e-6 * float(want.abs().max()))
+    assert float(got[:, -1].abs().max()) > 0  # the y face wrapped
+
+
+def test_random_ice_thinner_than_its_kernel():
+    ice = RandomIcemaker(dx=0.5, n=24, nz=4).generate_ice(batchsize=1)
+    assert ice.shape == (1, 4, 24, 24)
+    assert torch.isfinite(ice).all()

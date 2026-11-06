@@ -10,10 +10,9 @@ import lightning as L
 import torch
 
 from ..arrays import soft_voxelize_coordinates
-from ..fft import fftconvolve
 from ._energy import mlbop_energy_summary
 from ._helpers import ndensity_of_amorphous_ice
-from ._kernels import build_water_kernel
+from ._kernels import build_water_kernel, ice_potential_from_deltas
 from specter.options import IceModel, ScatteringFactors
 
 
@@ -167,7 +166,9 @@ class RandomIcemaker(L.LightningModule):
         Generate ice potential volumes.
 
         Runs :meth:`generate_ice_deltas` then convolves each volume with the
-        whole-water-molecule kernel (`build_water_kernel`). ``self.positions`` holds the last
+        whole-water-molecule kernel (`build_water_kernel`), periodically as
+        the positions were splatted (`ice_potential_from_deltas`).
+        ``self.positions`` holds the last
         batch's coordinates; ``self.current_icedeltas`` holds the pre-convolution
         grids.
 
@@ -187,13 +188,9 @@ class RandomIcemaker(L.LightningModule):
             device = self.device
         self.generate_ice_deltas(batchsize=batchsize)
         assert self.current_icedeltas is not None
-        icecubes = fftconvolve(
-            self.current_icedeltas.to(device),
-            self.ice_kernel.unsqueeze(0).to(device),
-            mode="same",
-            axes=(-3, -2, -1),
+        return ice_potential_from_deltas(
+            self.current_icedeltas.to(device), self.ice_kernel.to(device)
         )
-        return icecubes
 
     # ------------------------------------------------------------------
     # Diagnostics

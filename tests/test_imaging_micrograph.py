@@ -8,6 +8,11 @@ written once while both existed. Exact without ice. With ice, to float
 tolerance and without noise: the references were written while the CPU ice
 splat still accumulated in thread-scheduling order, so they carry ~1e-5 V of
 that noise, which Poisson counts would turn into different integers.
+
+Every case with ice was re-recorded from these objects on 2026-11-07, when
+`RandomIcemaker` began convolving its waters periodically (the generator's
+linear convolution left each face plane at 85-94% of the interior's
+potential): from then on they pin the objects, not the generator.
 """
 
 from __future__ import annotations

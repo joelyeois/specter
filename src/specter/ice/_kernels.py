@@ -21,7 +21,7 @@ from ..arrays import (
 )
 from ..fft import fft3
 from ..ice_data import bundled_ice_data
-from ..potential import build_atomic_potential_kernel
+from ..potential import build_atomic_potential_kernel, potential_from_deltas
 from specter.options import KernelParameterization
 
 __all__ = ["build_atomic_potential_kernel", "build_water_kernel"]
@@ -50,6 +50,50 @@ def _smear_onto_shell(kernel: torch.Tensor, dx: float, radius: float) -> torch.T
     shell = torch.where(x.abs() < 1e-8, torch.ones_like(x), torch.sin(x) / x)
     spectrum = torch.fft.fftn(torch.fft.ifftshift(kernel))
     return torch.fft.fftshift(torch.fft.ifftn(spectrum * shell).real)
+
+
+def ice_potential_from_deltas(
+    deltas: torch.Tensor, kernel: torch.Tensor, out: torch.Tensor | None = None
+) -> torch.Tensor:
+    """
+    The ice potential of splatted water positions: the water kernel, wrapped.
+
+    An ice canvas is a piece of bulk, so a molecule near a face has neighbours
+    across it, and its positions are splatted periodically; a linear
+    convolution would leave every face plane short of them (85-94% of the
+    interior's potential), which reflect padding then mirrors into a dark
+    line. The convolution wraps in y and x always, and in z too unless the
+    slab is shallower than the kernel, which cannot wrap onto itself: there
+    the slab's top and bottom are its real surfaces, and the depth is
+    zero-padded so the kernel spills past them rather than wrapping.
+
+    Parameters
+    ----------
+    deltas : torch.Tensor
+        Soft-voxelized water positions, shape ``(B, Z, Y, X)`` or ``(Z, Y, X)``.
+    kernel : torch.Tensor
+        The water kernel (`build_water_kernel`), on `deltas`' device.
+    out : torch.Tensor, optional
+        Passed to `potential_from_deltas`, which may write into `deltas`.
+
+    Returns
+    -------
+    torch.Tensor
+        The potential, the shape of `deltas`.
+    """
+    nz, kz = deltas.shape[-3], kernel.shape[0]
+    if kz <= nz:
+        return potential_from_deltas(
+            deltas, kernel, backend="auto", out=out, boundary="periodic"
+        )
+    margin = kz // 2
+    padded = torch.nn.functional.pad(deltas, (0, 0, 0, 0, margin, margin))
+    potential = potential_from_deltas(
+        padded, kernel, backend="auto", boundary="periodic"
+    )[..., margin : margin + nz, :, :]
+    if out is None:
+        return potential
+    return out.copy_(potential)
 
 
 def build_water_kernel(

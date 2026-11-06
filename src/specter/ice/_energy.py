@@ -67,6 +67,12 @@ import math
 import torch
 import vesin_torch
 
+#: ML-BOP energy per atom of real low-density amorphous ice (LDA, MD at 80 K),
+#: stable to +/-0.0001 eV across widely separated MD frames: the target an
+#: optimised or seam-relaxed configuration is held to, so that it matches
+#: that phase of ice rather than drifting to a more crystalline packing.
+LDA_ENERGY_PER_ATOM_EV = -0.413
+
 # ML-BOP, Table 3, Chan et al., Nat. Commun. 10, 379 (2019)
 ML_BOP_PARAMS: dict[str, float] = {
     "A": 1684.301476,  # eV, repulsive prefactor

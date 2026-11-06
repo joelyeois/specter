@@ -506,9 +506,6 @@ def fourier_shell_correlation(
     volume1: torch.Tensor,
     volume2: torch.Tensor,
     pixel_size: float = 1.0,
-    res_cutoff: float | None = None,
-    randomise_phases_beyond: float | None = None,
-    return_real: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute the Fourier Shell Correlation (FSC) between two 3D volumes.
@@ -523,15 +520,6 @@ def fourier_shell_correlation(
         Real-space 3D volumes of shape (N, N, N).
     pixel_size : float, optional
         Pixel size in Å (or consistent units). Default is 1.
-    res_cutoff : float | None, optional
-        High-resolution cutoff. Frequencies beyond 1/res_cutoff are zeroed.
-    randomise_phases_beyond : float | None, optional
-        Resolution limit beyond which phases are randomised, for
-        phase-randomisation FSC (gold-standard artefact validation; Chen et
-        al. 2013 [2]_).
-    return_real : bool, optional
-        If True (default), return real-part FSC (standard definition).
-        If False, return the magnitude of the complex cross-correlation per shell.
 
     Returns
     -------
@@ -556,12 +544,6 @@ def fourier_shell_correlation(
     ----------
     .. [1] Harauz, G., & van Heel, M. (1986). Exact filters for general
        geometry three dimensional reconstruction. *Optik*, 73, 146–156.
-    .. [2] Chen, S., McMullan, G., Faruqi, A. R., Murshudov, G. N., Short,
-       J. M., Scheres, S. H. W., & Henderson, R. (2013). High-resolution noise
-       substitution to measure overfitting and validate resolution in 3D
-       structure determination by single particle electron cryomicroscopy.
-       *Ultramicroscopy*, 135, 24–35.
-       https://doi.org/10.1016/j.ultramic.2013.06.004
     """
     # Lazy import to avoid circular dependency (arrays imports fft)
     from .arrays import radial_profile_3d
@@ -583,31 +565,6 @@ def fourier_shell_correlation(
     volume1_f = fft3(volume1, shift=True)
     volume2_f = fft3(volume2, shift=True)
 
-    # Apply resolution cutoff and/or phase randomisation if requested.
-    # k-grid is fftshifted to match the shifted FFT output (DC at center).
-    if res_cutoff is not None or randomise_phases_beyond is not None:
-        kx = torch.fft.fftshift(torch.fft.fftfreq(n, pixel_size, device=device))
-        kxx, kyy, kzz = torch.meshgrid(kx, kx, kx, indexing="ij")
-        k_mag = torch.sqrt(kxx**2 + kyy**2 + kzz**2)
-
-        if res_cutoff is not None:
-            mask = k_mag > (1.0 / res_cutoff)
-            volume1_f = volume1_f.clone()
-            volume2_f = volume2_f.clone()
-            volume1_f[mask] = 0.0
-            volume2_f[mask] = 0.0
-
-        if randomise_phases_beyond is not None:
-            rand_mask = k_mag > (1.0 / randomise_phases_beyond)
-            rand_phase1 = torch.rand(n, n, n, device=device) * (2 * torch.pi)
-            rand_phase2 = torch.rand(n, n, n, device=device) * (2 * torch.pi)
-            phase1 = torch.angle(volume1_f)
-            phase2 = torch.angle(volume2_f)
-            phase1[rand_mask] = rand_phase1[rand_mask]
-            phase2[rand_mask] = rand_phase2[rand_mask]
-            volume1_f = volume1_f.abs() * torch.exp(1j * phase1)
-            volume2_f = volume2_f.abs() * torch.exp(1j * phase2)
-
     # Cross-spectrum F1 * conj(F2) and power spectra.
     cross = volume1_f * volume2_f.conj()
     norm1 = volume1_f.real**2 + volume1_f.imag**2  # |F1|^2, avoids sqrt in .abs()
@@ -618,14 +575,8 @@ def fourier_shell_correlation(
     norm1_r = radial_profile_3d(norm1)
     norm2_r = radial_profile_3d(norm2)
 
-    if return_real:
-        num = cross_r
-    else:
-        cross_i = radial_profile_3d(cross.imag)
-        num = torch.sqrt(cross_r**2 + cross_i**2)
-
     denom = torch.sqrt(norm1_r * norm2_r).clamp(min=1e-10)
-    fsc = num / denom
+    fsc = cross_r / denom
 
     # Frequency axis: shell index × frequency spacing (1 / (N * pixel_size))
     dk = 1.0 / (n * float(pixel_size))

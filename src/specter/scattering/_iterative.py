@@ -1073,9 +1073,9 @@ class IterativeScattering(L.LightningModule):
             c = self._phase_scale(slice_sample)
             t = torch.exp(c * slice_sample) - 1
             F_i = self._get_propagator(float(nz_new - i))
-            total_scattered += ifft2(fft2(t) * F_i)
+            total_scattered += fft2(t) * F_i
 
-        exitwave = 1 + total_scattered
+        exitwave = 1 + ifft2(total_scattered)
         return exitwave
 
     def ctf(

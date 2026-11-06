@@ -17,7 +17,7 @@ from ..arrays import (
 )
 from ..cpu_threads import limited_cpu_threads
 from ..progress import track
-from ._energy import MLBOP
+from ._energy import LDA_ENERGY_PER_ATOM_EV, MLBOP
 from ..potential import (
     potential_from_deltas,
 )
@@ -293,7 +293,7 @@ class _IceTiling:
         seam_margin: float = 6.0,
         relax_steps: int = 0,
         relax_lr: float = 0.01,
-        mlbop_target: float | None = -0.413,
+        mlbop_target: float | None = LDA_ENERGY_PER_ATOM_EV,
         device: torch.device | str | None = None,
         generator: torch.Generator | None = None,
         to_host: bool = False,
@@ -375,7 +375,7 @@ class _IceTiling:
         seam_margin: float = 6.0,
         relax_steps: int = 0,
         relax_lr: float = 0.01,
-        mlbop_target: float | None = -0.413,
+        mlbop_target: float | None = LDA_ENERGY_PER_ATOM_EV,
         device: torch.device | str | None = None,
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
@@ -488,7 +488,7 @@ class _IceTiling:
         seam_margin: float = 6.0,
         relax_steps: int = 0,
         relax_lr: float = 0.01,
-        mlbop_target: float | None = -0.413,
+        mlbop_target: float | None = LDA_ENERGY_PER_ATOM_EV,
         device: torch.device | str | None = None,
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:

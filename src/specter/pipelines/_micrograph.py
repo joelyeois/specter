@@ -25,6 +25,7 @@ from specter.arrays import compute_nz
 from specter.config import MicrographConfig, parse_scalar_or_range, validate_config
 from specter.ice import IceProfile, resolve_icemaker
 from specter.imaging import CTF, Exposure, Field
+from specter.imaging._data import sample_uniform
 from specter.imaging._stages import read_dose_weights
 from specter.io import create_micrograph_starfile
 from specter.pdb import PDB
@@ -49,7 +50,6 @@ from ._common import (
     _seed_or_draw,
     _save_exitwave_pair,
     _tracked_output_dir,
-    _uniform_sample,
 )
 
 
@@ -160,9 +160,9 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # --- Sampling per-micrograph parameters ---
     section("Sampling defocus, dose, and coincidence radius")
-    defocus_angstrom = _uniform_sample(config.defocus, n)
-    dose = _uniform_sample(config.dose, n)
-    coincidence_radius = _uniform_sample(config.coincidence_radius, n)
+    defocus_angstrom = sample_uniform(config.defocus, n)
+    dose = sample_uniform(config.dose, n)
+    coincidence_radius = sample_uniform(config.coincidence_radius, n)
 
     n_frames = (
         config.n_frames if config.n_frames is not None else int(dose.mean().item())

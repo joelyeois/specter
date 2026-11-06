@@ -20,22 +20,12 @@ from ..constants import energy_to_wavelength
 from ..detectors import detector_mtf, dqe0_for_detector
 from ..microscope import Detector
 from ..options import AberrationModel, NoiseModel, TemporalCoherence
+from ..random_seed import derive_seeds
 from . import _stages as stages
 from ._data import CTF, Exposure, per_image
 from ._engines import aberration_engine
 
 __all__ = ["ExitWave", "Image"]
-
-
-def _seeds(
-    seed: int | None, ids: torch.Tensor, stage: int, tilt: int | None = None
-) -> list[int] | None:
-    if seed is None:
-        return None
-    from ..random_seed import derive_seed
-
-    keys = () if tilt is None else (tilt,)
-    return [derive_seed(seed, int(i), stage, *keys) for i in ids.tolist()]
 
 
 @dataclass(frozen=True)
@@ -403,7 +393,12 @@ class Image:
             per_image(coincidence_radius, n, "coincidence_radius").to(device),
             None if anisomag is None else anisomag.to(device),
             nxy=self.nxy,
-            seeds=_seeds(seed, self.ids, stages.SEED_STAGE_DETECTOR, self.tilt),
+            seeds=derive_seeds(
+                seed,
+                self.ids,
+                stages.SEED_STAGE_DETECTOR,
+                *(() if self.tilt is None else (self.tilt,)),
+            ),
         )
         return replace(self, array=counts, pad_nxy=self.nxy, detected=True)
 

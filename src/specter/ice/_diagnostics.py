@@ -15,7 +15,7 @@ import torch
 from ..arrays import (
     soft_voxelize_coordinates,
 )
-from ._energy import MLBOP, mlbop_energy_summary
+from ._energy import LDA_ENERGY_PER_ATOM_EV, MLBOP, mlbop_energy_summary
 
 if TYPE_CHECKING:
     from ._bank import IceBank
@@ -60,7 +60,7 @@ def plot_ice_bank_diagnostics(
     fig1, axes = plt.subplots(1, 3, figsize=(max(6, 0.4 * len(labels) + 4), 4))
     x = list(range(len(labels)))
     for ax, key, title, target in [
-        (axes[0], "E_per_atom", "E/atom (eV)", -0.413),
+        (axes[0], "E_per_atom", "E/atom (eV)", LDA_ENERGY_PER_ATOM_EV),
         (axes[1], "rij_var", "O-O distance variance", None),
         (axes[2], "theta_var", "O-O-O angle variance", None),
     ]:

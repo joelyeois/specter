@@ -9,14 +9,10 @@ from typing import Any, Literal, Sequence
 import torch
 
 from ..arrays import (
-    radial_grid_2d,
     radial_grid_3d,
-    soft_voxelize_coordinates,
-    soft_voxelize_xy_coordinates,
 )
 from ..atom import (
     MIN_GAUSSIAN_B,
-    kirkland_atomic_potential_2d,
     kirkland_atomic_potential_3d,
     load_kirkland_parameters,
     load_lobato_parameters,
@@ -28,8 +24,7 @@ from ..atom import (
     yukawa_shell_average,
 )
 from ..constants import bohr_radius, electron_charge_volt_angstrom
-from ..fft import fftconvolve, spatial_convolve2d_same, spatial_convolve3d_same
-from ..progress import track
+from ..fft import fftconvolve, spatial_convolve3d_same
 from specter.options import (
     ConvBackend,
     ConvBoundary,
@@ -104,140 +99,6 @@ def compute_supersampling_parameters(
     if n_pooled % 2 == 0:
         n_pooled += 1
     return n_pooled * ssf, ss_dx, ssf
-
-
-def build_potential_volume_fftconvolve_3d(
-    atomic_numbers: torch.Tensor,
-    centered_coords: torch.Tensor,
-    n_xyz: int | Sequence[int],
-    dx: float,
-    disable_tqdm: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Construct a 3D potential volume by convolving atomic kernels with voxelized positions.
-
-    Computes potentials for each unique element on a supersampled grid, then bins
-    down to the main volume resolution via average pooling.
-
-    Parameters
-    ----------
-    atomic_numbers : torch.Tensor
-        1D tensor of atomic numbers. Hydrogen is 1.
-    centered_coords : torch.Tensor
-        Atomic xyz coordinates, shape (N, 3), centered at origin.
-    n_xyz : int or sequence of int
-        Grid size (nx, ny, nz). If int, assumes cubic grid.
-    dx : float
-        Voxel size of main volume in Å.
-    disable_tqdm : bool, optional
-        Disable progress bar. Default is False.
-
-    Returns
-    -------
-    potential_volume : torch.Tensor
-        Sampled potential volume, shape (nz, ny, nx).
-    sR : torch.Tensor
-        Radial coordinate grid used for atomic potential sampling.
-    """
-    if isinstance(n_xyz, int):
-        nx = ny = nz = n_xyz
-    else:
-        nx, ny, nz = n_xyz
-
-    # create super-sampled (ss) coordinate system
-    ssn, ssdx, ssf = compute_supersampling_parameters(dx)
-    # torch convention avoids singularity at origin
-    sR = radial_grid_3d(ssn, ssdx, convention="torch")
-
-    avgpool3d = torch.nn.AvgPool3d(ssf, stride=ssf)
-    potential_volume = torch.zeros(nz, ny, nx)
-
-    for elem in track(
-        torch.unique(atomic_numbers),
-        description="Building elements",
-        disable=disable_tqdm,
-    ):
-        atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
-
-        # soft_voxelize_coordinates is differentiable w.r.t. coordinates
-        temp_volume = soft_voxelize_coordinates(
-            centered_coords[atomic_indices].reshape(-1, 3),
-            grid_shape=(nz, ny, nx),
-            voxel_size=dx,
-        )
-
-        pot = kirkland_atomic_potential_3d(int(elem), sR)
-
-        if ssf != 1:
-            pot = avgpool3d(pot[None, None]).squeeze(0).squeeze(0)
-        potential_volume += fftconvolve(temp_volume, pot, mode="same")
-    return potential_volume, sR
-
-
-def build_potential_volume_fftconvolve_2d(
-    atomic_numbers: torch.Tensor,
-    centered_coords: torch.Tensor,
-    n_xyz: int | Sequence[int],
-    dx: float,
-    disable_tqdm: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Construct a 3D potential volume using 2D projected atomic kernels.
-
-    Projects atoms onto XY slices and convolves with 2D atomic potential kernels.
-    Faster than the 3D variant but less accurate in Z.
-
-    Parameters
-    ----------
-    atomic_numbers : torch.Tensor
-        1D tensor of atomic numbers. Hydrogen is 1.
-    centered_coords : torch.Tensor
-        Atomic xyz coordinates, shape (N, 3), centered at origin.
-    n_xyz : int or sequence of int
-        Grid size (nx, ny, nz). Assumes nx = ny. If int, assumes cubic grid.
-    dx : float
-        Pixel size of main volume in Å (assumes dx = dy).
-    disable_tqdm : bool, optional
-        Disable progress bar. Default is False.
-
-    Returns
-    -------
-    potential_volume : torch.Tensor
-        Sampled potential volume, shape (nz, ny, nx).
-    sR : torch.Tensor
-        Radial coordinate grid used for atomic potential sampling.
-    """
-    if isinstance(n_xyz, int):
-        nx = ny = nz = n_xyz
-    else:
-        nx, ny, nz = n_xyz
-
-    ssn, ssdx, ssf = compute_supersampling_parameters(dx)
-    sR = radial_grid_2d(ssn, ssdx, convention="torch")
-    avgpool2d = torch.nn.AvgPool2d(ssf, stride=ssf)
-    potential_volume = torch.zeros(nz, ny, nx)
-
-    for elem in track(
-        torch.unique(atomic_numbers),
-        description="Building elements",
-        disable=disable_tqdm,
-    ):
-        atomic_indices = torch.squeeze(torch.argwhere(atomic_numbers == elem))
-
-        # soft_voxelize_xy_coordinates is differentiable w.r.t. coordinates
-        temp_volume = soft_voxelize_xy_coordinates(
-            centered_coords[atomic_indices].reshape(-1, 3),
-            grid_shape=(nz, ny, nx),
-            voxel_size=dx,
-        )
-
-        pot = kirkland_atomic_potential_2d(int(elem), sR)
-
-        if ssf != 1:
-            pot = avgpool2d(pot[None, None]).squeeze(0).squeeze(0)
-
-        potential_volume += spatial_convolve2d_same(temp_volume, pot)  # (nz, ny, nx)
-    return potential_volume, sR
 
 
 #: Peak bytes of transient per-atom state the analytic scatter builder aims
@@ -380,7 +241,7 @@ def build_potential_volume_analytic_scatter(
     volume*, in a small local window around the atom, then scatter-adding
     into the full volume.
 
-    Unlike `build_potential_volume_fftconvolve_3d` (splat atom onto the grid,
+    Unlike `PotentialBuilder`'s ``method="3d"`` (splat atoms onto the grid,
     then FFT-convolve a shared, precomputed, downsampled kernel per element
     group), this needs no FFT, no kernel precomputation, no box-size/aliasing
     dependence, and works with genuinely per-atom coefficients (no need to

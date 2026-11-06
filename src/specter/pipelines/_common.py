@@ -14,11 +14,9 @@ import torch
 import specter
 from specter.progress import console, format_elapsed
 from specter.config import (
-    ScalarOrRange,
     default_output_dir,
     ensure_project_root,
     find_specter_project_root,
-    parse_scalar_or_range,
 )
 
 
@@ -290,12 +288,6 @@ def _print_total_time(t_start: float) -> None:
     """Print a run's closing ``Total time`` footer, measured from ``t_start``."""
     elapsed = time.perf_counter() - t_start
     console.print(f"\n[bold]Total time:[/bold] {format_elapsed(elapsed)}")
-
-
-def _uniform_sample(value: ScalarOrRange, n: int) -> torch.Tensor:
-    """Sample `n` values uniformly from a `parse_scalar_or_range` scalar or [low, high] pair."""
-    low, high = parse_scalar_or_range(value)
-    return torch.rand(n) * (high - low) + low
 
 
 def _crop_center(t: torch.Tensor, nxy: int) -> torch.Tensor:

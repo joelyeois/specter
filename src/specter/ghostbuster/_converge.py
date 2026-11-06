@@ -615,27 +615,19 @@ class ConvergedSolver:
 
     def _fit_batchsize(self, V: torch.Tensor) -> None:
         """Halve the batch size until one gradient batch fits in memory."""
-        while True:
+
+        def probe() -> None:
             idx = torch.arange(
                 min(self.batchsize, self.n_particles), device=self.device
             )
             X = V.detach().clone().requires_grad_(True)
-            try:
-                with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
-                    r = self._predict(idx, X) - self._batch_images(idx)
-                    (0.5 * (r**2).sum()).backward()
-                return
-            except torch.cuda.OutOfMemoryError:
-                if self.batchsize == 1:
-                    raise
-                self.batchsize = max(1, self.batchsize // 2)
-                logger.info(
-                    f"{self._tag}: out of memory, batch size now {self.batchsize}"
-                )
-            finally:
-                del X
-                if self.device.type == "cuda":
-                    torch.cuda.empty_cache()
+            with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
+                r = self._predict(idx, X) - self._batch_images(idx)
+                (0.5 * (r**2).sum()).backward()
+
+        self._retrying(probe)
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
 
     def _out_of_memory(self, error: BaseException) -> bool:
         """Whether `error` is a device allocation failure, PyTorch's or cuFINUFFT's."""

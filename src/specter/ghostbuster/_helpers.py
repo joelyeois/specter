@@ -195,7 +195,6 @@ def _log_current_lr(trainer: L.Trainer, lr: float | None, log_lrs: list[float]) 
 
 def _build_epoch_metrics(
     total_loss: list[torch.Tensor],
-    norm_loss: list[torch.Tensor],
     lrs: list[float],
     current_epoch: int,
     include_loss_std: bool = False,
@@ -206,7 +205,7 @@ def _build_epoch_metrics(
 
     Parameters
     ----------
-    total_loss, norm_loss : list of torch.Tensor
+    total_loss : list of torch.Tensor
         Per-batch scalar losses logged during training.
     lrs : list of float
         Per-batch learning rate of the volume optimiser.
@@ -232,7 +231,6 @@ def _build_epoch_metrics(
         start = epoch * n_batches_per_epoch
         end = (epoch + 1) * n_batches_per_epoch
         ep_losses = [float(v) for v in total_loss[start:end]]
-        ep_norm = [float(v) for v in norm_loss[start:end]]
         ep_lrs = lrs[start:end]
         key = f"epoch_{epoch + 1:02d}"
 
@@ -258,9 +256,6 @@ def _build_epoch_metrics(
 
         epochs[key] = {
             "loss": loss_stats,
-            "norm_loss": {
-                "mean": sum(ep_norm) / len(ep_norm) if ep_norm else None,
-            },
             "lr": lr_stats,
         }
 

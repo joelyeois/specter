@@ -110,66 +110,6 @@ def fourier_crop(
     return resampled, actual_pixel_size
 
 
-def downsample(
-    images: torch.Tensor, bin_factor: int = 2, method: str = "fft"
-) -> torch.Tensor:
-    """
-    Downsample images using FFT or average pooling.
-
-    Parameters
-    ----------
-    images : torch.Tensor
-        Input images.
-    bin_factor : int, optional
-        Binning factor. Default is 2.
-    method : str, optional
-        Downsampling method ('fft' or 'avgpool'). Default is 'fft'.
-
-    Returns
-    -------
-    images_bin : torch.Tensor
-        Downsampled images.
-    """
-    if method == "fft":
-        N = images.shape[-1]
-        n = N // bin_factor
-        images_bin = ifft2(
-            fft2(images, shift=True)[
-                :,
-                N // 2 - n // 2 : N // 2 - n // 2 + n,
-                N // 2 - n // 2 : N // 2 - n // 2 + n,
-            ],
-            shift=True,
-        ).real
-    elif method == "avgpool":
-        avgpool = torch.nn.AvgPool2d(bin_factor, stride=bin_factor)
-        images_bin = avgpool(images) * bin_factor**2
-    return images_bin
-
-
-def centered_pad(data: torch.Tensor, target_shape: Sequence[int]) -> torch.Tensor:
-    """
-    Pad a tensor to a target shape, symmetrically.
-
-    Parameters
-    ----------
-    data : torch.Tensor
-        Input tensor.
-    target_shape : Sequence of int
-        Target shape for padding.
-
-    Returns
-    -------
-    padded : torch.Tensor
-        Padded tensor.
-    """
-    pad = []
-    for size, tgt in zip(reversed(data.shape), reversed(target_shape)):
-        diff = tgt - size
-        pad.extend([diff // 2, diff - diff // 2])
-    return F.pad(data, pad)
-
-
 def compute_nz(base_nz: int, ice_thickness: float | None, pixel_size: float) -> int:
     """
     Number of Z slices given an optional ice thickness.

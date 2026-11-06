@@ -79,6 +79,33 @@ def derive_seed(seed: int, *keys: int) -> int:
     return int(np.random.SeedSequence(seed, spawn_key=tuple(keys)).generate_state(1)[0])
 
 
+def derive_seeds(
+    seed: int | None, ids: torch.Tensor, stage: int, *keys: int
+) -> list[int] | None:
+    """
+    One `derive_seed` per image, keyed ``(id, stage, *keys)``; None without a seed.
+
+    Parameters
+    ----------
+    seed : int or None
+        The run's seed. None leaves every draw on the global stream.
+    ids : torch.Tensor
+        The images' global indices.
+    stage : int
+        The pipeline stage drawing (``imaging._stages.SEED_STAGE_*``).
+    *keys : int
+        Further indices, such as a tilt.
+
+    Returns
+    -------
+    list of int or None
+        One seed per image, or None when `seed` is None.
+    """
+    if seed is None:
+        return None
+    return [derive_seed(seed, int(i), stage, *keys) for i in ids.tolist()]
+
+
 class seeded_rng:
     """
     Run a block on the global torch RNG seeded to `seed`, then restore it.

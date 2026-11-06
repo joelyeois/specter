@@ -113,7 +113,6 @@ def _run(devices, strategy, batch_size, out_path, problem_path):
             dict(
                 V_final=model.V.detach().cpu(),
                 rot_final=model.rotations.detach().cpu(),
-                log_norm_loss=torch.stack(model.log_norm_loss),
                 log_total_loss=torch.stack(model.log_total_loss),
             ),
             out_path,
@@ -200,22 +199,15 @@ def test_reconstructor_multi_gpu_ddp_matches_single_gpu(tmp_path: Path):
         f"rotations mismatch between single- and multi-GPU: {rot_relerr}"
     )
 
-    # Logged metrics: multi-GPU's rank-0-saved log_norm_loss/log_total_loss
+    # Logged metrics: multi-GPU's rank-0-saved log_total_loss
     # should be the *gathered* (mean-across-ranks) value, not just rank 0's
     # own local-batch loss -- and since both ranks have equal-sized shards
     # here, that gathered mean must equal the single-GPU combined-batch loss
     # exactly (mean-of-equal-size-group-means == overall mean).
-    assert single["log_norm_loss"].shape == multi["log_norm_loss"].shape == (1,)
-    norm_relerr = (single["log_norm_loss"] - multi["log_norm_loss"]).abs() / single[
-        "log_norm_loss"
-    ].abs()
+    assert single["log_total_loss"].shape == multi["log_total_loss"].shape == (1,)
     total_relerr = (single["log_total_loss"] - multi["log_total_loss"]).abs() / single[
         "log_total_loss"
     ].abs()
-    assert norm_relerr < 1e-4, (
-        f"log_norm_loss not gathered correctly under multi-GPU: "
-        f"single={single['log_norm_loss'].item()} multi={multi['log_norm_loss'].item()}"
-    )
     assert total_relerr < 1e-4, (
         f"log_total_loss not gathered correctly under multi-GPU: "
         f"single={single['log_total_loss'].item()} multi={multi['log_total_loss'].item()}"

@@ -205,12 +205,13 @@ def build_one_ice_config(
     encoding (the bundled ``ice_data/ice_cache``) stay readable; see
     :meth:`IceBank._load_config`.
     """
+    from ._energy import LDA_ENERGY_PER_ATOM_EV
     from ._gradient import GradientSKIcemaker
 
     # The standard recipe, bound to names so the values actually optimised
     # with and the values recorded in the saved metadata below cannot drift
     # apart.
-    rep_strength, mlbop_strength, mlbop_target = 0.0, 0.5, -0.413
+    rep_strength, mlbop_strength, mlbop_target = 0.0, 0.5, LDA_ENERGY_PER_ATOM_EV
     tol, patience = 1e-3, 10
 
     started = time.perf_counter()

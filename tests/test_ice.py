@@ -32,10 +32,6 @@ def _random_icemaker_kernel(tmp_path, **kwargs) -> torch.Tensor:
     return RandomIcemaker(dx=1.0, n=16, **kwargs).ice_kernel
 
 
-def _gradientskicemaker_kernel(tmp_path, **kwargs) -> torch.Tensor:
-    return GradientSKIcemaker(n=16, dx=1.0, progressbars=False, **kwargs)._ice_kernel
-
-
 def _icebank_kernel(tmp_path, **kwargs) -> torch.Tensor:
     config = tmp_path / "config_000.pt"
     if not config.exists():
@@ -54,10 +50,9 @@ def _icebank_kernel(tmp_path, **kwargs) -> torch.Tensor:
     "make_kernel, baseline_kwargs",
     [
         (_random_icemaker_kernel, {"parameterization": "kirkland"}),
-        (_gradientskicemaker_kernel, {}),
         (_icebank_kernel, {}),
     ],
-    ids=["random", "gradient_sk", "ice_bank"],
+    ids=["random", "ice_bank"],
 )
 def test_icemaker_parameterization_changes_kernel(
     tmp_path, make_kernel, baseline_kwargs: dict

@@ -24,6 +24,7 @@ from specter.config import ParticleStackConfig, validate_config
 from specter.ice import IceBank, RandomIcemaker, resolve_icemaker
 from specter.image import normalize_particles
 from specter.imaging import CTF, Exposure, Poses, Specimen, Structure
+from specter.imaging._data import sample_uniform
 from specter.imaging._stages import read_dose_weights
 from specter.io import (
     create_particle_starfile,
@@ -56,7 +57,6 @@ from ._common import (
     _HostStack,
     _save_exitwave_pair,
     _tracked_output_dir,
-    _uniform_sample,
 )
 
 
@@ -205,8 +205,8 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     n, quats, translations, ctf_params, anisomag = _sample_poses_and_ctf(
         config, dataset_particles, cs_angstrom
     )
-    dose = _uniform_sample(config.dose, n)
-    coincidence_radius = _uniform_sample(config.coincidence_radius, n)
+    dose = sample_uniform(config.dose, n)
+    coincidence_radius = sample_uniform(config.coincidence_radius, n)
     n_frames = (
         config.n_frames if config.n_frames is not None else int(dose.mean().item())
     )
@@ -590,19 +590,19 @@ def _sample_poses_and_ctf(
         # and TomogramSpecimenGenerator apply to random_rotation_matrix.
         quats = rotations.random_quaternion(n).reshape(n, 4)
 
-        defocus_angstrom = _uniform_sample(config.defocus, n)
-        astigmatism_magnitude = _uniform_sample(config.astigmatism, n)
-        dfang = _uniform_sample(config.astigmatism_angle, n)
+        defocus_angstrom = sample_uniform(config.defocus, n)
+        astigmatism_magnitude = sample_uniform(config.astigmatism, n)
+        dfang = sample_uniform(config.astigmatism_angle, n)
         dfv = defocus_angstrom - astigmatism_magnitude
-        phaseshift = _uniform_sample(config.phaseshift, n)
-        tiltx = _uniform_sample(config.tiltx, n)
-        tilty = _uniform_sample(config.tilty, n)
-        trefoil1 = _uniform_sample(config.trefoil1, n)
-        trefoil2 = _uniform_sample(config.trefoil2, n)
-        tetrafoil1 = _uniform_sample(config.tetrafoil1, n)
-        tetrafoil2 = _uniform_sample(config.tetrafoil2, n)
-        tetrafoil3 = _uniform_sample(config.tetrafoil3, n)
-        tetrafoil4 = _uniform_sample(config.tetrafoil4, n)
+        phaseshift = sample_uniform(config.phaseshift, n)
+        tiltx = sample_uniform(config.tiltx, n)
+        tilty = sample_uniform(config.tilty, n)
+        trefoil1 = sample_uniform(config.trefoil1, n)
+        trefoil2 = sample_uniform(config.trefoil2, n)
+        tetrafoil1 = sample_uniform(config.tetrafoil1, n)
+        tetrafoil2 = sample_uniform(config.tetrafoil2, n)
+        tetrafoil3 = sample_uniform(config.tetrafoil3, n)
+        tetrafoil4 = sample_uniform(config.tetrafoil4, n)
         ctf_params = {
             "cs": torch.tensor([cs_angstrom] * n),
             "dfu": defocus_angstrom,

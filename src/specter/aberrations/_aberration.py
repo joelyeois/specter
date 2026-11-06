@@ -387,8 +387,8 @@ class Aberration(L.LightningModule):
         """
         if self.bfactor is not None:
             ctf_params = {**ctf_params, "bfactor": self.bfactor}
-        self.tf = self.transfer_function(ctf_params)
-        aberrated_exitwaves = ifft2(fft2(exitwave) * self.tf)
+        tf = self.transfer_function(ctf_params)
+        aberrated_exitwaves = ifft2(fft2(exitwave) * tf)
         if self.aberration_model == "linear":
             return -torch.real(aberrated_exitwaves)
         elif self.aberration_model == "nonlinear":

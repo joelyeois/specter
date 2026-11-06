@@ -12,18 +12,22 @@ import torch
 import torch.nn.functional as F
 
 from ..arrays import radial_profile_3d, soft_voxelize_coordinates
-from ..fft import fft3, fftconvolve
-from ..progress import ProgressManager, track
-from ._energy import MLBOP, NeighborListCache, mlbop_energy_summary
+from ..fft import fft3
+from ..progress import ProgressManager
+from ._energy import (
+    LDA_ENERGY_PER_ATOM_EV,
+    MLBOP,
+    NeighborListCache,
+    mlbop_energy_summary,
+)
 from ._helpers import ndensity_of_amorphous_ice
-from ._kernels import build_water_kernel
 from ._kernels import (
     compute_native_target,
     ice_kspace_radial_grid,
     interpolate_target_kernel,
     load_mdsim_f_radial_avg,
 )
-from specter.options import IceOptimizer, ScatteringFactors
+from specter.options import IceOptimizer
 
 
 class _PlateauStop:
@@ -104,14 +108,6 @@ class GradientSKIcemaker(L.LightningModule):
         which does not depend on this parameter.
     device : str or torch.device
         Computation device.
-    parameterization : str, optional
-        Atomic scattering-factor parameterization for the ice kernel:
-        ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default
-        ``'kirkland'``: Shtyrov fits bonded species of BIOMOLECULES over
-        0.011-0.62 1/A, so bulk ice is out of its domain and its k=0 limit
-        (which is what a mean inner potential is) extrapolates below the
-        fitted range. Kirkland, Lobato and Peng are per-element and valid at
-        k=0, and agree with each other there; see `build_water_kernel`.
     progressbars : bool, optional
         Whether to show progress bars. Default is True.
     mdsim_target_path : str, optional
@@ -152,14 +148,12 @@ class GradientSKIcemaker(L.LightningModule):
         nz: int | None = None,
         min_distance: float = 2.0,
         device: str | torch.device = "cpu",
-        parameterization: ScatteringFactors = "kirkland",
         progressbars: bool = True,
         mdsim_target_path: str | None = None,
     ) -> None:
         super().__init__()
         self.min_distance = min_distance
         self.progressbars = progressbars
-        self.parameterization = parameterization
 
         self.n = n
         self.nz = nz if nz is not None else n
@@ -167,9 +161,6 @@ class GradientSKIcemaker(L.LightningModule):
         self.box_x = self.n * self.dx
         self.box_y = self.n * self.dx
         self.box_z = self.nz * self.dx
-        self._ice_kernel: torch.Tensor = build_water_kernel(
-            self.dx, self.parameterization
-        )
 
         self.n_molecules = int(
             ndensity_of_amorphous_ice * self.box_x * self.box_y * self.box_z
@@ -519,7 +510,7 @@ class GradientSKIcemaker(L.LightningModule):
         record_every: int = 5,
         rep_strength: float = 0.0,
         mlbop_strength: float = 0.5,
-        mlbop_target: float | None = -0.413,
+        mlbop_target: float | None = LDA_ENERGY_PER_ATOM_EV,
         tol: float | None = 1e-3,
         patience: int = 10,
         history_size: int = 100,
@@ -784,150 +775,6 @@ class GradientSKIcemaker(L.LightningModule):
                 voxel_size=self.dx,
                 periodic=True,
             )
-
-    def generate_ice_deltas(
-        self,
-        batchsize: int = 1,
-        n_steps: int = 400,
-        lr: float = 1.0,
-        rep_strength: float = 0.0,
-        mlbop_strength: float = 0.5,
-        mlbop_target: float | None = -0.413,
-        init_positions: torch.Tensor | None = None,
-        tol: float | None = 1e-3,
-        patience: int = 10,
-    ) -> torch.Tensor:
-        """
-        Run ``batchsize`` independent L-BFGS optimisations and return soft-voxelized
-        ice position volumes, without convolving with scattering potentials.
-
-        Each volume uses a fresh random initialisation then L-BFGS optimisation.
-        Result is stored as ``self.current_icedeltas``.
-
-        Parameters
-        ----------
-        batchsize : int
-            Number of independent ice volumes.
-        n_steps : int
-            L-BFGS outer iterations per volume (upper bound — see ``tol``).
-            Default is 400 (see :meth:`optimize`).
-        lr : float
-            L-BFGS initial step size (line search adapts it automatically).
-        rep_strength : float, optional
-            Weight of the artificial pair-exclusion penalty.  Default is 0.0
-            (disabled in favor of ``mlbop_strength``; see :meth:`optimize`).
-        mlbop_strength : float, optional
-            Weight of the ML-BOP-energy-based penalty, the default
-            alternative to ``rep_strength`` (see :meth:`_sk_loss` and
-            :meth:`optimize`).  Default is 0.5.
-        mlbop_target : float or None, optional
-            Matches ``E_per_atom`` to this value instead of minimizing it
-            unboundedly (see :meth:`_sk_loss`).  Default is -0.413, matching
-            real LDA-80K MD ice.
-        tol : float or None, optional
-            Early-stopping tolerance forwarded to :meth:`optimize`. Default
-            is 1e-3; set to ``None`` to always run the full ``n_steps``.
-        patience : int, optional
-            Early-stopping patience forwarded to :meth:`optimize`. Default
-            is 10.
-
-        Returns
-        -------
-        icedeltas : torch.Tensor
-            Soft-voxelized ice position volumes, shape (batchsize, nz, n, n).
-        """
-        results = []
-        for i in track(
-            range(batchsize),
-            description="Generating ice volumes",
-            disable=not self.progressbars or batchsize == 1,
-            transient=True,
-        ):
-            if init_positions is None:
-                self.init_random()
-            else:
-                self.positions = init_positions
-            self.optimize(
-                n_steps=n_steps,
-                lr=lr,
-                optimizer="lbfgs",
-                record_every=n_steps,
-                rep_strength=rep_strength,
-                mlbop_strength=mlbop_strength,
-                mlbop_target=mlbop_target,
-                tol=tol,
-                patience=patience,
-            )
-            results.append(self.voxelize())
-        self.current_icedeltas = torch.stack(results)
-        return self.current_icedeltas
-
-    def generate_ice(
-        self,
-        batchsize: int = 1,
-        n_steps: int = 400,
-        lr: float = 1.0,
-        rep_strength: float = 0.0,
-        mlbop_strength: float = 0.5,
-        mlbop_target: float | None = -0.413,
-        tol: float | None = 1e-3,
-        patience: int = 10,
-    ) -> torch.Tensor:
-        """
-        Run ``batchsize`` independent L-BFGS optimisations and return convolved
-        ice potential volumes.
-
-        Each volume uses a fresh random initialisation, then L-BFGS, then
-        convolution with the Kirkland O potential kernel.
-
-        Parameters
-        ----------
-        batchsize : int
-            Number of independent ice volumes.
-        n_steps : int
-            L-BFGS outer iterations per volume (upper bound — see ``tol``).
-            Default is 400 (see :meth:`optimize`).
-        lr : float
-            L-BFGS initial step size (line search adapts it automatically).
-        rep_strength : float, optional
-            Weight of the artificial pair-exclusion penalty.  Default is 0.0
-            (disabled in favor of ``mlbop_strength``; see :meth:`optimize`).
-        mlbop_strength : float, optional
-            Weight of the ML-BOP-energy-based penalty, the default
-            alternative to ``rep_strength`` (see :meth:`_sk_loss` and
-            :meth:`optimize`).  Default is 0.5.
-        mlbop_target : float or None, optional
-            Matches ``E_per_atom`` to this value instead of minimizing it
-            unboundedly (see :meth:`_sk_loss`).  Default is -0.413, matching
-            real LDA-80K MD ice.
-        tol : float or None, optional
-            Early-stopping tolerance forwarded to :meth:`optimize`. Default
-            is 1e-3; set to ``None`` to always run the full ``n_steps``.
-        patience : int, optional
-            Early-stopping patience forwarded to :meth:`optimize`. Default
-            is 10.
-
-        Returns
-        -------
-        ice : torch.Tensor
-            Convolved ice potential volumes, shape (batchsize, nz, n, n).
-        """
-        self.generate_ice_deltas(
-            batchsize=batchsize,
-            n_steps=n_steps,
-            lr=lr,
-            rep_strength=rep_strength,
-            mlbop_strength=mlbop_strength,
-            mlbop_target=mlbop_target,
-            tol=tol,
-            patience=patience,
-        )
-        return fftconvolve(
-            self.current_icedeltas,
-            self._ice_kernel.unsqueeze(0),
-            mode="same",
-            axes=(-3, -2, -1),
-        )
 
     def mlbop_energy(self, pbc: bool = True) -> dict[str, float]:
         """

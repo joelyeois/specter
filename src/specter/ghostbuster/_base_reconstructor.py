@@ -58,13 +58,11 @@ class _BaseReconstructor(L.LightningModule):
     _run_dir: Path | None
     log_lrs: list[float]
     log_total_loss: list[torch.Tensor]
-    log_norm_loss: list[torch.Tensor]
 
     def _init_loss_logs(self) -> None:
         """Start the per-step loss and learning-rate histories."""
         self.log_lrs = []
         self.log_total_loss = []
-        self.log_norm_loss = []
 
     def _volume_optimizer(
         self,
@@ -278,8 +276,8 @@ class _BaseReconstructor(L.LightningModule):
         """Build training metrics (loss, lr) and, by default, save them to JSON.
 
         Rank-0-only under multi-GPU (DDP) to avoid every replica racing to
-        write the same file. ``log_total_loss``/``log_norm_loss`` are
-        gathered/averaged across ranks at the point they're recorded (see
+        write the same file. ``log_total_loss`` is
+        gathered/averaged across ranks at the point it is recorded (see
         ``_gather_for_logging``), so under DDP the saved metrics reflect the
         true global-batch loss, not just rank 0's local view.
         ``log_lrs`` needs no such gathering -- the learning rate is a
@@ -301,7 +299,6 @@ class _BaseReconstructor(L.LightningModule):
 
         meta = _build_epoch_metrics(
             self.log_total_loss,
-            self.log_norm_loss,
             self.log_lrs,
             self.current_epoch,
             include_loss_std=include_loss_std,

@@ -33,6 +33,7 @@ from ..potential import (
     molecular_mass_from_atoms,
     template_occupancy_reference,
 )
+from ..random_seed import derive_seeds
 from ..rotations import VolumeRotator, translate_coordinates
 from ..scattering import surface_slice_sum
 from ..settings import Camera, Crowding, Ice, Optics, Propagation
@@ -47,15 +48,6 @@ __all__ = ["Specimen", "Structure"]
 def _resolve(p: Propagation) -> Propagation:
     """`p` with its rotation mode settled: a simulation rotates exactly by default."""
     return replace(p, rotate_mode=p.rotation("exact"))
-
-
-def _seeds(seed: int | None, ids: torch.Tensor, stage: int) -> list[int] | None:
-    """One derived seed per image for `stage`, or None for the global RNG."""
-    if seed is None:
-        return None
-    from ..random_seed import derive_seed
-
-    return [derive_seed(seed, int(i), stage) for i in ids.tolist()]
 
 
 @dataclass(frozen=True)
@@ -608,7 +600,7 @@ class Specimen:
 
             if crowd is not None:
                 stages.crowd_into(
-                    V, crowd, _seeds(seed, poses.ids, stages.SEED_STAGE_CROWD)
+                    V, crowd, derive_seeds(seed, poses.ids, stages.SEED_STAGE_CROWD)
                 )
 
             v_ab = None
@@ -653,7 +645,7 @@ class Specimen:
                         full=full(),
                         relax_steps=self.ice.relax_steps,
                         free=free,
-                        seeds=_seeds(seed, poses.ids, stages.SEED_STAGE_ICE),
+                        seeds=derive_seeds(seed, poses.ids, stages.SEED_STAGE_ICE),
                         exposure_filter=exposure_filter,
                     )
                 del free

@@ -537,15 +537,13 @@ class TomogramReconstructor(_BaseReconstructor):
         # Prepare V once per step (the taper is a deterministic transform)
         V_prepared = self._prepare_volume()
 
-        total_norm_loss = torch.tensor(0.0, device=self.device)
+        total_loss = torch.tensor(0.0, device=self.device)
         # One host transfer for the batch's tilt indices, not a sync per tilt.
         for i, idx in enumerate(tilt_indices.tolist()):
             sim = self._forward_tilt(V_prepared, idx)
-            norm_loss = self._compute_loss(sim, obs_images[i], idx)
-            total_norm_loss = total_norm_loss + norm_loss
+            total_loss = total_loss + self._compute_loss(sim, obs_images[i], idx)
 
-        norm_loss = total_norm_loss / max(len(tilt_indices), 1)
-        loss = norm_loss
+        loss = total_loss / max(len(tilt_indices), 1)
 
         # Gathered/averaged across ranks under multi-GPU (DDP) for logging
         # only -- `loss` itself (fed to manual_backward below) stays the
@@ -553,7 +551,6 @@ class TomogramReconstructor(_BaseReconstructor):
         # Kept on the device, as in `Reconstructor`: a `.cpu()` here is a
         # host sync per step. The lists are read once, when the metrics are
         # built.
-        self.log_norm_loss.append(self._gather_for_logging(norm_loss).detach())
         self.log_total_loss.append(self._gather_for_logging(loss).detach())
 
         self._optimise(loss)

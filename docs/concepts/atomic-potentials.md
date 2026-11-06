@@ -253,7 +253,7 @@ coordinate. `PotentialBuilder` turns a full structure's coordinates into a
 voxel grid two ways:
 
 - **Supersample-then-pool** (`compute_supersampling_parameters`,
-  `build_potential_volume_fftconvolve_3d`/`_2d`): `PotentialBuilder` samples
+  `method="3d"`): `PotentialBuilder` samples
   each element's kernel on a finely-spaced grid (0.1 Å by default, fine
   enough to resolve the near-\(r=0\) peak), then average-pools it down to
   the main volume's voxel size. It splats atom positions onto the main

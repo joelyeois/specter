@@ -135,7 +135,7 @@ def test_refinement_recovers_the_true_parameters(truth, groups: str, steps: int)
     optimizers, _ = model.configure_optimizers()
     index = torch.arange(N)
     for _ in range(steps):
-        loss = mse_loss(model(index), images, model.scale)
+        loss = mse_loss(model(index), images)
         for opt in optimizers:
             opt.zero_grad()
         loss.backward()

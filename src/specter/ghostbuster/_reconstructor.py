@@ -158,7 +158,6 @@ class Reconstructor(_BaseReconstructor):
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
         symmetry_mode: SymmetryMode = "exact",
-        use_cpu_for_symmetry: bool = False,
         tag: str = "untagged",
         run_dir: str | Path | None = None,
         halfset_label: str | None = None,
@@ -202,9 +201,7 @@ class Reconstructor(_BaseReconstructor):
         self._final_metrics: dict[str, Any] | None = None
 
         self._setup_optimization_state(lr, lr_R, lr_T, lr_D, lr_decay, scheduler)
-        self._setup_symmetry(
-            symmetry, symmetry_batchsize, symmetry_mode, use_cpu_for_symmetry
-        )
+        self._setup_symmetry(symmetry, symmetry_batchsize, symmetry_mode)
         self.register_buffer("kmask", kmask)
         self._load_fsc_and_refs(fsc_ref, fsc_mask, cryosparc_ref)
 
@@ -269,7 +266,6 @@ class Reconstructor(_BaseReconstructor):
         symmetry: str | None,
         symmetry_batchsize: int | None,
         symmetry_mode: SymmetryMode,
-        use_cpu_for_symmetry: bool,
     ) -> None:
         """Store symmetry settings and register the symmetry rotation matrices."""
         self.symmetry = symmetry
@@ -278,7 +274,6 @@ class Reconstructor(_BaseReconstructor):
         if symmetry is not None:
             sym_rot_matrices = get_rotation_matrices(symmetry)
             self.register_buffer("sym_rot_matrices", sym_rot_matrices, persistent=False)
-        self.use_cpu_for_symmetry = use_cpu_for_symmetry
 
     def _load_fsc_and_refs(
         self,
@@ -291,8 +286,6 @@ class Reconstructor(_BaseReconstructor):
             fsc_ref = torch.as_tensor(mrcfile.read(str(fsc_ref)))
         if isinstance(fsc_mask, (str, Path)):
             fsc_mask = torch.as_tensor(mrcfile.read(str(fsc_mask)))
-        if fsc_mask is None:
-            fsc_mask = 1
         if isinstance(fsc_mask, torch.Tensor):
             self.register_buffer("fsc_mask", fsc_mask)
         else:
@@ -526,7 +519,7 @@ class Reconstructor(_BaseReconstructor):
         worse (EMPIAR-10083: pooled held-out FRC 0.0389 against 0.0408 at
         8-4.5 A) although the reconstructed map came out the same.
 
-        Under multi-GPU (DDP), the *logged* norm/total loss is
+        Under multi-GPU (DDP), the *logged* loss is
         gathered/averaged across ranks (see ``_gather_for_logging``) so it
         reflects the true global-batch loss -- but the ``loss`` this method
         returns (which feeds ``manual_backward``) stays the local, per-rank
@@ -535,12 +528,11 @@ class Reconstructor(_BaseReconstructor):
         scale = self.scale[idx]  # (B,)
         level = self.dose_per_angstrom * self.voxel_size**2
         out = level + scale[:, None, None] * (out - level)
-        loss = mse_loss(out, images, torch.ones_like(scale))
+        loss = mse_loss(out, images)
         # Kept on the device: a `.cpu()` here is a sync per step, and with
         # three of them the step ran 270 ms where the same work runs 160 ms
         # asynchronously. The lists are read once, when the epoch's metrics
         # are built.
-        self.log_norm_loss.append(self._gather_for_logging(loss).detach())
         self.log_total_loss.append(self._gather_for_logging(loss).detach())
         return loss
 
@@ -646,12 +638,7 @@ class Reconstructor(_BaseReconstructor):
         the file-writing tail below is rank-0-only.
         """
         if self.symmetry is not None:
-            self.V.data = apply_symmetry(
-                self.V.data,
-                self.sym_rot_matrices,
-                batchsize=self.symmetry_batchsize,
-                method=self.symmetry_mode,
-            )
+            self.symmetrize()
 
         if self._run_dir is None or not self.trainer.is_global_zero:
             return
@@ -718,10 +705,8 @@ class Reconstructor(_BaseReconstructor):
         """
         ``fsc_mask`` as a tensor, when it is one and matches ``volume``'s shape.
 
-        Two ways there is no usable mask, neither of them an error.
-        `_load_fsc_and_refs` substitutes the scalar ``1`` for an omitted mask
-        so the loss-weighting path can multiply unconditionally -- that is not
-        a mask to report a masked resolution against. And a ``test_run`` bins
+        Two ways there is no usable mask, neither of them an error: none was
+        given (or a scalar was, which masks nothing), or a ``test_run`` bins
         the volume (``bin_factor``) without binning the mask, so the shapes
         genuinely disagree; a sanity-check run must not die computing a
         diagnostic, which is the whole point of running one first.

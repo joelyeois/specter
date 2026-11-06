@@ -1,4 +1,4 @@
-"""Array utilities: grids, voxelization, radial profiles/NPS, padding/cropping, and block tiling."""
+"""Array utilities: grids, voxelization, radial profiles, padding/cropping, and block tiling."""
 
 from __future__ import annotations
 
@@ -15,13 +15,10 @@ from ._grids import (
     real_to_kgrid_3d,
 )
 from ._reduce import count_nonzero_chunked
-from ._nps import compute_nps_1d, compute_nps_2d, compute_nps_3d
 from ._padding import (
-    centered_pad,
     center_crop,
     clip_insert_bounds,
     compute_nz,
-    downsample,
     fourier_crop,
     pad_volume,
     radial_symmetrize,
@@ -36,16 +33,11 @@ from ._voxelize import (
 
 __all__ = [
     "ball3d",
-    "centered_pad",
     "center_crop",
     "clip_insert_bounds",
     "count_nonzero_chunked",
-    "compute_nps_1d",
-    "compute_nps_2d",
-    "compute_nps_3d",
     "compute_nz",
     "disk2d",
-    "downsample",
     "fourier_crop",
     "grid_1d",
     "grid_2d",

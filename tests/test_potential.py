@@ -21,7 +21,6 @@ from specter.potential import (
     build_atomic_potential_kernel,
     build_potential_volume_analytic_scatter_kirkland,
     build_potential_volume_analytic_scatter_lobato,
-    build_potential_volume_fftconvolve_3d,
     potential_from_deltas,
     recommended_rcut,
 )
@@ -55,9 +54,11 @@ def _column_potential(dx: float, n: int) -> float:
 
     i.e. the total potential integrated over the full 3D volume.
     """
-    V, _ = build_potential_volume_fftconvolve_3d(
-        _ATOMIC_NUMBERS, _COORDS, n_xyz=n, dx=dx, disable_tqdm=True
+    builder = PotentialBuilder(
+        n, dx, _ATOMIC_NUMBERS, progressbars=False, parameterization="kirkland"
     )
+    with torch.no_grad():
+        V = builder(_COORDS, method="3d")
     return (V.sum() * dx**3).item()
 
 

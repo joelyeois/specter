@@ -196,7 +196,7 @@ def _log_current_lr(trainer: L.Trainer, lr: float | None, log_lrs: list[float]) 
 def _build_epoch_metrics(
     total_loss: list[torch.Tensor],
     lrs: list[float],
-    current_epoch: int,
+    batches_per_epoch: int,
     include_loss_std: bool = False,
     include_lr_min: bool = False,
 ) -> dict[str, Any]:
@@ -209,8 +209,11 @@ def _build_epoch_metrics(
         Per-batch scalar losses logged during training.
     lrs : list of float
         Per-batch learning rate of the volume optimiser.
-    current_epoch : int
-        Zero-indexed epoch counter (``LightningModule.current_epoch``).
+    batches_per_epoch : int
+        Training batches per epoch (``Trainer.num_training_batches``). The
+        epoch count follows from it, a last partial epoch counting as one;
+        ``LightningModule.current_epoch`` cannot serve, since it has already
+        advanced past the last epoch by ``on_fit_end``.
     include_loss_std : bool
         If True, include the per-epoch loss standard deviation.
     include_lr_min : bool
@@ -222,12 +225,11 @@ def _build_epoch_metrics(
         Keys: ``total_batches``, ``batches_per_epoch``, ``total_epochs``,
         ``total_loss``, ``epochs``.
     """
-    n_batches_per_epoch = len(total_loss) // max(current_epoch, 1)
-    if n_batches_per_epoch == 0:
-        n_batches_per_epoch = len(total_loss)
+    n_batches_per_epoch = max(int(batches_per_epoch), 1)
+    n_epochs = -(-len(total_loss) // n_batches_per_epoch)
 
     epochs: dict[str, Any] = {}
-    for epoch in range(current_epoch + 1):
+    for epoch in range(n_epochs):
         start = epoch * n_batches_per_epoch
         end = (epoch + 1) * n_batches_per_epoch
         ep_losses = [float(v) for v in total_loss[start:end]]
@@ -262,7 +264,7 @@ def _build_epoch_metrics(
     return {
         "total_batches": len(total_loss),
         "batches_per_epoch": n_batches_per_epoch,
-        "total_epochs": current_epoch + 1,
+        "total_epochs": n_epochs,
         "total_loss": [float(v) for v in total_loss],
         "epochs": epochs,
     }

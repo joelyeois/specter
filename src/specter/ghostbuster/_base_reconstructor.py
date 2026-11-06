@@ -297,10 +297,15 @@ class _BaseReconstructor(L.LightningModule):
         ):
             return None
 
+        # Infinite for a loader with no length; then the epochs completed,
+        # which at `on_fit_end` is the count, divide the batches evenly.
+        per_epoch = self.trainer.num_training_batches
+        if per_epoch == float("inf"):
+            per_epoch = len(self.log_total_loss) // max(self.current_epoch, 1)
         meta = _build_epoch_metrics(
             self.log_total_loss,
             self.log_lrs,
-            self.current_epoch,
+            int(per_epoch),
             include_loss_std=include_loss_std,
             include_lr_min=include_lr_min,
         )

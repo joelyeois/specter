@@ -468,7 +468,11 @@ def test_run_dir_writes_expected_artifacts(
     assert "saved_arrays" in summary  # from on_fit_start's hparams
     metrics = summary["metrics"]
     assert metrics["total_batches"] == 2  # 1 batch/epoch x 2 epochs
-    assert {"epoch_01", "epoch_02"} <= set(metrics["epochs"])
+    # Exactly the epochs run: by on_fit_end Lightning's current_epoch has
+    # already advanced to 2, which once added an empty epoch_03.
+    assert metrics["batches_per_epoch"] == 1
+    assert metrics["total_epochs"] == 2
+    assert set(metrics["epochs"]) == {"epoch_01", "epoch_02"}
 
 
 def test_on_train_epoch_end_applies_symmetry(

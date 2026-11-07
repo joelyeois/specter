@@ -1,6 +1,6 @@
 """
 What `Ghostbuster` and `TomogramGhostbuster` share once their data is loaded:
-driving a Lightning `Trainer` over a reconstructor, and the binned quick run.
+fitting a reconstructor (`_training.fit`), and the binned quick run.
 """
 
 from __future__ import annotations
@@ -9,17 +9,18 @@ from ..progress import console
 
 from typing import Any, Sequence, TypeVar
 
-import lightning as L
 import torch
+from torch import nn
 
-from ._run_helpers import build_trainer, resolve_device
+from ._run_helpers import resolve_device
+from ._training import fit
 
-_M = TypeVar("_M", bound=L.LightningModule)
+_M = TypeVar("_M", bound=nn.Module)
 
 
 class _GhostbusterBase:
     """
-    Trainer plumbing for the two end-to-end reconstruction pipelines.
+    Training plumbing for the two end-to-end reconstruction pipelines.
 
     Subclasses set ``_images`` (the observed stack, ``(N, Y, X)``),
     ``_voxel_size``, ``epochs``, ``batchsize`` and ``precision`` in their
@@ -48,10 +49,14 @@ class _GhostbusterBase:
         callbacks: list[Any] | None,
     ) -> _M:
         """Train ``model`` on ``loader`` for ``epochs`` and return it."""
-        use_gpu, ids = resolve_device(device)
-        trainer = build_trainer(use_gpu, ids, epochs, precision, callbacks)
-        trainer.fit(model, loader)
-        return model
+        return fit(
+            model,
+            loader,
+            max_epochs=epochs,
+            device=device,
+            precision=precision,
+            callbacks=callbacks,
+        )
 
     def _bin_images(self, bin_factor: int) -> tuple[torch.Tensor, float]:
         """
@@ -69,7 +74,7 @@ class _GhostbusterBase:
         return images, self._voxel_size * bin_factor
 
     @staticmethod
-    def _report_test_run(model: L.LightningModule, summary: str) -> None:
+    def _report_test_run(model: nn.Module, summary: str) -> None:
         """Print the closing line of a `test_run` with the volume's range."""
         v = model.V.detach()
         console.print(

@@ -167,7 +167,9 @@ class Reconstructor(_BaseReconstructor):
                 "'alpha'."
             )
 
-        self.save_hyperparameters(
+        self._save_hyperparameters(
+            Reconstructor.__init__,
+            locals(),
             ignore=[
                 "V",
                 "quaternions",
@@ -182,7 +184,7 @@ class Reconstructor(_BaseReconstructor):
                 "fsc_mask",
                 "run_dir",
                 "halfset_label",
-            ]
+            ],
         )
         self._run_dir: Path | None = Path(run_dir) if run_dir is not None else None
         self._halfset_label: str | None = halfset_label
@@ -243,8 +245,6 @@ class Reconstructor(_BaseReconstructor):
         scheduler: Scheduler,
     ) -> None:
         """Configure manual-optimisation mode, per-parameter LRs, and loss logs."""
-        # Always use manual optimization to handle masking and multiple optimizers consistently
-        self.automatic_optimization = False
         if all(l_rate is None for l_rate in [lr, lr_R, lr_T, lr_D]):
             logger.info("Non-optimization mode.")
         elif sum(l_rate is None for l_rate in [lr, lr_R, lr_T, lr_D]) == 3:
@@ -554,7 +554,7 @@ class Reconstructor(_BaseReconstructor):
         batch : tuple of torch.Tensor
             (images, indices) from the dataloader.
         batch_idx : int
-            Batch index (unused, required by Lightning interface).
+            Batch index (unused).
 
         Returns
         -------
@@ -615,7 +615,7 @@ class Reconstructor(_BaseReconstructor):
             include_loss_std=True, include_lr_min=True, write=False
         )
 
-        if self._run_dir is None or not self.trainer.is_global_zero:
+        if self._run_dir is None or not self.is_global_zero:
             return
         suffix = self._metrics_path_suffix()
         v = self._volume_cpu()
@@ -636,7 +636,7 @@ class Reconstructor(_BaseReconstructor):
         if self.symmetry is not None:
             self.symmetrize()
 
-        if self._run_dir is None or not self.trainer.is_global_zero:
+        if self._run_dir is None or not self.is_global_zero:
             return
 
         epoch = self.current_epoch + 1

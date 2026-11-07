@@ -25,11 +25,11 @@ def main():
     p.add_argument("--warmup", type=int, default=20)
     p.add_argument("--output", required=True)
     a = p.parse_args()
-    import lightning as L
     import numpy as np
     import torch
+    import specter
     from specter.config import ReconstructionConfig
-    from specter.ghostbuster import Ghostbuster
+    from specter.ghostbuster import Ghostbuster, fit
     from specter.pipelines._reconstruct import _ghostbuster_kwargs
 
     torch.set_num_threads(4)
@@ -50,12 +50,12 @@ def main():
     assert a.batches <= (len(g._images) + g.batchsize - 1) // g.batchsize
     results = []
 
-    class Timing(L.Callback):
-        def on_train_start(self, trainer, model):
+    class Timing:
+        def on_train_start(self, model):
             self.events = []
             self.wall_start = None
 
-        def on_train_batch_start(self, trainer, model, batch, batch_idx):
+        def on_train_batch_start(self, model, batch, batch_idx):
             self.current = None
             if batch_idx >= a.warmup:
                 if self.wall_start is None:
@@ -66,7 +66,7 @@ def main():
                 start.record()
                 self.current = (start, end)
 
-        def on_train_batch_end(self, trainer, model, outputs, batch, batch_idx):
+        def on_train_batch_end(self, model, batch, batch_idx):
             if self.current:
                 self.current[1].record()
                 self.events.append(self.current)
@@ -75,26 +75,30 @@ def main():
                 self.wall_seconds = time.perf_counter() - self.wall_start
 
     for workers in [0, 8, 8, 0]:
-        L.seed_everything(123, workers=False)
+        specter.seed(123)
         g.num_workers = workers
         model, loader = g._build_reconstructor_and_loader(
             g._images, g._voxel_size, g.batchsize
         )
-        metric = Timing()
-        trainer = L.Trainer(
-            accelerator="gpu",
-            devices=[a.device],
-            precision=config.precision,
-            max_epochs=1,
-            limit_train_batches=a.batches,
-            logger=False,
-            enable_checkpointing=False,
-            enable_model_summary=False,
-            enable_progress_bar=False,
-            callbacks=[metric],
+        # The first `a.batches` batches' worth of particles, shuffled among
+        # themselves.
+        loader = torch.utils.data.DataLoader(
+            torch.utils.data.Subset(loader.dataset, range(a.batches * g.batchsize)),
+            batch_size=g.batchsize,
+            shuffle=True,
+            num_workers=workers,
         )
+        metric = Timing()
         torch.cuda.reset_peak_memory_stats()
-        trainer.fit(model, train_dataloaders=loader)
+        fit(
+            model,
+            loader,
+            max_epochs=1,
+            device=a.device,
+            precision=config.precision,
+            callbacks=[metric],
+            progress=False,
+        )
         torch.cuda.synchronize()
         row = dict(
             workers=workers,
@@ -113,7 +117,7 @@ def main():
         )
         results.append(row)
         print(json.dumps(row), flush=True)
-        del trainer, model, loader, metric
+        del model, loader, metric
         gc.collect()
         torch.cuda.empty_cache()
     Path(a.output).write_text(json.dumps(results, indent=2) + "\n")

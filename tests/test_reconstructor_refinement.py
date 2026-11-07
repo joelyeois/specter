@@ -149,11 +149,12 @@ def test_refinement_recovers_the_true_parameters(truth, groups: str, steps: int)
         assert after[group] < tolerance[group], (group, before[group], after[group])
 
 
-def test_a_trainer_run_refines_shifts_and_defocus(truth, tmp_path):
-    """The production path: Lightning's manual-optimisation step over several
-    optimisers moves the refined parameters to their truth."""
-    import lightning as L
+def test_a_fit_refines_shifts_and_defocus(truth):
+    """The production path: the training loop's manual-optimisation step over
+    several optimisers moves the refined parameters to their truth."""
     from torch.utils.data import DataLoader, TensorDataset
+
+    from specter.ghostbuster import fit
 
     V, poses, ctf, images = truth
     _, shifts, params = _perturbed(poses, ctf, 0.0, 2.0, 300.0)
@@ -170,16 +171,7 @@ def test_a_trainer_run_refines_shifts_and_defocus(truth, tmp_path):
         lr_D=20.0,
     )
     loader = DataLoader(TensorDataset(images, torch.arange(N)), batch_size=N)
-    trainer = L.Trainer(
-        accelerator="cpu",
-        max_epochs=150,
-        logger=False,
-        enable_checkpointing=False,
-        enable_progress_bar=False,
-        enable_model_summary=False,
-        default_root_dir=str(tmp_path),
-    )
-    trainer.fit(model, loader)
+    fit(model, loader, max_epochs=150, device="cpu", progress=False)
     errors = _errors(model, poses, 300.0)
     assert errors["T"] < 0.02
     assert errors["D"] < 2.0

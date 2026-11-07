@@ -7,20 +7,13 @@ Takes about two minutes on one L40.
 
 from __future__ import annotations
 
-import logging
 import sys
-import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 from _common import PALETTE, Transcript, as_numpy, save, show_image
-
-# Lightning's banner and dataloader advice are not part of the page.
-logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
-logging.getLogger("lightning.fabric").setLevel(logging.ERROR)
-warnings.filterwarnings("ignore", module="lightning")
 
 transcript = Transcript("reconstruction")
 
@@ -65,20 +58,19 @@ save(fig, "reconstruction-data")
 
 transcript.start("reconstruct")
 # --8<-- [start:reconstruct]
-import lightning as L
 from torch.utils.data import DataLoader, TensorDataset
 
 from specter.arrays import ball3d
-from specter.ghostbuster import Reconstructor
+from specter.ghostbuster import Reconstructor, fit
 
 
-class Snapshots(L.Callback):
+class Snapshots:
     """Keep a copy of the map at the end of every epoch."""
 
     def __init__(self) -> None:
         self.volumes: list[torch.Tensor] = []
 
-    def on_train_epoch_end(self, trainer, model) -> None:
+    def on_train_epoch_end(self, model) -> None:
         self.volumes.append(model.V.detach().cpu().clone())
 
 
@@ -101,17 +93,7 @@ def reconstruct(idx: torch.Tensor, epochs: int) -> tuple[Reconstructor, Snapshot
         shuffle=True,
     )
     snapshots = Snapshots()
-    trainer = L.Trainer(
-        accelerator="gpu",
-        devices=1,
-        max_epochs=epochs,
-        callbacks=[snapshots],
-        logger=False,
-        enable_checkpointing=False,
-        enable_progress_bar=False,
-        enable_model_summary=False,
-    )
-    trainer.fit(model, loader)
+    fit(model, loader, max_epochs=epochs, callbacks=[snapshots], progress=False)
     return model, snapshots
 
 

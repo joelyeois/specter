@@ -189,8 +189,8 @@ def resolve_output_dir(
     create : bool, optional
         Whether a missing project marker may be created (prompting at a
         terminal). Default ``False`` keeps this function pure, which is
-        what lets a non-main DDP rank call it to agree on a path without
-        racing its siblings. Only the one process that owns the run passes
+        what lets a process that does not own the run call it to agree on a
+        path without racing the owner. Only the one process that owns the run passes
         ``True`` -- see `_tracked_output_dir`.
     tracked : bool, optional
         Whether the run is tracked. Default `is_tracked`: whether ``project``
@@ -221,9 +221,8 @@ def _deterministic_tracked_path(config: Any, job_type: str) -> str:
     ``output_dir/[project/]job_type/job_id``, matching exactly what
     `specter.jobs.Job` itself would resolve to. Requires ``config.job_id``
     to already be set (see `_tracked_output_dir`'s docstring for why: this
-    exists specifically for callers -- a non-main DDP rank, or a pipeline
-    computing where a *sibling* pipeline's tracked output will land --
-    that need to agree on the path without opening a real `Job`
+    exists specifically for callers -- a pipeline computing where a
+    *sibling* pipeline's tracked output will land -- that need to agree on the path without opening a real `Job`
     themselves).
 
     Parameters
@@ -298,16 +297,14 @@ def _tracked_output_dir(
     `resolve_output_dir` for the full table, including what each case
     falls back to when ``output_dir`` is unset.
     Only ``is_main`` actually opens the `Job` -- creating the directory,
-    writing ``job.json``, recording status on exit. Multi-GPU DDP dispatch
-    re-executes a pipeline's whole top-level code once per rank (see
-    `run_particle_stack`'s own ``is_main`` handling), so a non-main rank
-    must be able to compute the *same* path without touching the
-    filesystem or racing another rank to auto-assign a job id.
-    ``validate_config`` requires an explicit ``job_id`` whenever tracking
-    is combined with multi-GPU for exactly this reason -- the branch below
-    is then a pure, deterministic string join, safe for every rank to
-    compute independently and agree on, instead of each one calling
-    :class:`~specter.jobs.Job` (and racing to auto-number) itself.
+    writing ``job.json``, recording status on exit. A process that does
+    not own the run passes ``is_main=False`` and, given a pinned
+    ``job_id``, gets the *same* path as a pure, deterministic string join,
+    without touching the filesystem or racing the owner to auto-number a
+    :class:`~specter.jobs.Job`. No pipeline does so at present: Lightning's
+    launcher, which re-ran a reconstruction's whole CLI once per GPU, was
+    the reason, and the training loop that replaced it replicates only the
+    fit.
 
     Parameters
     ----------
@@ -364,8 +361,8 @@ def _seed_or_draw(seed: int | None, *, announce: bool = True) -> int:
     seed : int, optional
         The configured seed, or ``None`` to draw one.
     announce : bool, optional
-        Whether to print a drawn seed. A non-main DDP rank passes ``False``
-        so the notice appears once per run rather than once per rank.
+        Whether to print a drawn seed. A process that does not own the run
+        passes ``False`` so the notice appears once per run.
 
     Returns
     -------

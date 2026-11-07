@@ -1,17 +1,18 @@
 """
-Pins which modules are allowed to pull `lightning` in at import time.
+Pins what the light modules, and the `specter` command, pull in at import
+time.
 
-`lightning` costs roughly 6 s on top of `torch` on a warm cache, because it
-eagerly imports `torchmetrics` (which in turn imports `matplotlib`). Only the
-reconstructors' training loop uses it; the forward model's modules have been
-plain `nn.Module`s (`specter._device_module.DeviceModule`) since 2026-11-07.
-The metadata and maths modules must not pull in matplotlib either.
+The metadata and maths modules must not import matplotlib, which costs
+seconds and is only needed to draw. Lightning, whose `torchmetrics` import
+used to drag matplotlib into every simulator and reconstructor module, has
+not been a dependency since 2026-11-07, when the reconstructors moved to
+their own training loop (`specter.ghostbuster.fit`).
 
 Each check runs in a subprocess: `sys.modules` is process-global, so a test
-running after anything that already imported the reconstructor would trivially
-pass in-process. A subprocess import costs 3-5 s, so each list of modules is
-checked in ONE interpreter rather than one each, and only a failure pays to
-bisect which of them was responsible.
+running after anything that already imported the plotting code would
+trivially pass in-process. A subprocess import costs 3-5 s, so the light
+modules are checked in ONE interpreter rather than one each, and only a
+failure pays to bisect which of them was responsible.
 """
 
 from __future__ import annotations
@@ -24,10 +25,10 @@ import textwrap
 
 import pytest
 
-# Modules a user may reasonably import for a small helper, none of which need
-# Lightning. `specter.io` reads/writes .cs and .star metadata; the rest are
+# Modules a user may reasonably import for a small helper, none of which
+# draw. `specter.io` reads/writes .cs and .star metadata; the rest are
 # array, coordinate and rotation maths.
-LIGHTNING_FREE_MODULES = [
+LIGHT_MODULES = [
     "specter",
     "specter.arrays",
     "specter.constants",
@@ -37,19 +38,6 @@ LIGHTNING_FREE_MODULES = [
     "specter.io",
     "specter.rotations",
     "specter.symmetries",
-]
-
-# The forward model: free of Lightning, though some of it plots.
-SIMULATOR_MODULES = [
-    "specter.aberrations",
-    "specter.crowding",
-    "specter.detectors",
-    "specter.ice",
-    "specter.imaging",
-    "specter.pipelines",
-    "specter.potential",
-    "specter.scattering",
-    "specter.specimen",
 ]
 
 
@@ -93,7 +81,7 @@ def _loaded_modules(import_stmt: str) -> frozenset[str]:
     return frozenset(proc.stdout.split())
 
 
-def _blame(heavy: str, modules: list[str]) -> str:
+def _blame(heavy: str) -> str:
     """
     Name the light module(s) responsible for pulling in a heavy dependency.
 
@@ -101,9 +89,7 @@ def _blame(heavy: str, modules: list[str]) -> str:
     ----------
     heavy : str
         Top-level package that should not have been imported, e.g.
-        ``"lightning"``.
-    modules : list of str
-        The modules that were imported together.
+        ``"matplotlib"``.
 
     Returns
     -------
@@ -112,30 +98,25 @@ def _blame(heavy: str, modules: list[str]) -> str:
         failure, since it costs one interpreter launch per light module.
     """
     culprits = [
-        module for module in modules if heavy in _loaded_modules(f"import {module}")
+        module
+        for module in LIGHT_MODULES
+        if heavy in _loaded_modules(f"import {module}")
     ]
     return ", ".join(culprits) or "(none individually; check import order)"
 
 
-@pytest.mark.parametrize(
-    "modules, heavy",
-    [(LIGHTNING_FREE_MODULES, h) for h in ("lightning", "torchmetrics", "matplotlib")]
-    + [(SIMULATOR_MODULES, h) for h in ("lightning", "torchmetrics")],
-)
-def test_modules_do_not_import_heavy_deps(modules: list[str], heavy: str) -> None:
+def test_light_modules_do_not_import_matplotlib() -> None:
     """
-    Neither the light modules nor the forward model may drag in Lightning.
+    None of the metadata/maths modules may drag in matplotlib.
 
-    Each list is imported into a single interpreter, so one subprocess covers
-    it; the per-module bisect only runs if that fails.
+    All of them are imported into a single interpreter, so one subprocess
+    covers the whole list; the per-module bisect only runs if that fails.
     """
-    loaded = _loaded_modules("; ".join(f"import {m}" for m in modules))
-    assert heavy not in loaded, (
-        f"{_blame(heavy, modules)} now import(s) {heavy} at module level. "
-        f"Lightning costs ~6 s on top of torch and pulls torchmetrics and "
-        f"matplotlib with it. Guard the offending import with `if "
-        f"TYPE_CHECKING:` if it is annotation-only, or import it where it is "
-        f"used."
+    loaded = _loaded_modules("; ".join(f"import {m}" for m in LIGHT_MODULES))
+    assert "matplotlib" not in loaded, (
+        f"{_blame('matplotlib')} now import(s) matplotlib at module level. "
+        f"Guard the offending import with `if TYPE_CHECKING:` if it is "
+        f"annotation-only, or import it where it is used."
     )
 
 

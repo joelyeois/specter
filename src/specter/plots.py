@@ -94,94 +94,60 @@ def plot3d(
     return fig
 
 
-try:
-    import lightning as L
-    from IPython.display import display
+class VolumeMonitorCallback:
+    """
+    Plots the reconstructed volume every N training steps, in a notebook.
 
-    class VolumeMonitorCallback(L.Callback):
-        """Lightning callback that plots the reconstructed volume every N training steps."""
+    A training callback for `Ghostbuster.run`/`test_run` (``callbacks=``).
+    It runs on rank 0 only, and redraws one figure in place through
+    IPython's ``display``.
+    """
 
-        def __init__(self, every_n_steps: int = 100):
-            self.every_n_steps = every_n_steps
-            self._display_handle = None
+    def __init__(self, every_n_steps: int = 100):
+        self.every_n_steps = every_n_steps
+        self._display_handle: Any = None
 
-        def _plot_volume(self, pl_module: L.LightningModule, title: str) -> None:
-            volume = pl_module.V.data.detach().cpu().float()
-            fig, axes = plt.subplots(
-                1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6)
-            )
-            for i, ax in enumerate(axes.ravel()):
-                im = ax.imshow(volume.sum(i), cmap="bone")
-                ax.set(xticks=[], yticks=[], title=f"projection along axis {i}")
-                fig.colorbar(im, ax=ax, location="bottom")
-            plt.suptitle(title, fontsize=15)
-            if self._display_handle is None:
-                self._display_handle = display(fig, display_id=True)
-            else:
-                self._display_handle.update(fig)
-            plt.close(fig)
+    def _plot_volume(self, model: Any, title: str) -> None:
+        from IPython.display import display
 
-        def on_train_batch_end(
-            self,
-            trainer: L.Trainer,
-            pl_module: L.LightningModule,
-            outputs: Any,
-            batch: Any,
-            batch_idx: int,
-        ) -> None:
-            # Rank-0-only under multi-GPU (DDP): pl_module.V is already
-            # identical across replicas (DDP gradient all-reduce every
-            # step), so every rank would otherwise plot/display redundantly.
-            if not trainer.is_global_zero:
-                return
-            if trainer.global_step % self.every_n_steps != 0:
-                return
-            total = (
-                trainer.max_steps
-                if trainer.max_steps > 0
-                else trainer.estimated_stepping_batches
-            )
-            self._plot_volume(pl_module, title=f"Step {trainer.global_step} / {total}")
+        volume = model.V.data.detach().cpu().float()
+        fig, axes = plt.subplots(
+            1, 3, dpi=200, constrained_layout=True, figsize=(8, 3.6)
+        )
+        for i, ax in enumerate(axes.ravel()):
+            im = ax.imshow(volume.sum(i), cmap="bone")
+            ax.set(xticks=[], yticks=[], title=f"projection along axis {i}")
+            fig.colorbar(im, ax=ax, location="bottom")
+        plt.suptitle(title, fontsize=15)
+        if self._display_handle is None:
+            self._display_handle = display(fig, display_id=True)
+        else:
+            self._display_handle.update(fig)
+        plt.close(fig)
 
-        def on_train_batch_start(
-            self,
-            trainer: L.Trainer,
-            pl_module: L.LightningModule,
-            batch: Any,
-            batch_idx: int,
-        ) -> None:
-            if not trainer.is_global_zero:
-                return
-            # Plot after the previous epoch's symmetry has been applied
-            if batch_idx == 0 and trainer.current_epoch > 0:
-                total = (
-                    trainer.max_steps
-                    if trainer.max_steps > 0
-                    else trainer.estimated_stepping_batches
-                )
-                self._plot_volume(
-                    pl_module,
-                    title=f"Epoch {trainer.current_epoch} (Step {trainer.global_step} / {total})",
-                )
+    def on_train_batch_end(self, model: Any, batch: Any, batch_idx: int) -> None:
+        if model.global_step % self.every_n_steps != 0:
+            return
+        self._plot_volume(
+            model, title=f"Step {model.global_step} / {model.n_training_steps()}"
+        )
 
-        def on_train_end(
-            self, trainer: L.Trainer, pl_module: L.LightningModule
-        ) -> None:
-            if not trainer.is_global_zero:
-                return
-            # Plot the final epoch after symmetry
-            total = (
-                trainer.max_steps
-                if trainer.max_steps > 0
-                else trainer.estimated_stepping_batches
-            )
+    def on_train_batch_start(self, model: Any, batch: Any, batch_idx: int) -> None:
+        # Plot after the previous epoch's symmetry has been applied
+        if batch_idx == 0 and model.current_epoch > 0:
             self._plot_volume(
-                pl_module,
-                title=f"Epoch {trainer.current_epoch + 1} (Step {trainer.global_step} / {total})",
+                model,
+                title=f"Epoch {model.current_epoch} "
+                f"(Step {model.global_step} / {model.n_training_steps()})",
             )
 
-except ImportError:
-    pass
+    def on_train_end(self, model: Any) -> None:
+        # Plot the final epoch after symmetry
+        self._plot_volume(
+            model,
+            title=f"Epoch {model.current_epoch + 1} "
+            f"(Step {model.global_step} / {model.n_training_steps()})",
+        )
 
 
 def plot_rdf(

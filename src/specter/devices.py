@@ -88,11 +88,11 @@ class DeviceSpec:
             return self.primary, list(self.devices)
         return self.primary, None
 
-    def lightning_target(self) -> int | list[int] | str:
+    def ghostbuster_target(self) -> int | list[int] | str:
         """
         What ``Ghostbuster.run``/``TomogramGhostbuster.run`` take as ``device``.
 
-        A GPU index, a list of them for multi-GPU DDP, or ``"cpu"``. A bare
+        A GPU index, a list of them for data-parallel training, or ``"cpu"``. A bare
         ``"cuda"`` names the backend without pinning a device, and becomes 0,
         the device torch itself defaults to.
 

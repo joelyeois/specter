@@ -1,19 +1,19 @@
 """
-`_BaseReconstructor`: the Lightning scaffolding `Reconstructor` and
+`_BaseReconstructor`: the training scaffolding `Reconstructor` and
 `TomogramReconstructor` share -- optimiser and scheduler construction, the
 manual optimisation step, k-space masking after each update, run-directory
-handling and metrics logging.
+handling and metrics logging. The loop driving it is `_training.fit`.
 """
 
 from __future__ import annotations
 
 from specter import logger
 
+import inspect
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, Sequence
 
-import lightning as L
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
@@ -25,15 +25,17 @@ from ._helpers import (
     _kmask_half_spectrum,
     _log_current_lr,
 )
+from ._training import TrainingState, all_reduce_mean
+from .._device_module import DeviceModule
 from ..io import write_mrc
 from specter.options import Scheduler
 
 # ---------------------------------------------------------------------------
-# Shared LightningModule scaffolding for Reconstructor and TomogramReconstructor
+# Shared scaffolding for Reconstructor and TomogramReconstructor
 # ---------------------------------------------------------------------------
 
 
-class _BaseReconstructor(L.LightningModule):
+class _BaseReconstructor(DeviceModule):
     """
     Shared optimisation-loop scaffolding for volume-reconstruction modules.
 
@@ -58,6 +60,50 @@ class _BaseReconstructor(L.LightningModule):
     _run_dir: Path | None
     log_lrs: list[float]
     log_total_loss: list[torch.Tensor]
+    hparams: dict[str, Any]
+    #: The fit in progress or last run, set by `_training.fit`; None before.
+    _training: TrainingState | None = None
+
+    def _save_hyperparameters(
+        self,
+        init: Callable[..., None],
+        init_locals: dict[str, Any],
+        ignore: Sequence[str],
+    ) -> None:
+        """
+        Record ``init``'s arguments, as passed, in ``self.hparams``.
+
+        Parameters
+        ----------
+        init : callable
+            The ``__init__`` calling this, whose signature names the arguments.
+        init_locals : dict
+            That call's ``locals()``.
+        ignore : sequence of str
+            Arguments left out (tensors and paths that are saved otherwise).
+        """
+        self.hparams = {
+            name: init_locals[name]
+            for name, p in inspect.signature(init).parameters.items()
+            if name != "self"
+            and name not in ignore
+            and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+        }
+
+    @property
+    def current_epoch(self) -> int:
+        """The epoch being trained, from 0; 0 outside a fit."""
+        return self._training.epoch if self._training is not None else 0
+
+    @property
+    def global_step(self) -> int:
+        """Optimiser steps taken, one per optimiser per batch; 0 outside a fit."""
+        return self._training.global_step if self._training is not None else 0
+
+    @property
+    def is_global_zero(self) -> bool:
+        """Whether this process is rank 0 (or the only one): the one that writes."""
+        return self._training is None or self._training.rank == 0
 
     def _init_loss_logs(self) -> None:
         """Start the per-step loss and learning-rate histories."""
@@ -72,9 +118,10 @@ class _BaseReconstructor(L.LightningModule):
         `configure_optimizers` returns; both empty when ``lr`` is None.
 
         Not ``fused=True``: it is ~8 ms faster per step on a 512^3 volume,
-        but Lightning's 16-mixed plugin hands it grads it rejects ("params,
-        grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and
-        layout").
+        but Lightning's 16-mixed plugin, which this loop's ``GradScaler``
+        replaced, handed it grads it rejected ("params, grads, exp_avgs, and
+        exp_avg_sqs must have same dtype, device, and layout"); not
+        re-measured since.
         """
         if self.lr is None:
             return [], []
@@ -92,23 +139,29 @@ class _BaseReconstructor(L.LightningModule):
     def _optimise(self, loss: torch.Tensor) -> None:
         """
         One manual optimisation step on ``loss``: zero every optimiser,
-        backpropagate, step them all, step the schedulers, and log the
-        loss to the progress bar.
+        backpropagate (scaled under ``"16-mixed"``), average the gradients
+        across ranks, step every optimiser, then the schedulers.
+
+        The scaler is updated after each optimiser's step and ``global_step``
+        advances once per optimiser, as under Lightning's manual optimisation.
         """
-        opts = self._optimizers_list()
-        for opt in opts:
+        state = self._training
+        assert state is not None, "_optimise runs inside `_training.fit`"
+        for opt in state.optimizers:
             opt.zero_grad()
-        self.manual_backward(loss)
-        for opt in opts:
-            opt.step()
+        (state.scaler.scale(loss) if state.scaler is not None else loss).backward()
+        if state.world_size > 1:
+            for p in self.parameters():
+                if p.grad is not None:
+                    all_reduce_mean(p.grad, state.world_size)
+        for opt in state.optimizers:
+            if state.scaler is not None:
+                state.scaler.step(opt)
+                state.scaler.update()
+            else:
+                opt.step()
+            state.global_step += 1
         self._step_schedulers()
-        self.log_dict(
-            {"train_loss": loss},
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=False,
-        )
 
     def _make_run_dir(self) -> bool:
         """
@@ -118,7 +171,7 @@ class _BaseReconstructor(L.LightningModule):
         global-zero rank: under multi-GPU (DDP) every replica would
         otherwise race to create and write the same files.
         """
-        if self._run_dir is None or not self.trainer.is_global_zero:
+        if self._run_dir is None or not self.is_global_zero:
             return False
         self._run_dir.mkdir(parents=True, exist_ok=True)
         (self._run_dir / "epochs").mkdir(exist_ok=True)
@@ -145,9 +198,10 @@ class _BaseReconstructor(L.LightningModule):
 
     def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
         """Record the current learning rate before each batch."""
-        _log_current_lr(self.trainer, self.lr, self.log_lrs)
+        schedulers = self._training.schedulers if self._training is not None else []
+        _log_current_lr(schedulers, self.lr, self.log_lrs)
 
-    def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
+    def on_train_batch_end(self, batch: Any, batch_idx: int) -> None:
         """Apply the Fourier-space k-mask to V after each gradient update."""
         _apply_kmask_inplace(self.V, self._kmask_half())
 
@@ -164,6 +218,15 @@ class _BaseReconstructor(L.LightningModule):
             self._kmask_half_cache = cached
         return cached[1]
 
+    def _fit_state(self) -> TrainingState:
+        """The fit in progress; the step counts below need one."""
+        if self._training is None:
+            raise RuntimeError(
+                "The schedule's step count is known only inside a fit "
+                "(`specter.ghostbuster._training.fit`)."
+            )
+        return self._training
+
     def n_training_steps_per_epoch(self) -> int:
         """
         Return the number of optimizer steps per training epoch.
@@ -171,17 +234,9 @@ class _BaseReconstructor(L.LightningModule):
         Returns
         -------
         int
-            Steps per epoch, accounting for gradient accumulation.
+            Steps per epoch: this rank's batches.
         """
-        if self.trainer.max_steps > -1:
-            return self.trainer.max_steps
-
-        self.trainer.fit_loop.setup_data()
-        assert self.trainer.train_dataloader is not None
-        dataset_size = len(self.trainer.train_dataloader)
-        n_steps = dataset_size // self.trainer.accumulate_grad_batches
-
-        return n_steps
+        return self._fit_state().batches_per_epoch
 
     def n_training_steps(self) -> int:
         """
@@ -192,44 +247,27 @@ class _BaseReconstructor(L.LightningModule):
         int
             Total scheduler steps across all epochs.
         """
-        if self.trainer.max_steps > -1:
-            return self.trainer.max_steps
-
-        max_epochs = self.trainer.max_epochs
-        if max_epochs is None or max_epochs < 1:
-            raise ValueError("OneCycleLR requires a positive trainer.max_epochs.")
-
+        max_epochs = self._fit_state().max_epochs
+        if max_epochs < 1:
+            raise ValueError("OneCycleLR requires a positive max_epochs.")
         return self.n_training_steps_per_epoch() * max_epochs
 
     def _metrics_path_suffix(self) -> str:
         """Filename suffix for saved metrics. Override for e.g. halfset labelling."""
         return ""
 
-    def _optimizers_list(self) -> list[Any]:
-        """Normalise ``self.optimizers()`` (Lightning returns one or a list) to a list."""
-        opts = self.optimizers()
-        if not isinstance(opts, (list, tuple)):
-            opts = [opts]
-        return list(opts)
-
     def _step_schedulers(self) -> None:
         """
-        Step every LR scheduler once, for manual optimisation.
+        Step every LR scheduler once.
 
-        No-op under automatic optimisation or when no scheduler is
-        configured (``self.lr is None``). ``ReduceLROnPlateau`` needs a
-        metric argument this single-step call can't supply, but
-        ``_build_lr_scheduler`` never constructs one -- encountering one
-        here would mean a caller bug, not a normal runtime condition.
+        No-op when no scheduler is configured (``self.lr is None``).
+        ``ReduceLROnPlateau`` needs a metric argument this single-step call
+        can't supply, but ``_build_lr_scheduler`` never constructs one --
+        encountering one here would mean a caller bug, not a normal runtime
+        condition.
         """
-        if self.automatic_optimization:
-            return
-        sch = self.lr_schedulers()
-        if not sch:
-            return
-        if not isinstance(sch, (list, tuple)):
-            sch = [sch]
-        for s in sch:
+        assert self._training is not None
+        for s in self._training.schedulers:
             if isinstance(s, ReduceLROnPlateau):
                 raise TypeError(
                     "ReduceLROnPlateau is not supported by this manual "
@@ -246,12 +284,8 @@ class _BaseReconstructor(L.LightningModule):
         local batch -- averaging across ranks here (matching DDP's own
         gradient all-reduce semantics) makes the logged value reflect the
         true global-batch loss, not just one rank's local view. A no-op
-        (returns ``value`` unchanged) outside DDP, or when no ``Trainer`` is
-        attached at all (e.g. calling ``_compute_loss``/``training_step``
-        directly without going through ``Trainer.fit()``) -- checks the
-        private ``_trainer`` attribute directly rather than the ``trainer``
-        property, since that property *raises* (rather than returning
-        ``None``) when unattached.
+        (returns ``value`` detached) on one device, or outside a fit (e.g.
+        calling ``_compute_loss`` directly).
 
         Only ever call this on a value being logged/recorded. Never use its
         result in place of the original ``value`` for ``backward()`` -- DDP
@@ -259,13 +293,9 @@ class _BaseReconstructor(L.LightningModule):
         averaging the loss a second time here before backward would double
         that averaging and silently change the effective learning rate.
         """
-        if self._trainer is None or self.trainer.world_size <= 1:
+        if self._training is None or self._training.world_size <= 1:
             return value.detach()
-        # self.all_gather's signature also accepts/returns dict/list/tuple
-        # (for gathering nested structures); we only ever pass a Tensor, so
-        # the result is always a Tensor too.
-        gathered = cast(torch.Tensor, self.all_gather(value.detach()))
-        return gathered.mean()
+        return all_reduce_mean(value.detach().clone(), self._training.world_size)
 
     def _save_metrics(
         self,
@@ -293,19 +323,15 @@ class _BaseReconstructor(L.LightningModule):
         if (
             self._run_dir is None
             or not self.log_total_loss
-            or not self.trainer.is_global_zero
+            or not self.is_global_zero
+            or self._training is None
         ):
             return None
 
-        # Infinite for a loader with no length; then the epochs completed,
-        # which at `on_fit_end` is the count, divide the batches evenly.
-        per_epoch = self.trainer.num_training_batches
-        if per_epoch == float("inf"):
-            per_epoch = len(self.log_total_loss) // max(self.current_epoch, 1)
         meta = _build_epoch_metrics(
             self.log_total_loss,
             self.log_lrs,
-            int(per_epoch),
+            self._training.batches_per_epoch,
             include_loss_std=include_loss_std,
             include_lr_min=include_lr_min,
         )

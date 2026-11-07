@@ -246,7 +246,7 @@ uv run pytest -m ""  # include tests that fetch structures from the internet
 
 **Do I need a GPU?**
 No. Every simulator and Ghostbuster component runs on CPU as well as GPU
-via PyTorch/Lightning; a CPU-only install path is documented in the
+via PyTorch; a CPU-only install path is documented in the
 [installation guide](https://joelyeois.github.io/specter/installation/).
 A GPU accelerates volume rotation, potential calculation, and wave
 propagation, and multiple GPUs can be used at once for particle stacks,

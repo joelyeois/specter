@@ -28,7 +28,7 @@ class TomogramGhostbuster(_GhostbusterBase):
     End-to-end tomogram reconstruction pipeline for cryo-ET tilt series.
 
     Loads tilt-series images, builds a :class:`TomogramReconstructor`, and
-    drives it via a Lightning ``Trainer``.  The ``run`` / ``test_run`` API
+    fits it with ``specter.ghostbuster._training.fit``.  The ``run`` / ``test_run`` API
     mirrors :class:`Ghostbuster`.
 
     The forward model is noiseless and predicts electron counts per pixel,
@@ -98,7 +98,7 @@ class TomogramGhostbuster(_GhostbusterBase):
     num_workers : int
         DataLoader worker processes.  Default 0.
     precision : str
-        Lightning ``Trainer`` precision.  Default ``"16-mixed"``.
+        Training precision: ``"16-mixed"`` (default), ``"bf16-mixed"`` or ``"32"``.
     run_dir : str or Path, optional
         Output directory for volumes and metadata.
     image_units : {"counts", "normalized"}
@@ -321,14 +321,14 @@ class TomogramGhostbuster(_GhostbusterBase):
         ----------
         device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to
-            train across multiple GPUs via Lightning DDP. A single tomogram's
+            train data-parallel across several GPUs. A single tomogram's
             tilt series is usually small (tens of tilts), so the benefit of
             splitting it across GPUs is more limited than for particle-stack
             reconstruction. Pass ``"cpu"`` to force CPU
             training; any other value uses the GPU when CUDA is
             available and falls back to the CPU when it is not.
         callbacks : list, optional
-            Additional Lightning callbacks.
+            Training hooks, as for :meth:`Ghostbuster.run`.
 
         Returns
         -------
@@ -372,10 +372,10 @@ class TomogramGhostbuster(_GhostbusterBase):
             Spatial downsampling factor.  Default 4.
         device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to run
-            across multiple GPUs via Lightning DDP, or ``"cpu"`` to force
-            CPU training.
+            data-parallel across several GPUs, or ``"cpu"`` to force CPU
+            training.
         callbacks : list, optional
-            Additional Lightning callbacks.
+            Training hooks, as for :meth:`Ghostbuster.run`.
 
         Returns
         -------

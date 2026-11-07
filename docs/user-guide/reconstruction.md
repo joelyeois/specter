@@ -327,17 +327,12 @@ list/show/diff CLI. `--project` and `--job_id` behave as documented there.
 ## Compute
 
 `--device` accepts `cpu`, `cuda`, `cuda:N`, a bare GPU index, or a
-comma-separated list (`0,1`), which trains across them via Lightning DDP,
-all-reducing gradients every step. For a gold-standard run, a
+comma-separated list (`0,1`), which trains data-parallel across them, one
+process per GPU, averaging gradients every step. For a gold-standard run, a
 comma-separated list instead splits the two halves across devices (see
-above) rather than sharding one half's batches across them. A
-multi-GPU device string with `--halfset A`, `B` or `all` requires an
-explicit `--job_id`: DDP re-runs the pipeline once per rank, and
-auto-numbering needs a single process to choose the job directory. A
-`gold` run does not need one, since its orchestrator opens the job once
-before spawning the halves. `--precision`
-controls Lightning's training precision (`16-mixed` by default, forced to
-`32` on CPU); `--num_workers` sets dataloader worker processes. It defaults
+above) rather than sharding one half's batches across them. `--precision`
+sets the training precision (`16-mixed` by default, also `bf16-mixed` or
+`32`, forced to `32` on CPU); `--num_workers` sets dataloader worker processes. It defaults
 to `0`: the particle images are already resident in memory, so workers add
 process startup and interprocess transfers to each batch. You can still
 set it explicitly for a workload where workers help.

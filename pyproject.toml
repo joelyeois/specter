@@ -31,7 +31,6 @@ dependencies = [
     "finufft>=2.5",
     "gemmi>=0.7.3",
     "h5py>=3.14.0",
-    "lightning>=2.5.5",
     "matplotlib>=3.10.6",
     "mrcfile>=1.5.4",
     "numpy>=2.3.3",

@@ -139,11 +139,12 @@ class TomogramReconstructor(_BaseReconstructor):
                 "information to construct the absorption field. Use 'alpha'."
             )
         scattering_model = propagation.scattering_model
-        self.save_hyperparameters(
-            ignore=["V", "quaternions", "translations", "ctf_params", "kmask"]
+        self._save_hyperparameters(
+            TomogramReconstructor.__init__,
+            locals(),
+            ignore=["V", "quaternions", "translations", "ctf_params", "kmask"],
         )
         self._run_dir = Path(run_dir) if run_dir is not None else None
-        self.automatic_optimization = False
 
         # Geometry
         self.nxy = V.shape[-1]
@@ -455,8 +456,8 @@ class TomogramReconstructor(_BaseReconstructor):
             linear=model == "ctf",
             alpha=self.propagation.alpha,
         )
-        # getattr, not the dict built at __init__: Lightning replaces buffer
-        # tensors on .to(device), and the dict would keep the old ones.
+        # getattr, not the dict built at __init__: `.to(device)` replaces
+        # buffer tensors, and the dict would keep the old ones.
         ctf = CTF(
             {k: getattr(self, k)[tilt_idx : tilt_idx + 1] for k in self.ctf_params}
         )
@@ -525,7 +526,7 @@ class TomogramReconstructor(_BaseReconstructor):
             ``(tilt_images, tilt_indices)`` from the dataloader, shapes
             ``(B, H, W)`` and ``(B,)``.
         batch_idx : int
-            Batch index (unused, required by Lightning).
+            Batch index (unused).
 
         Returns
         -------
@@ -587,7 +588,7 @@ class TomogramReconstructor(_BaseReconstructor):
         all-reduce every step), so every rank would otherwise race to write
         the same file.
         """
-        if self._run_dir is None or not self.trainer.is_global_zero:
+        if self._run_dir is None or not self.is_global_zero:
             return
         epoch = self.current_epoch + 1
         self._save_volume(
@@ -601,7 +602,7 @@ class TomogramReconstructor(_BaseReconstructor):
         ``on_train_epoch_end``.
         """
         self._save_metrics()
-        if self._run_dir is None or not self.trainer.is_global_zero:
+        if self._run_dir is None or not self.is_global_zero:
             return
         volume_path = self._run_dir / "volume.mrc"
         self._save_volume(self._volume_cpu(), volume_path)

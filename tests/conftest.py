@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    import lightning as L
     import torch
 
 FIXTURE_DIR = Path(__file__).parent / "test_data"
@@ -204,30 +203,22 @@ def monomer_library() -> str | None:
 
 
 def fit_one_epoch(
-    model: L.LightningModule,
+    model: torch.nn.Module,
     images: torch.Tensor,
     batch_size: int | None = None,
     max_epochs: int = 1,
 ) -> None:
     """Train ``model`` on ``images`` (indexed in order) on the CPU, quietly."""
-    import lightning as L
     import torch
+
+    from specter.ghostbuster import fit
 
     idx = torch.arange(len(images))
     loader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(images, idx),
         batch_size=len(images) if batch_size is None else batch_size,
     )
-    trainer = L.Trainer(
-        accelerator="cpu",
-        max_epochs=max_epochs,
-        precision="32",
-        logger=False,
-        enable_checkpointing=False,
-        enable_progress_bar=False,
-        enable_model_summary=False,
-    )
-    trainer.fit(model, loader)
+    fit(model, loader, max_epochs=max_epochs, device="cpu", progress=False)
 
 
 def fake_cryosparc_dataset(n: int, pixel_size: float = 1.5) -> type:

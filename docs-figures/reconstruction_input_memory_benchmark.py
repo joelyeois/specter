@@ -18,8 +18,8 @@ import time
 
 def install_measurements():
     sys.path.insert(0, os.environ["SPECTER_RECON_CHECKOUT"] + "/src")
-    import lightning as L
     import torch
+    import specter
     from specter.ghostbuster import Ghostbuster
 
     torch.set_num_threads(4)
@@ -34,34 +34,34 @@ def install_measurements():
             resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
         )
 
-    class Metrics(L.Callback):
-        def on_train_start(self, trainer, model):
+    class Metrics:
+        def on_train_start(self, model):
             self.start = time.perf_counter()
             self.events = []
             self.current = None
 
-        def on_train_batch_start(self, trainer, model, batch, batch_idx):
+        def on_train_batch_start(self, model, batch, batch_idx):
             start = torch.cuda.Event(enable_timing=True)
             end = torch.cuda.Event(enable_timing=True)
             start.record()
             self.current = (start, end)
 
-        def on_train_batch_end(self, trainer, model, outputs, batch, batch_idx):
+        def on_train_batch_end(self, model, batch, batch_idx):
             # Callback ordering precedes the module's post-update k-mask. GPU
             # event timings therefore cover training_step only, not that mask.
             self.current[1].record()
             self.events.append(self.current)
 
-        def on_train_end(self, trainer, model):
+        def on_train_end(self, model):
             torch.cuda.synchronize()
             self.train_seconds = time.perf_counter() - self.start
             self.step_seconds = [s.elapsed_time(e) / 1000 for s, e in self.events]
-            self.global_steps = trainer.global_step
+            self.global_steps = model.global_step
 
     def measured_run(self, device=0, callbacks=None):
         label = self.halfset_label or "all"
         seed = int(os.environ["SPECTER_RECON_SEED"]) + (0 if label == "A" else 1)
-        L.seed_everything(seed, workers=False)
+        specter.seed(seed)
         monitor_done = threading.Event()
         driver_peak = [0]
 

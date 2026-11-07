@@ -77,9 +77,9 @@ def test_primary_and_pool() -> None:
         ("1,2", [1, 2]),
     ],
 )
-def test_lightning_target(spelling, expected) -> None:
+def test_ghostbuster_target(spelling, expected) -> None:
     """What Ghostbuster.run takes: an index, a list of them, or "cpu"."""
-    assert parse_device(spelling).lightning_target() == expected
+    assert parse_device(spelling).ghostbuster_target() == expected
 
 
 def test_config_rejects_a_bad_device_at_load() -> None:

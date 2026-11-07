@@ -122,10 +122,8 @@ def run_tilt_series(
         # can't be known ahead of time by tomogram_output_path below, which
         # runs *after* run_build_tomogram returns using this same config
         # object. Reserve one now so both agree on the same path without
-        # either function handing anything back to the other -- the same
-        # can't-coordinate-after-the-fact problem multi-GPU DDP has (see
-        # _tracked_output_dir), just between two pipeline calls instead of
-        # two processes.
+        # either function handing anything back to the other (see
+        # _tracked_output_dir's is_main).
         if (
             tomogram_config.project is not None or tomogram_config.job_id is not None
         ) and tomogram_config.job_id is None:

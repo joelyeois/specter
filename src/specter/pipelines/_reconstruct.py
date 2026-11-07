@@ -11,7 +11,7 @@ turn that class into a command:
   the same name, so the mapping is mechanical and stays that way.
 - **Device parsing.** The rest of the CLI spells devices as strings
   (`"cuda:1"`, `"0,1"`); `Ghostbuster.run` wants a GPU index, a list of them,
-  or `"cpu"`. `DeviceSpec.lightning_target` draws exactly that distinction
+  or `"cpu"`. `DeviceSpec.ghostbuster_target` draws exactly that distinction
   from the one shared grammar, so there is no second spelling.
 - **A run directory.** Every run is numbered and tracked through
   `specter.jobs` -- there is no untracked mode, the way neither RELION nor
@@ -182,7 +182,7 @@ def run_reconstruction(config: ReconstructionConfig) -> None:
             kwargs = _ghostbuster_kwargs(config)
             device = parse_device(
                 resolve_available_device(config.device)
-            ).lightning_target()
+            ).ghostbuster_target()
             model = _fit(job.create(Ghostbuster, **kwargs), config, device)
             if model is not None:
                 summary = model.results_summary()
@@ -209,8 +209,8 @@ def _fit(
 
     Returns the trained `Reconstructor` (both `Ghostbuster.run` and
     `.test_run` already return it) -- `None` only if the run itself never
-    calls into Lightning, which does not currently happen but would leave a
-    caller checking ``model is not None`` correctly no-op instead of crashing.
+    trains, which does not currently happen but would leave a caller
+    checking ``model is not None`` correctly no-op instead of crashing.
     """
     if config.test_run:
         return ghostbuster.test_run(bin_factor=config.bin_factor, device=device)
@@ -249,7 +249,7 @@ def _run_single_halfset(
     from specter.ghostbuster import Ghostbuster
     from specter.jobs._job import _serialize_value
 
-    device = parse_device(resolve_available_device(config.device)).lightning_target()
+    device = parse_device(resolve_available_device(config.device)).ghostbuster_target()
     kwargs = _ghostbuster_kwargs(config)
     model = _fit(Ghostbuster(run_dir=run_dir, **kwargs), config, device)
     assert config.halfset in ("A", "B")

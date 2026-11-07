@@ -34,8 +34,6 @@ uses it for.
   potential builder. Wojdyr, M. (2022). GEMMI: A library for structural
   biology. *Journal of Open Source Software*, 7(73), 4200.
   [doi:10.21105/joss.04200](https://doi.org/10.21105/joss.04200)
-- **Lightning**: the training loop and multi-GPU execution of Ghostbuster.
-  [github.com/Lightning-AI/pytorch-lightning](https://github.com/Lightning-AI/pytorch-lightning)
 - **Matplotlib**: every figure SPECTER draws. Hunter, J. D. (2007).
   Matplotlib: A 2D graphics environment. *Computing in Science &
   Engineering*, 9(3), 90–95.

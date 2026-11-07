@@ -54,10 +54,10 @@ image.
 ## Fitting a map
 
 `Reconstructor` holds the map as a trainable tensor and each image's pose and
-transfer function as fixed buffers. A PyTorch Lightning `Trainer` feeds it
-batches of images, and every step simulates those images from the current
-map, compares them with the data, and updates the map. The callback keeps a
-copy of the map after every epoch:
+transfer function as fixed buffers. `fit` feeds it batches of images, and
+every step simulates those images from the current map, compares them with
+the data, and updates the map. The callback keeps a copy of the map after
+every epoch:
 
 ```python
 --8<-- "docs-figures/walkthrough/reconstruction.py:reconstruct"

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-import lightning as L
 import torch
 from torch.optim.lr_scheduler import (
     CosineAnnealingWarmRestarts,
@@ -185,12 +184,12 @@ def _apply_kmask_inplace(V: torch.Tensor, kmask_half: torch.Tensor | None) -> No
     V.data = torch.fft.irfftn(torch.fft.rfftn(V.data) * kmask_half, s=V.shape)
 
 
-def _log_current_lr(trainer: L.Trainer, lr: float | None, log_lrs: list[float]) -> None:
+def _log_current_lr(
+    schedulers: list[Any], lr: float | None, log_lrs: list[float]
+) -> None:
     """Append the volume optimiser's current LR to ``log_lrs``, if a scheduler is active."""
-    if lr is not None and trainer.lr_scheduler_configs:
-        log_lrs.append(
-            trainer.lr_scheduler_configs[0].scheduler.optimizer.param_groups[0]["lr"]
-        )
+    if lr is not None and schedulers:
+        log_lrs.append(schedulers[0].optimizer.param_groups[0]["lr"])
 
 
 def _build_epoch_metrics(

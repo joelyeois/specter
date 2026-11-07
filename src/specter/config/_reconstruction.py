@@ -225,18 +225,18 @@ class ReconstructionConfig:
 
     # --- Compute ---
     # "cpu" | "cuda" | "cuda:N" | a bare GPU index | a comma-separated list of
-    # GPU indices ("0,1"), which trains across them via Lightning DDP.
+    # GPU indices ("0,1"), which trains data-parallel across them.
     device: str = setting(
         "cuda",
         help=(
             "cpu | cuda | cuda:N | a bare GPU index | a comma-separated "
-            "list of GPU indices (0,1), which trains across them via Lightning DDP "
-            "with gradients all-reduced every step."
+            "list of GPU indices (0,1), which trains data-parallel across them, "
+            "one process each, with gradients averaged every step."
         ),
     )
     precision: str = setting(
         "16-mixed",
-        help="Lightning trainer precision, e.g. 16-mixed or 32. Forced to 32 on CPU.",
+        help="Training precision: 16-mixed, bf16-mixed or 32. Forced to 32 on CPU.",
     )
     num_workers: int = setting(
         0,

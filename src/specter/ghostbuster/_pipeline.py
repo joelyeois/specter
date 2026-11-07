@@ -38,7 +38,7 @@ class Ghostbuster(_GhostbusterBase):
 
     Loads particle data from CryoSPARC output files, preprocesses images
     (data sign, dose/scale normalisation), and drives a :class:`Reconstructor`
-    via a Lightning ``Trainer``.
+    with ``specter.ghostbuster._training.fit``.
 
     All parameters — data paths, physics settings, and training hyperparameters
     — are passed at construction so that :meth:`~specter.jobs.Job.create` can
@@ -130,7 +130,7 @@ class Ghostbuster(_GhostbusterBase):
         path to a .mrc file to load. Only plotted alongside fsc_ref when
         both are provided. Default is None.
     precision : str
-        Lightning ``Trainer`` precision (e.g. ``"16-mixed"``, ``"32"``).
+        Training precision: ``"16-mixed"``, ``"bf16-mixed"`` or ``"32"``.
         Falls back to ``"32"`` automatically on CPU.
     num_workers : int
         Dataloader worker processes.
@@ -550,15 +550,17 @@ class Ghostbuster(_GhostbusterBase):
         ----------
         device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to train
-            across multiple GPUs via Lightning DDP (``strategy="ddp"``).
-            Gradients (for the volume, and for rotations/translations/defocus
-            when pose refinement is enabled) are synchronised every step via
-            DDP's all-reduce, so the returned model is identical whichever
-            rank produced it. Pass ``"cpu"`` to force CPU
+            data-parallel, one process per GPU. Gradients (for the volume,
+            and for rotations/translations/defocus when pose refinement is
+            enabled) are averaged across the GPUs every step, so every rank
+            holds the same model and this process returns rank 0's. Pass ``"cpu"`` to force CPU
             training; any other value uses the GPU when CUDA is
             available and falls back to the CPU when it is not.
         callbacks : list, optional
-            Additional Lightning callbacks passed to the ``Trainer``.
+            Objects with any of the training hooks (``on_train_batch_start``,
+            ``on_train_batch_end``, ``on_train_epoch_end``, ``on_train_end``,
+            ...), each called with the model first; see
+            :class:`~specter.plots.VolumeMonitorCallback`.
 
         Returns
         -------
@@ -598,10 +600,10 @@ class Ghostbuster(_GhostbusterBase):
             Default 8.
         device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to run
-            across multiple GPUs via Lightning DDP, or ``"cpu"`` to force
-            CPU training.
+            data-parallel across several GPUs, or ``"cpu"`` to force CPU
+            training.
         callbacks : list, optional
-            Additional Lightning callbacks passed to the ``Trainer``.
+            Training hooks, as for :meth:`run`.
 
         Returns
         -------

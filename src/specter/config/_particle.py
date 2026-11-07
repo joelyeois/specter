@@ -5,6 +5,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._common_fields import (
+    alpha_setting,
+    assembly_setting,
+    bfactor_setting,
+    bulk_scattering_factors_setting,
+    cc_setting,
+    convergence_angle_setting,
+    crowd_max_distance_z_setting,
+    cs_setting,
+    deltaI_I_setting,
+    deltaV_V_setting,
+    detector_model_setting,
+    dose_envelope_setting,
+    energy_spread_setting,
+    ice_cache_dir_setting,
+    klim_setting,
+    monomer_library_path_setting,
+    noise_model_setting,
+    oversample_setting,
+    pdb_cache_dir_setting,
+    pdb_source_setting,
+    pixel_size_setting,
+    save_clean_exitwaves_setting,
+    save_exitwaves_setting,
+    scattering_factors_setting,
+    scattering_model_setting,
+    temporal_coherence_setting,
+    voltage_setting,
     absorption_model_setting,
     dose_envelope_target_setting,
     ice_motion_variance_setting,
@@ -19,7 +46,6 @@ from ._common_fields import (
 from ._field import help_of, setting
 from typing import Literal
 
-from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
 from specter.options import (
     AbsorptionModel,
@@ -61,28 +87,17 @@ class ParticleStackConfig:
     """
 
     # --- Structure & potential (basic) ---
-    pdb_source: str = setting(
-        help=(
-            "Path to a local .cif/.pdb file, or a 4-character PDB "
-            "accession code to fetch and cache. A local file is read where it "
-            "lies and never copied into the cache; an existing file wins over a "
-            "same-named accession code."
-        )
-    )
-    assembly: bool = setting(True, help="Fetch the biological assembly.")
+    pdb_source: str = pdb_source_setting()
+    assembly: bool = assembly_setting()
     n_pixels: int = setting(
         256,
         help="Number of pixels per axis for the 3-D potential box.",
         check="positive",
     )
-    pixel_size: float = setting(
-        1.0, help="Pixel size in Angstrom.", check="positive"
-    )  # Å
+    pixel_size: float = pixel_size_setting()  # Å
 
     # --- Microscope (basic) ---
-    voltage: float = setting(
-        300.0, help="Electron beam accelerating voltage in kV.", check="positive"
-    )  # kV
+    voltage: float = voltage_setting()  # kV
     dose: ScalarOrRange = setting(
         20.0,
         help=(
@@ -92,12 +107,8 @@ class ParticleStackConfig:
         ),
         check="positive_ordered",
     )  # e⁻/Å²
-    cs: float = setting(
-        2.0, help="Spherical aberration in mm (1-3 mm typical).", check="non_negative"
-    )  # mm
-    alpha: float = setting(
-        0.1, help="Amplitude contrast ratio.", range=(0.0, 1.0)
-    )  # unitless, amplitude contrast ratio
+    cs: float = cs_setting()  # mm
+    alpha: float = alpha_setting()  # unitless, amplitude contrast ratio
     absorption_model: AbsorptionModel = absorption_model_setting()
     inelastic_mfp_solvent: float | None = inelastic_mfp_solvent_setting()  # Å
     dose_weights_path: str | None = setting(
@@ -144,22 +155,17 @@ class ParticleStackConfig:
     )
 
     # --- Models (basic) ---
-    scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = setting(
-        "multislice", help="Scattering model."
+    scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
+        scattering_model_setting()
     )
-    detector_model: DetectorModel = setting("none", help="Detector model.")
+    detector_model: DetectorModel = detector_model_setting()
 
     # --- Post-processing (basic) ---
     normalize_particles: bool = setting(
         True, help="Normalize particles to zero mean and unit std."
     )
-    save_exitwaves: bool = setting(
-        False, help="Save exit wave magnitude and phase as separate .mrcs files."
-    )
-    save_clean_exitwaves: bool = setting(
-        False,
-        help="Save clean (particle-only, no ice) exit wave magnitude and phase.",
-    )
+    save_exitwaves: bool = save_exitwaves_setting()
+    save_clean_exitwaves: bool = save_clean_exitwaves_setting()
 
     # --- Compute (basic) ---
     device: str = setting(
@@ -215,14 +221,7 @@ class ParticleStackConfig:
     # --- Advanced ---
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
-    pdb_cache_dir: str = setting(
-        factory=default_pdb_cache_dir,
-        help=(
-            "Where downloaded PDB/mmCIF structures are cached. An "
-            "input cache shared by every run, not an output location -- job tracking "
-            "does not redirect it."
-        ),
-    )
+    pdb_cache_dir: str = pdb_cache_dir_setting()
     # if set, poses/CTF/pixel_size/voltage/alpha come from here (pick one)
     cs_path: str | None = setting(
         None,
@@ -250,55 +249,16 @@ class ParticleStackConfig:
         ),
         check="positive",
     )
-    convergence_angle: float | None = setting(
-        None,
-        help=(
-            "Beam convergence semi-angle in mrad, for the Cs "
-            "(spatial coherence) envelope."
-        ),
-        check="non_negative",
-    )  # mrad
-    cc: float | None = setting(
-        2.7,
-        help=(
-            "Chromatic aberration coefficient in mm, for the temporal coherence "
-            "loss from the beam's energy spread. Default 2.7, the Titan Krios "
-            "objective; 0 disables it. On by default since every real image "
-            "carries it, filtered or not."
-        ),
-        check="non_negative",
-    )  # mm
-    energy_spread: float = setting(
-        0.7,
-        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
-        check="non_negative",
-    )  # eV (FWHM)
-    deltaV_V: float = setting(
-        0.06e-6,
-        help="Relative high-voltage instability, used by the Cc envelope.",
-        check="non_negative",
-    )  # unitless (ΔV/V)
-    deltaI_I: float = setting(
-        0.01e-6,
-        help="Relative objective-lens current instability, used by the Cc envelope.",
-        check="non_negative",
-    )  # unitless (ΔI/I)
-    temporal_coherence: TemporalCoherence = setting(
-        "integrated",
-        help=(
-            "How the Cc focal spread is applied when cc is set: 'integrated' sums the image incoherently over the defocus spread (exact), 'envelope' multiplies the transfer function by the Cc envelope (exact only for the part linear in the scattered wave; 0.4% low in mean intensity in 2000 A of ice at 300 kV, 5% at 120 kV)."
-        ),
-    )
-    dose_envelope: bool = setting(
-        False, help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope."
-    )
+    convergence_angle: float | None = convergence_angle_setting()  # mrad
+    cc: float | None = cc_setting()  # mm
+    energy_spread: float = energy_spread_setting()  # eV (FWHM)
+    deltaV_V: float = deltaV_V_setting()  # unitless (ΔV/V)
+    deltaI_I: float = deltaI_I_setting()  # unitless (ΔI/I)
+    temporal_coherence: TemporalCoherence = temporal_coherence_setting()
+    dose_envelope: bool = dose_envelope_setting()
     dose_envelope_target: DoseEnvelopeTarget = dose_envelope_target_setting("particle")
-    bfactor: float | None = setting(
-        None, help="Isotropic B-factor envelope in Angstrom^2.", check="non_negative"
-    )  # Å²
-    noise_model: NoiseModel = setting(
-        "poisson", help="Noise model. Use 'none' for no noise."
-    )
+    bfactor: float | None = bfactor_setting()  # Å²
+    noise_model: NoiseModel = noise_model_setting()
     coincidence_radius: ScalarOrRange = setting(
         0.0,
         help=(
@@ -330,12 +290,8 @@ class ParticleStackConfig:
         help="Ice thickness in Angstrom. 0 = minimum (particle box size).",
         check="non_negative",
     )  # Å, 0 = minimum (particle box size)
-    ice_cache_dir: str | None = setting(
-        None,
-        help=(
-            "Directory of cached ice configs for ice_model='gd'. "
-            "Defaults to the bundled ice_data/ice_cache."
-        ),
+    ice_cache_dir: str | None = (
+        ice_cache_dir_setting()
     )  # defaults to the bundled ice_data/ice_cache
     crowd_min_distance: float | None = setting(
         None,
@@ -345,23 +301,13 @@ class ParticleStackConfig:
         ),
         check="non_negative",
     )  # Å
-    crowd_max_distance_z: float | None = setting(
-        None,
-        help="Maximum z-distance between crowded particles in Angstrom.",
-        check="non_negative",
-    )  # Å
+    crowd_max_distance_z: float | None = crowd_max_distance_z_setting()  # Å
     pad_fft: bool = setting(
         True, help="Pad the volume for FFT to avoid edge artifacts."
     )
 
     # --- Advanced: potential building ---
-    scattering_factors: ScatteringFactors = setting(
-        "shtyrov",
-        help=(
-            "Atomic scattering-factor parameterization used to "
-            "build the structure's scattering potential."
-        ),
-    )
+    scattering_factors: ScatteringFactors = scattering_factors_setting()
     potential_method: PotentialMethod = setting(
         "analytic",
         help=(
@@ -423,16 +369,7 @@ class ParticleStackConfig:
     # the rendered potential), and a run should be reproducible from its own
     # recorded config rather than from an environment nobody wrote down --
     # the same reason pdb_cache_dir is a field despite $SPECTER_PDB_CACHE.
-    monomer_library_path: str | None = setting(
-        None,
-        help=(
-            "Path to a Monomer Library "
-            "(https://github.com/MonomerLibrary/monomers), which completes a "
-            "structure's bond topology and hydrogens so Shtyrov species resolve. "
-            "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
-            "hydrogen-free protein falls back to per-element Peng factors."
-        ),
-    )
+    monomer_library_path: str | None = monomer_library_path_setting()
     # Off by default: a deposited B-factor is refinement output, not a
     # measured mean-square displacement, and applying a structure's own
     # column silently makes the rendered specimen depend on who deposited
@@ -463,20 +400,8 @@ class ParticleStackConfig:
     # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
     # that costs real spatial resolution, so the default keeps the full range
     # and accepts the aliasing. Exposed so a caller can make the other choice.
-    klim: float | None = setting(
-        None,
-        help=(
-            "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but discards real spatial frequency content above it. Unset (the default) keeps the full Nyquist range and accepts the aliasing."
-        ),
-        check="non_negative",
-    )  # fraction of Nyquist
-    oversample: int = setting(
-        2,
-        help=(
-            "Grid refinement for the multislice recursion, the Fourier-space counterpart of pad_fft: slices are interpolated onto an xy grid this many times finer (same frame, higher Nyquist), so the transmission-times-wave product no longer wraps at Nyquist; the image is formed on that grid as well and its intensity sampled to the pixels. 1 reproduces the volume-grid recursion (0.2-1.1% of the scattered power in error, 1.9% at Nyquist); 2 is at the float32 noise floor for ~3x the multislice time. Also applied to Rytov's and projection's final exponential, which aliases identically, at negligible cost; first Born and ctf are linear and unaffected."
-        ),
-        check="positive",
-    )
+    klim: float | None = klim_setting()  # fraction of Nyquist
+    oversample: int = oversample_setting()
     rotate_mode: RotateMode = setting(
         "exact",
         help=(
@@ -497,12 +422,7 @@ class ParticleStackConfig:
     # its domain and a mean inner potential (a k=0 quantity) extrapolates below
     # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
     # agree there. See ice._kernels.build_water_kernel for the measurements.
-    bulk_scattering_factors: ScatteringFactors = setting(
-        "kirkland",
-        help=(
-            "Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain."
-        ),
-    )
+    bulk_scattering_factors: ScatteringFactors = bulk_scattering_factors_setting()
     ice_relax_steps: int = setting(
         0,
         help=(

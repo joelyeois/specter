@@ -1,5 +1,5 @@
 """
-Shared `setting()` factories for the output, job-tracking and seed fields.
+Shared `setting()` factories for fields several commands declare alike.
 
 Every command that writes output declares ``output_dir``, ``project``,
 ``job_id`` and ``seed``, and what those fields mean is the same everywhere
@@ -7,7 +7,10 @@ Every command that writes output declares ``output_dir``, ``project``,
 here keeps their ``--help`` text from drifting apart between commands, while
 each factory still takes the per-command detail -- what the command writes,
 its job-type folder, whether it runs under multi-GPU dispatch -- as an
-argument.
+argument. The simulating commands' physics fields follow: those that need a
+per-command note take it as an argument, the rest are declared verbatim.
+A field whose default or meaning genuinely differs between commands stays in
+its own config.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from ._field import setting
+from ._paths import default_pdb_cache_dir
 
 
 def output_dir_setting(writes: str, job_type: str) -> Any:
@@ -227,4 +231,252 @@ def ice_motion_variance_setting(note: str = "") -> Any:
     )
     return setting(
         None, help=f"{help_text} {note}" if note else help_text, check="non_negative"
+    )
+
+
+# --- Fields the simulating commands share verbatim -------------------------
+#
+# Lens, camera, scattering and structure-input fields that
+# `ParticleStackConfig`, `MicrographConfig` and `TiltSeriesConfig` (and,
+# for the structure inputs, `TomogramConfig`) declare with the same default
+# and help.
+
+
+def pdb_source_setting() -> Any:
+    """The ``pdb_source`` field."""
+    return setting(
+        help=(
+            "Path to a local .cif/.pdb file, or a 4-character PDB "
+            "accession code to fetch and cache. A local file is read where it "
+            "lies and never copied into the cache; an existing file wins over a "
+            "same-named accession code."
+        )
+    )
+
+
+def assembly_setting() -> Any:
+    """The ``assembly`` field."""
+    return setting(True, help="Fetch the biological assembly.")
+
+
+def pixel_size_setting() -> Any:
+    """The ``pixel_size`` field."""
+    return setting(1.0, help="Pixel size in Angstrom.", check="positive")
+
+
+def voltage_setting() -> Any:
+    """The ``voltage`` field."""
+    return setting(
+        300.0, help="Electron beam accelerating voltage in kV.", check="positive"
+    )
+
+
+def cs_setting() -> Any:
+    """The ``cs`` field."""
+    return setting(
+        2.0, help="Spherical aberration in mm (1-3 mm typical).", check="non_negative"
+    )
+
+
+def alpha_setting() -> Any:
+    """The ``alpha`` field."""
+    return setting(0.1, help="Amplitude contrast ratio.", range=(0.0, 1.0))
+
+
+def scattering_model_setting() -> Any:
+    """The ``scattering_model`` field."""
+    return setting("multislice", help="Scattering model.")
+
+
+def detector_model_setting() -> Any:
+    """The ``detector_model`` field."""
+    return setting("none", help="Detector model.")
+
+
+def save_exitwaves_setting() -> Any:
+    """The ``save_exitwaves`` field."""
+    return setting(
+        False, help="Save exit wave magnitude and phase as separate .mrcs files."
+    )
+
+
+def save_clean_exitwaves_setting() -> Any:
+    """The ``save_clean_exitwaves`` field."""
+    return setting(
+        False,
+        help="Save clean (particle-only, no ice) exit wave magnitude and phase.",
+    )
+
+
+def pdb_cache_dir_setting() -> Any:
+    """The ``pdb_cache_dir`` field."""
+    return setting(
+        factory=default_pdb_cache_dir,
+        help=(
+            "Where downloaded PDB/mmCIF structures are cached. An "
+            "input cache shared by every run, not an output location -- job tracking "
+            "does not redirect it."
+        ),
+    )
+
+
+def convergence_angle_setting() -> Any:
+    """The ``convergence_angle`` field."""
+    return setting(
+        None,
+        help=(
+            "Beam convergence semi-angle in mrad, for the Cs "
+            "(spatial coherence) envelope."
+        ),
+        check="non_negative",
+    )
+
+
+def cc_setting() -> Any:
+    """The ``cc`` field."""
+    return setting(
+        2.7,
+        help=(
+            "Chromatic aberration coefficient in mm, for the temporal coherence "
+            "loss from the beam's energy spread. Default 2.7, the Titan Krios "
+            "objective; 0 disables it. On by default since every real image "
+            "carries it, filtered or not."
+        ),
+        check="non_negative",
+    )
+
+
+def energy_spread_setting() -> Any:
+    """The ``energy_spread`` field."""
+    return setting(
+        0.7,
+        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
+        check="non_negative",
+    )
+
+
+def deltaV_V_setting() -> Any:
+    """The ``deltaV_V`` field."""
+    return setting(
+        0.06e-6,
+        help="Relative high-voltage instability, used by the Cc envelope.",
+        check="non_negative",
+    )
+
+
+def deltaI_I_setting() -> Any:
+    """The ``deltaI_I`` field."""
+    return setting(
+        0.01e-6,
+        help="Relative objective-lens current instability, used by the Cc envelope.",
+        check="non_negative",
+    )
+
+
+def temporal_coherence_setting() -> Any:
+    """The ``temporal_coherence`` field."""
+    return setting(
+        "integrated",
+        help=(
+            "How the Cc focal spread is applied when cc is set: 'integrated' sums the image incoherently over the defocus spread (exact), 'envelope' multiplies the transfer function by the Cc envelope (exact only for the part linear in the scattered wave; 0.4% low in mean intensity in 2000 A of ice at 300 kV, 5% at 120 kV)."
+        ),
+    )
+
+
+def dose_envelope_setting() -> Any:
+    """The ``dose_envelope`` field."""
+    return setting(
+        False, help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope."
+    )
+
+
+def bfactor_setting() -> Any:
+    """The ``bfactor`` field."""
+    return setting(
+        None, help="Isotropic B-factor envelope in Angstrom^2.", check="non_negative"
+    )
+
+
+def noise_model_setting() -> Any:
+    """The ``noise_model`` field."""
+    return setting("poisson", help="Noise model. Use 'none' for no noise.")
+
+
+def ice_cache_dir_setting() -> Any:
+    """The ``ice_cache_dir`` field."""
+    return setting(
+        None,
+        help=(
+            "Directory of cached ice configs for ice_model='gd'. "
+            "Defaults to the bundled ice_data/ice_cache."
+        ),
+    )
+
+
+def crowd_max_distance_z_setting() -> Any:
+    """The ``crowd_max_distance_z`` field."""
+    return setting(
+        None,
+        help="Maximum z-distance between crowded particles in Angstrom.",
+        check="non_negative",
+    )
+
+
+def scattering_factors_setting() -> Any:
+    """The ``scattering_factors`` field."""
+    return setting(
+        "shtyrov",
+        help=(
+            "Atomic scattering-factor parameterization used to "
+            "build the structure's scattering potential."
+        ),
+    )
+
+
+def monomer_library_path_setting() -> Any:
+    """The ``monomer_library_path`` field."""
+    return setting(
+        None,
+        help=(
+            "Path to a Monomer Library "
+            "(https://github.com/MonomerLibrary/monomers), which completes a "
+            "structure's bond topology and hydrogens so Shtyrov species resolve. "
+            "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
+            "hydrogen-free protein falls back to per-element Peng factors."
+        ),
+    )
+
+
+def klim_setting() -> Any:
+    """The ``klim`` field."""
+    return setting(
+        None,
+        help=(
+            "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of "
+            "Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but "
+            "discards real spatial frequency content above it. Unset (the default) "
+            "keeps the full Nyquist range and accepts the aliasing."
+        ),
+        check="non_negative",
+    )
+
+
+def oversample_setting() -> Any:
+    """The ``oversample`` field."""
+    return setting(
+        2,
+        help=(
+            "Grid refinement for the multislice recursion, the Fourier-space counterpart of pad_fft: slices are interpolated onto an xy grid this many times finer (same frame, higher Nyquist), so the transmission-times-wave product no longer wraps at Nyquist; the image is formed on that grid as well and its intensity sampled to the pixels. 1 reproduces the volume-grid recursion (0.2-1.1% of the scattered power in error, 1.9% at Nyquist); 2 is at the float32 noise floor for ~3x the multislice time. Also applied to Rytov's and projection's final exponential, which aliases identically, at negligible cost; first Born and ctf are linear and unaffected."
+        ),
+        check="positive",
+    )
+
+
+def bulk_scattering_factors_setting() -> Any:
+    """The ``bulk_scattering_factors`` field."""
+    return setting(
+        "kirkland",
+        help=(
+            "Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain."
+        ),
     )

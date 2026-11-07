@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._common_fields import (
+    monomer_library_path_setting,
+    pdb_cache_dir_setting,
     job_id_setting,
     output_dir_setting,
     project_setting,
@@ -13,7 +15,6 @@ from ._common_fields import (
 from ._field import help_of, setting
 from typing import Any, ClassVar, Literal
 
-from ._paths import default_pdb_cache_dir
 from ._scalar_range import ScalarOrRange
 from specter.options import ScatteringFactors
 
@@ -210,14 +211,7 @@ class TomogramConfig:
     )
     # Relative to the current working directory, like any other CLI path
     # argument -- see default_pdb_cache_dir for the unset case.
-    pdb_cache_dir: str = setting(
-        factory=default_pdb_cache_dir,
-        help=(
-            "Where downloaded PDB/mmCIF structures are cached. An "
-            "input cache shared by every run, not an output location -- job tracking "
-            "does not redirect it."
-        ),
-    )
+    pdb_cache_dir: str = pdb_cache_dir_setting()
     seed: int | None = seed_setting(
         "specimen assembly: placement, orientations and membrane shapes",
         "Tomogram i of --n_tomograms uses seed + i. Unset leaves the run "
@@ -356,16 +350,7 @@ class TomogramConfig:
     # Unset falls back to $CLIBD_MON. A field as well as a variable because
     # the library changes the rendered potential, so a run should be
     # reproducible from its own config -- see ParticleStackConfig's own note.
-    monomer_library_path: str | None = setting(
-        None,
-        help=(
-            "Path to a Monomer Library "
-            "(https://github.com/MonomerLibrary/monomers), which completes a "
-            "structure's bond topology and hydrogens so Shtyrov species resolve. "
-            "Unset falls back to $CLIBD_MON. Without one, around 44% of a "
-            "hydrogen-free protein falls back to per-element Peng factors."
-        ),
-    )
+    monomer_library_path: str | None = monomer_library_path_setting()
     # Off by default: a deposited B-factor is refinement output, not a
     # measured mean-square displacement, and applying a structure's own
     # column silently makes the rendered specimen depend on who deposited

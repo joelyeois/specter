@@ -5,6 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._common_fields import (
+    klim_setting,
+    alpha_setting,
+    bfactor_setting,
+    bulk_scattering_factors_setting,
+    cc_setting,
+    convergence_angle_setting,
+    cs_setting,
+    deltaI_I_setting,
+    deltaV_V_setting,
+    detector_model_setting,
+    dose_envelope_setting,
+    energy_spread_setting,
+    ice_cache_dir_setting,
+    noise_model_setting,
+    oversample_setting,
+    save_exitwaves_setting,
+    scattering_model_setting,
+    temporal_coherence_setting,
+    voltage_setting,
     absorption_model_setting,
     dose_envelope_target_setting,
     ice_motion_variance_setting,
@@ -75,9 +94,7 @@ class TiltSeriesConfig:
         ),
         check="positive",
     )
-    voltage: float = setting(
-        300.0, help="Electron beam accelerating voltage in kV.", check="positive"
-    )  # kV
+    voltage: float = voltage_setting()  # kV
     dose_per_tilt: float = setting(
         3.0,
         help="Total dose for each tilt image in e-/Angstrom^2.",
@@ -92,60 +109,21 @@ class TiltSeriesConfig:
         ),
         check="positive",
     )  # movie frames per tilt
-    cs: float = setting(
-        2.0, help="Spherical aberration in mm (1-3 mm typical).", check="non_negative"
-    )  # mm
-    alpha: float = setting(
-        0.1, help="Amplitude contrast ratio.", range=(0.0, 1.0)
-    )  # unitless, amplitude contrast ratio
+    cs: float = cs_setting()  # mm
+    alpha: float = alpha_setting()  # unitless, amplitude contrast ratio
     absorption_model: AbsorptionModel = absorption_model_setting()
     inelastic_mfp_solvent: float | None = inelastic_mfp_solvent_setting()  # Å
     inelastic_mfp_specimen: float | None = inelastic_mfp_specimen_setting()  # Å
     objective_aperture: float | None = objective_aperture_setting()  # mrad
 
     # --- Envelopes ---
-    convergence_angle: float | None = setting(
-        None,
-        help=(
-            "Beam convergence semi-angle in mrad, for the Cs "
-            "(spatial coherence) envelope."
-        ),
-        check="non_negative",
-    )  # mrad
-    cc: float | None = setting(
-        2.7,
-        help=(
-            "Chromatic aberration coefficient in mm, for the temporal coherence "
-            "loss from the beam's energy spread. Default 2.7, the Titan Krios "
-            "objective; 0 disables it. On by default since every real image "
-            "carries it, filtered or not."
-        ),
-        check="non_negative",
-    )  # mm
-    energy_spread: float = setting(
-        0.7,
-        help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
-        check="non_negative",
-    )  # eV (FWHM)
-    deltaV_V: float = setting(
-        0.06e-6,
-        help="Relative high-voltage instability, used by the Cc envelope.",
-        check="non_negative",
-    )  # unitless (ΔV/V)
-    deltaI_I: float = setting(
-        0.01e-6,
-        help="Relative objective-lens current instability, used by the Cc envelope.",
-        check="non_negative",
-    )  # unitless (ΔI/I)
-    temporal_coherence: TemporalCoherence = setting(
-        "integrated",
-        help=(
-            "How the Cc focal spread is applied when cc is set: 'integrated' sums the image incoherently over the defocus spread (exact), 'envelope' multiplies the transfer function by the Cc envelope (exact only for the part linear in the scattered wave; 0.4% low in mean intensity in 2000 A of ice at 300 kV, 5% at 120 kV)."
-        ),
-    )
-    dose_envelope: bool = setting(
-        False, help="Apply the Grant & Grigorieff (2015) cumulative-dose envelope."
-    )
+    convergence_angle: float | None = convergence_angle_setting()  # mrad
+    cc: float | None = cc_setting()  # mm
+    energy_spread: float = energy_spread_setting()  # eV (FWHM)
+    deltaV_V: float = deltaV_V_setting()  # unitless (ΔV/V)
+    deltaI_I: float = deltaI_I_setting()  # unitless (ΔI/I)
+    temporal_coherence: TemporalCoherence = temporal_coherence_setting()
+    dose_envelope: bool = dose_envelope_setting()
     dose_envelope_target: DoseEnvelopeTarget = dose_envelope_target_setting(
         "specimen",
         "Each tilt is damaged by its own dose after the pre-exposure of the tilts before it.",
@@ -238,12 +216,10 @@ class TiltSeriesConfig:
     )
 
     # --- Models ---
-    scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = setting(
-        "multislice", help="Scattering model."
+    scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
+        scattering_model_setting()
     )
-    noise_model: NoiseModel = setting(
-        "poisson", help="Noise model. Use 'none' for no noise."
-    )
+    noise_model: NoiseModel = noise_model_setting()
     coincidence_radius: float = setting(
         0.0,
         help=(
@@ -259,12 +235,8 @@ class TiltSeriesConfig:
             "(cheap RandomIcemaker), or 'none'."
         ),
     )
-    ice_cache_dir: str | None = setting(
-        None,
-        help=(
-            "Directory of cached ice configs for ice_model='gd'. "
-            "Defaults to the bundled ice_data/ice_cache."
-        ),
+    ice_cache_dir: str | None = (
+        ice_cache_dir_setting()
     )  # defaults to the bundled ice_data/ice_cache
     ice_relax_steps: int = setting(
         0,
@@ -283,36 +255,14 @@ class TiltSeriesConfig:
     # its domain and a mean inner potential (a k=0 quantity) extrapolates below
     # the fitted range. Kirkland/Lobato/Peng are per-element, valid at k=0, and
     # agree there. See ice._kernels.build_water_kernel for the measurements.
-    bulk_scattering_factors: ScatteringFactors = setting(
-        "kirkland",
-        help=(
-            "Atomic scattering-factor parameterization for the ice -- everything rendered that is not a biomolecule. Deliberately separate from scattering_factors: Shtyrov is fitted for biomolecules, and these materials are outside that domain."
-        ),
-    )
+    bulk_scattering_factors: ScatteringFactors = bulk_scattering_factors_setting()
     # Fraction of Nyquist, not 1/A: Scattering masks k <= klim * k_nyquist.
     # Kirkland recommends 0.66 (2/3) to prevent multislice FFT aliasing, but
     # that costs real spatial resolution, so the default keeps the full range
     # and accepts the aliasing. Exposed so a caller can make the other choice.
-    klim: float | None = setting(
-        None,
-        help=(
-            "Bandlimit for Kirkland's FFT anti-aliasing, as a fraction of "
-            "Nyquist. Kirkland recommends 0.66 (2/3), which prevents aliasing but "
-            "discards real spatial frequency content above it. Unset (the default) "
-            "keeps the full Nyquist range and accepts the aliasing."
-        ),
-        check="non_negative",
-    )  # fraction of Nyquist
-    oversample: int = setting(
-        2,
-        help=(
-            "Grid refinement for the multislice recursion, the Fourier-space counterpart of pad_fft: slices are interpolated onto an xy grid this many times finer (same frame, higher Nyquist), so the transmission-times-wave product no longer wraps at Nyquist; the image is formed on that grid as well and its intensity sampled to the pixels. 1 reproduces the volume-grid recursion (0.2-1.1% of the scattered power in error, 1.9% at Nyquist); 2 is at the float32 noise floor for ~3x the multislice time. Also applied to Rytov's and projection's final exponential, which aliases identically, at negligible cost; first Born and ctf are linear and unaffected."
-        ),
-        check="positive",
-    )
-    bfactor: float | None = setting(
-        None, help="Isotropic B-factor envelope in Angstrom^2.", check="non_negative"
-    )  # A^2
+    klim: float | None = klim_setting()  # fraction of Nyquist
+    oversample: int = oversample_setting()
+    bfactor: float | None = bfactor_setting()  # A^2
     pad_fft: bool = setting(
         True,
         help=(
@@ -323,15 +273,13 @@ class TiltSeriesConfig:
             "5-9% per tilt."
         ),
     )
-    detector_model: DetectorModel = setting("none", help="Detector model.")
+    detector_model: DetectorModel = detector_model_setting()
 
     # --- Post-processing ---
     normalize_tilt_series: bool = setting(
         False, help="Normalize each tilt image to zero mean and unit std."
     )
-    save_exitwaves: bool = setting(
-        False, help="Save exit wave magnitude and phase as separate .mrcs files."
-    )
+    save_exitwaves: bool = save_exitwaves_setting()
 
     # --- Compute ---
     device: str = setting(

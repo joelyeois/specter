@@ -17,7 +17,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from specter.microscope import Detector
+from specter.detectors import Detector
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 A_PLAIN = torch.tensor([[1.0045, 0.0008], [0.0009, 0.9955]], dtype=torch.float64)

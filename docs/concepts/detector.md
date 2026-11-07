@@ -9,7 +9,7 @@ direct electron detectors, coincidence loss.
     This page is the theory behind [Detection](../walkthrough/detection.md), which shows it step by step with code and figures.
 
 !!! info "Source"
-    `specter.microscope.Detector` (image formation, MTF, coincidence
+    `specter.detectors.Detector` (image formation, MTF, coincidence
     loss) and `specter.detectors` (bundled MTF/DQE curves per detector
     model). Figures are produced by `docs-figures/detector.py`, which
     calls both directly.

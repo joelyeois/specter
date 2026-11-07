@@ -11,7 +11,7 @@ scattering and detection are already free functions or modules of their own
 (:func:`~specter.potential.apply_dose_damage`,
 :func:`~specter.potential.aperture_lowpass`,
 :class:`~specter.scattering.Scattering`,
-:class:`~specter.microscope.Detector`).
+:class:`~specter.detectors.Detector`).
 """
 
 from __future__ import annotations

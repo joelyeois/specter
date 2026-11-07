@@ -332,7 +332,7 @@ def test_dose_weights_raise_the_noise_floor_without_touching_the_signal() -> Non
     of Nyquist -- far larger than anything absorption does, and the term that
     dominated a sim/experiment 2D classification until it was modelled.
     """
-    from specter.microscope import Detector
+    from specter.detectors import Detector
 
     n_frames, n_bins, n = 8, 64, 64
     # Damage-aware weighting: frames are weighted nearly equally at low
@@ -389,7 +389,7 @@ def test_dose_weights_axis_is_keyed_on_absolute_frequency() -> None:
     against a measured 2.22x at 0.9 Nyquist, where the right mapping gives
     3.33x. Keying on absolute frequency is what makes a later crop harmless.
     """
-    from specter.microscope import Detector
+    from specter.detectors import Detector
 
     n_frames, n_bins, n = 8, 64, 64
     ramp = torch.linspace(0.0, 1.0, n_bins)

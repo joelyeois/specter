@@ -17,7 +17,7 @@ from ..aberrations import FocalSpread
 from ..aberrations._envelopes import cc_envelope
 from ..constants import energy_to_wavelength
 from ..detectors import detector_mtf, dqe0_for_detector
-from ..microscope import Detector
+from ..detectors import Detector
 from ..options import AberrationModel, NoiseModel, TemporalCoherence
 from ..random_seed import derive_seeds
 from . import _stages as stages

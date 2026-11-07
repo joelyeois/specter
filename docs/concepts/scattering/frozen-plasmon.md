@@ -45,7 +45,7 @@ This homogeneous slab checks normalization. Replace `slab` with an
 ```python
 import torch
 from specter.inelastic import FrozenPlasmonForward, PlasmonFilter, PotentialState
-from specter.microscope import Detector
+from specter.detectors import Detector
 from specter.potential import absorption_potential
 from specter.scattering import IterativeScattering
 

@@ -20,7 +20,7 @@ from specter import rotations
 from specter.aberrations import Aberration, defocus_midplane_shift
 from specter.arrays import compute_nz, pad_volume
 from specter.imaging import CTF, Exposure, Poses, Specimen, simulate_particles
-from specter.microscope import Detector
+from specter.detectors import Detector
 from specter.rotations import VolumeRotator
 from specter.scattering import Scattering
 from specter.settings import Envelopes, Propagation

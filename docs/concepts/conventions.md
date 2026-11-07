@@ -17,7 +17,7 @@ themselves, such as the meaning of the Euler angles of RELION (Scheres
 !!! info "Source"
     `specter.constants`, `specter.fft`, `specter.rotations`,
     `specter.aberrations._functions`, `specter.scattering`,
-    `specter.microscope`, `specter.io`.
+    `specter.detectors`, `specter.io`.
 
 ## Units
 

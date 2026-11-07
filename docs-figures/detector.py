@@ -2,7 +2,7 @@
 Generate the figures for docs/concepts/detector.md.
 
 Calls `specter.detectors`' bundled MTF/DQE(0) functions and
-`specter.microscope.Detector`'s coincidence-loss machinery directly, so
+`specter.detectors.Detector`'s coincidence-loss machinery directly, so
 the curves plotted are exactly what `specter.imaging.Image.detect` (via
 `specter.detectors.detector_mtf`) and `Detector.apply_coincidence` produce
 for a real imaging run.
@@ -33,7 +33,7 @@ from specter.detectors import (
     k3_300kv,
     perfect_detector,
 )
-from specter.microscope import Detector
+from specter.detectors import Detector
 from specter.plots import _deep_palette
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

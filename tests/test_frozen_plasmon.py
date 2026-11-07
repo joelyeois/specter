@@ -13,7 +13,7 @@ from specter.inelastic import (
     PlasmonFilter,
     PotentialState,
 )
-from specter.microscope import Detector
+from specter.detectors import Detector
 from specter.potential import absorption_potential
 from specter.rotations import build_affine_matrix
 from specter.scattering import IterativeScattering, Scattering

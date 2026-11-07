@@ -10,7 +10,7 @@ from torch import nn
 from specter.scattering import IterativeScattering
 from specter.scattering._kernels import fourier_crop_xy
 from specter.arrays import center_crop
-from specter.microscope import Detector
+from specter.detectors import Detector
 from ._exposure import ExposureStep, exposure_steps
 from ._specimen import PotentialState
 from ._spectrum import PlasmonFilter

@@ -25,7 +25,7 @@ import pytest
 import torch
 from scipy.optimize import brentq
 
-from specter.microscope import Detector
+from specter.detectors import Detector
 
 # Enough seeds to average out the +-5% per-call cell-size jitter in the grid
 # rule; too few makes the measured area noisy by several percent.
@@ -249,7 +249,7 @@ def test_scatter_coincidence_matches_stable_sort(
     """Keep exactly the same arrivals, including at the cell-width bounds."""
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA unavailable")
-    import specter.microscope as microscope
+    import specter.detectors._detector as detector_module
 
     detector = Detector(pixel_size=1.059)
     torch.manual_seed(19)
@@ -264,7 +264,7 @@ def test_scatter_coincidence_matches_stable_sort(
         lambda *a, generator=None, **kw: torch.full(a, cell_jitter, **kw),
     )
     with monkeypatch.context() as ref:
-        ref.setattr(microscope, "_COINCIDENCE_MAX_DENSE_CELLS", 0)
+        ref.setattr(detector_module, "_COINCIDENCE_MAX_DENSE_CELLS", 0)
         torch.manual_seed(5)
         expected = detector.apply_detector_physics(intensity, 1.059, 0.8, radius)
         expected_next_random = torch.rand(8, device=device)
@@ -331,7 +331,7 @@ def test_batched_detection_matches_per_image_coincidence(weighted: bool) -> None
 def test_dose_weights_without_coincidence_loss() -> None:
     """dose_weights with coincidence_radius=0 is a weighted sum of plain
     Poisson frames; it used to divide by a zero coincidence-cell side."""
-    from specter.microscope import Detector
+    from specter.detectors import Detector
 
     n, n_frames = 32, 4
     det = Detector(

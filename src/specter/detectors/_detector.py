@@ -1,5 +1,5 @@
 """
-Aberration and detector models.
+The detector: the camera stage of image formation (`Detector`).
 
 The detector's coincidence-loss model (:meth:`Detector.apply_coincidence`) is
 an original, deliberately simplified spatial simulation -- it is not an
@@ -31,11 +31,11 @@ import torch
 import torch.nn.functional as F
 import lightning as L
 
-from .aberrations import FocalSpread
-from .arrays import center_crop
-from .fft import fft2, ifft2
-from .scattering._kernels import fourier_crop_xy
-from .progress import track
+from ..aberrations import FocalSpread
+from ..arrays import center_crop
+from ..fft import fft2, ifft2
+from ..scattering._kernels import fourier_crop_xy
+from ..progress import track
 from specter.options import AberrationModel, NoiseModel
 
 
@@ -69,7 +69,7 @@ def _warp_grouped(
     Images sharing a matrix share their sample points, which are set once
     for the group.
     """
-    from .nufft import sample_transform
+    from ..nufft import sample_transform
 
     B, H, W = coeffs.shape
     out = torch.empty(B, H, W, device=coeffs.device, dtype=pix.dtype)
@@ -100,7 +100,7 @@ def _warp_batched(
     then sums them back to image ``b``'s own coefficients, exactly, and its
     (x, y) frequencies are that image's warped sample points.
     """
-    from .nufft import sample_transform
+    from ..nufft import sample_transform
 
     B, H, W = coeffs.shape
     dtype, device = pix.dtype, pix.device

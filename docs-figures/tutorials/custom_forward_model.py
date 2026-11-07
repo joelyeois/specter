@@ -106,7 +106,7 @@ transcript.start("detect")
 from specter.aberrations import FocalSpread
 from specter.constants import energy_to_wavelength
 from specter.detectors import detector_mtf, dqe0_for_detector
-from specter.microscope import Detector
+from specter.detectors import Detector
 
 focal = FocalSpread.from_instrument(
     2.7e7,  # Cc, Angstrom

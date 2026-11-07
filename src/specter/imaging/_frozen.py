@@ -17,7 +17,7 @@ from ..aberrations import FocalSpread
 from ..aberrations._functions import defocus_midplane_shift
 from ..constants import energy_to_wavelength
 from ..detectors import detector_mtf, dqe0_for_detector
-from ..microscope import Detector
+from ..detectors import Detector
 from ..options import EwaldSphereSign, NoiseModel
 from ..scattering import IterativeScattering
 from . import _stages as stages

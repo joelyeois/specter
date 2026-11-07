@@ -13,7 +13,7 @@ import math
 import os
 from typing import TYPE_CHECKING
 
-import lightning as L
+from .._device_module import DeviceModule
 import matplotlib.figure
 import torch
 
@@ -34,7 +34,7 @@ from ._library import FIXED_POINT_ENCODING, decode_positions, default_ice_cache_
 from ._tiling import _IceTiling
 
 
-class IceBank(_IceTiling, L.LightningModule):
+class IceBank(_IceTiling, DeviceModule):
     """
     Draws randomly rotated, randomly translated ice sub-volumes from a
     library of pre-generated ice coordinate configurations.

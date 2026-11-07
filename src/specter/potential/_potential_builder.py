@@ -10,7 +10,7 @@ from importlib import resources
 from typing import Sequence
 
 import gemmi
-import lightning as L
+from .._device_module import DeviceModule
 import torch
 
 from ..arrays import (
@@ -102,7 +102,7 @@ def _cached_atomic_potential_kernel(
     return hit.clone()
 
 
-class PotentialBuilder(L.LightningModule):
+class PotentialBuilder(DeviceModule):
     """
     Module for building 3D electrostatic potential volumes from atomic coordinates.
 

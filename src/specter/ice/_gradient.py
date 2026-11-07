@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-import lightning as L
+from .._device_module import DeviceModule
 import torch
 import torch.nn.functional as F
 
@@ -78,7 +78,7 @@ def _wrap_coords(x: torch.Tensor, L: float) -> torch.Tensor:
     return (x + L / 2) % L - L / 2
 
 
-class GradientSKIcemaker(L.LightningModule):
+class GradientSKIcemaker(DeviceModule):
     """
     Differentiable S(k)-matching ice coordinate generator.
 

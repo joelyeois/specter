@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Literal
 
-import lightning as L
+from ._device_module import DeviceModule
 import torch
 
 from .arrays import insert_particles_into_micrograph
@@ -304,7 +304,7 @@ def rotation_safe_crop(volume: torch.Tensor) -> torch.Tensor:
     ].contiguous()
 
 
-class CrowdWithDuplicates(L.LightningModule):
+class CrowdWithDuplicates(DeviceModule):
     """
     Generates multiple duplicates of a 3D volume within a micrograph using
     Poisson-disk sampling for spatial placement and random rotations for orientation.

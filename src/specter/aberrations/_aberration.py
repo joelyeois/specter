@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 import torch
-import lightning as L
+from .._device_module import DeviceModule
 
 from . import _envelopes as env
 from . import _functions as fn
@@ -42,7 +42,7 @@ _CTF_PARAM_NAMES = frozenset(
 )
 
 
-class Aberration(L.LightningModule):
+class Aberration(DeviceModule):
     """
     An aberration module to apply microscopy aberrations to the 2D exitwaves,
     following the conventions of Kirkland [1]_ and Penczek [2]_.

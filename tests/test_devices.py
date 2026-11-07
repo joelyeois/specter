@@ -89,3 +89,30 @@ def test_config_rejects_a_bad_device_at_load() -> None:
     config = ParticleStackConfig(pdb_source="1abc", device="banana")
     with pytest.raises(ValueError, match="device"):
         validate_config(config)
+
+
+def test_a_device_module_follows_every_move_including_its_parents() -> None:
+    """
+    `DeviceModule.device` is where the module was last moved, with no
+    buffers to read it from, and a move of an enclosing module reaches it.
+    """
+    import torch
+    from torch import nn
+
+    from specter._device_module import DeviceModule
+
+    child = DeviceModule()
+    parent = nn.Sequential(nn.Sequential(child))
+    assert child.device == torch.device("cpu")
+    parent.to("meta")
+    assert child.device == torch.device("meta")
+    child.double()
+    assert child.device == torch.device("meta")
+    if torch.cuda.is_available():
+        child = DeviceModule()
+        parent = nn.Sequential(child)
+        index = torch.cuda.current_device()
+        assert parent.to("cuda").get_submodule("0") is child
+        assert child.device == torch.device("cuda", index)
+        parent.cpu()
+        assert child.device == torch.device("cpu")

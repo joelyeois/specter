@@ -138,7 +138,7 @@ Changes to these would silently break the physical accuracy of all simulations.
 
 ### Forward simulation pipeline
 
-`specter.imaging` is the forward model as data objects and the verbs between them (it replaced the `BaseImager`/`ImageGenerator`/`MicrographGenerator`/`TiltSeriesGenerator` hierarchy on 2026-10-15; nothing subclasses Lightning on the forward path any more):
+`specter.imaging` is the forward model as data objects and the verbs between them (it replaced the `BaseImager`/`ImageGenerator`/`MicrographGenerator`/`TiltSeriesGenerator` hierarchy on 2026-10-15; and since 2026-11-07 its engines -- `Scattering`, `Aberration`, `Detector`, `VolumeRotator`, `PotentialBuilder`, the icemakers, `CrowdWithDuplicates` -- are plain `nn.Module`s through `_device_module.DeviceModule`, which records the device a module was last moved to, parent moves included, since several hold no buffers to read it from; only the reconstructors still use Lightning):
 
 ```
 Structure.from_pdb(...).render(voxel_size, box)   – PotentialBuilder: atoms → Specimen (a recipe drawn per image)
@@ -221,7 +221,7 @@ Pose/shift/defocus refinement (`lr_R`/`lr_T`/`lr_D` on `Reconstructor`; `Tomogra
 src/specter/                  # Main source package
   aberrations/                # Aberration phase model
     _functions.py             # Low-level, stateless phase functions (cs, defocus, beamtilt, trefoil, tetrafoil, phaseshift)
-    _aberration.py            # Aberration(L.LightningModule) — composes the functions above into a transfer function
+    _aberration.py            # Aberration(DeviceModule) — composes the functions above into a transfer function
     _envelopes.py             # B-factor/Cc/spatial-coherence/dose envelope functions (pure functions of k-grid + params)
   arrays/                     # Array utilities, one module per concern: _grids (k-space/real grids, ball3d), _padding
                               # (fourier_crop, compute_nz, clip_insert_bounds, center_crop), _stamp
@@ -297,7 +297,7 @@ src/specter/                  # Main source package
     _rotation.py              # roma-wrapped translate_coordinates, rotate_coordinates; rotation_aligning
     _random.py                # roma-wrapped random_quaternion/random_rotation_matrix
     _volume.py                # rotate_volume, rotate_volume_fourier, affine matrix helpers
-    _volume_rotator.py        # VolumeRotator (LightningModule) for sampling rotated slices
+    _volume_rotator.py        # VolumeRotator (DeviceModule) for sampling rotated slices
     _exact.py                 # rotate_volume_exact (NUFFT, rotate_mode="exact"), wrapped_fraction
   specimen/                   # Volume assembly (package) — under heavy active development, structure below is
                               # partial/illustrative only; read the package directly rather than trusting this list.

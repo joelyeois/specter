@@ -50,7 +50,7 @@ V = TypeVar("V")
 
 # build_pdb_cache_concurrently falls back to serial when the process pool is
 # not predicted to pay for itself. Spawn re-imports specter's whole dependency
-# chain, torch/lightning included, in every worker, and that startup is a fixed
+# chain, torch included, in every worker, and that startup is a fixed
 # cost the parsing has to earn back.
 #
 # A threshold on the NUMBER of unique sources is the wrong criterion: the cost

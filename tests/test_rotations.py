@@ -3,10 +3,12 @@ import pytest
 import roma
 import torch
 
-from specter.rotations import (
-    VolumeRotator,
+from specter.rotations._volume_rotator import (
     _build_roi_query_points,
     _prepare_volume_for_grid_sample,
+)
+from specter.rotations import (
+    VolumeRotator,
     build_affine_matrix,
     random_rotation_matrix,
     rotate_volume,

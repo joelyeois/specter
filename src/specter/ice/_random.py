@@ -6,7 +6,7 @@ water positions, for quick tests.
 from __future__ import annotations
 
 
-import lightning as L
+from .._device_module import DeviceModule
 import torch
 
 from ..arrays import soft_voxelize_coordinates
@@ -16,7 +16,7 @@ from ._kernels import build_water_kernel, ice_potential_from_deltas
 from specter.options import IceModel, ScatteringFactors
 
 
-class RandomIcemaker(L.LightningModule):
+class RandomIcemaker(DeviceModule):
     """
     Creates ice through random molecule placement.
 

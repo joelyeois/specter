@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-import lightning as L
+from .._device_module import DeviceModule
 import math
 
 import torch
@@ -28,7 +28,7 @@ from ._kernels import (
 from specter.options import EwaldSphereSign, ScatteringModel
 
 
-class Scattering(L.LightningModule):
+class Scattering(DeviceModule):
     def __init__(
         self,
         nxy: int,

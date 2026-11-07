@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal, Sequence
 
-import lightning as L
+from .._device_module import DeviceModule
 import torch
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
@@ -195,7 +195,7 @@ def _windowed_grid_sample(
     return slices_roi[:, 0]
 
 
-class VolumeRotator(L.LightningModule):
+class VolumeRotator(DeviceModule):
     """
     3D volume rotator with RELION / PyTorch center conventions.
     """

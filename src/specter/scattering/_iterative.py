@@ -9,7 +9,7 @@ import functools
 
 from collections.abc import Callable, Iterator
 
-import lightning as L
+from .._device_module import DeviceModule
 import torch
 from torch.utils.checkpoint import checkpoint as _gradient_checkpoint
 
@@ -31,7 +31,7 @@ from ._kernels import (
 from specter.options import EwaldSphereSign, GridSamplePadding, ScatteringModel
 
 
-class IterativeScattering(L.LightningModule):
+class IterativeScattering(DeviceModule):
     """
     Scattering module that computes the 2D exitwave from a 3D scattering
     potential using on-the-fly slice sampling. This is highly memory efficient

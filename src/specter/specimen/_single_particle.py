@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
-import lightning as L
+from .._device_module import DeviceModule
 
 from ..arrays import compute_nz
 from ..crowding import CrowdWithDuplicates
@@ -68,7 +68,7 @@ class AssembledSpecimen:
     absorption: torch.Tensor | None = None
 
 
-class MicrographSpecimenGenerator(L.LightningModule):
+class MicrographSpecimenGenerator(DeviceModule):
     """
     Generates a 3D scattering potential volume by populating it with many
     duplicate copies of ONE particle template plus amorphous ice.

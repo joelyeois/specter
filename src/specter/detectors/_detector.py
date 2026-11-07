@@ -29,7 +29,7 @@ from collections.abc import Sequence
 
 import torch
 import torch.nn.functional as F
-import lightning as L
+from .._device_module import DeviceModule
 
 from ..aberrations import FocalSpread
 from ..arrays import center_crop, rfft_frequency_squared
@@ -117,7 +117,7 @@ def _warp_batched(
     return vals.real.reshape(B, H, W) / (H * W)
 
 
-class Detector(L.LightningModule):
+class Detector(DeviceModule):
     """
     A detector module to apply detector noise to images.
 

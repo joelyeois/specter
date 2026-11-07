@@ -12,6 +12,7 @@ them.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, TypeVar
 
@@ -375,6 +376,26 @@ class Exposure:
     def doses(self, n: int) -> torch.Tensor:
         """The dose of each of `n` images, float32."""
         return per_image(self.dose, n, "dose")
+
+    def damage_envelope(
+        self, dose: float, pre_exposure: float, voltage: float
+    ) -> Callable[[torch.Tensor], torch.Tensor]:
+        """
+        The dose envelope of one image of this exposure, received after
+        `pre_exposure` e-/A^2 (:func:`~specter.potential.dose_damage_envelope`,
+        under these frames, weights and weighting).
+        """
+        from ..potential import dose_damage_envelope
+
+        return dose_damage_envelope(
+            dose,
+            pre_exposure,
+            weighted=self.weighted,
+            voltage=voltage,
+            n_frames=self.n_frames,
+            frame_weights=self.weights,
+            frame_weights_max_frequency=self.weights_max_frequency,
+        )
 
     def __getitem__(self, i: slice | torch.Tensor) -> Exposure:
         dose = torch.as_tensor(self.dose)

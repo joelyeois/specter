@@ -28,10 +28,10 @@ from ..ice import (
     resolve_icemaker,
 )
 from ..ice._blend import AbsorptionTarget
-from ..potential import absorption_potential, aperture_lowpass, dose_damage_envelope
+from ..potential import absorption_potential, aperture_lowpass
 from ..random_seed import derive_seed, seeded_rng
 from ..scattering import IterativeScattering
-from ..settings import Camera, Crowding, Ice, Optics, Packing, Propagation
+from ..settings import Crowding, Ice, Optics, Packing, Propagation
 from ..specimen import MicrographSpecimenGenerator
 from ..specimen._single_particle import AbsorptionRates
 from . import _stages as stages
@@ -74,15 +74,7 @@ class _DoseSeries:
         key = (dose, pre_exposure)
         if self.rendered == key:
             return
-        envelope = dose_damage_envelope(
-            dose,
-            pre_exposure,
-            weighted=exposure.weighted,
-            voltage=voltage,
-            n_frames=exposure.n_frames,
-            frame_weights=exposure.weights,
-            frame_weights_max_frequency=exposure.weights_max_frequency,
-        )
+        envelope = exposure.damage_envelope(dose, pre_exposure, voltage)
         with torch.no_grad():
             if self.spectrum.device != volume.device:
                 self.spectrum.to(volume.device)
@@ -221,12 +213,7 @@ class Sample:
                 doses = exposure.doses(1)
                 dose = float(doses[0])
                 ice_filter = stages.solvent_exposure_filter(
-                    ice,
-                    Camera(n_frames=exposure.n_frames),
-                    self.voxel_size,
-                    dose,
-                    exposure.weights,
-                    exposure.weights_max_frequency,
+                    ice, exposure, self.voxel_size, dose
                 )
             with torch.no_grad():
                 volume = blend_ice_into_volume(
@@ -242,16 +229,9 @@ class Sample:
         def lowpass(v: torch.Tensor, inplace: bool) -> torch.Tensor:
             if objective_aperture is None:
                 return v
-            area = v.shape[-1] * v.shape[-2]
-            with torch.no_grad():
-                return aperture_lowpass(
-                    v,
-                    self.voxel_size,
-                    objective_aperture,
-                    voltage,
-                    max_slices_per_chunk=max(1, min(64, 2**26 // area)),
-                    out=v if inplace else None,
-                )
+            return _aperture_lowpass(
+                v, self.voxel_size, objective_aperture, voltage, inplace=inplace
+            )
 
         # In place only on a canvas this method allocated, never the caller's.
         volume = lowpass(volume, inplace=has_ice)
@@ -630,10 +610,7 @@ class Field:
         Sample
         """
         p = settings_group(Propagation, propagation, settings)
-        if objective_aperture is not None and p.absorption_model != "inelastic_mfp":
-            raise ValueError(
-                "objective_aperture requires absorption_model='inelastic_mfp'"
-            )
+        stages.check_objective_aperture(p, objective_aperture)
         if p.absorption_model == "inelastic_mfp" and p.scattering_model != "multislice":
             raise ValueError(
                 "absorption_model='inelastic_mfp' requires "
@@ -656,15 +633,7 @@ class Field:
             doses = exposure.doses(1)
             dose = float(doses[0])
             if self.damaged:
-                envelope = dose_damage_envelope(
-                    dose,
-                    0.0,
-                    weighted=exposure.weighted,
-                    voltage=voltage,
-                    n_frames=exposure.n_frames,
-                    frame_weights=exposure.weights,
-                    frame_weights_max_frequency=exposure.weights_max_frequency,
-                )
+                envelope = exposure.damage_envelope(dose, 0.0, voltage)
 
                 def damage(V: torch.Tensor) -> torch.Tensor:
                     for item in V:
@@ -672,12 +641,7 @@ class Field:
                     return V
 
             ice_filter = stages.solvent_exposure_filter(
-                self.ice,
-                Camera(n_frames=exposure.n_frames),
-                self.voxel_size,
-                dose,
-                exposure.weights,
-                exposure.weights_max_frequency,
+                self.ice, exposure, self.voxel_size, dose
             )
 
         def assemble() -> Any:
@@ -712,16 +676,9 @@ class Field:
             volume = volume.cpu()
             absorption = None if absorption is None else absorption.cpu()
         if objective_aperture is not None:
-            area = volume.shape[-1] * volume.shape[-2]
-            with torch.no_grad():
-                volume = aperture_lowpass(
-                    volume,
-                    self.voxel_size,
-                    objective_aperture,
-                    voltage,
-                    max_slices_per_chunk=max(1, min(64, 2**26 // area)),
-                    out=volume,
-                )
+            volume = _aperture_lowpass(
+                volume, self.voxel_size, objective_aperture, voltage, inplace=True
+            )
         return Sample(
             volume,
             self.voxel_size,
@@ -787,3 +744,27 @@ def _absorption(
     if has_ice:
         return AbsorptionRates(solvent, solvent), 0.0
     return None, 0.0
+
+
+def _aperture_lowpass(
+    v: torch.Tensor,
+    voxel_size: float,
+    objective_aperture: float,
+    voltage: float,
+    *,
+    inplace: bool,
+) -> torch.Tensor:
+    """
+    :func:`~specter.potential.aperture_lowpass` of a field-sized volume, in
+    chunks of slices bounded to 2^26 voxels.
+    """
+    area = v.shape[-1] * v.shape[-2]
+    with torch.no_grad():
+        return aperture_lowpass(
+            v,
+            voxel_size,
+            objective_aperture,
+            voltage,
+            max_slices_per_chunk=max(1, min(64, 2**26 // area)),
+            out=v if inplace else None,
+        )

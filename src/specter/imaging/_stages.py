@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 
@@ -38,9 +38,13 @@ from ..random_seed import derive_seed, seeded_rng
 from ..scattering._kernels import fourier_crop_xy, fourier_upsample_xy
 from ..settings import Camera, Ice, Optics, Propagation
 
+if TYPE_CHECKING:
+    from ._data import Exposure
+
 __all__ = [
     "RemovalMFPs",
     "aberrate",
+    "check_objective_aperture",
     "crowd_into",
     "draw_ice",
     "free_fraction",
@@ -98,20 +102,25 @@ def read_dose_weights(camera: Camera) -> tuple[torch.Tensor | None, float | None
     return w, max_freq
 
 
+def check_objective_aperture(p: Propagation, objective_aperture: float | None) -> None:
+    """Refuse an objective aperture outside ``absorption_model="inelastic_mfp"``."""
+    if objective_aperture is not None and p.absorption_model != "inelastic_mfp":
+        raise ValueError(
+            "objective_aperture requires absorption_model='inelastic_mfp': "
+            "under 'alpha' the fitted amplitude contrast already stands in "
+            "for aperture loss"
+        )
+
+
 def solvent_exposure_filter(
-    ice: Ice,
-    camera: Camera,
-    pixel_size: float,
-    dose: float,
-    weights: torch.Tensor | None,
-    weights_max_frequency: float | None,
+    ice: Ice, exposure: Exposure, pixel_size: float, dose: float
 ) -> Callable[[torch.Tensor], None] | None:
     """
     The in-place solvent-exposure filter for one exposure, or None.
 
     :func:`~specter.ice.apply_solvent_exposure` with the exposure's frame
-    structure: ``camera.n_frames`` frames (one when unset) summed under
-    `weights`. Shared by `Sample` and `TiltSeries`, which filter a whole ice
+    structure: ``exposure.n_frames`` frames (one when unset) summed under its
+    weights. Shared by `Sample` and `TiltSeries`, which filter a whole ice
     canvas before it is blended, and by `Specimen`, which hands it to
     :func:`solvate` to filter each particle's ice draw.
 
@@ -119,14 +128,12 @@ def solvent_exposure_filter(
     ----------
     ice : Ice
         Supplies ``motion_variance``; None returns None.
-    camera : Camera
-        Supplies ``n_frames``.
+    exposure : Exposure
+        Supplies the frame count and the frame weights.
     pixel_size : float
         Voxel size in Angstrom.
     dose : float
         The exposure's dose in e-/A^2.
-    weights, weights_max_frequency
-        As returned by :func:`read_dose_weights`.
 
     Returns
     -------
@@ -138,7 +145,8 @@ def solvent_exposure_filter(
     from ..ice._exposure import apply_solvent_exposure
 
     variance = ice.motion_variance
-    n_frames = camera.n_frames or 1
+    n_frames = exposure.n_frames or 1
+    weights, weights_max_frequency = exposure.weights, exposure.weights_max_frequency
 
     def apply(canvas: torch.Tensor) -> None:
         apply_solvent_exposure(

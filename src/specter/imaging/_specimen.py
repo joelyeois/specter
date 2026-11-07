@@ -36,7 +36,7 @@ from ..potential import (
 from ..random_seed import derive_seeds
 from ..rotations import VolumeRotator, translate_coordinates
 from ..scattering import surface_slice_sum
-from ..settings import Camera, Crowding, Ice, Optics, Propagation
+from ..settings import Crowding, Ice, Optics, Propagation
 from . import _stages as stages
 from ._data import Exposure, Poses, settings_group
 from ._engines import scattering_engine
@@ -532,12 +532,7 @@ class Specimen:
         before the ice is added so the solvent keeps its structure, and the
         aperture filters what will be propagated.
         """
-        if objective_aperture is not None and p.absorption_model != "inelastic_mfp":
-            raise ValueError(
-                "objective_aperture requires absorption_model='inelastic_mfp': "
-                "under 'alpha' the fitted amplitude contrast already stands in "
-                "for aperture loss"
-            )
+        stages.check_objective_aperture(p, objective_aperture)
         if (self.damaged or self._filters_solvent) and exposure is None:
             raise ValueError("damage() and Ice(motion_variance=...) need an exposure")
         if p.rotate_mode == "surface":
@@ -723,10 +718,5 @@ class Specimen:
                 "exposure filter acts on a whole batch's ice canvas at once"
             )
         return stages.solvent_exposure_filter(
-            self.ice,
-            Camera(n_frames=exposure.n_frames),
-            self.voxel_size,
-            float(doses[0]),
-            exposure.weights,
-            exposure.weights_max_frequency,
+            self.ice, exposure, self.voxel_size, float(doses[0])
         )

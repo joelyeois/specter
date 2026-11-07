@@ -31,11 +31,11 @@ from ..aberrations._functions import defocus_midplane_shift
 from ..fft import RadialSpectrum
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ..ice._exposure import solvent_exposure_envelope
-from ..potential import aperture_lowpass_isotropic, dose_damage_envelope
+from ..potential import aperture_lowpass_isotropic
 from ..progress import status
 from ..random_seed import derive_seed, seeded_rng
 from ..scattering import IterativeScattering
-from ..settings import Camera, Deformation, Ice, Optics, Propagation, TiltGeometry
+from ..settings import Deformation, Ice, Optics, Propagation, TiltGeometry
 from . import _stages as stages
 from ._data import Exposure, Poses, settings_group
 from ._deformation import (
@@ -388,13 +388,8 @@ class TiltSeries:
         **settings: Any,
     ) -> None:
         p = settings_group(Propagation, propagation, settings)
+        stages.check_objective_aperture(p, objective_aperture)
         mfp = p.absorption_model == "inelastic_mfp"
-        if objective_aperture is not None and not mfp:
-            raise ValueError(
-                "objective_aperture requires absorption_model='inelastic_mfp': "
-                "under 'alpha' the fitted amplitude contrast already stands in "
-                "for aperture loss"
-            )
         if (mfp or absorption is not None) and (
             p.scattering_model != "multislice" or p.alpha != 0
         ):
@@ -470,12 +465,7 @@ class TiltSeries:
         elif self.filters_solvent:
             # Every tilt has the same dose, so one filtered ice serves all.
             ice_filter = stages.solvent_exposure_filter(
-                ice,
-                Camera(n_frames=exposure.n_frames),
-                voxel_size,
-                float(self.doses[0]),
-                exposure.weights,
-                exposure.weights_max_frequency,
+                ice, exposure, voxel_size, float(self.doses[0])
             )
         dry = volume if damaged else None
         blended = volume
@@ -650,15 +640,7 @@ class TiltSeries:
         if self._rendered == key:
             return
         spectrum = cast(RadialSpectrum, self._spectrum)
-        envelope = dose_damage_envelope(
-            dose,
-            pre_exposure,
-            weighted=self.exposure.weighted,
-            voltage=self.voltage,
-            n_frames=self.exposure.n_frames,
-            frame_weights=self.exposure.weights,
-            frame_weights_max_frequency=self.exposure.weights_max_frequency,
-        )
+        envelope = self.exposure.damage_envelope(dose, pre_exposure, self.voltage)
         with torch.no_grad():
             try:
                 spectrum.filter_into(self.volume[0], envelope)

@@ -33,9 +33,7 @@ from specter.specimen import load_specimen_volume
 
 from specter.devices import parse_device, resolve_available_device
 from specter.settings import (
-    Camera,
     Deformation,
-    Envelopes,
     Ice,
     Propagation,
     TiltGeometry,
@@ -43,6 +41,7 @@ from specter.settings import (
 )
 from specter.progress import console, section, track
 from ._common import (
+    _Microscope,
     _mm_to_angstrom,
     _normalize_images,
     _print_total_time,
@@ -222,18 +221,12 @@ def run_tilt_series(
     ice = bundle_from_config(
         Ice, config, prefix="ice_", parameterization=config.bulk_scattering_factors
     )
-    # Envelopes.cc is in Angstrom and the config's in mm; cc is read from the config.
-    envelopes = bundle_from_config(Envelopes, config, cc=None)
-    damage_on_lens = (
-        envelopes.dose_envelope
-        and envelopes.dose_envelope_target == "transfer_function"
-    )
-    camera = bundle_from_config(Camera, config)
-    weights, weights_max_frequency = read_dose_weights(camera)
+    microscope = _Microscope.from_config(config)
+    weights, weights_max_frequency = read_dose_weights(microscope.camera)
     exposure = Exposure.tilt_series(
         config.dose_per_tilt,
         config.n_tilts,
-        n_frames=camera.n_frames,
+        n_frames=microscope.camera.n_frames,
         weights=weights,
         weights_max_frequency=weights_max_frequency,
     )
@@ -244,7 +237,7 @@ def run_tilt_series(
         voltage=config.voltage,
         micrograph_size=micrograph_size,
         ice=ice,
-        damaged=envelopes.dose_envelope and not damage_on_lens,
+        damaged=microscope.damages_specimen,
         tilt=tilt,
         deformation=deformation,
         seed=run_seed,
@@ -263,28 +256,12 @@ def run_tilt_series(
             waves = series.scatter(i, device=device_target)
             if config.save_exitwaves:
                 exitwaves_list.append(waves.pixels().cpu())
-            image = (
-                waves.apply_ctf(
-                    ctf,
-                    bfactor=config.bfactor,
-                    convergence_angle=envelopes.convergence_angle,
-                    dose_envelope=exposure[one] if damage_on_lens else None,
-                )
-                .intensity(
-                    cc=config.cc or None,
-                    energy_spread=envelopes.energy_spread,
-                    deltaV_V=envelopes.deltaV_V,
-                    deltaI_I=envelopes.deltaI_I,
-                    temporal_coherence=envelopes.temporal_coherence,
-                )
-                .detect(
-                    exposure[one],
-                    detector=camera.detector_model,
-                    noise=camera.noise_model,
-                    coincidence_radius=config.coincidence_radius,
-                    detector_pixel_size=camera.detector_pixel_size,
-                    seed=run_seed,
-                )
+            image = microscope.image(
+                waves,
+                ctf,
+                exposure[one],
+                coincidence_radius=config.coincidence_radius,
+                seed=run_seed,
             )
             images_list.append(image.array.cpu())
     images = torch.cat(images_list)  # (n_tilts, H, W)

@@ -42,7 +42,6 @@ from specter.devices import parse_device, resolve_available_device
 from specter.settings import (
     Camera,
     Crowding,
-    Envelopes,
     Ice,
     Propagation,
     bundle_from_config,
@@ -50,6 +49,7 @@ from specter.settings import (
 from specter.progress import console, section, track
 
 from ._common import (
+    _Microscope,
     _crowd_min_distance,
     _mm_to_angstrom,
     _print_total_time,
@@ -317,8 +317,7 @@ class _ParticleRun:
             specimen = replace(specimen, ice=ice)
         else:
             specimen = specimen.solvate(ice, icemaker=icemaker)
-        envelopes = bundle_from_config(Envelopes, self.config, cc=None)
-        if envelopes.dose_envelope and envelopes.dose_envelope_target == "specimen":
+        if _Microscope.from_config(self.config).damages_specimen:
             specimen = specimen.damage()
         return specimen
 
@@ -339,13 +338,7 @@ class _ParticleRun:
         specimen = self.specimen(device)
         dry = specimen.dry() if config.save_clean_exitwaves else None
         propagation = asdict(bundle_from_config(Propagation, config, alpha=self.alpha))
-        # Its cc is in Angstrom and the config's in mm; cc is read from the config.
-        envelopes = bundle_from_config(Envelopes, config, cc=None)
-        camera = bundle_from_config(Camera, config)
-        damage_on_lens = (
-            envelopes.dose_envelope
-            and envelopes.dose_envelope_target == "transfer_function"
-        )
+        microscope = _Microscope.from_config(config)
         n = stop - start
         images, exitwaves, clean = _HostStack(n), _HostStack(n), _HostStack(n)
         with torch.no_grad():
@@ -366,26 +359,12 @@ class _ParticleRun:
                     exitwaves.append(waves.pixels())
                 if dry is not None:
                     clean.append(dry.scatter(self.poses[i], **beam).pixels())
-                waves = waves.apply_ctf(
+                counts = microscope.image(
+                    waves,
                     self.ctf[i],
-                    bfactor=config.bfactor,
-                    convergence_angle=envelopes.convergence_angle,
-                    dose_envelope=exposure if damage_on_lens else None,
-                )
-                image = waves.intensity(
-                    cc=config.cc or None,
-                    energy_spread=envelopes.energy_spread,
-                    deltaV_V=envelopes.deltaV_V,
-                    deltaI_I=envelopes.deltaI_I,
-                    temporal_coherence=envelopes.temporal_coherence,
-                )
-                counts = image.detect(
                     exposure,
-                    detector=camera.detector_model,
-                    noise=camera.noise_model,
                     coincidence_radius=self.coincidence_radius[i],
                     anisomag=None if self.anisomag is None else self.anisomag[i],
-                    detector_pixel_size=camera.detector_pixel_size,
                     seed=self.seed,
                 )
                 images.append(counts.array)

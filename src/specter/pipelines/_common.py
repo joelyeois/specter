@@ -1,13 +1,14 @@
 """Shared helpers for `specter.pipelines` modules: output-directory and job
-resolution, the host-side image stack, scalar-or-range
-sampling, and exit-wave output."""
+resolution, the host-side image stack, the microscope after the specimen,
+and exit-wave output."""
 
 from __future__ import annotations
 
 import os
 import time
 from contextlib import contextmanager
-from typing import Any, Iterator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Iterator
 
 import torch
 
@@ -19,6 +20,128 @@ from specter.config import (
     ensure_project_root,
     find_specter_project_root,
 )
+from specter.settings import Camera, Envelopes, bundle_from_config
+
+if TYPE_CHECKING:
+    from specter.imaging import CTF, ExitWave, Exposure, Image
+
+
+@dataclass(frozen=True)
+class _Microscope:
+    """
+    The instrument after the specimen, as a simulate pipeline's config sets it:
+    the lens (`apply_ctf`), its focal spread (`intensity`) and the camera
+    (`detect`), run in that order on each exit wave.
+
+    Attributes
+    ----------
+    envelopes : Envelopes
+        The coherence and dose-envelope settings. Its own ``cc`` is unset:
+        `Envelopes` holds Cc in Angstrom and the config in mm, so `cc` carries
+        the config's value to `intensity`, which takes mm.
+    camera : Camera
+        The detector, its noise and pixel size.
+    bfactor : float or None
+        The envelope's B-factor, in A^2.
+    cc : float or None
+        Chromatic aberration in mm; None leaves the focal spread out.
+    """
+
+    envelopes: Envelopes
+    camera: Camera
+    bfactor: float | None
+    cc: float | None
+
+    @classmethod
+    def from_config(cls, config: Any, **camera: Any) -> _Microscope:
+        """
+        Read the lens and camera from `config`.
+
+        Parameters
+        ----------
+        config : Any
+            A particle, micrograph or tilt-series config.
+        **camera
+            `Camera` fields the config spells differently (``n_frames``).
+        """
+        return cls(
+            envelopes=bundle_from_config(Envelopes, config, cc=None),
+            camera=bundle_from_config(Camera, config, **camera),
+            bfactor=config.bfactor,
+            cc=config.cc or None,
+        )
+
+    @property
+    def damage_on_lens(self) -> bool:
+        """Whether dose damage is an envelope on the transfer function."""
+        return bool(
+            self.envelopes.dose_envelope
+            and self.envelopes.dose_envelope_target == "transfer_function"
+        )
+
+    @property
+    def damages_specimen(self) -> bool:
+        """Whether dose damage is applied to the specimen's potential instead."""
+        return bool(
+            self.envelopes.dose_envelope
+            and self.envelopes.dose_envelope_target == "specimen"
+        )
+
+    def image(
+        self,
+        waves: ExitWave,
+        ctf: CTF,
+        exposure: Exposure,
+        *,
+        coincidence_radius: torch.Tensor | float,
+        seed: int | None,
+        anisomag: torch.Tensor | None = None,
+    ) -> Image:
+        """
+        Detected counts of `waves` under `ctf` and `exposure`.
+
+        Parameters
+        ----------
+        waves : ExitWave
+            The exit waves, one per image.
+        ctf, exposure : CTF, Exposure
+            Each image's, matched to `waves` by position.
+        coincidence_radius : torch.Tensor or float
+            Per image, or one for all.
+        seed : int or None
+            The run's seed; each image's noise comes from it and the image's id.
+        anisomag : torch.Tensor, optional
+            Per-image anisotropic magnification matrices.
+
+        Returns
+        -------
+        Image
+        """
+        envelopes, camera = self.envelopes, self.camera
+        return (
+            waves.apply_ctf(
+                ctf,
+                bfactor=self.bfactor,
+                convergence_angle=envelopes.convergence_angle,
+                dose_envelope=exposure if self.damage_on_lens else None,
+            )
+            .intensity(
+                cc=self.cc,
+                energy_spread=envelopes.energy_spread,
+                deltaV_V=envelopes.deltaV_V,
+                deltaI_I=envelopes.deltaI_I,
+                temporal_coherence=envelopes.temporal_coherence,
+            )
+            .detect(
+                exposure,
+                detector=camera.detector_model,
+                noise=camera.noise_model,
+                coincidence_radius=coincidence_radius,
+                anisomag=anisomag,
+                detector_pixel_size=camera.detector_pixel_size,
+                seed=seed,
+            )
+        )
 
 
 def is_tracked(config: Any) -> bool:

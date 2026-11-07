@@ -32,9 +32,7 @@ from specter.pdb import PDB
 from specter.potential import PotentialBuilder, molecular_mass_from_atoms
 from specter.devices import resolve_available_device
 from specter.settings import (
-    Camera,
     Crowding,
-    Envelopes,
     Ice,
     Packing,
     Propagation,
@@ -43,6 +41,7 @@ from specter.settings import (
 from specter.progress import console, section, track
 
 from ._common import (
+    _Microscope,
     _crowd_min_distance,
     _mm_to_angstrom,
     _normalize_images,
@@ -233,16 +232,10 @@ def run_micrograph(config: MicrographConfig) -> None:
     )
     if icemaker is not None:
         field = field.solvate(ice, icemaker=icemaker)
-    # Envelopes.cc is in Angstrom and the config's in mm; cc is read from the config.
-    envelopes = bundle_from_config(Envelopes, config, cc=None)
-    if envelopes.dose_envelope and envelopes.dose_envelope_target == "specimen":
+    microscope = _Microscope.from_config(config, n_frames=n_frames)
+    if microscope.damages_specimen:
         field = field.damage()
-    damage_on_lens = (
-        envelopes.dose_envelope
-        and envelopes.dose_envelope_target == "transfer_function"
-    )
-    camera = bundle_from_config(Camera, config, n_frames=n_frames)
-    weights, weights_max_frequency = read_dose_weights(camera)
+    weights, weights_max_frequency = read_dose_weights(microscope.camera)
     exposure = Exposure(
         dose,
         n_frames=n_frames,
@@ -287,28 +280,12 @@ def run_micrograph(config: MicrographConfig) -> None:
                 exitwaves.append(waves.pixels().cpu())
             if clean_exitwaves is not None:
                 clean_exitwaves.append(sample.clean().scatter(**beam).pixels().cpu())
-            image = (
-                waves.apply_ctf(
-                    ctf[one],
-                    bfactor=config.bfactor,
-                    convergence_angle=envelopes.convergence_angle,
-                    dose_envelope=exposure[one] if damage_on_lens else None,
-                )
-                .intensity(
-                    cc=config.cc or None,
-                    energy_spread=envelopes.energy_spread,
-                    deltaV_V=envelopes.deltaV_V,
-                    deltaI_I=envelopes.deltaI_I,
-                    temporal_coherence=envelopes.temporal_coherence,
-                )
-                .detect(
-                    exposure[one],
-                    detector=camera.detector_model,
-                    noise=camera.noise_model,
-                    coincidence_radius=coincidence_radius[one],
-                    detector_pixel_size=camera.detector_pixel_size,
-                    seed=run_seed,
-                )
+            image = microscope.image(
+                waves,
+                ctf[one],
+                exposure[one],
+                coincidence_radius=coincidence_radius[one],
+                seed=run_seed,
             )
             del sample, waves
         images.append(image.array.cpu())

@@ -456,7 +456,7 @@ def _compute_and_save_gold_standard_fsc(
     masked : str or None
         The same inside `mask`; None without one.
     check : dict or None
-        `ghostbuster._converge.mask_check` of `mask` on these half-maps:
+        `ghostbuster._resolution.mask_check` of `mask` on these half-maps:
         the noise-substituted ("corrected") resolution and whether the mask
         is too tight, its FSC curve dropped; None without a mask.
     """
@@ -473,7 +473,7 @@ def _compute_and_save_gold_standard_fsc(
     )
     check = None
     if mask is not None:
-        from ..ghostbuster._converge import mask_check
+        from ..ghostbuster._resolution import mask_check
 
         check = mask_check(vol_a, vol_b, mask, voxel_size)
         corrected = check.pop("corrected_fsc")
@@ -550,11 +550,11 @@ def _wiener_prior(config: ReconstructionConfig, run_dir: Path) -> dict[str, Any]
     The SSNR the prior is built from: the Adam half-maps' masked FSC.
 
     The mask is `fsc_mask` when it is a map on this grid, and otherwise the
-    auto-tightened mask of `ghostbuster._converge.auto_mask`, written to
+    auto-tightened mask of `ghostbuster._resolution.auto_mask`, written to
     ``mask_auto.mrc``. The record goes into ``job.json``, the run's only
     JSON file.
     """
-    from ..ghostbuster._converge import auto_mask, masked_fsc, ssnr_from_fsc
+    from ..ghostbuster._resolution import auto_mask, masked_fsc, ssnr_from_fsc
     from ..io import read_mrc, write_mrc
 
     vol_a, voxel_size = read_mrc(run_dir / "volume_A_adam.mrc")

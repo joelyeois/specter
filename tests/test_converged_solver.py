@@ -11,9 +11,9 @@ import torch
 from specter import nufft
 from specter.arrays import ball3d
 from specter.ghostbuster import Reconstructor
-from specter.ghostbuster._converge import (
+from specter.ghostbuster._converge import ConvergedSolver
+from specter.ghostbuster._resolution import (
     FSC_CLIP,
-    ConvergedSolver,
     auto_mask,
     frequency_shells,
     mask_check,

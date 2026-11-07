@@ -180,7 +180,7 @@ class IceProfile:
         """Centred (x, y) coordinate grids in Å, each of shape (nxy, nxy).
 
         Pixel ``k`` is at ``(k - nxy // 2) * pixel_size``, the canvas
-        convention :func:`~specter.crowding.insert_particles_into_micrograph`
+        convention :func:`~specter.arrays.insert_particles_into_micrograph`
         places particles in, so a field value belongs to the column a
         particle at that position is rendered into.
         """
@@ -284,7 +284,7 @@ class IceProfile:
         xy : torch.Tensor
             Coordinates of shape (N, 2) in Å, origin at the field's centre --
             the convention
-            :func:`~specter.crowding.insert_particles_into_micrograph` uses.
+            :func:`~specter.arrays.insert_particles_into_micrograph` uses.
         nxy : int
             Field size in pixels (square).
         pixel_size : float

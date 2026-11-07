@@ -297,7 +297,7 @@ def defocus_midplane_shift(nz: int, pixel_size: float) -> float:
     underfocus than the midplane's, and subtracting this shift adds it. Under
     the default negative Ewald sign the beam enters at slice 0, so defocus
     *increases* with z, and for a particle at centred coordinate ``z_i`` (the
-    convention :func:`specter.crowding.insert_particles_into_micrograph`
+    convention :func:`specter.arrays.insert_particles_into_micrograph`
     uses) the effective defocus is ``df_ref + z_i``, where ``df_ref`` is the
     nominal defocus, at ``z = 0``. Measured, not assumed: a scatterer
     placed 96 A below the midplane produces an image matching the same

@@ -91,7 +91,8 @@ def _render_masks(masks, coords, rots, species, canvas_shape, voxel):
     0.5 like `_rotation_cache`, one copy at a time so neighbouring copies'
     interpolation tails cannot add up past it. Returns the per-voxel count.
     """
-    from specter.crowding import fold_subvoxel_offsets, insert_particles_into_micrograph
+    from specter.arrays import insert_particles_into_micrograph
+    from specter.rotations import fold_subvoxel_offsets
 
     hits = torch.zeros(canvas_shape, dtype=torch.int16)
     for i in range(len(coords)):

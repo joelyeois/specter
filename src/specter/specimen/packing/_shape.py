@@ -471,7 +471,7 @@ def _placement_positions(
 
     The canvas a copy is rendered into maps voxel ``k`` to ``(k - n // 2) *
     voxel`` per axis (`~specter.arrays.clip_insert_bounds`,
-    `~specter.crowding.insert_particles_into_micrograph`), and packing voxel
+    `~specter.arrays.insert_particles_into_micrograph`), and packing voxel
     ``j`` covers fine voxels ``[j * pool_factor, (j + 1) * pool_factor)`` of
     it. So the origin of a footprint anchored at packing voxel ``c`` is on
     fine voxel ``c * pool_factor + offset``, and its position is that
@@ -656,7 +656,7 @@ def pack_shapes_3d(
         molecule's origin (the frame of `species_masks`, which is the frame
         its potential template is built in) lands, in the render grid's
         convention that voxel ``k`` is at ``(k - n // 2) * voxel`` -- the one
-        `~specter.crowding.insert_particles_into_micrograph` stamps with.
+        `~specter.arrays.insert_particles_into_micrograph` stamps with.
         Each is a whole render voxel, and rendering a copy there reproduces
         the footprint that was collision-tested (see `_placement_positions`).
     rotations : torch.Tensor

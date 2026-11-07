@@ -53,6 +53,7 @@ from ._volume import (
     affine_sampling_grid,
     apply_fourier_translation,
     build_affine_matrix,
+    fold_subvoxel_offsets,
     fourier_origin_displacement,
     rotate_volume,
     rotate_volume_fourier,
@@ -126,6 +127,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "fold_subvoxel_offsets",
     "translate_coordinates",
     "rotate_coordinates",
     "rotation_aligning",

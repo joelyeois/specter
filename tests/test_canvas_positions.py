@@ -391,7 +391,8 @@ def test_coarse_footprints_stay_inside_an_overhung_canvas(canvas_shape, factor):
     """With no axis clippable, no rendered copy loses a voxel to the canvas
     edge, although the coarse grid's last packing voxel covers render voxels
     past it."""
-    from specter.crowding import fold_subvoxel_offsets, insert_particles_into_micrograph
+    from specter.arrays import insert_particles_into_micrograph
+    from specter.rotations import fold_subvoxel_offsets
 
     voxel = 2.0
     grid = tuple(-(-n // factor) for n in canvas_shape)

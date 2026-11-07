@@ -75,7 +75,7 @@ import torch
 
 from ...config import ScalarOrRange
 from ...arrays import count_nonzero_chunked
-from ...crowding import insert_particles_into_micrograph
+from ...arrays import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB, canonical_pdb_source
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix

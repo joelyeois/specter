@@ -26,7 +26,7 @@ from typing import Literal
 import torch
 
 from ...arrays import clip_insert_bounds
-from ...crowding import fold_subvoxel_offsets
+from ...rotations import fold_subvoxel_offsets
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB
 from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, rotate_volume

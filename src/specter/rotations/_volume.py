@@ -5,6 +5,7 @@ translation, and the affine-matrix helpers they share.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Literal
 
 import torch
@@ -699,3 +700,65 @@ def build_affine_matrix(R: torch.Tensor, T: torch.Tensor | None = None) -> torch
     Tprime[:, 2] = R[:, 2, 0] * T[:, 0] + R[:, 2, 1] * T[:, 1] + R[:, 2, 2] * T[:, 2]
     theta = torch.concat([R, Tprime.unsqueeze(2)], dim=-1)
     return theta
+
+
+def fold_subvoxel_offsets(
+    theta: torch.Tensor,
+    positions: torch.Tensor,
+    pixel_size: float,
+    template_shape: Sequence[int],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Move each copy's sub-voxel offset into the affine that resamples it.
+
+    :func:`~specter.arrays.insert_particles_into_micrograph` stamps at whole voxels, so on its
+    own a copy lands up to half a voxel from its recorded position on every
+    axis. A rotated copy is resampled anyway, and a translation in the same
+    affine costs nothing: this splits each position into the whole voxel the
+    copy is stamped at and the remainder, which the rotation then applies.
+
+    Parameters
+    ----------
+    theta : torch.Tensor
+        Affine matrices from :func:`~specter.rotations.build_affine_matrix`,
+        shape (N, 3, 4), applied to the template by
+        :func:`~specter.rotations.rotate_volume` (``origin="relion"``).
+    positions : torch.Tensor
+        Copy centres (x, y, z) in physical units, origin at the canvas centre,
+        shape (N, 3) or (N, 2) (z taken as zero).
+    pixel_size : float
+        Voxel size, in the units of `positions`.
+    template_shape : sequence of int
+        Shape (Z, Y, X) of the volume `theta` will be applied to; the
+        translation is normalised by its x width.
+
+    Returns
+    -------
+    theta : torch.Tensor
+        The affines with the remainder added as a lab-frame displacement,
+        shape (N, 3, 4).
+    positions_whole : torch.Tensor
+        Positions rounded to whole voxels, in physical units, shape (N, 3),
+        to pass to :func:`~specter.arrays.insert_particles_into_micrograph`.
+
+    Notes
+    -----
+    ``build_affine_matrix(R, T)`` displaces the density by ``-T`` in the lab
+    frame whatever ``R`` is, by pre-rotating ``T``; the remainder ``f`` is
+    therefore added as ``R @ (-f)`` in the normalised units of
+    :func:`~specter.rotations.translations_angstrom_to_torch`, on top of any
+    translation `theta` already carries. The rounding is the one
+    :func:`~specter.arrays.insert_particles_into_micrograph` applies, so the two parts add
+    back to the position exactly. Trilinear resampling conserves the first
+    moment of a shifted density, so the copy's centroid lands on its position
+    to interpolation accuracy rather than to the nearest voxel.
+    """
+    if positions.shape[1] == 2:
+        positions = torch.cat([positions, positions.new_zeros(len(positions), 1)], 1)
+    voxels = positions / pixel_size
+    whole = voxels.round()
+    remainder = (voxels - whole).to(device=theta.device, dtype=theta.dtype)
+    shift = translations_angstrom_to_torch(-remainder, int(template_shape[-1]), 1.0)
+    R = theta[..., :3]
+    t = theta[..., 3] + torch.einsum("bij,bj->bi", R, shift)
+    return torch.cat([R, t.unsqueeze(-1)], dim=-1), whole * pixel_size

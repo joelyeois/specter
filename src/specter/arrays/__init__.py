@@ -1,4 +1,4 @@
-"""Array utilities: grids, voxelization, radial profiles, padding/cropping, and block tiling."""
+"""Array utilities: grids, voxelization, radial profiles, padding/cropping, stamping, and block tiling."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from ._grids import (
     real_to_kgrid_3d,
 )
 from ._reduce import count_nonzero_chunked
+from ._stamp import insert_particles_into_micrograph
 from ._padding import (
     center_crop,
     clip_insert_bounds,
@@ -42,6 +43,7 @@ __all__ = [
     "grid_1d",
     "grid_2d",
     "grid_3d",
+    "insert_particles_into_micrograph",
     "kgrid_1d",
     "kgrid_2d",
     "pad_volume",

@@ -10,7 +10,8 @@ import torch.nn.functional as F
 from scipy import ndimage
 
 from ...arrays import clip_insert_bounds
-from ...crowding import fold_subvoxel_offsets, insert_particles_into_micrograph
+from ...arrays import insert_particles_into_micrograph
+from ...rotations import fold_subvoxel_offsets
 from ...rotations import rotate_volume
 from ..membrane import MembraneGenerator, membrane_bounding_radius
 
@@ -52,7 +53,7 @@ def _insert_instance_labels(
     cz_center, cy_center, cx_center = Z // 2, Y // 2, X // 2
 
     # One host transfer per chunk, not three device syncs per instance --
-    # same reasoning as `crowding._insert_all`'s own loop.
+    # same reasoning as `arrays._stamp._insert_all`'s own loop.
     positions_list = positions_int.cpu().tolist()
     for i, (px_i, py_i, pz_i) in enumerate(positions_list):
         cx_index = cx_center + px_i

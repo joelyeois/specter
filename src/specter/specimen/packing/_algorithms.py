@@ -326,7 +326,7 @@ def pack_hard_spheres_3d(
         ``field_origin + i * field_voxel_size``. Default None: the render
         canvas's own convention for a field at its resolution, voxel ``k`` at
         ``(k - n // 2) * field_voxel_size`` (that of
-        `~specter.crowding.insert_particles_into_micrograph`). A field
+        `~specter.arrays.insert_particles_into_micrograph`). A field
         max-pooled from the canvas by an integer factor is offset from that,
         and from the canvas centre whenever the factor does not divide the
         canvas; `..tomogram._helpers._allowed_region_exclusion_field` returns

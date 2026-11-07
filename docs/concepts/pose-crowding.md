@@ -111,7 +111,7 @@ Each duplicate is placed at its sampled position to sub-voxel accuracy.
 The rotated copy is added into the canvas at the whole voxel nearest that
 position, and the remainder, up to half a voxel on each axis, is applied
 as a translation in the same affine resample that rotates the copy
-(`crowding.fold_subvoxel_offsets`), so it costs no additional
+(`rotations.fold_subvoxel_offsets`), so it costs no additional
 interpolation pass. Trilinear resampling conserves the first moment of
 the density, so the copy's centroid lands on the sampled position to
 within interpolation error (about \(10^{-3}\) voxel for a smooth

@@ -223,7 +223,8 @@ src/specter/                  # Main source package
     _aberration.py            # Aberration(L.LightningModule) — composes the functions above into a transfer function
     _envelopes.py             # B-factor/Cc/spatial-coherence/dose envelope functions (pure functions of k-grid + params)
   arrays/                     # Array utilities, one module per concern: _grids (k-space/real grids, ball3d), _padding
-                              # (fourier_crop, compute_nz, clip_insert_bounds, center_crop), _voxelize (soft
+                              # (fourier_crop, compute_nz, clip_insert_bounds, center_crop), _stamp
+                              # (insert_particles_into_micrograph), _voxelize (soft
                               # voxelization), _tiling (block tiling), _profiles (radial averages), _reduce
                               # (count_nonzero_chunked)
   atom/                       # Atomic properties and potential functions

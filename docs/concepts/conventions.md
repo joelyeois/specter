@@ -80,7 +80,7 @@ frame and renders at that position:
   proteins, filament subunits, tubulin dimers and transmembrane proteins) are
   added at the nearest whole voxel, and the remainder, at most half a voxel
   per axis, is applied by the affine resample that rotates them
-  (`crowding.fold_subvoxel_offsets`).
+  (`rotations.fold_subvoxel_offsets`).
 - Gold beads are built with the remainder already applied to their atoms and
   boundary (`BeadGenerator.generate(offset_xyz=...)`), since resampling a
   finished bead would blur its lattice.

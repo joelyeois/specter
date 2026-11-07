@@ -1,27 +1,25 @@
 """
 Molecular crowding: `CrowdWithDuplicates` places rotated copies of one
 template around a particle or across a micrograph, with the placement
-filters (ice-surface adsorption, local ice thickness) and the insertion
-kernel it uses.
+filters (ice-surface adsorption, local ice thickness). The copies are
+stamped by :func:`~specter.arrays.insert_particles_into_micrograph`.
 """
 
 from __future__ import annotations
 
-import contextlib
 
 import math
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
 
 import lightning as L
 import torch
 
-from .arrays import clip_insert_bounds
+from .arrays import insert_particles_into_micrograph
 from .coords import poisson_disk_neighbors, poisson_disk_neighbors_3d
-from .cpu_threads import limited_cpu_threads
 from .progress import track
 
 from . import rotations
+from .rotations import fold_subvoxel_offsets
 
 if TYPE_CHECKING:
     from .ice import IceProfile
@@ -29,208 +27,11 @@ if TYPE_CHECKING:
 __all__ = [
     "poisson_disk_neighbors",
     "poisson_disk_neighbors_3d",
-    "insert_particles_into_micrograph",
-    "fold_subvoxel_offsets",
     "filter_by_z_density",
     "filter_by_local_z_density",
     "rotation_safe_crop",
     "CrowdWithDuplicates",
 ]
-
-
-def insert_particles_into_micrograph(
-    volumes: torch.Tensor,
-    positions: torch.Tensor,
-    pixel_size: float = 1.0,
-    micro_shape: tuple[int, int, int] | None = None,
-    micrograph: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """
-    Insert rotated 3D volumes into a 3D micrograph centered at the origin.
-
-    Parameters
-    ----------
-    volumes : torch.Tensor
-        Rotated volumes with shape (N, Zp, Yp, Xp) where N is the number
-        of particles to insert.
-    positions : torch.Tensor
-        Particle center coordinates in physical units (x, y, z) with shape
-        (N, 3) or (N, 2). Origin is at the center of the micrograph. If
-        shape is (N, 2), z-coordinates are assumed to be zero.
-    pixel_size : float, optional
-        Physical size of one pixel in same units as positions. Default is 1.0.
-    micro_shape : tuple of int, optional
-        Shape of micrograph (Z, Y, X). Required if micrograph is None.
-    micrograph : torch.Tensor, optional
-        Existing micrograph to insert volumes into. If None, a new micrograph
-        is created with shape micro_shape.
-
-    Returns
-    -------
-    micrograph : torch.Tensor
-        Micrograph with volumes inserted, shape (Z, Y, X).
-
-    Raises
-    ------
-    ValueError
-        If neither micro_shape nor micrograph is provided.
-
-    Notes
-    -----
-    If a particle extends beyond the micrograph boundaries, only the portion
-    within bounds is inserted (clipping at edges).
-
-    Each volume is stamped at the whole voxel nearest its position, with its
-    index ``n // 2`` on that voxel; the remainder, up to half a voxel per
-    axis, is not applied here. A caller that resamples its copies anyway
-    (every rotated copy does) carries it through that resampling instead,
-    with :func:`fold_subvoxel_offsets`, and passes the whole-voxel positions
-    that function returns.
-    """
-    N, Zp, Yp, Xp = volumes.shape
-    device = volumes.device
-
-    # Allocate micrograph
-    if micrograph is not None:
-        micrograph = micrograph.to(device)
-        Z, Y, X = micrograph.shape
-    elif micro_shape is not None:
-        Z, Y, X = micro_shape
-        micrograph = torch.zeros(micro_shape, device=device)
-    else:
-        raise ValueError(
-            "Must provide either `micro_shape` or an existing `micrograph`."
-        )
-
-    volumes = volumes.to(device)
-    positions = positions.to(device)
-    if positions.shape[1] == 2:
-        zeros = torch.zeros(
-            (positions.shape[0], 1), device=positions.device, dtype=positions.dtype
-        )
-        positions = torch.cat([positions, zeros], dim=1)
-
-    # Convert from physical units to pixel indices
-    positions_pixels = positions / pixel_size
-    positions_int = positions_pixels.round().long()  # shape (N, 3), order (x, y, z)
-
-    # Micrograph center indices
-    cz_center = Z // 2
-    cy_center = Y // 2
-    cx_center = X // 2
-
-    # Per particle: a bounds clip and one slice add. Under the default
-    # thread pool of a many-core host the small CPU ops dominate; see
-    # cpu_threads. A CUDA canvas has no CPU tensor op in the loop at all,
-    # so the cap there only pays `torch.set_num_threads`' pool-resize cost
-    # (3.15 ms per down/up pair at a 64-thread pool on this host) once per
-    # call -- 337 calls for one 21.5k-instance tomogram species pool.
-    cap = contextlib.nullcontext() if micrograph.is_cuda else limited_cpu_threads()
-    with cap:
-        _insert_all(
-            volumes,
-            positions_int,
-            (cz_center, cy_center, cx_center),
-            (Zp, Yp, Xp),
-            (Z, Y, X),
-            micrograph,
-        )
-    return micrograph
-
-
-def fold_subvoxel_offsets(
-    theta: torch.Tensor,
-    positions: torch.Tensor,
-    pixel_size: float,
-    template_shape: Sequence[int],
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Move each copy's sub-voxel offset into the affine that resamples it.
-
-    :func:`insert_particles_into_micrograph` stamps at whole voxels, so on its
-    own a copy lands up to half a voxel from its recorded position on every
-    axis. A rotated copy is resampled anyway, and a translation in the same
-    affine costs nothing: this splits each position into the whole voxel the
-    copy is stamped at and the remainder, which the rotation then applies.
-
-    Parameters
-    ----------
-    theta : torch.Tensor
-        Affine matrices from :func:`~specter.rotations.build_affine_matrix`,
-        shape (N, 3, 4), applied to the template by
-        :func:`~specter.rotations.rotate_volume` (``origin="relion"``).
-    positions : torch.Tensor
-        Copy centres (x, y, z) in physical units, origin at the canvas centre,
-        shape (N, 3) or (N, 2) (z taken as zero).
-    pixel_size : float
-        Voxel size, in the units of `positions`.
-    template_shape : sequence of int
-        Shape (Z, Y, X) of the volume `theta` will be applied to; the
-        translation is normalised by its x width.
-
-    Returns
-    -------
-    theta : torch.Tensor
-        The affines with the remainder added as a lab-frame displacement,
-        shape (N, 3, 4).
-    positions_whole : torch.Tensor
-        Positions rounded to whole voxels, in physical units, shape (N, 3),
-        to pass to :func:`insert_particles_into_micrograph`.
-
-    Notes
-    -----
-    ``build_affine_matrix(R, T)`` displaces the density by ``-T`` in the lab
-    frame whatever ``R`` is, by pre-rotating ``T``; the remainder ``f`` is
-    therefore added as ``R @ (-f)`` in the normalised units of
-    :func:`~specter.rotations.translations_angstrom_to_torch`, on top of any
-    translation `theta` already carries. The rounding is the one
-    :func:`insert_particles_into_micrograph` applies, so the two parts add
-    back to the position exactly. Trilinear resampling conserves the first
-    moment of a shifted density, so the copy's centroid lands on its position
-    to interpolation accuracy rather than to the nearest voxel.
-    """
-    if positions.shape[1] == 2:
-        positions = torch.cat([positions, positions.new_zeros(len(positions), 1)], 1)
-    voxels = positions / pixel_size
-    whole = voxels.round()
-    remainder = (voxels - whole).to(device=theta.device, dtype=theta.dtype)
-    shift = rotations.translations_angstrom_to_torch(
-        -remainder, int(template_shape[-1]), 1.0
-    )
-    R = theta[..., :3]
-    t = theta[..., 3] + torch.einsum("bij,bj->bi", R, shift)
-    return torch.cat([R, t.unsqueeze(-1)], dim=-1), whole * pixel_size
-
-
-def _insert_all(
-    volumes: torch.Tensor,
-    positions_int: torch.Tensor,
-    center: tuple[int, int, int],
-    part_shape: tuple[int, int, int],
-    micro_shape: tuple[int, int, int],
-    micrograph: torch.Tensor,
-) -> None:
-    """The insertion loop of :func:`insert_particles_into_micrograph`."""
-    cz_center, cy_center, cx_center = center
-    Zp, Yp, Xp = part_shape
-    Z, Y, X = micro_shape
-    # One host transfer for the whole chunk rather than three `.item()`s per
-    # particle: on a CUDA tensor each of those is a separate device
-    # synchronisation, and the loop does nothing else that needs one.
-    positions_list = positions_int.cpu().tolist()
-    for i, (px_i, py_i, pz_i) in enumerate(positions_list):
-        # Convert centered coords to array indices
-        cx_index = cx_center + px_i
-        cy_index = cy_center + py_i
-        cz_index = cz_center + pz_i
-
-        bounds = clip_insert_bounds(
-            (cz_index, cy_index, cx_index), (Zp, Yp, Xp), (Z, Y, X)
-        )
-        if bounds is None:
-            continue
-        dst, src = bounds
-        micrograph[dst] += volumes[i][src]
 
 
 def _local_z_density_probs(

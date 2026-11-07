@@ -130,7 +130,7 @@ Do **not** modify files in:
 
 - `src/specter/atom_data/` — parameterised atomic potential data (Kirkland, Lobato, Shtyrov). These are fixed physical constants from published literature.
 - `src/specter/ice_data/` — pre-computed ice data: the bundled `IceBank` library (`ice_cache/`) plus the MD reference frame and radial-average S(k) targets every `GradientSKIcemaker` run needs. Both this and `atom_data/` live inside the package, and are located via `importlib.resources` (`ice_data/__init__.py`'s `bundled_ice_data()`), so they ship in a wheel and resolve identically for editable and installed layouts. Never reintroduce the old repo-root `ice-data/` + `dirname`×3 pattern: that only resolves for an editable install from a checkout, and silently pointed inside the virtualenv's `lib/` otherwise.
-- `ice-data/` — what remains at the repo root: two 32 MB legacy `MDSimDump`/`ExtXYZDump` inputs that no code path reads (notebooks only). Deliberately *not* packaged, since shipping them would push the wheel past PyPI's 100 MB per-file limit for no benefit.
+- `ice-data/` — what remains at the repo root: two 32 MB legacy MD-derived `.pt` files (`mdsim_f_kernel_averaged_200x200x200_0.5A.pt`, `mdsim_frame100_ice_deltas.pt`) that no code path, test or notebook reads. `ice/_mdsim.py`'s `MDSimDump`/`ExtXYZDump` readers are kept on purpose (2026-11-07, the user's call) though only their tests use them. Deliberately *not* packaged, since shipping them would push the wheel past PyPI's 100 MB per-file limit for no benefit.
 
 Changes to these would silently break the physical accuracy of all simulations.
 
@@ -445,7 +445,7 @@ tools/cli-qa/                  # Tracked pre-release QA sweep for the `specter` 
                               # entry, so a newly added flag surfaces as a coverage failure; see its README for the
                               # phases and FINDINGS.md for what they caught. Run artifacts go to a gitignored results/.
 pdb-data/                     # PDB structure files
-ice-data/                     # Two 32 MB legacy MDSimDump inputs, notebook-only, NOT packaged (do not modify)
+ice-data/                     # Two 32 MB legacy MD-derived .pt files nothing reads, NOT packaged (do not modify)
 ```
 
 ## Physics Accuracy Notes

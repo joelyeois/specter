@@ -1,3 +1,4 @@
+from ._common import ParticleParameters
 from ._convert import convert_csfile_to_starfile
 from ._cryosparc import (
     extract_parameters_from_csfile,
@@ -21,6 +22,7 @@ from ._relion import (
 )
 
 __all__ = [
+    "ParticleParameters",
     "load_dose_weights",
     "read_mrc",
     "write_mrc",

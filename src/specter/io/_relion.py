@@ -16,7 +16,12 @@ import torch
 from rich.console import Console
 
 from ._mrc import write_mrc
-from ._common import _select_particles, _uniform_scalar
+from ._common import (
+    ParticleParameters,
+    _extract,
+    _LoadedParameters,
+    _uniform_scalar,
+)
 
 _console = Console()
 
@@ -55,17 +60,7 @@ def _merge_optics(particles: pd.DataFrame, optics: pd.DataFrame) -> pd.DataFrame
 def _load_starfile_parameters(
     starfile_path: str,
     rotation_representation: Literal["quaternion", "rotvec"],
-) -> tuple[
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    dict[str, torch.Tensor],
-    torch.Tensor,
-    torch.Tensor | None,
-    torch.Tensor | None,
-]:
+) -> _LoadedParameters:
     """Load and derive all per-particle imaging parameters from a RELION STAR file, unfiltered.
 
     Returns
@@ -168,7 +163,7 @@ def _load_starfile_parameters(
         else None
     )
 
-    return (
+    return _LoadedParameters(
         voltage_kv,
         pixel_size,
         alpha,
@@ -186,7 +181,7 @@ def extract_parameters_from_starfile(
     halfset: Literal["A", "B", "all"] = "all",
     rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
     n_particles: int | None = None,
-) -> tuple:
+) -> ParticleParameters:
     """
     Extract poses and CTF parameters from a RELION-format STAR file.
 
@@ -235,59 +230,12 @@ def extract_parameters_from_starfile(
         values (1 or 2) -- 1 corresponds to halfset 'A', 2 to halfset 'B'.
         Only returned when ``halfset == "all"``; ``None`` otherwise.
     """
-    (
-        voltage_kv,
-        pixel_size,
-        alpha,
-        rotations,
-        translations_angstrom,
-        ctf_params,
-        scale,
-        anisomag,
-        split,
-    ) = _load_starfile_parameters(starfile_path, rotation_representation)
-
-    n_total = len(rotations)
-
-    if halfset == "all":
-        mask = torch.ones(n_total, dtype=torch.bool)
-        indices = torch.arange(n_total)
-        halfset_labels: torch.Tensor | None = split
-    else:
-        if split is None:
-            raise ValueError(
-                "STAR file has no 'rlnRandomSubset' column; cannot filter by halfset."
-            )
-        mask = split == {"A": 1, "B": 2}[halfset]
-        indices = torch.squeeze(torch.nonzero(mask))
-        halfset_labels = None
-
-    indices, rotations, translations_angstrom, ctf_params, scale, anisomag = (
-        _select_particles(
-            mask,
-            indices,
-            rotations,
-            translations_angstrom,
-            ctf_params,
-            scale,
-            anisomag,
-            n_particles,
-        )
-    )
-    if halfset_labels is not None and n_particles is not None:
-        halfset_labels = halfset_labels[:n_particles]
-
-    return (
-        voltage_kv,
-        pixel_size,
-        alpha,
-        rotations,
-        translations_angstrom,
-        ctf_params,
-        scale,
-        anisomag,
-        indices,
-        halfset_labels,
+    return _extract(
+        _load_starfile_parameters(starfile_path, rotation_representation),
+        halfset,
+        (1, 2),
+        n_particles,
+        ("STAR file has no 'rlnRandomSubset' column; cannot filter by halfset."),
     )
 
 

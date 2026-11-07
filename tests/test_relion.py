@@ -166,6 +166,23 @@ def test_extract_parameters_from_starfile_halfset_filters_particles(
     assert halfset_labels is None
 
 
+def test_a_one_particle_halfset_keeps_a_list_of_indices(tmp_path) -> None:
+    """A half-set holding one particle gives its indices as a 1-D tensor and
+    can still be truncated; a squeezed index tensor was 0-d and made
+    ``n_particles`` raise."""
+    df = _single_block_star_df()
+    df["rlnRandomSubset"] = [1, 2, 1, 1]
+    star_path = tmp_path / "particles.star"
+    starfile.write(df, star_path, overwrite=True)
+
+    params = extract_parameters_from_starfile(
+        str(star_path), halfset="B", n_particles=2
+    )
+
+    assert torch.equal(params.indices, torch.tensor([1]))
+    assert params.rotations.shape == (1, 4)
+
+
 def test_extract_parameters_from_starfile_n_particles_truncates(tmp_path) -> None:
     df = _single_block_star_df()
     star_path = tmp_path / "particles.star"

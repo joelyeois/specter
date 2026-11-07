@@ -16,23 +16,18 @@ import torch
 from cryosparc.dataset import Dataset
 from .. import logger
 from ..constants import energy_to_wavelength
-from ._common import _select_particles, _uniform_scalar
+from ._common import (
+    ParticleParameters,
+    _extract,
+    _LoadedParameters,
+    _uniform_scalar,
+)
 
 
 def _load_csfile_parameters(
     csfile_path: str,
     rotation_representation: Literal["quaternion", "rotvec"],
-) -> tuple[
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    dict[str, torch.Tensor],
-    torch.Tensor,
-    torch.Tensor | None,
-    torch.Tensor,
-]:
+) -> _LoadedParameters:
     """Load and derive all per-particle imaging parameters from a .cs file, unfiltered.
 
     Returns
@@ -211,7 +206,7 @@ def _load_csfile_parameters(
         "tetrafoil4": tetrafoil4,
     }
 
-    return (
+    return _LoadedParameters(
         voltage_kv,
         pixel_size,
         alpha,
@@ -229,7 +224,7 @@ def extract_parameters_from_csfile(
     halfset: Literal["A", "B", "all"] = "all",
     rotation_representation: Literal["quaternion", "rotvec"] = "quaternion",
     n_particles: int | None = None,
-) -> tuple:
+) -> ParticleParameters:
     """
     Extract poses and CTF parameters from CryoSPARC .cs file.
 
@@ -258,8 +253,10 @@ def extract_parameters_from_csfile(
         Quaternions with shape (N, 4) or rotation vectors.
     translations_angstrom : torch.Tensor
         xy-translations in Å with shape (N, 2).
-    ctf_params : torch.Tensor
-        CTF parameters with shape (N, 7). Parameters are (Cs, dfu, dfv, dfang, tiltx, tilty, phaseshift).
+    ctf_params : dict[str, torch.Tensor]
+        CTF parameters keyed by name: ``cs``, ``dfu``, ``dfv``, ``dfang``,
+        ``tiltx``, ``tilty``, ``phaseshift``, ``trefoil1``-``2`` and
+        ``tetrafoil1``-``4``, each of length N.
     scale : torch.Tensor
         Per-particle scale factors.
     anisomag : torch.Tensor or None
@@ -271,53 +268,12 @@ def extract_parameters_from_csfile(
         values (0 or 1) -- 0 corresponds to halfset 'A', 1 to halfset 'B'.
         Only returned when ``halfset == "all"``; ``None`` otherwise.
     """
-    (
-        voltage_kv,
-        pixel_size,
-        alpha,
-        rotations,
-        translations_angstrom,
-        ctf_params,
-        scale,
-        anisomag,
-        split,
-    ) = _load_csfile_parameters(csfile_path, rotation_representation)
-
-    if halfset == "all":
-        mask = torch.ones_like(split, dtype=torch.bool)
-        indices = torch.arange(len(split))
-        halfset_labels: torch.Tensor | None = split
-    else:  # "A" or "B"
-        mask = split == {"A": 0, "B": 1}[halfset]
-        indices = torch.squeeze(torch.nonzero(mask))
-        halfset_labels = None
-
-    indices, rotations, translations_angstrom, ctf_params, scale, anisomag = (
-        _select_particles(
-            mask,
-            indices,
-            rotations,
-            translations_angstrom,
-            ctf_params,
-            scale,
-            anisomag,
-            n_particles,
-        )
-    )
-    if halfset_labels is not None and n_particles is not None:
-        halfset_labels = halfset_labels[:n_particles]
-
-    return (
-        voltage_kv,
-        pixel_size,
-        alpha,
-        rotations,
-        translations_angstrom,
-        ctf_params,
-        scale,
-        anisomag,
-        indices,
-        halfset_labels,
+    return _extract(
+        _load_csfile_parameters(csfile_path, rotation_representation),
+        halfset,
+        (0, 1),
+        n_particles,
+        "no alignments3D/split column; cannot filter by halfset.",
     )
 
 

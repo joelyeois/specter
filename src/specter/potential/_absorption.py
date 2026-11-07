@@ -39,6 +39,7 @@ import warnings
 
 import torch
 
+from ..arrays import rfft_frequency_squared
 from ..atom._atomic_potentials import kirkland_atomic_potential_3d_fourier
 from ..constants import (
     bohr_radius,
@@ -590,9 +591,7 @@ def aperture_lowpass(
     if k_ap >= 0.5 / pixel_size:
         return v
     ny, nx = v.shape[-2], v.shape[-1]
-    ky = torch.fft.fftfreq(ny, d=pixel_size, device=v.device)
-    kx = torch.fft.rfftfreq(nx, d=pixel_size, device=v.device)
-    mask = (ky[:, None] ** 2 + kx[None, :] ** 2) <= k_ap**2
+    mask = rfft_frequency_squared((ny, nx), pixel_size, v.device) <= k_ap**2
     if out is None:
         out = torch.empty_like(v)
     for z0 in range(0, v.shape[-3], max_slices_per_chunk):
@@ -661,12 +660,7 @@ def aperture_lowpass_isotropic(
     if k_ap >= 0.5 / pixel_size:
         return v
     nz, ny, nx = v.shape[-3], v.shape[-2], v.shape[-1]
-    kz = torch.fft.fftfreq(nz, d=pixel_size, device=v.device)
-    ky = torch.fft.fftfreq(ny, d=pixel_size, device=v.device)
-    kx = torch.fft.rfftfreq(nx, d=pixel_size, device=v.device)
-    mask = (
-        kz[:, None, None] ** 2 + ky[None, :, None] ** 2 + kx[None, None, :] ** 2
-    ) <= k_ap**2
+    mask = rfft_frequency_squared((nz, ny, nx), pixel_size, v.device) <= k_ap**2
     spectrum = torch.fft.rfftn(v, dim=(-3, -2, -1)) * mask
     return torch.fft.irfftn(spectrum, s=(nz, ny, nx), dim=(-3, -2, -1)).to(v.dtype)
 

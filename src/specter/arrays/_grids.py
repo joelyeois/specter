@@ -381,3 +381,37 @@ def disk2d(n: int, d: float) -> torch.Tensor:
     r2 = (X - center) ** 2 + (Y - center) ** 2
     disk = (r2 <= (d / 2) ** 2).float()
     return disk
+
+
+def rfft_frequency_squared(
+    shape: Sequence[int],
+    d: float = 1.0,
+    device: str | torch.device | None = None,
+) -> torch.Tensor:
+    """
+    ``|k|^2`` on the half spectrum ``rfftn`` returns, 2D or 3D.
+
+    Parameters
+    ----------
+    shape : sequence of int
+        The real grid, ``(Y, X)`` or ``(Z, Y, X)``.
+    d : float, optional
+        Sample spacing; ``k`` is in cycles per unit of `d`. Default 1
+        (cycles per sample).
+    device : str or torch.device, optional
+        Device of the result.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape ``(*shape[:-1], shape[-1] // 2 + 1)``, float32, summed over the
+        axes from the first to the last.
+    """
+    *full, nx = shape
+    axes = [torch.fft.fftfreq(n, d=d, device=device) for n in full]
+    axes.append(torch.fft.rfftfreq(nx, d=d, device=device))
+    nd = len(axes)
+    k2 = axes[0].reshape([-1] + [1] * (nd - 1)) ** 2
+    for i, k in enumerate(axes[1:], 1):
+        k2 = k2 + k.reshape([1] * i + [-1] + [1] * (nd - 1 - i)) ** 2
+    return k2

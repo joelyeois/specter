@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from ..arrays import rfft_frequency_squared
 from ..fft import fourier_shell_correlation, frequency_shells, fsc_crossing
 
 #: FSC is clipped to this range before it becomes an SSNR, so the prior is
@@ -278,9 +279,7 @@ def _distance_from_shared_signal(
     n = a.shape[-1]
     fsc_sphere = masked_fsc(a, b, spherical_mask(n).to(a.device))
     r = n * voxel_size / max(fsc_crossing(fsc_sphere), 1.0)
-    k = torch.fft.fftfreq(n, d=voxel_size, device=a.device)
-    kr = torch.fft.rfftfreq(n, d=voxel_size, device=a.device)
-    kk = torch.sqrt(k[:, None, None] ** 2 + k[None, :, None] ** 2 + kr[None, None] ** 2)
+    kk = torch.sqrt(rfft_frequency_squared(a.shape[-3:], voxel_size, a.device))
     band = ((kk >= 1 / (2 * r)) & (kk < 1 / r)).float()
     fa = torch.fft.irfftn(torch.fft.rfftn(a) * band, s=a.shape)
     fb = torch.fft.irfftn(torch.fft.rfftn(b) * band, s=a.shape)

@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from specter.arrays import (
+    rfft_frequency_squared,
     center_crop,
     soft_voxelize_coordinates,
     soft_voxelize_xy_coordinates,
@@ -184,3 +185,20 @@ def test_center_crop_keeps_the_fftshift_centre(length: int, size: int) -> None:
     crop = center_crop(x, size)
     assert crop.shape == (size, size)
     assert crop[size // 2, size // 2] == x[length // 2, length // 2]
+
+
+@pytest.mark.parametrize("shape", [(8, 9), (7, 16, 9), (6, 6, 6)])
+def test_rfft_frequency_squared_is_the_half_of_the_full_spectrum(shape) -> None:
+    """|k|^2 on rfftn's half spectrum is the full spectrum's, last axis cut at
+    n // 2 + 1, with the absolute frequency of that axis."""
+    d = 0.73
+    full = sum(
+        torch.fft.fftfreq(n, d=d).reshape(
+            [-1 if j == i else 1 for j in range(len(shape))]
+        )
+        ** 2
+        for i, n in enumerate(shape)
+    )
+    half = rfft_frequency_squared(shape, d)
+    assert half.shape == (*shape[:-1], shape[-1] // 2 + 1)
+    torch.testing.assert_close(half, full[..., : shape[-1] // 2 + 1])

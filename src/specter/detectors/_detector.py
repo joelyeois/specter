@@ -32,7 +32,7 @@ import torch.nn.functional as F
 import lightning as L
 
 from ..aberrations import FocalSpread
-from ..arrays import center_crop
+from ..arrays import center_crop, rfft_frequency_squared
 from ..fft import fft2, ifft2
 from ..scattering._kernels import fourier_crop_xy
 from ..progress import track
@@ -940,14 +940,12 @@ class Detector(L.LightningModule):
             return None
         w = self.dose_weights.to(device).float()
         n_frames, n_bins = w.shape
-        ky = torch.fft.fftfreq(shape[0], device=device)
-        kx = torch.fft.rfftfreq(shape[1], device=device)
         # Fraction of the WEIGHTS' Nyquist, which is what the radial axis
         # indexes -- not the image's, when the two differ.
         # Absolute frequency, in 1/Angstrom, mapped onto the weights' own
         # axis. Keying on frequency rather than on a fraction of somebody's
         # Nyquist is what makes a later crop or downsample harmless.
-        k = torch.sqrt(ky[:, None] ** 2 + kx[None, :] ** 2) / self.pixel_size
+        k = torch.sqrt(rfft_frequency_squared(shape, device=device)) / self.pixel_size
         max_freq = self.dose_weights_max_frequency
         if max_freq is None:
             max_freq = 1.0 / (2.0 * self.pixel_size)

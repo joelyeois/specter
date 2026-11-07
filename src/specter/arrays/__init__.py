@@ -13,6 +13,7 @@ from ._grids import (
     radial_grid_2d,
     radial_grid_3d,
     real_to_kgrid_3d,
+    rfft_frequency_squared,
 )
 from ._reduce import count_nonzero_chunked
 from ._stamp import insert_particles_into_micrograph
@@ -53,6 +54,7 @@ __all__ = [
     "radial_profile_3d",
     "radial_symmetrize",
     "real_to_kgrid_3d",
+    "rfft_frequency_squared",
     "soft_voxelize_coordinates",
     "soft_voxelize_coordinates_into",
     "soft_voxelize_xy_coordinates",

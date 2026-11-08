@@ -1240,3 +1240,49 @@ def test_a_placed_protein_records_the_rotation_its_density_was_given():
     transposed = correlation(template @ rotation)
     assert recorded > 0.85
     assert recorded > transposed + 0.1
+
+
+@pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
+def test_a_seeded_tomogram_neither_reads_nor_reseeds_the_global_stream():
+    """`seed` alone decides the specimen, and generate() leaves the caller's
+    global torch stream where it was rather than reseeding it."""
+
+    def build(global_seed: int) -> tuple[TomogramSpecimenGenerator, bool]:
+        torch.manual_seed(global_seed)
+        before = torch.get_rng_state()
+        gen = TomogramSpecimenGenerator(
+            membrane_instances=[
+                MembraneInstance(
+                    generator=MembraneGenerator(seed=0, **_MEMBRANE_KWARGS)
+                )
+            ],
+            target_shape=_TARGET_SHAPE_ZYX,
+            voxel_size=_V_SIZE,
+            protein_specs=[
+                TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="cytosol")
+            ],
+            filament_specs=[
+                FilamentSpec(
+                    code=str(_SMALL_FIXTURE),
+                    step=30.0,
+                    flex_deg=8.0,
+                    n_copies=2,
+                    n_monomers=4,
+                )
+            ],
+            occupancy_fraction=0.05,
+            pdb_cache_dir=str(Path(__file__).parent / "test_data"),
+            seed=3,
+            progressbars=False,
+        )
+        gen.generate()
+        return gen, torch.equal(torch.get_rng_state(), before)
+
+    a, a_untouched = build(1)
+    b, b_untouched = build(2)
+    assert a_untouched and b_untouched
+    assert len(a.placements) > 0
+    assert torch.equal(a.instance_labels, b.instance_labels)
+    for p, q in zip(a.placements, b.placements, strict=True):
+        assert torch.equal(p.position_xyz, q.position_xyz)
+        assert torch.equal(p.rotation_matrix, q.rotation_matrix)

@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import torch
 
+from specter.random_seed import derive_seed
 from specter.specimen.packing._shape import (
     _DENSE_REGION_FRACTION,
     _placement_positions,
@@ -98,7 +99,11 @@ def pack_shapes_3d_reference(
         if rows.size == 0:
             continue
         cache, geom, centre_solid, probes, origin_offsets, _, R = _rotation_cache(
-            species_masks[int(s)], n_orientations, device, seed, pool_factor
+            species_masks[int(s)],
+            n_orientations,
+            device,
+            None if seed is None else derive_seed(seed, int(s)),
+            pool_factor,
         )
         # Probe indices -> flat offsets, which needs the grid's own strides
         # and so cannot be precomputed inside the cache.
@@ -269,7 +274,6 @@ def test_pack_shapes_3d_matches_one_attempt_at_a_time_reference(
         region = ~occupancy
 
     def run(fn):
-        torch.manual_seed(0)
         return fn(
             masks,
             species_idx,

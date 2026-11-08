@@ -48,6 +48,7 @@ import torch
 
 import torch.nn.functional as F
 
+from ...random_seed import derive_seed
 from ...rotations._random import random_rotation_matrix
 from ...rotations._volume import build_affine_matrix, rotate_volume
 
@@ -310,10 +311,8 @@ def _rotation_cache(
     R : torch.Tensor
         The rotation matrices, shape (n_orientations, 3, 3).
     """
-    gen = torch.Generator(device="cpu")
-    if seed is not None:
-        gen.manual_seed(seed)
-    R = random_rotation_matrix(n_orientations)
+    generator = None if seed is None else torch.Generator().manual_seed(seed)
+    R = random_rotation_matrix(n_orientations, generator=generator)
     if R.dim() == 2:
         R = R.unsqueeze(0)
     theta = build_affine_matrix(R.to(device))
@@ -622,6 +621,9 @@ def pack_shapes_3d(
         that is true across species but not within a stage, which is the
         only thing this counter spans.)
     seed : int, optional
+        Seeds every draw: the RSA loop's, and each species' orientation
+        set (from ``derive_seed(seed, species)``). Default None draws the
+        orientations from the global torch stream.
     device : str or torch.device, optional
         Device for the rotation cache only; the RSA loop is numpy on the
         host, where the collision test is already 0.08 ms.
@@ -746,7 +748,11 @@ def pack_shapes_3d(
             continue
         cache, geom, centre_solid, probes, origin_offsets, fine_reach, R = (
             _rotation_cache(
-                species_masks[int(s)], n_orientations, device, seed, pool_factor
+                species_masks[int(s)],
+                n_orientations,
+                device,
+                None if seed is None else derive_seed(seed, int(s)),
+                pool_factor,
             )
         )
         R_np = R.cpu().numpy()

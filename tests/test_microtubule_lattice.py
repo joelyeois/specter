@@ -469,6 +469,40 @@ def test_protein_fill_does_not_pack_into_the_lumen(tmp_path):
     assert float(closest.min()) > radius
 
 
+@pytest.mark.parametrize("shape", [(40, 48, 48), (41, 47, 49)])
+def test_lumen_mask_is_centred_where_the_axis_point_lies(shape):
+    """The sealing sphere sits on the canvas voxel at the axis point.
+
+    Canvas voxel ``k`` of an axis of ``n`` is at ``(k - n // 2) * voxel_size``
+    in the centred frame, and an axis point is corner-relative, so it lies
+    at ``point - extent / 2``. An odd axis puts that half a voxel from
+    ``point / voxel_size``.
+    """
+    from types import SimpleNamespace
+
+    from specter.specimen.tomogram import TomogramSpecimenGenerator
+
+    voxel_size = 4.0
+    generator = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=shape,
+        voxel_size=voxel_size,
+        protein_specs=[],
+        microtubule_specs=[MicrotubuleSpec(n_copies=1)],
+        progressbars=False,
+    )
+    extent_xyz = torch.tensor(shape[::-1], dtype=torch.float64) * voxel_size
+    point = extent_xyz / 2 + torch.tensor([6.0, -10.0, 2.0], dtype=torch.float64)
+    generator.microtubule_instances = [
+        SimpleNamespace(axis_xyz=point[None], lattice=SimpleNamespace(radius=30.0))
+    ]
+    mask = generator._microtubule_lumen_mask(voxel_size, torch.device("cpu"))
+
+    zyx = torch.nonzero(mask).double().mean(dim=0)
+    centred_xyz = (zyx - torch.tensor([n // 2 for n in shape])).flip(0) * voxel_size
+    torch.testing.assert_close(centred_xyz, point - extent_xyz / 2, atol=1e-6, rtol=0)
+
+
 @pytest.mark.network
 def test_extracted_dimer_is_in_the_microtubule_frame(tmp_path):
     """+Z must be the protofilament axis: the dimer is ~82 A long there and

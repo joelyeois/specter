@@ -404,10 +404,18 @@ class _FilamentStageMixin:
             radius_vox = tube.lattice.radius / voxel_size
             reach = int(math.ceil(radius_vox))
             for point in tube.axis_xyz:
-                cx, cy, cz = (float(v) / voxel_size for v in point)
-                ix0, ix1 = max(0, int(cx) - reach), min(nx, int(cx) + reach + 1)
-                iy0, iy1 = max(0, int(cy) - reach), min(ny, int(cy) + reach + 1)
-                iz0, iz1 = max(0, int(cz) - reach), min(nz, int(cz) + reach + 1)
+                # The corner-relative point as a continuous canvas index:
+                # (p - extent / 2) / voxel_size + n // 2, the frame the dimers
+                # are stamped in (`_stamped_centres`), which sits half a voxel
+                # below p / voxel_size along an odd axis.
+                cx, cy, cz = (
+                    float(v) / voxel_size - (n % 2) / 2
+                    for v, n in zip(point, (nx, ny, nz))
+                )
+                fx, fy, fz = math.floor(cx), math.floor(cy), math.floor(cz)
+                ix0, ix1 = max(0, fx - reach), min(nx, fx + reach + 1)
+                iy0, iy1 = max(0, fy - reach), min(ny, fy + reach + 1)
+                iz0, iz1 = max(0, fz - reach), min(nz, fz + reach + 1)
                 if ix0 >= ix1 or iy0 >= iy1 or iz0 >= iz1:
                     continue
                 zz, yy, xx = torch.meshgrid(

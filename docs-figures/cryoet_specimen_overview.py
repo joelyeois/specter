@@ -66,7 +66,7 @@ def _membrane_instances() -> list[MembraneInstance]:
             generator=MembraneGenerator(
                 voxel_size=VOXEL_SIZE,
                 shape_backend="spherical_harmonics",
-                sh_axes_range=(220.0, 300.0),
+                axes_range=(220.0, 300.0),
                 bilayer_thickness=30.0,
                 transmembrane_specs=[
                     TransmembraneSpec(pdb_source="1C3W", frequency=25)

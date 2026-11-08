@@ -69,7 +69,7 @@ def _membrane_instances() -> list[MembraneInstance]:
             generator=MembraneGenerator(
                 voxel_size=VOXEL_SIZE,
                 shape_backend="spherical_harmonics",
-                sh_axes_range=(160.0, 200.0),
+                axes_range=(160.0, 200.0),
                 bilayer_thickness=30.0,
                 device=DEVICE,
                 seed=SEED + i,
@@ -512,7 +512,7 @@ def figure_exclusion_field() -> None:
     membrane = MembraneGenerator(
         voxel_size=VOXEL_SIZE,
         shape_backend="spherical_harmonics",
-        sh_axes_range=(160.0, 200.0),
+        axes_range=(160.0, 200.0),
         bilayer_thickness=30.0,
         device=DEVICE,
         seed=SEED,

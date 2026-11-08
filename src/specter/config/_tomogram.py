@@ -223,7 +223,9 @@ class TomogramConfig:
     # composited into the shared tomogram (see specter.specimen.tomogram.
     # MembraneInstance). Empty (default): no membrane at all -- the whole
     # tomogram is then one cytosol region. Keys are passed as **kwargs
-    # straight into specter.specimen.membrane.MembraneGenerator -- e.g.
+    # into specter.specimen.membrane.MembraneGenerator, a shape field
+    # spelled with its backend's prefix (sh_ for SphericalHarmonicsShape,
+    # swept_ for SweptSplineShape) that the pipeline strips -- e.g.
     # {"shape_backend": "spherical_harmonics", "sh_axes": [300.0, 300.0,
     # 300.0], "sh_amplitude": 0.15, "bilayer_thickness": 37.0} -- PLUS
     # three keys not real MembraneGenerator kwargs, popped before that call:
@@ -253,8 +255,10 @@ class TomogramConfig:
             "[[membrane]] tables, one per composited TEMPLATE) -- optional, empty "
             "by default (no membrane at all; the whole tomogram is then one "
             "cytosol region). e.g. {'shape_backend': 'spherical_harmonics', "
-            "'n_copies': 3}. See MembraneGenerator's own docstring for the full "
-            "per-backend parameter set; plus 'n_copies' (int, default 1, expands "
+            "'n_copies': 3}. Shape fields take their backend's prefix: "
+            "SphericalHarmonicsShape's as sh_<field>, SweptSplineShape's as "
+            "swept_<field>. See MembraneGenerator's own docstring for the rest; "
+            "plus 'n_copies' (int, default 1, expands "
             "one entry into that many independently-seeded instances, each "
             "collision-rejecting-random-placed) and 'target_shape' (default "
             "omitted = auto-sized per instance)."

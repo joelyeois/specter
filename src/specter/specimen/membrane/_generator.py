@@ -18,10 +18,11 @@ before being composited.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import torch
 
@@ -35,12 +36,7 @@ from .._parallel_render import (
     resolve_render_workers,
 )
 from ..packing import estimate_protein_box_size
-from ._extent import (
-    DEFAULT_SH_AXES_RANGE_ANGSTROM,
-    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
-    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
-    membrane_bounding_radius,
-)
+from ._extent import membrane_bounding_radius
 from ._field import MembraneField, _centred_origin_xyz, _grid_points_xyz
 from ._field_spherical_harmonics import generate_membrane_field_spherical_harmonics
 from ._field_swept_spline import generate_membrane_field_swept_spline
@@ -55,6 +51,13 @@ from ._profile import (
     build_measured_bilayer_profile,
 )
 from ._raster import rasterize_membrane_density
+from ._shape import (
+    MembraneShape,
+    SphericalHarmonicsShape,
+    SweptSplineShape,
+    membrane_shape,
+    resolve_sizes,
+)
 from specter.options import ScatteringFactors, ShapeBackend
 
 # target_shape auto-sizing/clamping (spherical_harmonics/swept_spline
@@ -66,22 +69,6 @@ _SIZE_MARGIN_FRACTION = 0.85
 # Below this safe half-extent, refuse rather than silently clamp every
 # instance down to a degenerate, barely-there size.
 _MIN_SAFE_HALF_EXTENT_A = 50.0
-
-
-def _resolve_range(
-    name: str, range_ab: tuple[float, float], min_low: float
-) -> tuple[float, float]:
-    low, high = range_ab
-    if low > high or low < min_low:
-        raise ValueError(
-            f"{name} must be (low, high) with {min_low} <= low <= high, "
-            f"got {range_ab!r}"
-        )
-    return low, high
-
-
-def _draw_uniform(rng: torch.Generator, low: float, high: float) -> float:
-    return float(torch.empty(1).uniform_(low, high, generator=rng).item())
 
 
 # Per-call element budget for _chunked_upsample_density's grid_sample calls
@@ -358,128 +345,34 @@ class TransmembranePlacement:
     rotation_matrix: torch.Tensor
 
 
-def _resolve_shape_parameters(
-    seed: int | None,
-    sh_axes: tuple[float, float, float] | None,
-    sh_axes_range: tuple[float, float],
-    swept_tube_radius: float | None,
-    swept_tube_radius_range: tuple[float, float],
-    swept_total_length: float | None,
-    swept_total_length_range: tuple[float, float],
-    swept_flexibility: float | None,
-    swept_flexibility_range: tuple[float, float],
-    swept_radius_variation: float | None,
-    swept_radius_variation_range: tuple[float, float],
-    swept_step_length_angstrom: float | None,
-) -> tuple[tuple[float, float, float], float, float, float, float, float]:
-    """
-    Draw every size parameter left as None from its own range.
-
-    The draws come from a generator seeded independently from ``seed``,
-    separate from whatever RNG the shape backend uses internally, so they
-    never consume that stream. Every parameter is resolved regardless of
-    the active backend, so each is a plain concrete value afterwards rather
-    than a backend-conditional Optional at every later read site.
-    """
-    meta_rng = torch.Generator(device="cpu")
-    if seed is not None:
-        meta_rng.manual_seed(seed)
-
-    if sh_axes is None:
-        lo, hi = _resolve_range("sh_axes_range", sh_axes_range, min_low=1e-6)
-        sh_axes = (
-            _draw_uniform(meta_rng, lo, hi),
-            _draw_uniform(meta_rng, lo, hi),
-            _draw_uniform(meta_rng, lo, hi),
-        )
-    else:
-        # Normalize to a tuple even when given one already -- a caller
-        # passing a plain list (e.g. every TOML-sourced config value,
-        # since TOML arrays decode to Python lists) would otherwise make
-        # the clamp check below's `clamped != sh_axes` compare a tuple
-        # against a list and spuriously fire even when nothing needed
-        # clamping (tuple != list in Python regardless of contents).
-        sh_axes = (float(sh_axes[0]), float(sh_axes[1]), float(sh_axes[2]))
-    if swept_tube_radius is None:
-        lo, hi = _resolve_range(
-            "swept_tube_radius_range", swept_tube_radius_range, min_low=1e-6
-        )
-        swept_tube_radius = _draw_uniform(meta_rng, lo, hi)
-    if swept_total_length is None:
-        lo, hi = _resolve_range(
-            "swept_total_length_range", swept_total_length_range, min_low=1e-6
-        )
-        swept_total_length = _draw_uniform(meta_rng, lo, hi)
-    if swept_flexibility is None:
-        lo, hi = _resolve_range(
-            "swept_flexibility_range", swept_flexibility_range, min_low=1e-6
-        )
-        if hi > 1.0:
-            raise ValueError(
-                "swept_flexibility_range must have high <= 1, got "
-                f"{swept_flexibility_range!r}"
-            )
-        swept_flexibility = _draw_uniform(meta_rng, lo, hi)
-    if swept_radius_variation is None:
-        lo, hi = _resolve_range(
-            "swept_radius_variation_range",
-            swept_radius_variation_range,
-            min_low=0.0,
-        )
-        swept_radius_variation = _draw_uniform(meta_rng, lo, hi)
-    if swept_step_length_angstrom is None:
-        # Half the (now-resolved) tube radius -- always comfortably
-        # under the 2*tube_radius_angstrom beading threshold regardless of
-        # which value got drawn, unlike a fixed absolute default tuned
-        # for one specific radius (see generate_membrane_field_swept_
-        # spline's own beading-risk docstring).
-        swept_step_length_angstrom = 0.5 * swept_tube_radius
-
-    # target_shape: auto-size from the now-resolved organelle size
-    # when omitted, so a casual caller never has to compute a working
-    # grid by hand; clamp the organelle size to fit when an explicit
-    # target_shape IS given, so a too-large drawn/explicit size can
-    # never silently clip (MembraneField.clipped_at_boundary/each shape
-    # backend's own boundary warning are the last-resort safety net,
-    # not the primary defense).
-    return (
-        sh_axes,
-        swept_tube_radius,
-        swept_total_length,
-        swept_flexibility,
-        swept_radius_variation,
-        swept_step_length_angstrom,
-    )
-
-
 def _fit_shape_to_box(
     target_shape: tuple[int, int, int] | None,
     voxel_size: float,
-    shape_backend: ShapeBackend,
-    sh_axes: tuple[float, float, float],
-    swept_total_length: float,
-    swept_tube_radius: float,
-    swept_step_length_angstrom: float,
+    shape: MembraneShape,
     max_output_voxels: int,
-) -> tuple[tuple[int, int, int], tuple[float, float, float], float, float, float]:
+) -> tuple[tuple[int, int, int], MembraneShape]:
     """
     Reconcile the organelle's size with its box.
 
     With no ``target_shape`` the box is sized to the organelle, scaled down
     if that would exceed ``max_output_voxels``. With one, the organelle is
     clamped (spherical harmonics) or scaled (swept spline) to what the box
-    can hold without clipping. Returns the box and the possibly adjusted
-    size parameters.
+    can hold without clipping. Returns the box and the shape, its sizes
+    resolved (`resolve_sizes`) and possibly adjusted.
     """
+    shape_backend = shape.backend
+    if isinstance(shape, SphericalHarmonicsShape):
+        assert shape.axes is not None
+        axes = shape.axes
+    else:
+        assert shape.total_length is not None and shape.tube_radius is not None
+        assert shape.step_length_angstrom is not None
+        total_length = shape.total_length
+        tube_radius = shape.tube_radius
+        step_length = shape.step_length_angstrom
     if target_shape is None:
         safe_half_extent_angstrom = (
-            membrane_bounding_radius(
-                shape_backend,
-                sh_axes=sh_axes,
-                swept_total_length=swept_total_length,
-                swept_tube_radius=swept_tube_radius,
-            )
-            / _SIZE_MARGIN_FRACTION
+            membrane_bounding_radius(shape) / _SIZE_MARGIN_FRACTION
         )
         n = max(1, math.ceil(2.0 * safe_half_extent_angstrom / voxel_size))
         # This OUTPUT canvas (what becomes self.volume) is a SEPARATE
@@ -499,31 +392,31 @@ def _fit_shape_to_box(
             n_capped = max(1, round(max_output_voxels ** (1.0 / 3.0)))
             scale = n_capped / n
             if shape_backend == "spherical_harmonics":
-                new_sh_axes_angstrom = (
-                    sh_axes[0] * scale,
-                    sh_axes[1] * scale,
-                    sh_axes[2] * scale,
+                new_axes = (
+                    axes[0] * scale,
+                    axes[1] * scale,
+                    axes[2] * scale,
                 )
                 warnings.warn(
-                    f"MembraneGenerator: sh_axes {sh_axes} at "
+                    f"MembraneGenerator: axes {axes} at "
                     f"voxel_size={voxel_size:.2f} A implies a {n}^3 output canvas, "
                     f"exceeding max_output_voxels ({max_output_voxels:,}) -- "
                     f"scaled down by {scale:.2f}x (to "
-                    f"{tuple(round(a, 1) for a in new_sh_axes_angstrom)}) to avoid "
+                    f"{tuple(round(a, 1) for a in new_axes)}) to avoid "
                     "an OOM materializing the final array. Raise "
                     "max_output_voxels if you have the memory to spare, "
-                    "increase voxel_size, or set sh_axes explicitly to get "
+                    "increase voxel_size, or set axes explicitly to get "
                     "the originally requested size.",
                     stacklevel=2,
                 )
-                sh_axes = new_sh_axes_angstrom
+                axes = new_axes
             else:
-                new_total_length_angstrom = swept_total_length * scale
-                new_tube_radius_angstrom = swept_tube_radius * scale
+                new_total_length_angstrom = total_length * scale
+                new_tube_radius_angstrom = tube_radius * scale
                 warnings.warn(
-                    "MembraneGenerator: swept_total_length/"
-                    f"swept_tube_radius ({swept_total_length:.1f} A/"
-                    f"{swept_tube_radius:.1f} A) at voxel_size={voxel_size:.2f} A "
+                    "MembraneGenerator: total_length/"
+                    f"tube_radius ({total_length:.1f} A/"
+                    f"{tube_radius:.1f} A) at voxel_size={voxel_size:.2f} A "
                     f"imply a {n}^3 output canvas, exceeding "
                     f"max_output_voxels ({max_output_voxels:,}) -- scaled "
                     f"both down by {scale:.2f}x (to {new_total_length_angstrom:.1f} "
@@ -533,10 +426,10 @@ def _fit_shape_to_box(
                     "to get the originally requested size.",
                     stacklevel=2,
                 )
-                swept_total_length = new_total_length_angstrom
-                swept_tube_radius = new_tube_radius_angstrom
-                if swept_step_length_angstrom > swept_tube_radius:
-                    swept_step_length_angstrom = 0.5 * swept_tube_radius
+                total_length = new_total_length_angstrom
+                tube_radius = new_tube_radius_angstrom
+                if step_length > tube_radius:
+                    step_length = 0.5 * tube_radius
             n = n_capped
         target_shape = (n, n, n)
     else:
@@ -555,36 +448,32 @@ def _fit_shape_to_box(
             )
         if shape_backend == "spherical_harmonics":
             clamped = (
-                min(sh_axes[0], safe_half_extent_angstrom),
-                min(sh_axes[1], safe_half_extent_angstrom),
-                min(sh_axes[2], safe_half_extent_angstrom),
+                min(axes[0], safe_half_extent_angstrom),
+                min(axes[1], safe_half_extent_angstrom),
+                min(axes[2], safe_half_extent_angstrom),
             )
-            if clamped != sh_axes:
+            if clamped != axes:
                 warnings.warn(
-                    f"MembraneGenerator: sh_axes {sh_axes} exceeds what "
+                    f"MembraneGenerator: axes {axes} exceeds what "
                     f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
                     f"can safely hold -- clamped to "
                     f"{tuple(round(c, 1) for c in clamped)} to avoid clipping. "
-                    "Increase target_shape/voxel_size, or set sh_axes "
+                    "Increase target_shape/voxel_size, or set axes "
                     "explicitly to a smaller value, to get the originally "
                     "requested size.",
                     stacklevel=2,
                 )
-                sh_axes = clamped
+                axes = clamped
         else:
-            reach = membrane_bounding_radius(
-                shape_backend,
-                swept_total_length=swept_total_length,
-                swept_tube_radius=swept_tube_radius,
-            )
+            reach = membrane_bounding_radius(shape)
             if reach > safe_half_extent_angstrom:
                 scale = safe_half_extent_angstrom / reach
-                new_total_length_angstrom = swept_total_length * scale
-                new_tube_radius_angstrom = swept_tube_radius * scale
+                new_total_length_angstrom = total_length * scale
+                new_tube_radius_angstrom = tube_radius * scale
                 warnings.warn(
-                    "MembraneGenerator: swept_total_length/"
-                    f"swept_tube_radius ({swept_total_length:.1f} A/"
-                    f"{swept_tube_radius:.1f} A) exceed what "
+                    "MembraneGenerator: total_length/"
+                    f"tube_radius ({total_length:.1f} A/"
+                    f"{tube_radius:.1f} A) exceed what "
                     f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
                     f"can safely hold -- scaled both down by {scale:.2f}x (to "
                     f"{new_total_length_angstrom:.1f} A/{new_tube_radius_angstrom:.1f} A) to "
@@ -592,17 +481,18 @@ def _fit_shape_to_box(
                     "the originally requested size.",
                     stacklevel=2,
                 )
-                swept_total_length = new_total_length_angstrom
-                swept_tube_radius = new_tube_radius_angstrom
-                if swept_step_length_angstrom > swept_tube_radius:
-                    swept_step_length_angstrom = 0.5 * swept_tube_radius
+                total_length = new_total_length_angstrom
+                tube_radius = new_tube_radius_angstrom
+                if step_length > tube_radius:
+                    step_length = 0.5 * tube_radius
 
-    return (
-        target_shape,
-        sh_axes,
-        swept_total_length,
-        swept_tube_radius,
-        swept_step_length_angstrom,
+    if isinstance(shape, SphericalHarmonicsShape):
+        return target_shape, dataclasses.replace(shape, axes=axes)
+    return target_shape, dataclasses.replace(
+        shape,
+        total_length=total_length,
+        tube_radius=tube_radius,
+        step_length_angstrom=step_length,
     )
 
 
@@ -614,7 +504,7 @@ class MembraneGenerator:
     ----------
     target_shape : tuple of int, optional
         Output volume shape, ``(Z, Y, X)``. Default `None`: auto-sized from
-        the (possibly randomly drawn, see `sh_axes_range`/`swept_*_range_a`
+        the (possibly randomly drawn, see the shape group's ``*_range`` fields
         below) organelle size, with margin. When given
         explicitly, the organelle size is instead CLAMPED to whatever this
         box can safely hold (with a warning if that changes anything) --
@@ -625,151 +515,22 @@ class MembraneGenerator:
         Output voxel size, Å. Also used to render transmembrane
         protein templates, so their scale matches the membrane's. Default
         5.0.
+    shape : SphericalHarmonicsShape or SweptSplineShape, optional
+        The organic shape model and its parameters, which build the
+        underlying :class:`~specter.specimen.membrane._field.MembraneField`.
+        Pass the group, or its fields as keywords (`**shape_settings`) with
+        `shape_backend` naming which group they belong to; never both.
+        Default: a `SphericalHarmonicsShape` with its defaults.
+        `SphericalHarmonicsShape` perturbs an ellipsoid (vesicles, nuclei,
+        roughly ellipsoidal mitochondria; star-convex only);
+        `SweptSplineShape` sweeps a sphere along a wandering path (an
+        ER-tubule-like tube that can loop back near itself). Both are read
+        afterwards only through `MembraneField`'s public contract, so the
+        calibrated bilayer profile and transmembrane placement are identical
+        either way. ``self.shape`` holds the group with every size resolved.
     shape_backend : {"spherical_harmonics", "swept_spline"}, optional
-        Which organic-shape algorithm builds the underlying
-        :class:`~specter.specimen.membrane._field.MembraneField`.
-        `"spherical_harmonics"` (default) perturbs an ellipsoid with a
-        random real spherical-harmonic expansion
-        (:func:`~specter.specimen.membrane.
-        _field_spherical_harmonics.generate_membrane_field_spherical_harmonics`)
-        -- smooth by construction and given a physically-motivated (Helfrich
-        bending-mode) undulation spectrum, but -- being a radius function of
-        direction -- restricted to STAR-CONVEX topology: good for vesicles,
-        nuclei, and roughly-spherical (or ellipsoidal, via `sh_axes`)
-        mitochondria; cannot represent branching/self-occluding shapes.
-        `"swept_spline"` instead sweeps a sphere along a smoothly wandering
-        random path (:func:`~specter.specimen.membrane._field_swept_spline.
-        generate_membrane_field_swept_spline`) -- an elongated, tube-shaped
-        organelle (ER-tubule-like) rather than a closed blob, and unlike
-        `"spherical_harmonics"` it CAN self-approach/loop back near itself (a
-        real topological capability the radius-function-of-direction backend
-        structurally lacks).
-
-        Both backends are read afterward only through `MembraneField`'s
-        public contract, so the calibrated bilayer profile and transmembrane
-        placement below are identical either way -- this choice only affects
-        the shape.
-    sh_max_degree : int, optional
-        Highest spherical-harmonic degree in the random surface
-        perturbation -- higher values add finer surface detail. See
-        `generate_membrane_field_spherical_harmonics`'s own docstring.
-        `"spherical_harmonics"` backend only. Default 8.
-    sh_axes : tuple of float, optional
-        Physical semi-axes `(a_x, a_y, a_z)` of the base ellipsoid,
-        Å -- isotropic axes give a roughly spherical organelle,
-        anisotropic axes give an elongated/flattened one. Default `None`:
-        each axis is drawn independently, uniformly, from `sh_axes_range`
-        (mild natural anisotropy for free) using a `seed`-derived generator
-        independent of the shape's own randomness. `"spherical_harmonics"`
-        backend only.
-    sh_axes_range : tuple of float, optional
-        `(low, high)` semi-axis draw range, Å, used only when
-        `sh_axes` is `None`. Default `(150.0, 450.0)` -- real vesicle/
-        small-organelle scale (radius): synaptic vesicles run ~25-60 nm
-        diameter, general/endosomal vesicles up to ~100-300 nm diameter in
-        cryo-ET (PNAS 10.1073/pnas.2403136121; PMID 24455109); this range
-        (30-90 nm diameter) sits inside that population without also
-        reaching into mitochondria scale (~200-700 nm diameter), which is
-        different enough (>10x) that a single default range can't cover
-        both coherently -- pass `sh_axes` explicitly for that.
-        `"spherical_harmonics"` backend only.
-    sh_amplitude : float, optional
-        RMS fractional radius perturbation (dimensionless) -- picked from a
-        direct visual sweep, see `generate_membrane_field_spherical_harmonics`'s
-        own docstring. `"spherical_harmonics"` backend only. Default 0.15.
-    sh_spectrum_power : float, optional
-        Exponent `p` in `Var(a_lm) ~ 1 / [l*(l+1)]**p`; `2.0` matches the
-        Helfrich (1973) [2]_ thermal bending-mode spectrum of a lipid
-        bilayer at equilibrium, in the large-`l`, tensionless limit of the
-        vesicle spectrum of Milner & Safran (1987) [3]_.
-        `"spherical_harmonics"` backend only. Default 2.0.
-    swept_total_length : float, optional
-        Approximate path CONTOUR length (not bounding-box extent), Å.
-        See `generate_membrane_field_swept_spline`'s own docstring. Default
-        `None`: drawn uniformly from `swept_total_length_range`.
-        `"swept_spline"` backend only.
-    swept_total_length_range : tuple of float, optional
-        `(low, high)` contour-length draw range, Å, used only when
-        `swept_total_length` is `None`. Default `(1500.0, 2500.0)` --
-        sized to keep a good length:radius aspect ratio (still reads as a
-        tube, not a blob) even at `swept_tube_radius_range`'s own upper
-        bound, while keeping the auto-sized `target_shape` this range
-        implies (see that parameter) in a practical, fast-to-generate
-        regime: measured directly, the worst-case combination (max radius,
-        max length) auto-sizes to ~540 voxels/axis at `voxel_size=5.0` (~0.6 GB
-        float32) at this range's own default; a naively "more realistic"
-        4000 A upper bound instead reaches ~1130 voxels/axis (~5.8 GB) and
-        measurably slow generation, for organelle sizes well past what
-        fits in a typical local tomogram crop anyway. `"swept_spline"`
-        backend only.
-    swept_step_length_angstrom : float, optional
-        Distance between consecutive blended sphere source centers along
-        the path, Å -- must stay well under `2 * swept_tube_radius` or
-        the tube shows visible beading (warned about proactively). Default
-        `None`: `0.5 * swept_tube_radius` (using whatever value that
-        resolves to), which stays safely under the beading threshold
-        regardless of which radius gets drawn, unlike a fixed absolute
-        default tuned for one specific radius. `"swept_spline"` backend
-        only.
-    swept_tube_radius : float, optional
-        Tube radius, Å. Default `None`: drawn uniformly from
-        `swept_tube_radius_range`. `"swept_spline"` backend only.
-    swept_tube_radius_range : tuple of float, optional
-        `(low, high)` tube-radius draw range, Å, used only when
-        `swept_tube_radius` is `None`. Default `(150.0, 400.0)` (30-80 nm
-        diameter) -- real ER tubule scale: EM measurements of neuronal ER
-        tubules run ~20 nm diameter (thin), general ER tubules up to ~88 nm
-        diameter by STORM (PNAS 10.1073/pnas.2117559119; PMC5705721).
-        `"swept_spline"` backend only.
-    swept_flexibility : float, optional
-        In (0, 1]; picked from a direct visual sweep (see
-        `generate_membrane_field_swept_spline`'s own docstring): 0.05 is
-        nearly a straight rod, 0.35+ produces sharp hooks/loops, 0.15 gives
-        a gently organic, clearly non-straight tube. Default `None`: drawn
-        uniformly from `swept_flexibility_range`. `"swept_spline"` backend
-        only.
-    swept_flexibility_range : tuple of float, optional
-        `(low, high)` flexibility draw range, used only when
-        `swept_flexibility` is `None`. Default `(0.08, 0.25)` -- stays
-        inside the "gently organic" zone characterized by the visual sweep
-        above, avoiding both the near-straight-rod and sharp-hook/loop
-        extremes. `"swept_spline"` backend only.
-    swept_radius_variation : float, optional
-        RMS fractional variation in tube radius along the path -- see
-        `generate_membrane_field_swept_spline`'s own docstring ("Radius
-        variation"). Default `None`: drawn uniformly from
-        `swept_radius_variation_range`. `"swept_spline"` backend only.
-    swept_radius_variation_range : tuple of float, optional
-        `(low, high)` radius-variation draw range, used only when
-        `swept_radius_variation` is `None`. Default `(0.1, 0.3)` -- mild,
-        organic caliber variation by default (real ER tubules show local
-        varicosities/constrictions) rather than a perfectly uniform tube.
-        `"swept_spline"` backend only.
-    swept_radius_variation_sigma_points : float, optional
-        Path-order smoothing for the radius noise, in PATH POINTS -- see
-        `generate_membrane_field_swept_spline`'s own docstring for why 2.0
-        (not a larger, intuitively "smoother" value) was picked from a
-        direct visual sweep. Only affects the field when
-        `swept_radius_variation > 0`. `"swept_spline"` backend only.
-        Default 2.0.
-    swept_blend_sharpness_angstrom : float, optional
-        Smooth-min blend radius, Å. Default (`None`) is
-        `0.5 * swept_tube_radius` -- a default tuned for a handful of
-        sparse, independent blobs would under-blend a dense chain of
-        sources into visible beading, so this is a separate default.
-        `"swept_spline"` backend only.
-    swept_path_smoothing_sigma_points : float, optional
-        Path-order-aware smoothing (`scipy.ndimage.gaussian_filter1d`),
-        in PATH POINTS -- see `generate_membrane_field_swept_spline`'s own
-        docstring for why this must be order-aware rather than spatial.
-        `"swept_spline"` backend only. Default 1.5.
-    swept_curvature_iterations : int, optional
-        Curvature-capping relaxation steps -- an analytic smooth-min blend
-        can still have locally sharp concave curvature, so this stays
-        applied here too. `"swept_spline"` backend only. Default 15.
-    swept_curvature_step_fraction : float, optional
-        See :func:`~specter.specimen.membrane._field.cap_curvature`.
-        `"swept_spline"` backend only. Default 0.15.
+        Which group `**shape_settings` builds when `shape` is not given.
+        Default None: ``"spherical_harmonics"``, or the backend of `shape`.
     n_lipids_per_leaflet : int, optional
         Reference lipid patch size, passed to
         :func:`~specter.specimen.membrane._profile.build_reference_lipid_patch`.
@@ -789,9 +550,9 @@ class MembraneGenerator:
         scales with it as lipid-volume conservation requires.
 
         Default 37.0, the spacing measured for fully hydrated fluid POPC
-        at 30 °C [4]_, the lipid the reference template is built from.
+        at 30 °C [2]_, the lipid the reference template is built from.
         Fluid phosphatidylcholines span 35-38 Å: 35.3 Å for DMPC and
-        36.7 Å for DOPC at 30 °C [4]_, 38.3 Å for DPPC at 50 °C [5]_.
+        36.7 Å for DOPC at 30 °C [2]_, 38.3 Å for DPPC at 50 °C [3]_.
         `polnet`'s [1]_ `MB_THICK_RG` range (25.0, 35.0) sits entirely
         below the experimental one and is not followed: a 30 Å bilayer
         renders about 19% less integrated potential than a 37 Å one, since
@@ -938,6 +699,11 @@ class MembraneGenerator:
         multiple GPUs). Default None: every species renders on `device`
         above, still concurrently across `render_workers` threads, just not
         spread across multiple physical devices.
+    **shape_settings
+        The fields of `shape_backend`'s group, when `shape` is not given:
+        ``axes``, ``amplitude``, ... for ``"spherical_harmonics"``;
+        ``tube_radius``, ``total_length``, ... for ``"swept_spline"``. A
+        field of the other group is refused.
 
     References
     ----------
@@ -946,17 +712,11 @@ class MembraneGenerator:
        tomography. *IEEE Transactions on Medical Imaging*, 43(11), 3742–3754.
        https://doi.org/10.1109/TMI.2024.3398401
        (polnet source: https://github.com/anmartinezs/polnet)
-    .. [2] Helfrich, W. (1973). Elastic properties of lipid bilayers: theory and
-       possible experiments. *Zeitschrift für Naturforschung C*, 28(11–12),
-       693–703. https://doi.org/10.1515/znc-1973-11-1209
-    .. [3] Milner, S. T., & Safran, S. A. (1987). Dynamical fluctuations of droplet
-       microemulsions and vesicles. *Physical Review A*, 36(9), 4371–4379.
-       https://doi.org/10.1103/PhysRevA.36.4371
-    .. [4] Kučerka, N., Tristram-Nagle, S., & Nagle, J. F. (2005). Structure of
+    .. [2] Kučerka, N., Tristram-Nagle, S., & Nagle, J. F. (2005). Structure of
        fully hydrated fluid phase lipid bilayers with monounsaturated chains.
        *Journal of Membrane Biology*, 208(3), 193–202.
        https://doi.org/10.1007/s00232-005-7006-8
-    .. [5] Nagle, J. F., & Tristram-Nagle, S. (2000). Structure of lipid
+    .. [3] Nagle, J. F., & Tristram-Nagle, S. (2000). Structure of lipid
        bilayers. *Biochimica et Biophysica Acta (BBA) – Reviews on
        Biomembranes*, 1469(3), 159–195.
        https://doi.org/10.1016/S0304-4157(00)00016-2
@@ -966,30 +726,9 @@ class MembraneGenerator:
         self,
         target_shape: tuple[int, int, int] | None = None,
         voxel_size: float = 5.0,
-        shape_backend: ShapeBackend = "spherical_harmonics",
-        sh_max_degree: int = 8,
-        sh_axes: tuple[float, float, float] | None = None,
-        sh_axes_range: tuple[float, float] = DEFAULT_SH_AXES_RANGE_ANGSTROM,
-        sh_amplitude: float = 0.15,
-        sh_spectrum_power: float = 2.0,
-        swept_total_length: float | None = None,
-        swept_total_length_range: tuple[
-            float, float
-        ] = DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
-        swept_step_length_angstrom: float | None = None,
-        swept_tube_radius: float | None = None,
-        swept_tube_radius_range: tuple[
-            float, float
-        ] = DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
-        swept_flexibility: float | None = None,
-        swept_flexibility_range: tuple[float, float] = (0.08, 0.25),
-        swept_radius_variation: float | None = None,
-        swept_radius_variation_range: tuple[float, float] = (0.1, 0.3),
-        swept_radius_variation_sigma_points: float = 2.0,
-        swept_blend_sharpness_angstrom: float | None = None,
-        swept_path_smoothing_sigma_points: float = 1.5,
-        swept_curvature_iterations: int = 15,
-        swept_curvature_step_fraction: float = 0.15,
+        shape: MembraneShape | None = None,
+        *,
+        shape_backend: ShapeBackend | None = None,
         n_lipids_per_leaflet: int = 200,
         parameterization: ScatteringFactors = "shtyrov",
         bilayer_thickness: float = 37.0,
@@ -1006,51 +745,15 @@ class MembraneGenerator:
         seed: int | None = None,
         render_workers: int | Literal["auto"] = 1,
         render_devices: list[str | torch.device] | None = None,
+        **shape_settings: Any,
     ):
-        if shape_backend not in ("spherical_harmonics", "swept_spline"):
-            raise ValueError(
-                "shape_backend must be 'spherical_harmonics' or "
-                f"'swept_spline', got {shape_backend!r}"
-            )
-
         voxel_size = float(voxel_size)
-
-        (
-            sh_axes,
-            swept_tube_radius,
-            swept_total_length,
-            swept_flexibility,
-            swept_radius_variation,
-            swept_step_length_angstrom,
-        ) = _resolve_shape_parameters(
-            seed,
-            sh_axes,
-            sh_axes_range,
-            swept_tube_radius,
-            swept_tube_radius_range,
-            swept_total_length,
-            swept_total_length_range,
-            swept_flexibility,
-            swept_flexibility_range,
-            swept_radius_variation,
-            swept_radius_variation_range,
-            swept_step_length_angstrom,
+        shape = resolve_sizes(
+            membrane_shape(shape, shape_backend, shape_settings), seed
         )
-        (
-            target_shape,
-            sh_axes,
-            swept_total_length,
-            swept_tube_radius,
-            swept_step_length_angstrom,
-        ) = _fit_shape_to_box(
-            target_shape,
-            voxel_size,
-            shape_backend,
-            sh_axes,
-            swept_total_length,
-            swept_tube_radius,
-            swept_step_length_angstrom,
-            max_output_voxels,
+
+        target_shape, shape = _fit_shape_to_box(
+            target_shape, voxel_size, shape, max_output_voxels
         )
 
         tz, ty, tx = target_shape
@@ -1109,26 +812,8 @@ class MembraneGenerator:
             self._needs_upsample = False
         self.voxel_size = voxel_size
         self.max_output_voxels = max_output_voxels
-        self.shape_backend = shape_backend
-        self.sh_max_degree = sh_max_degree
-        self.sh_axes = sh_axes
-        self.sh_axes_range = sh_axes_range
-        self.sh_amplitude = sh_amplitude
-        self.sh_spectrum_power = sh_spectrum_power
-        self.swept_total_length = swept_total_length
-        self.swept_total_length_range = swept_total_length_range
-        self.swept_step_length_angstrom = swept_step_length_angstrom
-        self.swept_tube_radius = swept_tube_radius
-        self.swept_tube_radius_range = swept_tube_radius_range
-        self.swept_flexibility = swept_flexibility
-        self.swept_flexibility_range = swept_flexibility_range
-        self.swept_radius_variation = swept_radius_variation
-        self.swept_radius_variation_range = swept_radius_variation_range
-        self.swept_radius_variation_sigma_points = swept_radius_variation_sigma_points
-        self.swept_blend_sharpness_angstrom = swept_blend_sharpness_angstrom
-        self.swept_path_smoothing_sigma_points = swept_path_smoothing_sigma_points
-        self.swept_curvature_iterations = swept_curvature_iterations
-        self.swept_curvature_step_fraction = swept_curvature_step_fraction
+        self.shape: MembraneShape = shape
+        self.shape_backend: ShapeBackend = shape.backend
         self.n_lipids_per_leaflet = n_lipids_per_leaflet
         self.parameterization = parameterization
         self.bilayer_thickness = bilayer_thickness
@@ -1272,31 +957,38 @@ class MembraneGenerator:
                 "resolved less crisply.",
                 stacklevel=2,
             )
-        if self.shape_backend == "spherical_harmonics":
+        shape = self.shape
+        if isinstance(shape, SphericalHarmonicsShape):
+            assert shape.axes is not None  # resolved in __init__
             self.field = generate_membrane_field_spherical_harmonics(
                 shape_zyx=field_shape_zyx,
                 spacing_angstrom=field_spacing_angstrom,
-                sh_max_degree=self.sh_max_degree,
-                sh_axes=self.sh_axes,
-                sh_amplitude=self.sh_amplitude,
-                sh_spectrum_power=self.sh_spectrum_power,
+                sh_max_degree=shape.max_degree,
+                sh_axes=shape.axes,
+                sh_amplitude=shape.amplitude,
+                sh_spectrum_power=shape.spectrum_power,
                 device=self.device,
                 seed=self.seed,
             )
         else:
+            assert isinstance(shape, SweptSplineShape)
+            # Resolved in __init__ (`resolve_sizes`).
+            assert shape.total_length is not None and shape.tube_radius is not None
+            assert shape.step_length_angstrom is not None
+            assert shape.flexibility is not None and shape.radius_variation is not None
             self.field = generate_membrane_field_swept_spline(
                 shape_zyx=field_shape_zyx,
                 spacing_angstrom=field_spacing_angstrom,
-                total_length_angstrom=self.swept_total_length,
-                step_length_angstrom=self.swept_step_length_angstrom,
-                tube_radius_angstrom=self.swept_tube_radius,
-                flexibility=self.swept_flexibility,
-                radius_variation=self.swept_radius_variation,
-                radius_variation_sigma_points=self.swept_radius_variation_sigma_points,
-                blend_sharpness_angstrom=self.swept_blend_sharpness_angstrom,
-                path_smoothing_sigma_points=self.swept_path_smoothing_sigma_points,
-                curvature_iterations=self.swept_curvature_iterations,
-                curvature_step_fraction=self.swept_curvature_step_fraction,
+                total_length_angstrom=shape.total_length,
+                step_length_angstrom=shape.step_length_angstrom,
+                tube_radius_angstrom=shape.tube_radius,
+                flexibility=shape.flexibility,
+                radius_variation=shape.radius_variation,
+                radius_variation_sigma_points=shape.radius_variation_sigma_points,
+                blend_sharpness_angstrom=shape.blend_sharpness_angstrom,
+                path_smoothing_sigma_points=shape.path_smoothing_sigma_points,
+                curvature_iterations=shape.curvature_iterations,
+                curvature_step_fraction=shape.curvature_step_fraction,
                 device=self.device,
                 seed=self.seed,
             )

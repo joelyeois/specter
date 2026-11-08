@@ -11,7 +11,7 @@ def make_generator(retain=None, device="cpu"):
     membrane = MembraneGenerator(
         target_shape=(24, 24, 24),
         voxel_size=5.0,
-        sh_axes=(30.0, 30.0, 30.0),
+        axes=(30.0, 30.0, 30.0),
         n_lipids_per_leaflet=6,
         seed=11,
         device=device,

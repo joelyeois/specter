@@ -153,8 +153,8 @@ def test_a_membrane_volume_is_centred_on_voxel_n_over_2():
     gen = MembraneGenerator(
         target_shape=(33, 33, 33),
         voxel_size=6.0,
-        sh_axes=(50.0, 50.0, 50.0),
-        sh_amplitude=0.0,
+        axes=(50.0, 50.0, 50.0),
+        amplitude=0.0,
         seed=0,
     )
     volume = gen.generate()
@@ -171,8 +171,8 @@ def test_transmembrane_density_lands_on_its_site():
     gen = MembraneGenerator(
         target_shape=(33, 33, 33),
         voxel_size=voxel,
-        sh_axes=(50.0, 50.0, 50.0),
-        sh_amplitude=0.15,
+        axes=(50.0, 50.0, 50.0),
+        amplitude=0.15,
         transmembrane_specs=[
             TransmembraneSpec("blob", template=_gaussian_template(), frequency=6)
         ],
@@ -199,8 +199,8 @@ def test_tomogram_membranes_snap_and_their_proteins_land_on_their_picks():
     mgen = MembraneGenerator(
         target_shape=(25, 25, 25),
         voxel_size=voxel,
-        sh_axes=(60.0, 60.0, 60.0),
-        sh_amplitude=0.15,
+        axes=(60.0, 60.0, 60.0),
+        amplitude=0.15,
         transmembrane_specs=[
             TransmembraneSpec("blob", template=_gaussian_template(), frequency=6)
         ],

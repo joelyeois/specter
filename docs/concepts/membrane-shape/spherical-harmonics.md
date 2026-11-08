@@ -146,8 +146,10 @@ voxels, 81x at 3M, ~180x at 10M. Measured by
 
 ## Parameters
 
-These are the names a `[[membrane]]` TOML table and `MembraneGenerator`
-accept.
+These are the names a `[[membrane]]` TOML table uses. In Python they are the
+fields of `SphericalHarmonicsShape` without the `sh_` prefix (`axes`,
+`amplitude`, ...), which `MembraneGenerator` takes as `shape=` or as
+keywords.
 
 | Parameter | Meaning | Default |
 |---|---|---|

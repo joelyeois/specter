@@ -41,8 +41,8 @@ _V_SIZE = 8.0
 _MEMBRANE_KWARGS = dict(
     target_shape=_TARGET_SHAPE_ZYX,
     voxel_size=_V_SIZE,
-    sh_axes=(70.0, 70.0, 70.0),
-    sh_amplitude=0.15,
+    axes=(70.0, 70.0, 70.0),
+    amplitude=0.15,
     n_lipids_per_leaflet=6,
 )
 
@@ -134,8 +134,8 @@ def test_tomogram_specimen_generator_warns_when_lumen_species_has_no_region():
             target_shape=(24, 24, 24),
             voxel_size=8.0,
             shape_backend="spherical_harmonics",
-            sh_axes=(20.0, 20.0, 20.0),
-            bilayer_thickness=150.0,  # >> sh_axes -> no hollow lumen
+            axes=(20.0, 20.0, 20.0),
+            bilayer_thickness=150.0,  # >> axes -> no hollow lumen
             n_lipids_per_leaflet=6,
             seed=0,
         )
@@ -295,7 +295,7 @@ def test_tomogram_specimen_generator_drops_instances_that_dont_fit():
     rejection happens before generation, not after."""
     small_shape_zyx = (30, 30, 30)  # 30*8 = 240 A per axis
     kwargs = dict(
-        _MEMBRANE_KWARGS, target_shape=small_shape_zyx, sh_axes=(70.0, 70.0, 70.0)
+        _MEMBRANE_KWARGS, target_shape=small_shape_zyx, axes=(70.0, 70.0, 70.0)
     )
     instances = [
         MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
@@ -563,7 +563,7 @@ def test_tomogram_specimen_generator_export_picks(tmp_path):
     """export_picks: coordinate conversion (corner-relative, not centered)
     against a known placement, and transmembrane species get their own
     suffixed file distinct from cytosol/lumen files."""
-    # A bigger sh_axes than _MEMBRANE_KWARGS' own (100A vs 70A radius) --
+    # A bigger axes than _MEMBRANE_KWARGS' own (100A vs 70A radius) --
     # verified directly: 70A reliably finds zero transmembrane sites for
     # 1mbo at this seed/box (Newton-projection surface search exhausts
     # max_attempts against too-tight a curvature), 100A reliably finds one.
@@ -573,8 +573,8 @@ def test_tomogram_specimen_generator_export_picks(tmp_path):
     mgen = MembraneGenerator(
         target_shape=_TARGET_SHAPE_ZYX,
         voxel_size=_V_SIZE,
-        sh_axes=(100.0, 100.0, 100.0),
-        sh_amplitude=0.15,
+        axes=(100.0, 100.0, 100.0),
+        amplitude=0.15,
         n_lipids_per_leaflet=6,
         transmembrane_specs=[
             TransmembraneSpec(pdb_source=str(_SMALL_FIXTURE), frequency=1)

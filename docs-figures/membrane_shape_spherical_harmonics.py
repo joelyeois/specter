@@ -420,12 +420,12 @@ def figure_parameter_sweep() -> None:
     sh_max_degree -- the finished-shape counterpart to figure_degree_buildup's
     abstract (theta, phi) view."""
     configs = [
-        ("amplitude=0.10", dict(sh_amplitude=0.10, sh_max_degree=8)),
-        ("amplitude=0.15 (default)", dict(sh_amplitude=0.15, sh_max_degree=8)),
-        ("amplitude=0.25", dict(sh_amplitude=0.25, sh_max_degree=8)),
-        ("amplitude=0.40", dict(sh_amplitude=0.40, sh_max_degree=8)),
-        ("degree=3", dict(sh_amplitude=0.15, sh_max_degree=3)),
-        ("degree=14", dict(sh_amplitude=0.15, sh_max_degree=14)),
+        ("amplitude=0.10", dict(amplitude=0.10, max_degree=8)),
+        ("amplitude=0.15 (default)", dict(amplitude=0.15, max_degree=8)),
+        ("amplitude=0.25", dict(amplitude=0.25, max_degree=8)),
+        ("amplitude=0.40", dict(amplitude=0.40, max_degree=8)),
+        ("degree=3", dict(amplitude=0.15, max_degree=3)),
+        ("degree=14", dict(amplitude=0.15, max_degree=14)),
     ]
     fig, axes = plt.subplots(1, len(configs), figsize=(2.2 * len(configs), 2.6))
     for ax, (label, cfg) in zip(axes, configs):
@@ -433,7 +433,7 @@ def figure_parameter_sweep() -> None:
             target_shape=SHAPE_ZYX,
             voxel_size=SPACING_ANGSTROM,
             shape_backend="spherical_harmonics",
-            sh_axes=SH_AXES_ANGSTROM,
+            axes=SH_AXES_ANGSTROM,
             n_lipids_per_leaflet=1,
             seed=SEED,
             **cfg,
@@ -474,9 +474,9 @@ def figure_axes_sweep() -> None:
             target_shape=shape_zyx,
             voxel_size=spacing_angstrom,
             shape_backend="spherical_harmonics",
-            sh_axes=sh_axes,
-            sh_amplitude=SH_AMPLITUDE,
-            sh_max_degree=SH_MAX_DEGREE,
+            axes=sh_axes,
+            amplitude=SH_AMPLITUDE,
+            max_degree=SH_MAX_DEGREE,
             n_lipids_per_leaflet=1,
             seed=SEED,
         )

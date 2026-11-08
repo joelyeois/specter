@@ -409,6 +409,34 @@ def _cap_membrane_auto_size_ranges(
     return instance_kwargs
 
 
+#: The prefix a [[membrane]] table spells each backend's shape fields with,
+#: so a flat table says which backend a key belongs to.
+_SHAPE_KEY_PREFIXES = {"spherical_harmonics": "sh_", "swept_spline": "swept_"}
+
+
+def _shape_keys_unprefixed(instance_kwargs: dict) -> dict:
+    """
+    `instance_kwargs` with its shape fields under `MembraneGenerator`'s
+    names: ``sh_axes`` becomes ``axes``, ``swept_tube_radius``
+    ``tube_radius``. A field of the backend the table did not choose is
+    refused rather than ignored.
+    """
+    backend = instance_kwargs.get("shape_backend", "spherical_harmonics")
+    out = {}
+    for key, value in instance_kwargs.items():
+        for key_backend, prefix in _SHAPE_KEY_PREFIXES.items():
+            if key.startswith(prefix):
+                if key_backend != backend:
+                    raise ValueError(
+                        f"[[membrane]] sets {key!r}, a {key_backend!r} shape "
+                        f"field, under shape_backend = {backend!r}"
+                    )
+                key = key[len(prefix) :]
+                break
+        out[key] = value
+    return out
+
+
 def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerator:
     """
     Build a `TomogramSpecimenGenerator` from a `TomogramConfig`, without
@@ -541,8 +569,8 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         target_shape = (
             tuple(target_shape_zyx_raw) if target_shape_zyx_raw is not None else None
         )
-        instance_kwargs = _cap_membrane_auto_size_ranges(
-            instance_kwargs, target_shape, config
+        instance_kwargs = _shape_keys_unprefixed(
+            _cap_membrane_auto_size_ranges(instance_kwargs, target_shape, config)
         )
 
         # One tomogram, one set of scattering factors: the bilayer is summed

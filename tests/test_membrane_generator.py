@@ -15,8 +15,8 @@ from specter.specimen.membrane._generator import (
 _SMALL_KWARGS = dict(
     target_shape=(32, 32, 32),
     voxel_size=6.0,
-    sh_axes=(50.0, 50.0, 50.0),
-    sh_amplitude=0.15,
+    axes=(50.0, 50.0, 50.0),
+    amplitude=0.15,
     n_lipids_per_leaflet=6,
 )
 
@@ -25,8 +25,8 @@ _SH_KWARGS = dict(
     target_shape=(80, 80, 80),
     voxel_size=4.0,
     shape_backend="spherical_harmonics",
-    sh_axes=(60.0, 60.0, 60.0),
-    sh_max_degree=8,
+    axes=(60.0, 60.0, 60.0),
+    max_degree=8,
     n_lipids_per_leaflet=6,
 )
 
@@ -35,9 +35,9 @@ _SWEPT_SPLINE_KWARGS = dict(
     target_shape=(90, 90, 90),
     voxel_size=4.0,
     shape_backend="swept_spline",
-    swept_total_length=300.0,
-    swept_step_length_angstrom=15.0,
-    swept_tube_radius=25.0,
+    total_length=300.0,
+    step_length_angstrom=15.0,
+    tube_radius=25.0,
     n_lipids_per_leaflet=6,
 )
 
@@ -227,8 +227,8 @@ def test_max_field_voxels_coarsens_and_warns_instead_of_exploding_memory():
         gen = MembraneGenerator(
             target_shape=(32, 32, 32),
             voxel_size=6.0,
-            sh_axes=(50.0, 50.0, 50.0),
-            sh_amplitude=0.15,
+            axes=(50.0, 50.0, 50.0),
+            amplitude=0.15,
             n_lipids_per_leaflet=6,
             max_field_voxels=1000,
             seed=0,
@@ -267,8 +267,8 @@ def test_field_grid_coarsening_is_reported_when_it_is_the_only_clamp():
         gen = MembraneGenerator(
             target_shape=(32, 32, 32),
             voxel_size=6.0,
-            sh_axes=(50.0, 50.0, 50.0),
-            sh_amplitude=0.15,
+            axes=(50.0, 50.0, 50.0),
+            amplitude=0.15,
             n_lipids_per_leaflet=6,
             max_field_voxels=40_000,
             seed=0,
@@ -707,7 +707,7 @@ def test_place_transmembrane_warns_on_partial_or_zero_placement():
         target_shape=(80, 80, 80),
         voxel_size=4.0,
         shape_backend="spherical_harmonics",
-        sh_axes=(18.0, 18.0, 18.0),
+        axes=(18.0, 18.0, 18.0),
         n_lipids_per_leaflet=6,
         # frequency=40: an ~18 A vesicle cannot hold that many sites 15 A
         # apart (fewer than 30 even in the best spherical packing; random
@@ -956,32 +956,40 @@ def test_interpolate_angular_grid_returns_tensor_for_tensor_input() -> None:
 
 def test_bounding_radius_matches_each_backend_formula() -> None:
     """The measurement itself, pinned so a refactor cannot quietly change it."""
-    from specter.specimen.membrane import membrane_bounding_radius
+    from specter.specimen.membrane import (
+        SphericalHarmonicsShape,
+        SweptSplineShape,
+        membrane_bounding_radius,
+    )
 
     assert membrane_bounding_radius(
-        "spherical_harmonics", sh_axes=(100.0, 250.0, 180.0)
+        SphericalHarmonicsShape(axes=(100.0, 250.0, 180.0))
     ) == pytest.approx(250.0)
     assert membrane_bounding_radius(
-        "swept_spline", swept_total_length=2000.0, swept_tube_radius=300.0
+        SweptSplineShape(total_length=2000.0, tube_radius=300.0)
     ) == pytest.approx(1300.0)
 
 
-def test_bounding_radius_rejects_an_unknown_backend() -> None:
+def test_bounding_radius_rejects_an_unknown_shape() -> None:
     """A new backend must be added here, not silently take another's formula."""
     from specter.specimen.membrane import membrane_bounding_radius
 
-    with pytest.raises(ValueError, match="Unknown shape_backend"):
-        membrane_bounding_radius("helicoid", sh_axes=(1.0, 1.0, 1.0))
+    with pytest.raises(ValueError, match="Unknown membrane shape"):
+        membrane_bounding_radius("helicoid")  # type: ignore[arg-type]
 
 
-def test_bounding_radius_requires_the_arguments_its_backend_needs() -> None:
+def test_bounding_radius_requires_resolved_sizes() -> None:
     """Silently defaulting a missing size would understate the reach."""
-    from specter.specimen.membrane import membrane_bounding_radius
+    from specter.specimen.membrane import (
+        SphericalHarmonicsShape,
+        SweptSplineShape,
+        membrane_bounding_radius,
+    )
 
-    with pytest.raises(ValueError, match="sh_axes"):
-        membrane_bounding_radius("spherical_harmonics")
-    with pytest.raises(ValueError, match="swept_total_length"):
-        membrane_bounding_radius("swept_spline", swept_tube_radius=300.0)
+    with pytest.raises(ValueError, match="axes"):
+        membrane_bounding_radius(SphericalHarmonicsShape())
+    with pytest.raises(ValueError, match="total_length"):
+        membrane_bounding_radius(SweptSplineShape(tube_radius=300.0))
 
 
 def test_collision_radius_and_generator_sizing_agree() -> None:
@@ -997,22 +1005,45 @@ def test_collision_radius_and_generator_sizing_agree() -> None:
     from specter.specimen.tomogram._helpers import _instance_bounding_radius
 
     for kwargs in (
-        {"shape_backend": "spherical_harmonics", "sh_axes": (150.0, 200.0, 175.0)},
-        {
-            "shape_backend": "swept_spline",
-            "swept_total_length": 1800.0,
-            "swept_tube_radius": 250.0,
-        },
+        {"shape_backend": "spherical_harmonics", "axes": (150.0, 200.0, 175.0)},
+        {"shape_backend": "swept_spline", "total_length": 1800.0, "tube_radius": 250.0},
     ):
         generator = MembraneGenerator(voxel_size=10.0, **kwargs)
         assert _instance_bounding_radius(generator) == pytest.approx(
-            membrane_bounding_radius(
-                generator.shape_backend,
-                sh_axes=generator.sh_axes,
-                swept_total_length=generator.swept_total_length,
-                swept_tube_radius=generator.swept_tube_radius,
-            )
+            membrane_bounding_radius(generator.shape)
         )
+
+
+def test_shape_is_given_as_a_group_or_as_its_fields() -> None:
+    """`shape` or its fields as keywords, never both, and never a field of the
+    backend not chosen (which used to be accepted and ignored)."""
+    from specter.specimen.membrane import (
+        MembraneGenerator,
+        SphericalHarmonicsShape,
+        SweptSplineShape,
+    )
+
+    grouped = MembraneGenerator(
+        voxel_size=10.0,
+        shape=SweptSplineShape(total_length=1800.0, tube_radius=250.0),
+        seed=1,
+    )
+    flat = MembraneGenerator(
+        voxel_size=10.0,
+        shape_backend="swept_spline",
+        total_length=1800.0,
+        tube_radius=250.0,
+        seed=1,
+    )
+    assert grouped.shape == flat.shape
+    assert grouped.shape_backend == "swept_spline"
+
+    with pytest.raises(TypeError, match="not both"):
+        MembraneGenerator(shape=SphericalHarmonicsShape(), amplitude=0.2)
+    with pytest.raises(TypeError, match="SweptSplineShape"):
+        MembraneGenerator(shape_backend="swept_spline", axes=(100.0, 100.0, 100.0))
+    with pytest.raises(ValueError, match="does not match"):
+        MembraneGenerator(shape=SphericalHarmonicsShape(), shape_backend="swept_spline")
 
 
 def test_render_transmembrane_template_honours_use_deposited_bfactors():

@@ -59,6 +59,34 @@ def test_membrane_entry_explicit_target_shape_zyx_is_honored():
     assert instance.generator.target_shape == (20, 20, 20)
 
 
+def test_membrane_table_shape_keys_reach_the_shape_group():
+    """A [[membrane]] table spells shape fields with their backend's prefix;
+    the generator's shape group receives them unprefixed."""
+    config = TomogramConfig(
+        membrane=[
+            {
+                "shape_backend": "swept_spline",
+                "swept_tube_radius": 120.0,
+                "swept_flexibility": 0.2,
+            }
+        ],
+        **_BASE_KWARGS,
+    )
+    generator = build_tomogram_generator(config).membrane_instances[0].generator
+    assert generator.shape_backend == "swept_spline"
+    assert generator.shape.tube_radius == 120.0
+    assert generator.shape.flexibility == 0.2
+
+
+def test_membrane_table_refuses_the_other_backends_shape_keys():
+    config = TomogramConfig(
+        membrane=[{"shape_backend": "swept_spline", "sh_axes": [50.0, 50.0, 50.0]}],
+        **_BASE_KWARGS,
+    )
+    with pytest.raises(ValueError, match="sh_axes"):
+        build_tomogram_generator(config)
+
+
 def test_n_copies_restarts_per_entry_not_running_across_entries():
     config = TomogramConfig(
         membrane=[

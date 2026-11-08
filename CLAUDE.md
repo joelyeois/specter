@@ -319,7 +319,9 @@ src/specter/                  # Main source package
     membrane/                 # Organic membranes: _field (signed-field geometry), _field_spherical_harmonics and
                               # _field_swept_spline (the two shape backends), _profile (calibrated bilayer psi(z)),
                               # _raster (field + profile → density), _placement (transmembrane sites/orientations),
-                              # _extent (bounding radius), _generator (MembraneGenerator, TransmembraneSpec)
+                              # _extent (bounding radius), _shape (SphericalHarmonicsShape, SweptSplineShape: the
+                              # two shape settings groups, sh_/swept_ prefixed in [[membrane]] TOML), _generator
+                              # (MembraneGenerator, TransmembraneSpec)
     packing/                  # _algorithms.py (pack_hard_spheres_3d, species pools), _shape.py (pack_shapes_3d, the
                               # default voxel-occupancy packer)
     tomogram/                 # _generator.py (TomogramSpecimenGenerator, behind `specter build tomogram`), _specs

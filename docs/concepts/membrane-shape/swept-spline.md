@@ -134,8 +134,10 @@ adjacent convex bulge is pulled inward; both reduce local curvature.
 
 ## Parameters at a glance
 
-These are the names a `[[membrane]]` TOML table and `MembraneGenerator`
-accept. The four size and shape parameters each have a `_range`
+These are the names a `[[membrane]]` TOML table uses. In Python they are the
+fields of `SweptSplineShape` without the `swept_` prefix (`tube_radius`,
+`flexibility`, ...), which `MembraneGenerator` takes as `shape=` or as
+keywords. The four size and shape parameters each have a `_range`
 counterpart: when the scalar is unset, every membrane instance draws its own
 value uniformly from the range.
 
@@ -155,8 +157,9 @@ value uniformly from the range.
 `specter build tomogram` clamps the upper bounds of
 `swept_total_length_range` and `swept_tube_radius_range` so that an
 automatically sized organelle fits the box. The figures on this page call
-the underlying field function directly, whose keyword arguments drop the
-`swept_` prefix (`flexibility`, `tube_radius_angstrom`, ...).
+the underlying field function directly, whose keyword arguments also drop
+the `swept_` prefix and carry their unit (`flexibility`,
+`tube_radius_angstrom`, ...).
 
 ![Flexibility swept from a nearly straight rod to a tightly wandering, near-self-touching walk.](../../assets/images/membrane-swept-flexibility-sweep.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption

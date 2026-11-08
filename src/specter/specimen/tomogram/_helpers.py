@@ -493,12 +493,7 @@ def _instance_bounding_radius(generator: MembraneGenerator) -> float:
     true bounding box is smaller than its contour length (same reasoning
     MembraneGenerator's own auto-sizing uses), so treating the FULL
     contour length as if straight overestimates, not underestimates."""
-    return membrane_bounding_radius(
-        generator.shape_backend,
-        sh_axes=generator.sh_axes,
-        swept_total_length=generator.swept_total_length,
-        swept_tube_radius=generator.swept_tube_radius,
-    )
+    return membrane_bounding_radius(generator.shape)
 
 
 def _insert_shell_label(

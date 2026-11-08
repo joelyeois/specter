@@ -29,7 +29,7 @@ from ..filament._actin import extract_actin_subunit
 from ..filament._placement import subunit_centre_in_filament_frame
 from ..filament._tubulin import extract_mt_dimer
 from ..membrane._placement import align_principal_axis_to_z
-from ._helpers import _canvas_indices, _insert_rotated_copies
+from ._helpers import _insert_rotated_copies, _mask_at_positions
 
 if TYPE_CHECKING:
     from ...pdb import PDB
@@ -309,15 +309,11 @@ class _FilamentStageMixin:
             return instances
 
         centres = {code: centre for code, (_, centre) in templates.items()}
-        index = _canvas_indices(
+        in_carbon = _mask_at_positions(
+            carbon_mask,
             _stamped_centres(instances, centres, self.target_shape, voxel_size),
-            self.target_shape,
             voxel_size,
         )
-        last = torch.tensor(self.target_shape) - 1
-        iz, iy, ix = torch.minimum(index.clamp(min=0), last).unbind(1)
-        cm_dev = carbon_mask.device
-        in_carbon = carbon_mask[iz.to(cm_dev), iy.to(cm_dev), ix.to(cm_dev)].cpu()
         n_dropped = int(in_carbon.sum())
         if n_dropped:
             warnings.warn(

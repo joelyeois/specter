@@ -193,6 +193,17 @@ def _canvas_indices(
     return torch.round(positions_xyz.flip(-1) / voxel_size).long() + centre
 
 
+def _mask_at_positions(
+    mask: torch.Tensor, positions_xyz: torch.Tensor, voxel_size: float
+) -> torch.Tensor:
+    """``mask`` read at the canvas voxel of each ``(N, 3)`` x, y, z position
+    (`_canvas_indices`), clamped into the canvas, as an ``(N,)`` CPU bool."""
+    index = _canvas_indices(positions_xyz, tuple(mask.shape), voxel_size)
+    last = torch.tensor(mask.shape, device=index.device) - 1
+    iz, iy, ix = torch.minimum(index.clamp(min=0), last).to(mask.device).unbind(1)
+    return mask[iz, iy, ix].cpu()
+
+
 def _position_to_center_index(
     position_xyz: tuple[float, float, float],
     shape_zyx: tuple[int, ...],

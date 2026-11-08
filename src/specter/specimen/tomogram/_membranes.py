@@ -26,6 +26,7 @@ from ._helpers import (
     _insert_shell_label,
     _insert_volume_max,
     _instance_bounding_radius,
+    _mask_at_positions,
     _position_to_center_index,
     _snap_to_canvas_voxel,
 )
@@ -114,8 +115,8 @@ class _MembraneStageMixin:
             disable=not self.progressbars or not to_composite,
         )
         # classify_membrane_regions' own threshold: needs the FULL
-        # composite's peak (unlike instance_shell_masks' per-instance
-        # thresholds above), so can only be resolved after every instance
+        # composite's peak (unlike `_instance_shell_mask`'s per-instance
+        # thresholds), so can only be resolved after every instance
         # is merged into volume.
         _membrane_regions_start = phase_start(
             "  Region classification",
@@ -247,199 +248,30 @@ class _MembraneStageMixin:
                 # to_composite only ever collects accepted instances, whose
                 # position_xyz was just set above.
                 assert mi.position_xyz is not None
-                mi.generator.generate()
+                generated = self._generate_instance(mi)
                 progress.update(membrane_task, advance=1)
-                if mi.generator.clipped_at_boundary:
-                    if not self.retain_membrane_fields:
-                        mi.generator.field = None
-                        mi.generator.volume = None
-                    warnings.warn(
-                        "TomogramSpecimenGenerator: a membrane instance's own "
-                        "working grid was too small for the organelle size it "
-                        "actually drew (clipped_at_boundary=True on its "
-                        "MembraneGenerator) -- skipped rather than compositing a "
-                        "visibly truncated shape. Increase that instance's own "
-                        "target_shape/voxel_size, or omit target_shape "
-                        "entirely for auto-sizing.",
-                        stacklevel=2,
-                    )
+                if generated is None:
                     continue
-                # The bilayer's own peak, read BEFORE place_transmembrane
-                # inserts protein density. A protein template's peak is
-                # typically several times a smoothed bilayer's, so taking
-                # this afterwards would inflate the shell threshold below
-                # and erode the very thing it is meant to outline.
-                bare_bilayer = mi.generator.volume
-                assert bare_bilayer is not None  # generate() just ran
-                bare_peak = float(bare_bilayer.max())
-                del bare_bilayer
-                tm_placements = mi.generator.place_transmembrane(
-                    min_spacing_angstrom=self.min_transmembrane_spacing
+                bare_peak, tm_placements = generated
+
+                tm_placements = self._drop_placements_outside(
+                    tm_placements, tuple(volume.shape), voxel_size
                 )
-                # The field is needed for surface-site placement, but not
-                # for compositing, labels or subsequent tomogram stages.
-                # CLI runs need only those outputs; retaining every dense
-                # field would keep completed organelles in GPU memory.
-                if not self.retain_membrane_fields:
-                    mi.generator.field = None
-                offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
-                for tp in tm_placements:
-                    tp.center_xyz = tp.center_xyz + offset
-
-                # A membrane instance may extend past the tomogram walls
-                # (clip_axes), and `_insert_volume_max` clips the part that
-                # does -- so a protein embedded out there contributes no
-                # density and gets no instance label. Drop its ground-truth
-                # entry too, rather than shipping a pick at coordinates the
-                # volume does not cover. Same reasoning, and the same
-                # center-point granularity, as the carbon-film drop below.
-                if tm_placements:
-                    # By the canvas voxel each centre falls in, the same
-                    # rounding the insertion uses: voxel k is at
-                    # (k - n // 2) * voxel_size.
-                    centers = torch.stack([tp.center_xyz for tp in tm_placements])
-                    index = _canvas_indices(centers, tuple(volume.shape), voxel_size)
-                    shape = torch.tensor(volume.shape, device=index.device)
-                    outside = ((index < 0) | (index >= shape)).any(dim=1)
-                    n_outside = int(outside.sum())
-                    if n_outside:
-                        warnings.warn(
-                            f"TomogramSpecimenGenerator: dropped {n_outside} "
-                            "transmembrane protein placement(s) that fell "
-                            "outside the tomogram box, on the part of a "
-                            "membrane instance clipped by the volume walls "
-                            "(no density was rendered for them, so a pick "
-                            "there would claim a particle the volume does "
-                            "not contain).",
-                            stacklevel=2,
-                        )
-                        tm_placements = [
-                            tp
-                            for tp, drop in zip(tm_placements, outside.tolist())
-                            if not drop
-                        ]
-
                 local_volume = mi.generator.volume
                 assert local_volume is not None
                 if carbon_mask is not None:
-                    # Placed instances shouldn't reach here at all in the
-                    # common case (their bounding sphere was already kept
-                    # clear of carbon by the RSA exclusion field above), so
-                    # this is normally a no-op -- it's a safety net for an
-                    # irregular organelle whose true rendered shape extends
-                    # past its own bounding-sphere approximation. Zeroes
-                    # local_volume wherever it would
-                    # land on carbon, BEFORE both compositing into `volume`
-                    # and the shell_mask/ground-truth labeling below, so
-                    # both consistently reflect the clip -- reuses the same
-                    # index math `_insert_volume_max` itself uses, rather
-                    # than duplicating it.
-                    center_zyx = _position_to_center_index(
-                        mi.position_xyz, tuple(volume.shape), voxel_size
+                    self._clip_instance_to_carbon(
+                        mi, local_volume, carbon_mask, voxel_size
                     )
-                    bounds = clip_insert_bounds(
-                        center_zyx, local_volume.shape, volume.shape
+                    tm_placements = self._drop_placements_in_carbon(
+                        tm_placements, carbon_mask, voxel_size
                     )
-                    if bounds is not None:
-                        dst, src = bounds
-                        forbidden = carbon_mask[dst].to(local_volume.device)
-                        if forbidden.any():
-                            warnings.warn(
-                                "TomogramSpecimenGenerator: clipped part of a "
-                                "membrane instance (an irregular shape "
-                                "exceeding its own bounding-sphere estimate) "
-                                "that overlapped the carbon film.",
-                                stacklevel=2,
-                            )
-                            local_volume[src] = local_volume[src] * (~forbidden).to(
-                                local_volume.dtype
-                            )
-                            # Same clip on the protein labels, so a
-                            # transmembrane instance whose density was just
-                            # removed doesn't keep a ground-truth label
-                            # sitting on carbon.
-                            tm_labels_clip = mi.generator.transmembrane_labels
-                            if tm_labels_clip is not None:
-                                tm_labels_clip[src] = tm_labels_clip[src] * (
-                                    ~forbidden
-                                ).to(tm_labels_clip.dtype)
-
-                    # `place_transmembrane` (above) already baked these
-                    # placements' own density into local_volume before this
-                    # point, so a placement whose center lands on carbon
-                    # just had its density zeroed by the clip above too --
-                    # this only fixes the separate ground-truth bookkeeping
-                    # list (self.transmembrane_placements, what export_picks
-                    # writes out), which would otherwise still claim a
-                    # particle sits somewhere with no actual density left.
-                    # Checked by center point, not full rendered footprint
-                    # (same granularity already used for filament monomers
-                    # in _stamp_filaments) -- a placement whose center is
-                    # just outside carbon but whose template partially
-                    # overlapped it keeps its (partially clipped) entry,
-                    # matching how e.g. bead/protein exclusion is also
-                    # voxel-level, not footprint-exact.
-                    if tm_placements:
-                        centers = torch.stack([tp.center_xyz for tp in tm_placements])
-                        index = _canvas_indices(
-                            centers, tuple(volume.shape), voxel_size
-                        )
-                        last = torch.tensor(volume.shape, device=index.device) - 1
-                        iz, iy, ix = torch.minimum(index.clamp(min=0), last).unbind(1)
-                        cm_dev = carbon_mask.device
-                        in_carbon = carbon_mask[
-                            iz.to(cm_dev), iy.to(cm_dev), ix.to(cm_dev)
-                        ].cpu()
-                        n_dropped_tm = int(in_carbon.sum())
-                        if n_dropped_tm:
-                            warnings.warn(
-                                f"TomogramSpecimenGenerator: dropped "
-                                f"{n_dropped_tm} transmembrane protein "
-                                "placement(s) clipped by the carbon film "
-                                "(density already removed above; this drops "
-                                "their now-stale ground-truth pick entries "
-                                "too).",
-                                stacklevel=2,
-                            )
-                            tm_placements = [
-                                tp
-                                for tp, drop in zip(tm_placements, in_carbon.tolist())
-                                if not drop
-                            ]
                 self.transmembrane_placements.extend(tm_placements)
                 volume = _insert_volume_max(
                     volume, local_volume, mi.position_xyz, voxel_size
                 )
-                # Per-instance shell mask, computed and stashed as a bool
-                # (~4x smaller than float32, and ~4-8x smaller again than
-                # keeping the full density array around) NOW, while
-                # local_volume is still cheaply available, rather than in a
-                # second pass after every instance has run. A GLOBAL
-                # threshold (shared across every instance) would need the
-                # full composite's peak, which isn't known until the loop
-                # finishes -- forcing every instance's full-resolution
-                # array to stay resident simultaneously until then.
-                # Confirmed directly: that OOMs well before this loop even
-                # finishes, now that generation-resolution decoupling
-                # (MembraneGenerator's max_field_voxels) lets a single
-                # instance's own volume reach tens of GB. Using THIS
-                # instance's own peak instead when region_density_threshold
-                # is auto (None) -- a per-instance peak is also the more
-                # correct reference for per-instance shell LABELING, since
-                # an instance whose own peak is lower (a smaller organelle
-                # resolved on a coarser working grid, say) should not have
-                # its true shell mislabeled as background just
-                # because a brighter sibling set a higher global bar).
-                # When region_density_threshold is explicitly set, it's
-                # already an absolute density value (not a fraction, see
-                # this same fallback below for self.regions), so using it
-                # directly here is identical to a shared global threshold
-                # -- no behaviour change in that case.
-                if self.region_density_threshold is not None:
-                    instance_threshold = self.region_density_threshold
-                else:
-                    instance_threshold = 0.05 * bare_peak if bare_peak > 0 else 0.0
-                shell_mask = local_volume > instance_threshold
+
+                shell_mask = self._instance_shell_mask(local_volume, bare_peak)
                 # The membrane label is the BILAYER, not the bilayer plus
                 # whatever is embedded in it. `_insert_blend` has already
                 # decided which voxels the protein displaced lipid from --
@@ -459,42 +291,222 @@ class _MembraneStageMixin:
                     )
                     # Reserve from the count `place_transmembrane` actually
                     # LABELLED (its own `placements`, ids 1..n), not from
-                    # `tm_placements` -- the carbon block above may have
-                    # pruned that list, and reserving the short count would
-                    # let the next membrane's offset collide with this
-                    # one's higher ids.
+                    # `tm_placements` -- the carbon drop may have pruned that
+                    # list, and reserving the short count would let the next
+                    # membrane's offset collide with this one's higher ids.
                     next_instance_id += len(mi.generator.placements)
                     mi.generator.transmembrane_labels = None
                 del tm_labels
-                shell_mask = shell_mask.cpu()
-                instance_shell_masks.append((mi, shell_mask))
+                instance_shell_masks.append((mi, shell_mask.cpu()))
                 self.placed_membrane_instances.append(mi)
                 mi.generator.volume = None
-                # Dropping the last reference above is not enough by
-                # itself: PyTorch's CUDA caching allocator keeps freed
-                # blocks in its own pool rather than returning them to the
-                # driver, and each instance's own working/output grid can
-                # be a DIFFERENT size (random per-instance organelle size),
-                # so the next instance's allocation can fail on
-                # fragmentation even though the previous instance's memory
-                # was already dereferenced -- confirmed directly: a second
-                # instance's OOM here, with the traceback showing several
-                # GiB "reserved but unallocated" at the same time as the
-                # failing allocation. gc.collect() first in case any
-                # tensor is only reachable via a reference cycle (autograd
-                # graphs can create these) that plain refcounting wouldn't
-                # free promptly.
                 del local_volume
-                if torch.device(self.device).type == "cuda":
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                self._release_device_memory()
         return volume, instance_labels, next_instance_id, instance_shell_masks
+
+    def _generate_instance(
+        self, mi: MembraneInstance
+    ) -> tuple[float, list[TransmembranePlacement]] | None:
+        """Generate `mi` and embed its transmembrane proteins.
+
+        Returns the bare bilayer's peak and the placements, offset into the
+        canvas frame, or None when the instance's working grid clipped the
+        organelle it drew.
+        """
+        assert mi.position_xyz is not None
+        mi.generator.generate()
+        if mi.generator.clipped_at_boundary:
+            if not self.retain_membrane_fields:
+                mi.generator.field = None
+                mi.generator.volume = None
+            warnings.warn(
+                "TomogramSpecimenGenerator: a membrane instance's own "
+                "working grid was too small for the organelle size it "
+                "actually drew (clipped_at_boundary=True on its "
+                "MembraneGenerator) -- skipped rather than compositing a "
+                "visibly truncated shape. Increase that instance's own "
+                "target_shape/voxel_size, or omit target_shape "
+                "entirely for auto-sizing.",
+                stacklevel=3,
+            )
+            return None
+        # The bilayer's own peak, read BEFORE place_transmembrane inserts
+        # protein density. A protein template's peak is typically several
+        # times a smoothed bilayer's, so taking this afterwards would
+        # inflate the shell threshold and erode the very thing it is meant
+        # to outline.
+        bare_bilayer = mi.generator.volume
+        assert bare_bilayer is not None  # generate() just ran
+        bare_peak = float(bare_bilayer.max())
+        del bare_bilayer
+        tm_placements = mi.generator.place_transmembrane(
+            min_spacing_angstrom=self.min_transmembrane_spacing
+        )
+        # The field is needed for surface-site placement, but not for
+        # compositing, labels or subsequent tomogram stages. CLI runs need
+        # only those outputs; retaining every dense field would keep
+        # completed organelles in GPU memory.
+        if not self.retain_membrane_fields:
+            mi.generator.field = None
+        offset = torch.tensor(mi.position_xyz, dtype=torch.float32)
+        for tp in tm_placements:
+            tp.center_xyz = tp.center_xyz + offset
+        return bare_peak, tm_placements
+
+    @staticmethod
+    def _drop_placements_outside(
+        tm_placements: list[TransmembranePlacement],
+        shape_zyx: tuple[int, ...],
+        voxel_size: float,
+    ) -> list[TransmembranePlacement]:
+        """Drop placements whose centre's canvas voxel is outside the box.
+
+        A membrane instance may extend past the tomogram walls (clip_axes),
+        and `_insert_volume_max` clips the part that does -- so a protein
+        embedded out there contributes no density and gets no instance
+        label. Its ground-truth entry goes too, rather than shipping a pick
+        at coordinates the volume does not cover.
+        """
+        if not tm_placements:
+            return tm_placements
+        centers = torch.stack([tp.center_xyz for tp in tm_placements])
+        index = _canvas_indices(centers, shape_zyx, voxel_size)
+        shape = torch.tensor(shape_zyx, device=index.device)
+        outside = ((index < 0) | (index >= shape)).any(dim=1)
+        n_outside = int(outside.sum())
+        if n_outside:
+            warnings.warn(
+                f"TomogramSpecimenGenerator: dropped {n_outside} "
+                "transmembrane protein placement(s) that fell "
+                "outside the tomogram box, on the part of a "
+                "membrane instance clipped by the volume walls "
+                "(no density was rendered for them, so a pick "
+                "there would claim a particle the volume does "
+                "not contain).",
+                stacklevel=3,
+            )
+        return [tp for tp, drop in zip(tm_placements, outside.tolist()) if not drop]
+
+    @staticmethod
+    def _clip_instance_to_carbon(
+        mi: MembraneInstance,
+        local_volume: torch.Tensor,
+        carbon_mask: torch.Tensor,
+        voxel_size: float,
+    ) -> None:
+        """Zero `local_volume` and its transmembrane labels, in place,
+        wherever they would land on the carbon film.
+
+        Placed instances shouldn't reach here at all in the common case
+        (their bounding sphere was already kept clear of carbon by the RSA
+        exclusion field), so this is normally a no-op -- a safety net for an
+        irregular organelle whose true rendered shape extends past its own
+        bounding-sphere approximation. It runs BEFORE both compositing and
+        the shell mask/ground-truth labelling, so both reflect the clip,
+        and reuses the index math `_insert_volume_max` itself uses.
+        """
+        assert mi.position_xyz is not None
+        center_zyx = _position_to_center_index(
+            mi.position_xyz, tuple(carbon_mask.shape), voxel_size
+        )
+        bounds = clip_insert_bounds(center_zyx, local_volume.shape, carbon_mask.shape)
+        if bounds is None:
+            return
+        dst, src = bounds
+        forbidden = carbon_mask[dst].to(local_volume.device)
+        if not forbidden.any():
+            return
+        warnings.warn(
+            "TomogramSpecimenGenerator: clipped part of a "
+            "membrane instance (an irregular shape "
+            "exceeding its own bounding-sphere estimate) "
+            "that overlapped the carbon film.",
+            stacklevel=3,
+        )
+        local_volume[src] = local_volume[src] * (~forbidden).to(local_volume.dtype)
+        # Same clip on the protein labels, so a transmembrane instance whose
+        # density was just removed doesn't keep a ground-truth label sitting
+        # on carbon.
+        tm_labels = mi.generator.transmembrane_labels
+        if tm_labels is not None:
+            tm_labels[src] = tm_labels[src] * (~forbidden).to(tm_labels.dtype)
+
+    @staticmethod
+    def _drop_placements_in_carbon(
+        tm_placements: list[TransmembranePlacement],
+        carbon_mask: torch.Tensor,
+        voxel_size: float,
+    ) -> list[TransmembranePlacement]:
+        """Drop placements whose centre's canvas voxel is carbon.
+
+        `place_transmembrane` baked these placements' density into the
+        instance before `_clip_instance_to_carbon` zeroed it, so this only
+        fixes the ground-truth list (what export_picks writes), which would
+        otherwise claim a particle where no density is left. Checked by
+        centre point, not full footprint (as for filament copies): a
+        placement whose centre is just outside carbon keeps its partially
+        clipped entry, matching how bead and protein exclusion are also
+        voxel-level rather than footprint-exact.
+        """
+        if not tm_placements:
+            return tm_placements
+        centers = torch.stack([tp.center_xyz for tp in tm_placements])
+        in_carbon = _mask_at_positions(carbon_mask, centers, voxel_size)
+        n_dropped = int(in_carbon.sum())
+        if n_dropped:
+            warnings.warn(
+                f"TomogramSpecimenGenerator: dropped "
+                f"{n_dropped} transmembrane protein "
+                "placement(s) clipped by the carbon film "
+                "(density already removed above; this drops "
+                "their now-stale ground-truth pick entries "
+                "too).",
+                stacklevel=3,
+            )
+        return [tp for tp, drop in zip(tm_placements, in_carbon.tolist()) if not drop]
+
+    def _instance_shell_mask(
+        self, local_volume: torch.Tensor, bare_peak: float
+    ) -> torch.Tensor:
+        """Where `local_volume` is membrane shell, thresholded per instance.
+
+        Computed now, while `local_volume` is at hand, and kept as a bool:
+        a GLOBAL threshold would need the full composite's peak, forcing
+        every instance's full-resolution array to stay resident until the
+        loop finishes, which OOMs once `MembraneGenerator`'s
+        max_field_voxels lets one instance reach tens of GB. This
+        instance's own peak (when `region_density_threshold` is auto) is
+        also the right reference for labelling it: an instance with a lower
+        peak (a smaller organelle on a coarser working grid, say) should
+        not have its shell mislabelled as background because a brighter
+        sibling set a higher bar. An explicit `region_density_threshold` is
+        an absolute density, identical to a shared global threshold.
+        """
+        if self.region_density_threshold is not None:
+            threshold = self.region_density_threshold
+        else:
+            threshold = 0.05 * bare_peak if bare_peak > 0 else 0.0
+        return local_volume > threshold
+
+    def _release_device_memory(self) -> None:
+        """Hand freed CUDA blocks back to the driver between instances.
+
+        Dropping the last reference is not enough: the caching allocator
+        keeps freed blocks in its own pool, and each instance's grid can be
+        a different size (random per-instance organelle size), so the next
+        allocation can fail on fragmentation with several GiB "reserved but
+        unallocated" -- observed directly. gc.collect() first in case a
+        tensor is only reachable through a reference cycle.
+        """
+        if torch.device(self.device).type == "cuda":
+            gc.collect()
+            torch.cuda.empty_cache()
 
     def _classify_regions(self, volume: torch.Tensor) -> None:
         """Classify the composite into shell, lumen and cytosol (``self.regions``)."""
         # classify_membrane_regions' own threshold: needs the FULL
-        # composite's peak (unlike instance_shell_masks' per-instance
-        # thresholds above), so can only be resolved after every instance
+        # composite's peak (unlike `_instance_shell_mask`'s per-instance
+        # thresholds), so can only be resolved after every instance
         # is merged into volume.
         threshold = self.region_density_threshold
         if threshold is None:

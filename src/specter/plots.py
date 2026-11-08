@@ -367,8 +367,9 @@ def fsc_resolution(
     Returns
     -------
     str
-        Resolution formatted as ``"1.397 Å"``, or ``">Nyquist"`` when the FSC
-        never crosses the threshold.
+        Resolution formatted as ``"1.397 Å"``, ``">Nyquist"`` when the FSC
+        never falls below the threshold, or ``"worse than"`` the lowest nonzero
+        shell's resolution when it never reaches it.
 
     References
     ----------
@@ -382,9 +383,13 @@ def fsc_resolution(
     if k_max is not None:
         keep = int((kf <= k_max).sum())
         kf, ff = kf[:keep], ff[:keep]
-    if len(ff) < 2 or not bool((ff[1:] < threshold).any()):
+    if len(ff) < 2:
         return ">Nyquist"
     shell = fsc_crossing(ff, threshold)
+    if shell == len(ff) - 1:
+        return ">Nyquist"
+    if not bool((ff >= threshold).any()):
+        return f"worse than {1.0 / float(kf[1]):.3f} Å"
     i = min(int(shell), len(kf) - 2)
     k_cross = kf[i] + (shell - i) * (kf[i + 1] - kf[i])
     return f"{1.0 / float(k_cross):.3f} Å"

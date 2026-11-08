@@ -627,7 +627,10 @@ def fsc_crossing(fsc: np.ndarray | torch.Tensor, threshold: float = 0.143) -> fl
 
     The *first* crossing, as RELION and CryoSPARC report it: a masked FSC
     can rise again toward Nyquist when both maps share the mask, and reading
-    the last crossing would report that artefact as resolution.
+    the last crossing would report that artefact as resolution. A crossing
+    is a shell at or above `threshold` followed by one below it, so a curve
+    that starts below, as a map-to-model FSC does at the shells the data
+    leave undetermined (the map's mean), is read where it falls after rising.
 
     Parameters
     ----------
@@ -639,15 +642,16 @@ def fsc_crossing(fsc: np.ndarray | torch.Tensor, threshold: float = 0.143) -> fl
     Returns
     -------
     float
-        Shell index (Fourier voxels); the last shell when it never falls below.
+        Shell index (Fourier voxels); the last shell when it never falls
+        below after reaching `threshold`, and 0 when it never reaches it.
     """
     # In the curve's own precision: the solver's mask search compares
     # crossings computed this way, and float64 would move them in the last bits.
     f = fsc.detach().cpu().numpy() if isinstance(fsc, torch.Tensor) else np.asarray(fsc)
-    below = np.nonzero(f[1:] < threshold)[0]
-    if len(below) == 0:
-        return float(len(f) - 1)
-    i = int(below[0]) + 1
+    crossed = np.nonzero((f[:-1] >= threshold) & (f[1:] < threshold))[0]
+    if len(crossed) == 0:
+        return float(len(f) - 1) if bool((f >= threshold).any()) else 0.0
+    i = int(crossed[0]) + 1
     return float((i - 1) + (f[i - 1] - threshold) / (f[i - 1] - f[i]))
 
 

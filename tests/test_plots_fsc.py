@@ -8,6 +8,7 @@ import torch
 
 matplotlib.use("Agg")
 
+from specter.fft import fsc_crossing  # noqa: E402
 from specter.plots import (  # noqa: E402
     MAP_TO_MODEL_FSC_THRESHOLD,
     fsc_resolution,
@@ -90,7 +91,7 @@ def test_map_to_model_resolution_never_finer_than_nyquist():
     (label,) = fig.axes[0].get_legend_handles_labels()[1]
     matplotlib.pyplot.close(fig)
 
-    if ">Nyquist" not in label:
+    if ">Nyquist" not in label and "worse than" not in label:
         reported = float(label.split("(")[1].split()[0])
         assert reported >= nyquist_res, (
             f"reported {reported} Å, finer than Nyquist {nyquist_res} Å"
@@ -135,3 +136,21 @@ def test_fsc_resolution_reports_the_first_crossing():
     # first crossing of 0.143 lies between k[4]=0.20 and k[5]=0.25
     expected = 1.0 / (0.20 + (0.143 - 0.2) / (0.10 - 0.2) * 0.05)
     assert fsc_resolution(k, fsc, 0.143) == f"{expected:.3f} Å"
+
+
+def test_a_curve_starting_below_the_threshold_is_read_where_it_falls():
+    """A map-to-model FSC starts at -1 when the map's mean, which the images
+    leave undetermined, has the opposite sign to the model's. The resolution
+    is where the curve falls through the threshold after rising, not an
+    extrapolation between the two low shells already below it."""
+    k = torch.tensor([0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
+    fsc = torch.tensor([-1.0, -0.9, 0.9, 0.7, 0.3, 0.0])
+    assert fsc_resolution(k, fsc, 0.5) == "2.857 Å"
+    assert fsc_crossing(fsc, 0.5) == pytest.approx(3.5)
+
+
+def test_a_curve_that_never_reaches_the_threshold_has_no_resolution():
+    k = torch.tensor([0.0, 0.1, 0.2, 0.3])
+    fsc = torch.tensor([-1.0, 0.2, 0.1, 0.0])
+    assert fsc_crossing(fsc, 0.5) == 0.0
+    assert fsc_resolution(k, fsc, 0.5) == "worse than 10.000 Å"

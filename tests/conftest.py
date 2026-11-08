@@ -2,7 +2,8 @@
 
 Configured here: intra-op thread limiting under ``pytest-xdist`` (see
 :func:`_limit_threads_under_xdist` for why it is conditional rather than
-unconditional), per-test resetting of the warn-once flags (see
+unconditional), glibc heap retention (see :func:`_retain_freed_heap`),
+per-test resetting of the warn-once flags (see
 :func:`reset_warn_once_flags`), and the box-phantom volumes and
 golden-fixture helper several test modules share.
 
@@ -61,6 +62,52 @@ def _limit_threads_under_xdist() -> None:
 
 
 _limit_threads_under_xdist()
+
+
+# glibc mallopt parameters (malloc.h) and the environment spellings that set
+# them in a process's own malloc initialisation.
+_M_TRIM_THRESHOLD, _M_TOP_PAD, _M_MMAP_MAX = -1, -2, -4
+_HEAP_RETENTION = {
+    "MALLOC_MMAP_MAX_": (_M_MMAP_MAX, 0),
+    "MALLOC_TRIM_THRESHOLD_": (_M_TRIM_THRESHOLD, 64 << 30),
+    "MALLOC_TOP_PAD_": (_M_TOP_PAD, 1 << 30),
+}
+
+
+def _retain_freed_heap() -> None:
+    """
+    Keep freed memory in glibc's heap instead of handing it back to the kernel.
+
+    By default glibc serves every allocation above a few MB (most tensors
+    here) with its own ``mmap`` and ``munmap``s it on free, so the next
+    tensor of that size page-faults in freshly zeroed pages. The tests
+    allocate and drop large volumes constantly, and that zeroing was nearly
+    half the suite's CPU time (system 3,800 s against user 4,600 s). Serving
+    everything from a heap that is never trimmed lets freed pages be reused:
+    the full suite's system time fell to ~230 s and its total CPU by 37%.
+    Measured with 4 threads, alone: the gold-bead MIP test 45.0 -> 31.7 s
+    (system 45 -> 7 s), a filament tomogram test 40.8 -> 29.1 s (35 -> 2 s),
+    peak RSS 9.1 -> 10.4 GB. The cost is that a worker keeps its high-water
+    mark until it exits.
+
+    This process's malloc is already initialised, so it is configured with
+    ``mallopt``; the environment variables cover the subprocesses tests
+    spawn. Linux/glibc only, and a no-op elsewhere.
+    """
+    import ctypes
+    import ctypes.util
+
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6")
+        mallopt = libc.mallopt
+    except (OSError, AttributeError):
+        return
+    for var, (param, value) in _HEAP_RETENTION.items():
+        os.environ.setdefault(var, str(value))
+        mallopt(param, int(os.environ[var]))
+
+
+_retain_freed_heap()
 
 
 @pytest.fixture(autouse=True)

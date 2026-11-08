@@ -31,7 +31,7 @@ _FENCE = re.compile(r"^```python\n(.*?)^```", re.MULTILINE | re.DOTALL)
 
 
 def _notebook_sources(path: Path) -> list[str]:
-    cells = json.loads(path.read_text())["cells"]
+    cells = json.loads(path.read_text(encoding="utf-8"))["cells"]
     sources = []
     for cell in cells:
         if cell["cell_type"] != "code":
@@ -48,7 +48,7 @@ def _notebook_sources(path: Path) -> list[str]:
 
 
 def _doc_sources(path: Path) -> list[str]:
-    return [m.group(1) for m in _FENCE.finditer(path.read_text())]
+    return [m.group(1) for m in _FENCE.finditer(path.read_text(encoding="utf-8"))]
 
 
 def _specter_imports(source: str) -> list[tuple[str, str | None]]:

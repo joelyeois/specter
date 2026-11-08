@@ -29,7 +29,7 @@ from ..filament._actin import extract_actin_subunit
 from ..filament._placement import subunit_centre_in_filament_frame
 from ..filament._tubulin import extract_mt_dimer
 from ..membrane._placement import align_principal_axis_to_z
-from ._helpers import _insert_rotated_copies
+from ._helpers import _canvas_indices, _insert_rotated_copies
 
 if TYPE_CHECKING:
     from ...pdb import PDB
@@ -42,6 +42,29 @@ _EXTRACTED_FRAMES: dict[str, Callable[..., str]] = {
     "actin_filament": extract_actin_subunit,
     "microtubule_dimer": extract_mt_dimer,
 }
+
+
+def _stamped_centres(
+    instances: list[FilamentInstance],
+    centres: dict[str, torch.Tensor],
+    shape_zyx: tuple[int, ...],
+    voxel_size: float,
+    device: torch.device | str = "cpu",
+) -> torch.Tensor:
+    """Where each copy's template centre is stamped, ``(N, 3)`` x, y, z in
+    Å in the canvas's centred frame.
+
+    A copy's corner-relative path point, moved by ``-extent / 2`` into the
+    frame `volume`/`instance_labels` are indexed in, plus its species'
+    template centre (``centres[code]``, `_filament_template`) carried into
+    the world by the copy's rotation; that offset is zero unless the
+    subunit sits off the filament axis.
+    """
+    extent_xyz = torch.tensor(shape_zyx[::-1], dtype=torch.float32) * voxel_size
+    pos = torch.stack([inst.position_xyz for inst in instances]).to(device)
+    R = torch.stack([inst.rotation_matrix for inst in instances]).to(device)
+    C = torch.stack([centres[inst.code] for inst in instances]).to(device)
+    return pos - (extent_xyz / 2).to(device) + (R @ C.unsqueeze(-1)).squeeze(-1)
 
 
 def _filament_runs(
@@ -246,8 +269,9 @@ class _FilamentStageMixin:
         if self.seed is not None:
             rng.manual_seed(self.seed)
         instances = place_filaments(self.filament_specs, target_shape, voxel_size, rng)
+        templates = self._filament_templates(instances, voxel_size, as_given=False)
         instances = self._drop_instances_in_carbon(
-            instances, carbon_mask, voxel_size, "filament monomer"
+            instances, templates, carbon_mask, voxel_size, "filament monomer"
         )
 
         self.filament_instances = instances
@@ -261,29 +285,37 @@ class _FilamentStageMixin:
             voxel_size,
             instances,
             instance_ids=instance_ids,
+            templates=templates,
         )
 
     def _drop_instances_in_carbon(
         self,
         instances: list[FilamentInstance],
+        templates: dict[str, tuple[torch.Tensor, torch.Tensor]],
         carbon_mask: torch.Tensor | None,
         voxel_size: float,
         what: str,
     ) -> list[FilamentInstance]:
-        """Drop copies whose centre lands inside the carbon film.
+        """Drop copies whose template centre lands inside the carbon film.
 
         Shared by filament and microtubule stamping -- neither placer is
         obstacle-aware, so this is the same "reject after the fact" pass
-        described in `_stamp_filaments`.
+        described in `_stamp_filaments`. The voxel tested is the one the
+        copy's template centre is stamped on (`_stamped_centres`), clamped
+        into the canvas, not its path point: an F-actin subunit sits
+        15.7 A off the axis its path point lies on.
         """
         if carbon_mask is None or not instances:
             return instances
 
-        nz, ny, nx = self.target_shape
-        pos = torch.stack([inst.position_xyz for inst in instances])  # (N,3) x,y,z
-        ix = (pos[:, 0] / voxel_size).long().clamp(0, nx - 1)
-        iy = (pos[:, 1] / voxel_size).long().clamp(0, ny - 1)
-        iz = (pos[:, 2] / voxel_size).long().clamp(0, nz - 1)
+        centres = {code: centre for code, (_, centre) in templates.items()}
+        index = _canvas_indices(
+            _stamped_centres(instances, centres, self.target_shape, voxel_size),
+            self.target_shape,
+            voxel_size,
+        )
+        last = torch.tensor(self.target_shape) - 1
+        iz, iy, ix = torch.minimum(index.clamp(min=0), last).unbind(1)
         cm_dev = carbon_mask.device
         in_carbon = carbon_mask[iz.to(cm_dev), iy.to(cm_dev), ix.to(cm_dev)].cpu()
         n_dropped = int(in_carbon.sum())
@@ -327,8 +359,9 @@ class _FilamentStageMixin:
             generator=rng,
             pdb_cache_dir=self.pdb_cache_dir,
         )
+        templates = self._filament_templates(instances, voxel_size, as_given=True)
         instances = self._drop_instances_in_carbon(
-            instances, carbon_mask, voxel_size, "microtubule dimer"
+            instances, templates, carbon_mask, voxel_size, "microtubule dimer"
         )
 
         self.microtubule_instances = tubes
@@ -350,6 +383,7 @@ class _FilamentStageMixin:
             instances,
             instance_ids=instance_ids,
             as_given=True,
+            templates=templates,
         )
 
     def _microtubule_lumen_mask(
@@ -442,6 +476,15 @@ class _FilamentStageMixin:
         )
         return template, torch.zeros(3)
 
+    def _filament_templates(
+        self, instances: list[FilamentInstance], voxel_size: float, as_given: bool
+    ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+        """`_filament_template` for every species among `instances`."""
+        codes = dict.fromkeys(inst.code for inst in instances)
+        return {
+            code: self._filament_template(code, voxel_size, as_given) for code in codes
+        }
+
     def _render_filament_instances(
         self,
         volume: torch.Tensor,
@@ -451,6 +494,7 @@ class _FilamentStageMixin:
         instances: list[FilamentInstance],
         instance_ids: torch.Tensor | None = None,
         as_given: bool = False,
+        templates: dict[str, tuple[torch.Tensor, torch.Tensor]] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         """Render placed monomer/dimer copies: one template per species,
         rotated and inserted once per instance.
@@ -474,11 +518,10 @@ class _FilamentStageMixin:
             (`_tubulin.extract_mt_dimer`), where the roll about ``+Z``
             carries the radial orientation that principal-axis alignment
             has no way to know about and would be free to destroy.
+        templates : dict, optional
+            ``code -> (template, centre)`` from `_filament_templates`, for
+            callers that needed the centres first. Default None: built here.
         """
-        extent_xyz = (
-            torch.tensor(self.target_shape[::-1], dtype=torch.float32) * voxel_size
-        )
-
         if instance_ids is None:
             ids = torch.arange(
                 next_instance_id,
@@ -493,24 +536,17 @@ class _FilamentStageMixin:
         for inst, inst_id in zip(instances, ids.tolist()):
             by_code.setdefault(inst.code, []).append((inst, inst_id))
 
-        templates: dict[str, tuple[torch.Tensor, torch.Tensor]] = {
-            code: self._filament_template(code, voxel_size, as_given)
-            for code in by_code
-        }
+        if templates is None:
+            templates = self._filament_templates(instances, voxel_size, as_given)
+        centres = {code: centre for code, (_, centre) in templates.items()}
 
-        offset = (extent_xyz / 2).to(self.device)
         for code, entries in by_code.items():
-            template, centre = templates[code]
+            template = templates[code][0]
 
             insts = [inst for inst, _ in entries]
             R = torch.stack([inst.rotation_matrix for inst in insts]).to(self.device)
-            # A copy's template centre: its path point, plus the template's
-            # own centre carried into the world by the copy's rotation (zero
-            # unless the subunit sits off the filament axis).
-            positions_centered = (
-                torch.stack([inst.position_xyz for inst in insts]).to(self.device)
-                - offset
-                + R @ centre.to(self.device)
+            positions_centered = _stamped_centres(
+                insts, centres, self.target_shape, voxel_size, self.device
             )
             # `rotation_matrix` maps template coordinates to world ones (the
             # template's +Z onto the path tangent, a dimer's +X radially out),

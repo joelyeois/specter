@@ -296,6 +296,69 @@ def test_actin_filament_copies_render_off_the_axis(synthetic_filament, tmp_path)
     assert float((rendered - on_axis).norm()) > 12.0
 
 
+def test_carbon_drops_a_copy_where_its_density_lands(synthetic_filament, tmp_path):
+    """A subunit is dropped when its rendered density sits in the carbon film,
+    and kept when only the axis point its position names does.
+
+    The copy's centre of mass, 15.7 A off its axis point, is read off a
+    render without carbon, so the test does not reuse the drop's own
+    arithmetic. Each mask is the 3x3x3 block around one voxel, wide enough
+    for the half-voxel rounding of the insertion.
+    """
+    path, _ = synthetic_filament
+    n, voxel_size = 64, 2.0
+    gen = TomogramSpecimenGenerator(
+        membrane_instances=[],
+        target_shape=(n, n, n),
+        voxel_size=voxel_size,
+        protein_specs=[],
+        filament_specs=[
+            FilamentSpec(
+                code=str(path), step=_RISE, flex_deg=0.0, frame="actin_filament"
+            )
+        ],
+        pdb_cache_dir=str(tmp_path / "cache"),
+        parameterization="kirkland",
+        progressbars=False,
+    )
+    instance = FilamentInstance(
+        code=str(path),
+        filament_id=0,
+        monomer_index=0,
+        position_xyz=torch.full((3,), n * voxel_size / 2),
+        rotation_matrix=roma.rotvec_to_rotmat(torch.tensor([0.9, -0.4, 0.3])),
+    )
+    volume, _, _ = gen._render_filament_instances(
+        torch.zeros((n, n, n)),
+        torch.zeros((n, n, n), dtype=torch.int32),
+        1,
+        voxel_size,
+        [instance],
+    )
+    zyx = torch.meshgrid(*(torch.arange(n, dtype=torch.float64),) * 3, indexing="ij")
+    density = volume.double()
+    com = [int(round(float((density * g).sum() / density.sum()))) for g in zyx]
+    axis = [n // 2] * 3
+    assert max(abs(a - c) for a, c in zip(axis, com)) >= 3
+
+    def block(centre: list[int]) -> torch.Tensor:
+        mask = torch.zeros((n, n, n), dtype=torch.bool)
+        z, y, x = centre
+        mask[z - 1 : z + 2, y - 1 : y + 2, x - 1 : x + 2] = True
+        return mask
+
+    templates = gen._filament_templates([instance], voxel_size, as_given=False)
+    with pytest.warns(UserWarning, match="carbon film"):
+        kept = gen._drop_instances_in_carbon(
+            [instance], templates, block(com), voxel_size, "filament monomer"
+        )
+    assert kept == []
+    kept = gen._drop_instances_in_carbon(
+        [instance], templates, block(axis), voxel_size, "filament monomer"
+    )
+    assert kept == [instance]
+
+
 def test_subunit_centre_undoes_pdb_centring(synthetic_filament, tmp_path):
     """`PDB` re-centres the subunit; the centre it removed is recovered."""
     from specter.pdb import PDB

@@ -119,6 +119,7 @@ class Structure:
         rcut: float | None = None,
         use_deposited_bfactors: bool = False,
         periodic: bool = False,
+        coordinates: torch.Tensor | None = None,
         device: torch.device | str = "cpu",
     ) -> Specimen:
         """
@@ -126,6 +127,8 @@ class Structure:
 
         Rendered on `device` and returned there; the analytic renderer is a
         loop of small ops per atom, an order of magnitude faster on a GPU.
+        `coordinates` replaces the model's own, atom for atom (a rotated or
+        shifted copy: elements and species keep their order).
         """
         builder = PotentialBuilder(
             box,
@@ -140,7 +143,8 @@ class Structure:
             periodic=periodic,
         ).to(device)
         with torch.no_grad():
-            V = builder(self.pdb.coordinates.to(device), method=method).clone()
+            xyz = self.pdb.coordinates if coordinates is None else coordinates
+            V = builder(xyz.to(device), method=method).clone()
         return Specimen(V, voxel_size, molecular_mass=self.molecular_mass)
 
 

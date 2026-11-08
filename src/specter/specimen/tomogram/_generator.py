@@ -77,7 +77,6 @@ from ...config import ScalarOrRange
 from ...arrays import count_nonzero_chunked
 from ...arrays import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB, canonical_pdb_source
-from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, random_rotation_matrix
 from .._carbon import CarbonFilmGenerator, CarbonFilmSpec, edge_hole_center
 from .._grid import BeadGenerator
@@ -1336,21 +1335,20 @@ class TomogramSpecimenGenerator(
         `coordinates` replaces ``pdb.coordinates`` (default None: use them
         as-is); filament rendering passes principal-axis-aligned ones.
         """
+        # Imported here: specter.imaging imports this package.
+        from ...imaging import Structure
+
         n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
-        builder = PotentialBuilder(
-            n_xyz=n,
-            dx=voxel_size,
-            atomic_numbers=pdb.atomic_numbers,
-            progressbars=False,
-            parameterization=self.parameterization,
-            # A replacement `coordinates` is rotation-only, so species stay
-            # aligned with coordinates.
-            atom_species=pdb.atom_species,
-            b_factors=pdb.b_factors if self.use_deposited_bfactors else None,
-        ).to(device)
-        if coordinates is None:
-            coordinates = pdb.coordinates
-        return builder.forward(coordinates, method="analytic").to(self.device)
+        # A replacement `coordinates` is rotation-only, so species stay
+        # aligned with coordinates.
+        template = Structure(pdb, self.parameterization).render(
+            voxel_size,
+            n,
+            coordinates=coordinates,
+            use_deposited_bfactors=self.use_deposited_bfactors,
+            device=device,
+        )
+        return template.potential.to(self.device)
 
     def _render_species_pool(
         self,

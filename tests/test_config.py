@@ -449,14 +449,16 @@ def test_hydrogen_settings_reach_pdb(monkeypatch, pipeline):
     be reproducible from its own recorded config. Unset still falls back to
     $CLIBD_MON, so nothing that relied on the variable changes.
     """
+    import specter.imaging._specimen as specimen_module
     import specter.pipelines._micrograph as micrograph_module
     import specter.pipelines._particles as particles_module
     from specter.config import MicrographConfig, ParticleStackConfig
 
-    mod, cls, run = (
-        (particles_module, ParticleStackConfig, "run_particle_stack")
+    # run_micrograph reads its model through Structure.from_pdb.
+    mod, cls, run, pdb_home = (
+        (particles_module, ParticleStackConfig, "run_particle_stack", particles_module)
         if pipeline == "particles"
-        else (micrograph_module, MicrographConfig, "run_micrograph")
+        else (micrograph_module, MicrographConfig, "run_micrograph", specimen_module)
     )
     seen: dict = {}
 
@@ -467,7 +469,7 @@ def test_hydrogen_settings_reach_pdb(monkeypatch, pipeline):
         seen.update(kwargs)
         raise _Stop
 
-    monkeypatch.setattr(mod, "PDB", _spy)
+    monkeypatch.setattr(pdb_home, "PDB", _spy)
     cfg = cls(
         pdb_source=str(Path(__file__).parent / "test_data" / "1mbo.cif"),
         readd_hydrogens=False,

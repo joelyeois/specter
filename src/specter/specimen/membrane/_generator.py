@@ -28,7 +28,6 @@ import torch
 from ...arrays import clip_insert_bounds
 from ...rotations import fold_subvoxel_offsets
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB
-from ...potential import PotentialBuilder
 from ...rotations import build_affine_matrix, rotate_volume
 from .._parallel_render import (
     build_templates_concurrently,
@@ -323,17 +322,9 @@ def render_transmembrane_template(
     coordinates = align_principal_axis_to_z(pdb.coordinates)
     coordinates = align_transmembrane_depth(coordinates, spec.tm_span_mask)
     n = estimate_protein_box_size(pdb.max_diameter, voxel_size)
-    builder = PotentialBuilder(
-        n_xyz=n,
-        dx=voxel_size,
-        atomic_numbers=pdb.atomic_numbers,
-        progressbars=False,
-        parameterization=spec.parameterization,
-        # align_principal_axis_to_z/align_transmembrane_depth only rotate and
-        # translate, so species stay in step with coordinates.
-        atom_species=pdb.atom_species,
-        b_factors=pdb.b_factors if use_deposited_bfactors else None,
-    ).to(device)
+    # Imported here: specter.imaging imports this package.
+    from ...imaging import Structure
+
     # "analytic" (PotentialBuilder's own documented default), not "3d" --
     # confirmed empirically the two methods integrate to the same total
     # potential (ratio ~1.001 across a 10x span of voxel sizes, on a real
@@ -343,7 +334,19 @@ def render_transmembrane_template(
     # rendered with "analytic"; using "3d" here compared two differently-
     # sharpened renderings of the same underlying physics, not a
     # deliberate contrast difference between membrane and protein.
-    return builder.forward(coordinates, method="analytic")
+    # align_principal_axis_to_z/align_transmembrane_depth only rotate and
+    # translate, so species stay in step with coordinates.
+    return (
+        Structure(pdb, spec.parameterization)
+        .render(
+            voxel_size,
+            n,
+            coordinates=coordinates,
+            use_deposited_bfactors=use_deposited_bfactors,
+            device=device,
+        )
+        .potential
+    )
 
 
 @dataclass

@@ -384,6 +384,7 @@ voxel_size = 12.0
 # did. This asserts the wiring rather than the pixels: it captures what
 # PotentialBuilder is actually constructed with, then aborts the run.
 def test_run_micrograph_types_atoms_for_shtyrov(monkeypatch, tmp_path: Path) -> None:
+    import specter.imaging._specimen as specimen_module
     import specter.pipelines._micrograph as micrograph_module
     from specter.config import MicrographConfig
 
@@ -392,14 +393,15 @@ def test_run_micrograph_types_atoms_for_shtyrov(monkeypatch, tmp_path: Path) -> 
     class _Sentinel(Exception):
         pass
 
-    real_builder = micrograph_module.PotentialBuilder
+    # run_micrograph renders through Structure.render.
+    real_builder = specimen_module.PotentialBuilder
 
     def _spy(*args, **kwargs):
         captured["atom_species"] = kwargs.get("atom_species")
         captured["n_atoms"] = len(args[2]) if len(args) > 2 else None
         raise _Sentinel
 
-    monkeypatch.setattr(micrograph_module, "PotentialBuilder", _spy)
+    monkeypatch.setattr(specimen_module, "PotentialBuilder", _spy)
 
     config = MicrographConfig(
         pdb_source=_FIXTURE_PDB,

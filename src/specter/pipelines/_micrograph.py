@@ -24,12 +24,10 @@ import specter
 from specter.arrays import compute_nz
 from specter.config import MicrographConfig, parse_scalar_or_range, validate_config
 from specter.ice import IceProfile, resolve_icemaker
-from specter.imaging import CTF, Exposure, Field
+from specter.imaging import CTF, Exposure, Field, Structure
 from specter.imaging._data import sample_uniform
 from specter.imaging._stages import read_dose_weights
 from specter.io import create_micrograph_starfile, write_mrc
-from specter.pdb import PDB
-from specter.potential import PotentialBuilder, molecular_mass_from_atoms
 from specter.devices import resolve_available_device
 from specter.settings import (
     Crowding,
@@ -116,19 +114,15 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     # --- Building 3D scattering potential ---
     section("Building 3D scattering potential")
-    # Shtyrov fits scattering factors per bonded species, so derive the bond
-    # topology from the structure -- without atom_species every atom silently
-    # falls back to per-element Peng. The other parameterizations are
-    # per-element and would only pay the extra gemmi pass for nothing.
-    _derive_atom_species = config.scattering_factors == "shtyrov"
-    pdb = PDB(
+    structure = Structure.from_pdb(
         config.pdb_source,
         assembly=config.assembly,
+        scattering_factors=config.scattering_factors,
         pdb_cache_dir=config.pdb_cache_dir,
-        compute_atom_species=_derive_atom_species,
         readd_hydrogens=config.readd_hydrogens,
         monomer_library_path=config.monomer_library_path,
     )
+    pdb = structure.pdb
 
     cs_angstrom = _mm_to_angstrom(config.cs)
     # The mean-free-path model replaces the amplitude-contrast ratio as the
@@ -139,16 +133,12 @@ def run_micrograph(config: MicrographConfig) -> None:
     # one particle box (a few hundred MB at most), the analytic renderer is
     # a loop of small ops per atom, and on the CPU that loop cost 18 s on a
     # 128-core host against under 2 s on the device.
-    pb = PotentialBuilder(
-        config.n_pixels,
+    V = structure.render(
         config.pixel_size,
-        pdb.atomic_numbers,
-        parameterization=config.scattering_factors,
-        atom_species=pdb.atom_species,
-        b_factors=pdb.b_factors if config.use_deposited_bfactors else None,
-    ).to(device)
-    with torch.no_grad():
-        V = pb(pdb.coordinates.to(device)).clone().cpu()
+        config.n_pixels,
+        use_deposited_bfactors=config.use_deposited_bfactors,
+        device=device,
+    ).potential.cpu()
 
     n = config.n_micrographs
 
@@ -208,7 +198,7 @@ def run_micrograph(config: MicrographConfig) -> None:
         V,
         config.pixel_size,
         config.micrograph_size,
-        molecular_mass=molecular_mass_from_atoms(pdb.atomic_numbers),
+        molecular_mass=structure.molecular_mass,
         ice=ice,
     ).pack(
         bundle_from_config(

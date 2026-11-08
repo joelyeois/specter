@@ -439,11 +439,11 @@ class GradientSKIcemaker(DeviceModule):
     def anneal(
         self,
         t_high: float = 220.0,
-        t_low: float = 80.0,
-        hold_steps: int = 2000,
-        cool_steps: int = 22000,
-        dt: float = 5.0,
-        friction: float = 0.01,
+        t_low: float = 130.0,
+        hold_steps: int = 1000,
+        cool_steps: int = 7071,
+        dt: float = 10.0,
+        friction: float = 0.001,
         prerelax_steps: int = 30,
         quench_steps: int = 50,
     ) -> dict[str, float]:
@@ -452,7 +452,7 @@ class GradientSKIcemaker(DeviceModule):
 
         Langevin dynamics (BAOAB splitting) holds the cell at `t_high`,
         cools it linearly to `t_low`, then L-BFGS quenches it to the nearest
-        energy minimum. Run it between :meth:`init_random` and
+        energy minimum (the inherent structure, effectively 0 K). Run it between :meth:`init_random` and
         :meth:`optimize` (with ``prerelax_steps=0`` there, since the anneal
         has already relaxed the cell).
 
@@ -464,14 +464,28 @@ class GradientSKIcemaker(DeviceModule):
         Changing a molecule's coordination means breaking one contact and
         forming another, an uphill move gradient descent does not make.
         Thermal motion does, and cooling lets the network settle into the
-        tetrahedral arrangement the ML-BOP three-body term favours. With the
-        defaults (10 ps at 220 K, 110 ps to 80 K) and a following
-        :meth:`optimize`, a 100 A cell at ``dx=0.25`` reached 74%
-        four-coordinated, a g(r) first peak of 5.0 (MD 6.1, without
-        annealing 4.8) and a lower S(k) loss than without annealing, in
-        about 4.5 min on an L40 against about 10 min for :meth:`optimize`
-        alone. Slower cooling raises the fraction (12 ps of cooling gave
-        58%) at proportional cost; the MD reference was cooled at 5 K/ns.
+        tetrahedral arrangement the ML-BOP three-body term favours.
+
+        The defaults hold 10 ps at 220 K and cool at 1.27 K/ps to 130 K
+        (71 ps), then quench. At the library geometry (``n=256, dx=1.0``,
+        527k molecules) this and a following :meth:`optimize` took 7.2 min
+        on an L40 and gave 75% four-coordinated molecules, an ML-BOP energy
+        of -0.414 eV/atom against the -0.413 target, and an S(k) loss of
+        5e-8 to 9e-8 (seeds 0 and 1). The first version of this anneal
+        (5 fs, friction 0.01/fs, 110 ps of cooling to 80 K) took 12.8 min
+        for 74%, -0.407 eV/atom and 1.8e-7. The settings were chosen on a
+        100 A cell:
+
+        * a 10 fs step matched 5 fs on every measure; 15 fs did too, but
+          is not the default.
+        * friction 0.001/fs let the network rearrange faster than 0.01/fs
+          in the same simulated time (77% against 74%); 0.0003/fs gave
+          no further gain.
+        * continuing the ramp from 130 K to 80 K added 2 points of
+          four-coordination at 40% more time; halving the ramp lost 6.
+
+        The MD reference itself was cooled at 5 K/ns, about 250 times more
+        slowly, and is 94% four-coordinated.
 
         The anneal has no voxel grid or FFT, so a step costs a small
         fraction of an :meth:`optimize` closure. The cell volume is fixed
@@ -482,16 +496,17 @@ class GradientSKIcemaker(DeviceModule):
         t_high : float, optional
             Hold temperature in K. Default 220.
         t_low : float, optional
-            Final temperature in K, that of the MD reference. Default 80.
+            Temperature in K the ramp ends at, before the quench. Default
+            130.
         hold_steps : int, optional
-            Steps held at `t_high`. Default 2000 (10 ps).
+            Steps held at `t_high`. Default 1000 (10 ps).
         cool_steps : int, optional
-            Steps of the linear ramp from `t_high` to `t_low`. Default 22000
-            (110 ps).
+            Steps of the linear ramp from `t_high` to `t_low`. Default 7071
+            (71 ps).
         dt : float, optional
-            Time step in fs, the one the MD reference used. Default 5.
+            Time step in fs. Default 10, twice the MD reference's.
         friction : float, optional
-            Langevin friction in 1/fs. Default 0.01.
+            Langevin friction in 1/fs. Default 0.001.
         prerelax_steps : int, optional
             L-BFGS steps on the energy alone before the dynamics, removing
             the overlaps of a random start that would otherwise blow the
@@ -564,7 +579,13 @@ class GradientSKIcemaker(DeviceModule):
                     torch.randn_like(vel)
                 )
                 pos += 0.5 * dt * vel
-                self._wrap_positions_(pos)
+                # Not wrapped into the cell here: the neighbour cache measures
+                # displacement from where it was built, so an atom wrapped
+                # across the boundary reads as having moved a cell length and
+                # forces a rebuild. With 5e5 atoms some atom crosses nearly
+                # every step, which made rebuilds 60% of the anneal's time.
+                # The pair vectors carry their own periodic shifts, so the
+                # forces do not need wrapped positions.
                 f = force(pos)
                 vel += 0.5 * dt * f * to_accel
                 if step % 500 == 0:
@@ -573,6 +594,7 @@ class GradientSKIcemaker(DeviceModule):
             pbar.close()
             manager.release(pbar_pos)
 
+        self._wrap_positions_(pos)
         if quench_steps > 0:
             pos.requires_grad_(True)
             self._prerelax(pos, quench_steps, cache)

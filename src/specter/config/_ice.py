@@ -39,9 +39,9 @@ class IceCacheConfig:
         8,
         help=(
             "Number of independent ice configurations to generate. "
-            "Each costs an ML-BOP anneal (about 45 minutes on one L40 at the "
-            "default n=256, dx=1.0, with the default anneal steps) plus a full "
-            "optimisation run."
+            "Each costs about 7 minutes on one L40 at the default n=256, "
+            "dx=1.0: an ML-BOP anneal (about 6 minutes) then the L-BFGS "
+            "optimisation."
         ),
         check="positive",
     )
@@ -95,18 +95,18 @@ class IceCacheConfig:
     )
 
     # Langevin anneal before the L-BFGS run (GradientSKIcemaker.anneal), at
-    # 5 fs per step: held at 220 K, then cooled linearly to 80 K. Cooling
+    # 10 fs per step: held at 220 K, then cooled linearly to 130 K. Cooling
     # longer raises the fraction of four-coordinated molecules at
     # proportional cost; see its docstring.
     anneal_hold_steps: int = setting(
-        2000,
-        help="Anneal steps held at 220 K before cooling (5 fs each).",
+        1000,
+        help="Anneal steps held at 220 K before cooling (10 fs each).",
         check="non_negative",
     )
     anneal_cool_steps: int = setting(
-        22000,
+        7071,
         help=(
-            "Anneal steps cooling from 220 K to 80 K (5 fs each). Longer "
+            "Anneal steps cooling from 220 K to 130 K (10 fs each). Longer "
             "cooling gives more four-coordinated, MD-like ice at proportional "
             "cost."
         ),

@@ -4,9 +4,8 @@
 
 # Full field docs: docs/user-guide/ice-cache.md.
 
-# This command is expensive by design: each configuration is an ML-BOP anneal
-# (about 45 min on an L40 at the geometry below) plus a full GradientSKIcemaker
-# optimisation.
+# Each configuration is an ML-BOP anneal plus a full GradientSKIcemaker
+# optimisation, about 7 min on an L40 at the geometry below.
 # Specter already ships a library (20 configurations, 256 A cells at 1 A/voxel)
 # in ice_data/ice_cache, which every simulation uses by default -- generate your
 # own only for a different cell size or voxel size, or more independent
@@ -27,8 +26,8 @@ seed_start = 0     # i-th config uses seed_start + i, and is named after its see
 # interchangeably.
 [optimisation]
 n_steps = 250
-anneal_hold_steps = 2000    # Langevin steps at 220 K (5 fs each) before the L-BFGS run
-anneal_cool_steps = 22000   # steps cooling to 80 K; longer gives more four-coordinated ice
+anneal_hold_steps = 1000    # Langevin steps at 220 K (10 fs each) before the L-BFGS run
+anneal_cool_steps = 7071    # steps cooling to 130 K; longer gives more four-coordinated ice
 
 [compute]
 device = "cuda"    # cpu | cuda | cuda:0 | 0,1,2,3 -- naming several GPUs shards the

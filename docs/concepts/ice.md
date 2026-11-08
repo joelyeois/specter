@@ -68,21 +68,28 @@ uphill steps.
 
 `GradientSKIcemaker.anneal` therefore runs Langevin dynamics on the ML-BOP
 potential before the main optimisation, integrated with the BAOAB splitting
-(Leimkuhler & Matthews 2012) at the 5 fs time step of the MD reference. The
-cell is held at 220 K for 10 ps, cooled linearly to 80 K over 110 ps, and
-then relaxed by L-BFGS to the nearest energy minimum. Thermal motion lets
+(Leimkuhler & Matthews 2012) with a 10 fs time step and a friction of
+0.001 fs⁻¹. The cell is held at 220 K for 10 ps, cooled linearly to 130 K
+over 71 ps, and then relaxed by L-BFGS to the nearest energy minimum. Thermal motion lets
 contacts break and reform, and cooling lets the network settle into the
 tetrahedral arrangement that the ML-BOP three-body term favours. The cell
 volume is fixed, at the density set by `init_random`. `optimize` then
 restores the \(S(k)\) match in a few tens of steps.
 
-In a 100 Å cell at 0.25 Å per voxel, the anneal raised the four-coordinated
-fraction to 74% and the height of the first \(g(r)\) peak from 4.8 to 5.0
-(MD reference 6.1), and the final \(S(k)\) loss was lower than without
-it. The anneal has no voxel grid or FFT, so its 24 000 steps took 3.4 min on
-an L40, and the whole recipe 4.5 min against about 10 min for `optimize`
-alone. Slower cooling raises the fraction further at proportional cost: 12 ps
-of cooling gave 58%. The MD reference itself was cooled at 5 K/ns.
+At the bundled library's geometry (256 Å cell, 1 Å per voxel, 527 178
+molecules), the anneal and the following `optimize` took 7.2 min on an L40.
+They left 75% of molecules four-coordinated, against about 40% for
+`optimize` alone, with an ML-BOP energy of \(-0.414\) eV/atom against the
+\(-0.413\) target and an \(S(k)\) loss of \(5 \times 10^{-8}\) to
+\(9 \times 10^{-8}\) over two seeds. The anneal has no voxel grid or FFT,
+so a step costs a small fraction of an `optimize` evaluation.
+
+The schedule was chosen on a 100 Å cell. A 10 fs step matched a 5 fs step
+on every measure. A friction of 0.001 fs⁻¹ let the network rearrange faster
+than 0.01 fs⁻¹ in the same simulated time, raising the four-coordinated
+fraction from 74% to 77%. Continuing the ramp from 130 K to 80 K added two
+points at 40% more time, and halving the ramp lost six. The MD reference
+itself was cooled at 5 K/ns.
 
 ### Combined loss
 
@@ -328,7 +335,7 @@ fade the solvent that the exposure filter already decorrelates.
   matched to an arbitrary energy rather than to a physically grounded
   phase.
 - **The anneal is far faster than the MD it stands in for.** It cools at
-  about 1300 K/ns against the reference's 5 K/ns, and leaves 74% of
+  about 1300 K/ns against the reference's 5 K/ns, and leaves 75% of
   molecules four-coordinated against 94%; most of the rest have five
   neighbours.
 - **The relaxed coherence comes from an optimiser, not molecular dynamics.**

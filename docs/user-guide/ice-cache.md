@@ -64,9 +64,9 @@ it. The [command reference](../api/cli/build.md#specter-build-ice) lists them al
 
 Each configuration first runs the ML-BOP anneal (`GradientSKIcemaker.anneal`;
 see the ice concepts page), then the L-BFGS optimisation. At the default
-\(n = 256\), \(dx = 1.0\) Å (527 178 molecules) an anneal step took 0.11 s
-on an L40, so the default 24 000 steps take about 45 min per configuration,
-several times the L-BFGS run that follows. `anneal_cool_steps` sets that cost
+\(n = 256\), \(dx = 1.0\) Å (527 178 molecules) an anneal step takes about
+37 ms on an L40, so the default 8071 steps take about 6 min, and a whole
+configuration about 7 min. `anneal_cool_steps` sets the anneal's cost
 directly: halving it halves the anneal time and leaves fewer molecules
 four-coordinated. The anneal's cost is linear in the number of molecules.
 

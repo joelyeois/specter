@@ -348,7 +348,7 @@ def build_ice_cache(
 
     One file per config, via :func:`build_one_ice_config`. This is the
     expensive, one-time cost the whole point of :class:`IceBank` is to
-    amortize -- expect on the order of tens of minutes per config at
+    amortize -- expect about 2.5 minutes per config on an L40 at
     production scale (``n=256, dx=1.0``), so this is meant to be run once
     (or occasionally, to extend/refresh the library), not per-session.
 

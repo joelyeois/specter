@@ -202,8 +202,8 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
     at that directory to sample ice from this library instead of the
     bundled ``ice_data/ice_cache``.
 
-    This is expensive by construction -- on the order of tens of minutes
-    per configuration at the default ``n=256, dx=1.0`` -- since it runs the
+    This is expensive by construction -- about 2.5 minutes per
+    configuration on an L40 at the default ``n=256, dx=1.0`` -- since it runs the
     full ``GradientSKIcemaker`` optimisation that :class:`~specter.ice.IceBank`
     exists to amortize. Configurations already present are skipped unless
     ``config.overwrite`` is set, so an interrupted run resumes rather than

@@ -77,11 +77,11 @@ volume is fixed, at the density set by `init_random`. `optimize` then
 restores the \(S(k)\) match in a few tens of steps.
 
 At the bundled library's geometry (256 Å cell, 1 Å per voxel, 527 178
-molecules), the anneal and the following `optimize` took 7.2 min on an L40.
-They left 75% of molecules four-coordinated, against about 40% for
-`optimize` alone, with an ML-BOP energy of \(-0.414\) eV/atom against the
-\(-0.413\) target and an \(S(k)\) loss of \(5 \times 10^{-8}\) to
-\(9 \times 10^{-8}\) over two seeds. The anneal has no voxel grid or FFT,
+molecules), the anneal and the following `optimize` took 2.2 to 2.5 min on
+an L40. They left 75% of molecules four-coordinated, against about 40% for
+`optimize` alone, with an ML-BOP energy of \(-0.414\) to \(-0.415\)
+eV/atom against the \(-0.413\) target and an \(S(k)\) loss of
+\(4 \times 10^{-8}\) to \(5 \times 10^{-8}\) over two seeds. The anneal has no voxel grid or FFT,
 so a step costs a small fraction of an `optimize` evaluation.
 
 The schedule was chosen on a 100 Å cell. A 10 fs step matched a 5 fs step

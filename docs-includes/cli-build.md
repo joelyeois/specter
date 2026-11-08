@@ -118,7 +118,7 @@ specter build ice [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--n_configs` | `INTEGER` | `8` | Number of independent ice configurations to generate. Each costs a full optimisation run, about 3-9 minutes on one GPU at the default n=256, dx=1.0. |
+| `--n_configs` | `INTEGER` | `8` | Number of independent ice configurations to generate. Each costs about 2.5 minutes on one L40 at the default n=256, dx=1.0: an ML-BOP anneal (about 1.5 minutes) then the L-BFGS optimisation (about 1 minute). |
 | `--n` | `INTEGER` | `256` | Voxels along each side of the cubic periodic cell (the cell measures n*dx Angstrom). Must be at least as large as the biggest ice volume a simulation will request from it in any one dimension, or IceBank has to tile several crops together to serve the request. |
 | `--dx` | `FLOAT` | `1.0` | Voxel size in Angstrom used when optimising and when voxelizing crops. Set this to the pixel size of the simulations the cache is for. |
 | `--seed_start` | `INTEGER` | `0` | Seed of the first configuration; the i-th uses seed_start+i, and each is saved under its own seed's filename. Set this past an existing library's highest seed to extend it rather than regenerate it. |
@@ -128,6 +128,8 @@ specter build ice [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--n_steps` | `INTEGER` | `250` | L-BFGS step ceiling per configuration. An upper bound only -- a run whose loss plateaus stops early. |
+| `--anneal_hold_steps` | `INTEGER` | `1000` | Anneal steps held at 220 K before cooling (10 fs each). |
+| `--anneal_cool_steps` | `INTEGER` | `7071` | Anneal steps cooling from 220 K to 130 K (10 fs each). Longer cooling gives more four-coordinated, MD-like ice at proportional cost. |
 
 **Compute**{ #specter-build-ice-compute }
 

@@ -39,9 +39,9 @@ class IceCacheConfig:
         8,
         help=(
             "Number of independent ice configurations to generate. "
-            "Each costs about 7 minutes on one L40 at the default n=256, "
-            "dx=1.0: an ML-BOP anneal (about 6 minutes) then the L-BFGS "
-            "optimisation."
+            "Each costs about 2.5 minutes on one L40 at the default n=256, "
+            "dx=1.0: an ML-BOP anneal (about 1.5 minutes) then the L-BFGS "
+            "optimisation (about 1 minute)."
         ),
         check="positive",
     )

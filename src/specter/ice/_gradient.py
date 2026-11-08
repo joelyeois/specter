@@ -350,14 +350,12 @@ class GradientSKIcemaker(DeviceModule):
         if mlbop_strength > 0.0:
             model = MLBOP(device=pos.device)
             box = (self.box_x, self.box_y, self.box_z)
-            mlbop_result = model.compute_energy(
-                pos,
-                box_size=box,
-                pbc=True,
-                neighbor_cache=neighbor_cache,
-                compute_dtype=torch.float32,
-            )
-            e_per_atom = mlbop_result["E_per_atom"]
+            if neighbor_cache is not None:
+                e_per_atom = model.total_energy(pos, box, neighbor_cache) / pos.shape[0]
+            else:
+                e_per_atom = model.compute_energy(
+                    pos, box_size=box, pbc=True, compute_dtype=torch.float32
+                )["E_per_atom"]
             if mlbop_target is None:
                 mlbop_penalty = e_per_atom
             else:
@@ -409,13 +407,7 @@ class GradientSKIcemaker(DeviceModule):
 
         def closure() -> torch.Tensor:
             opt.zero_grad()
-            energy = model.compute_energy(
-                pos,
-                box_size=box,
-                pbc=True,
-                neighbor_cache=neighbor_cache,
-                compute_dtype=torch.float32,
-            )["E_per_atom"]
+            energy = model.total_energy(pos, box, neighbor_cache) / pos.shape[0]
             energy.backward()
             return energy
 
@@ -468,13 +460,15 @@ class GradientSKIcemaker(DeviceModule):
 
         The defaults hold 10 ps at 220 K and cool at 1.27 K/ps to 130 K
         (71 ps), then quench. At the library geometry (``n=256, dx=1.0``,
-        527k molecules) this and a following :meth:`optimize` took 7.2 min
-        on an L40 and gave 75% four-coordinated molecules, an ML-BOP energy
-        of -0.414 eV/atom against the -0.413 target, and an S(k) loss of
-        5e-8 to 9e-8 (seeds 0 and 1). The first version of this anneal
-        (5 fs, friction 0.01/fs, 110 ps of cooling to 80 K) took 12.8 min
-        for 74%, -0.407 eV/atom and 1.8e-7. The settings were chosen on a
-        100 A cell:
+        527k molecules) this and a following :meth:`optimize` took 2.2 to
+        2.5 min on an L40 (8 ms per anneal step, on the Triton kernels of
+        :meth:`~specter.ice._energy.MLBOP.total_energy`) and gave 75%
+        four-coordinated molecules, an ML-BOP energy of -0.414 to -0.415
+        eV/atom against the -0.413 target, and an S(k) loss of 4e-8 to
+        5e-8 (seeds 0 and 1). On the torch ML-BOP path the same run took
+        7.2 min, and the first version of this anneal (5 fs, friction
+        0.01/fs, 110 ps of cooling to 80 K) 12.8 min, for 74%, -0.407
+        eV/atom and 1.8e-7. The settings were chosen on a 100 A cell:
 
         * a 10 fs step matched 5 fs on every measure; 15 fs did too, but
           is not the default.
@@ -529,8 +523,11 @@ class GradientSKIcemaker(DeviceModule):
         started = time.perf_counter()
         model = MLBOP(device=self.device)
         box = (self.box_x, self.box_y, self.box_z)
-        cache = NeighborListCache()
-        n_atoms = self.positions.shape[0]
+        # A wider skin than the optimiser's: at 220 K the fastest of 5e5
+        # atoms crosses skin / 2 within a few steps, and a 2 A skin halves
+        # the rebuilds of a 1 A one (876 against 1950 over the default
+        # schedule) at no extra cost per step.
+        cache = NeighborListCache(skin=2.0)
 
         pos = self.positions.to(self.device, dtype=torch.float64).clone()
         if prerelax_steps > 0:
@@ -540,14 +537,7 @@ class GradientSKIcemaker(DeviceModule):
 
         def force(x: torch.Tensor) -> torch.Tensor:
             x = x.detach().requires_grad_(True)
-            e = model.compute_energy(
-                x,
-                box_size=box,
-                pbc=True,
-                neighbor_cache=cache,
-                compute_dtype=torch.float32,
-            )["E_per_atom"]
-            (grad,) = torch.autograd.grad(e * n_atoms, x)
+            (grad,) = torch.autograd.grad(model.total_energy(x, box, cache), x)
             return -grad
 
         # eV / (amu A) -> A / fs^2

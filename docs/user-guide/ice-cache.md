@@ -65,10 +65,32 @@ it. The [command reference](../api/cli/build.md#specter-build-ice) lists them al
 Each configuration first runs the ML-BOP anneal (`GradientSKIcemaker.anneal`;
 see the ice concepts page), then the L-BFGS optimisation. At the default
 \(n = 256\), \(dx = 1.0\) Å (527 178 molecules) an anneal step takes about
-37 ms on an L40, so the default 8071 steps take about 6 min, and a whole
-configuration about 7 min. `anneal_cool_steps` sets the anneal's cost
-directly: halving it halves the anneal time and leaves fewer molecules
-four-coordinated. The anneal's cost is linear in the number of molecules.
+8 ms on an L40, so the default 8071 steps take about 70 s, the anneal with
+its relaxations 80 to 95 s, and a whole configuration 2.2 to 2.5 min.
+`anneal_cool_steps` sets the anneal's cost directly: halving it halves the
+anneal time and leaves fewer molecules four-coordinated. The anneal's cost
+is linear in the number of molecules.
+
+### Fused ML-BOP kernel
+
+On CUDA, the anneal, its relaxations and the ML-BOP term of the
+optimisation evaluate the potential with Triton kernels
+(`specter.ice._mlbop_triton`). One GPU program per molecule loads its
+neighbours, forms every bond angle in registers and writes its energy and
+analytic forces, where the torch implementation launches about sixty
+gather, scatter and elementwise kernels plus their autograd backward. A
+cell-list search replaces vesin for the neighbour table. At 527 178
+molecules an energy-and-force evaluation takes 5 ms against 25 ms, and a
+neighbour search 12 ms against 70 ms; the forces equal the autograd ones to
+float32 precision. Over the default anneal the cell was searched 876 times
+with the anneal's 2 Å Verlet skin, against 1950 with the optimiser's 1 Å.
+
+Two seeds at the library geometry took 2.5 and 2.2 min, against 7.2 min on
+the torch path, at equal or better quality: 75.1% and 75.2% of molecules
+four-coordinated, \(-0.4141\) and \(-0.4147\) eV/atom, and raw \(S(k)\)
+losses of \(4.9 \times 10^{-8}\) and \(4.1 \times 10^{-8}\). The torch path
+below remains the fallback on CPU and in cells narrower than three
+neighbour-list cutoffs.
 
 ### Filtering inactive ML-BOP neighbours
 

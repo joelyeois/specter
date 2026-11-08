@@ -5,7 +5,7 @@
 # Full field docs: docs/user-guide/ice-cache.md.
 
 # Each configuration is an ML-BOP anneal plus a full GradientSKIcemaker
-# optimisation, about 7 min on an L40 at the geometry below.
+# optimisation, about 2.5 min on an L40 at the geometry below.
 # Specter already ships a library (20 configurations, 256 A cells at 1 A/voxel)
 # in ice_data/ice_cache, which every simulation uses by default -- generate your
 # own only for a different cell size or voxel size, or more independent

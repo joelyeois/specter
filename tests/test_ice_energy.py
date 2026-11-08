@@ -148,3 +148,76 @@ def test_mlbop_energy_small_cell_matches_repeated_reference():
     assert result_small["E_per_atom"].item() == pytest.approx(
         result_big["E_per_atom"].item(), rel=1e-8
     )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Triton kernels need CUDA")
+@pytest.mark.parametrize("spread", [0.0, 0.7])
+def test_triton_energy_and_forces_match_autograd(spread):
+    """
+    The fused Triton kernel's energy and analytic forces match the torch
+    implementation's energy and autograd gradient, on a crowded random cell
+    (spread 0.0, atoms with more than 16 neighbours, which widens the tile)
+    and a relaxed one, here a jittered diamond lattice at ice spacing
+    (spread 0.7), shifted out of the cell to exercise the minimum image.
+    """
+    from specter.ice import _mlbop_triton
+    from specter.ice._energy import NeighborListCache
+
+    torch.manual_seed(0)
+    model = MLBOP(device="cuda")
+    if spread == 0.0:
+        L = 40.0
+        pos = torch.rand(2000, 3, dtype=torch.float64, device="cuda") * L
+    else:
+        a = 6.35  # cubic ice, nearest neighbours 2.75 A apart
+        basis = torch.tensor(
+            [[0, 0, 0], [0, 2, 2], [2, 0, 2], [2, 2, 0],
+             [1, 1, 1], [1, 3, 3], [3, 1, 3], [3, 3, 1]],
+            dtype=torch.float64,
+        ) / 4  # fmt: skip
+        cells = torch.stack(
+            torch.meshgrid(
+                *[torch.arange(6.0, dtype=torch.float64)] * 3, indexing="ij"
+            ),
+            dim=-1,
+        ).reshape(-1, 1, 3)
+        L = 6 * a
+        pos = ((cells + basis) * a).reshape(-1, 3).cuda()
+        pos = pos + 0.1 * spread * torch.randn_like(pos) + 3.5 * L
+    box = (L, L, L)
+    assert _mlbop_triton.supported(pos, box, model.r_cut + 1.0)
+
+    ref = pos.clone().requires_grad_(True)
+    e_ref = model.compute_energy(ref, box_size=box, pbc=True)["E_total"]
+    (f_ref,) = torch.autograd.grad(-e_ref, ref)
+
+    x = pos.clone().requires_grad_(True)
+    e = model.total_energy(x, box, NeighborListCache())
+    (f,) = torch.autograd.grad(-e, x)
+
+    assert e.item() == pytest.approx(e_ref.item(), rel=1e-5, abs=1e-3)
+    err = (f - f_ref).norm(dim=1)
+    scale = f_ref.norm(dim=1).pow(2).mean().sqrt()
+    assert err.max() < 1e-4 * scale + 1e-4
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Triton kernels need CUDA")
+def test_triton_neighbor_table_finds_every_pair():
+    """The cell-list table holds exactly the pairs vesin finds."""
+    import vesin_torch
+
+    from specter.ice import _mlbop_triton
+
+    torch.manual_seed(1)
+    L, cutoff = 30.0, 4.5
+    pos = torch.rand(1500, 3, dtype=torch.float64, device="cuda") * L - 7.0
+    table = _mlbop_triton.neighbor_table(pos, (L, L, L), cutoff)
+    rows = torch.arange(pos.shape[0], device="cuda")[:, None].expand_as(table)
+    have = table >= 0
+    found = set(zip(rows[have].tolist(), table[have].tolist()))
+
+    cell = torch.eye(3, dtype=torch.float64, device="cuda") * L
+    i, j = vesin_torch.NeighborList(cutoff=cutoff, full_list=True).compute(
+        pos, cell, periodic=True, quantities="ij"
+    )
+    assert found == set(zip(i.tolist(), j.tolist()))

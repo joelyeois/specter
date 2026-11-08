@@ -67,6 +67,8 @@ import math
 import torch
 import vesin_torch
 
+from . import _mlbop_triton
+
 #: ML-BOP energy per atom of real low-density amorphous ice (LDA, MD at 80 K),
 #: stable to +/-0.0001 eV across widely separated MD frames: the target an
 #: optimised or seam-relaxed configuration is held to, so that it matches
@@ -127,6 +129,8 @@ class NeighborListCache:
         self.j: torch.Tensor | None = None
         self.shift: torch.Tensor | None = None
         self.rebuilds = 0
+        self._table: torch.Tensor | None = None
+        self._table_reference: torch.Tensor | None = None
 
     def pairs(
         self, positions: torch.Tensor, box_t: torch.Tensor, r_cut: float
@@ -165,6 +169,43 @@ class NeighborListCache:
         self.reference = pos.clone()
         self.rebuilds += 1
         return i, j, self.shift
+
+    def table(
+        self,
+        positions: torch.Tensor,
+        box: tuple[float, float, float],
+        r_cut: float,
+    ) -> torch.Tensor:
+        """
+        Dense neighbour table for the Triton kernels, rebuilt only when needed.
+
+        The counterpart of :meth:`pairs` for
+        :func:`specter.ice._mlbop_triton.neighbor_table`, under the same
+        ``skin / 2`` rule and with its own reference positions.
+
+        Parameters
+        ----------
+        positions : torch.Tensor
+            Current positions, shape ``(N, 3)``, on CUDA.
+        box : tuple[float, float, float]
+            Orthorhombic cell lengths.
+        r_cut : float
+            The potential's own cutoff; the table is built at ``r_cut + skin``.
+
+        Returns
+        -------
+        torch.Tensor
+            int32, shape ``(N, K)``, padded with -1.
+        """
+        pos = positions.detach()
+        if self._table is not None and self._table_reference is not None:
+            moved = float((pos - self._table_reference).abs().max())
+            if moved <= self.skin / 2:
+                return self._table
+        self._table = _mlbop_triton.neighbor_table(pos, box, r_cut + self.skin)
+        self._table_reference = pos.clone()
+        self.rebuilds += 1
+        return self._table
 
 
 class MLBOP:
@@ -360,6 +401,65 @@ class MLBOP:
             if cos_theta_arr.numel()
             else nan,
         }
+
+    def _params(self) -> dict[str, float]:
+        return {
+            "A": self.A,
+            "B": self.B,
+            "lambda1": self.lambda1,
+            "lambda2": self.lambda2,
+            "R": self.R,
+            "D": self.D,
+            "beta": self.beta,
+            "n": self.n,
+            "c": self.c,
+            "d": self.d,
+            "cos_theta0": self.cos_theta0,
+        }
+
+    def total_energy(
+        self,
+        positions: torch.Tensor,
+        box_size: tuple[float, float, float],
+        neighbor_cache: NeighborListCache,
+    ) -> torch.Tensor:
+        """
+        Periodic total energy alone, differentiable, on the fastest path.
+
+        On CUDA with an orthorhombic cell at least three list cutoffs
+        across (see :func:`specter.ice._mlbop_triton.supported`), the fused
+        Triton kernel evaluates the energy and its forces together, about
+        5x faster than :meth:`compute_energy` at 527k molecules. Otherwise
+        this is ``compute_energy(..., compute_dtype=torch.float32)``'s
+        ``E_total``. Both form pair vectors in `positions`' dtype and
+        evaluate the potential in float32.
+
+        Parameters
+        ----------
+        positions : torch.Tensor
+            Bead positions in Angstrom, shape ``(N, 3)``. May require grad.
+        box_size : tuple[float, float, float]
+            Orthorhombic cell lengths.
+        neighbor_cache : NeighborListCache
+            Verlet-skin neighbour list kept across calls.
+
+        Returns
+        -------
+        torch.Tensor
+            Total energy in eV, 0-d, in `positions`' dtype.
+        """
+        if _mlbop_triton.supported(
+            positions, box_size, self.r_cut + neighbor_cache.skin
+        ):
+            table = neighbor_cache.table(positions, box_size, self.r_cut)
+            return _mlbop_triton.energy(positions, table, box_size, self._params())
+        return self.compute_energy(
+            positions,
+            box_size=box_size,
+            pbc=True,
+            neighbor_cache=neighbor_cache,
+            compute_dtype=torch.float32,
+        )["E_total"]
 
     def compute_energy(
         self,

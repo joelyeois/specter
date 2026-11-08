@@ -21,6 +21,7 @@ from ..packing import pack_hard_spheres_3d
 from ._helpers import (
     _allowed_region_exclusion_field,
     _canvas_box_center,
+    _canvas_indices,
     _insert_local_labels,
     _insert_shell_label,
     _insert_volume_max,
@@ -297,11 +298,9 @@ class _MembraneStageMixin:
                     # rounding the insertion uses: voxel k is at
                     # (k - n // 2) * voxel_size.
                     centers = torch.stack([tp.center_xyz for tp in tm_placements])
-                    n_xyz = torch.tensor(
-                        [volume.shape[2], volume.shape[1], volume.shape[0]]
-                    )
-                    index = torch.round(centers / voxel_size).long() + n_xyz // 2
-                    outside = ((index < 0) | (index >= n_xyz)).any(dim=1)
+                    index = _canvas_indices(centers, tuple(volume.shape), voxel_size)
+                    shape = torch.tensor(volume.shape, device=index.device)
+                    outside = ((index < 0) | (index >= shape)).any(dim=1)
                     n_outside = int(outside.sum())
                     if n_outside:
                         warnings.warn(
@@ -381,24 +380,12 @@ class _MembraneStageMixin:
                     # matching how e.g. bead/protein exclusion is also
                     # voxel-level, not footprint-exact.
                     if tm_placements:
-                        shape_zyx = tuple(volume.shape)
-                        z_c, y_c, x_c = (s // 2 for s in shape_zyx)
                         centers = torch.stack([tp.center_xyz for tp in tm_placements])
-                        iz = (
-                            (z_c + torch.round(centers[:, 2] / voxel_size))
-                            .long()
-                            .clamp(0, shape_zyx[0] - 1)
+                        index = _canvas_indices(
+                            centers, tuple(volume.shape), voxel_size
                         )
-                        iy = (
-                            (y_c + torch.round(centers[:, 1] / voxel_size))
-                            .long()
-                            .clamp(0, shape_zyx[1] - 1)
-                        )
-                        ix = (
-                            (x_c + torch.round(centers[:, 0] / voxel_size))
-                            .long()
-                            .clamp(0, shape_zyx[2] - 1)
-                        )
+                        last = torch.tensor(volume.shape, device=index.device) - 1
+                        iz, iy, ix = torch.minimum(index.clamp(min=0), last).unbind(1)
                         cm_dev = carbon_mask.device
                         in_carbon = carbon_mask[
                             iz.to(cm_dev), iy.to(cm_dev), ix.to(cm_dev)

@@ -40,7 +40,7 @@ def _insert_instance_labels(
     labels: torch.Tensor,
 ) -> torch.Tensor:
     """Stamp per-instance integer labels into a shared label volume.
-    `binarized`/`positions` are moved to `labels`' own device (not the
+    `binarized` is moved to `labels`' own device (not the
     other way around) -- `labels` is the shared, potentially large
     accumulator (see TomogramSpecimenGenerator's own `accumulator_device`
     docstring), `binarized` is one small per-chunk rotated result."""
@@ -48,17 +48,10 @@ def _insert_instance_labels(
     binarized = binarized.to(device)
     N, Zp, Yp, Xp = binarized.shape
     Z, Y, X = labels.shape
-    positions = positions.to(device)
-    positions_int = (positions / voxel_size).round().long()
-    cz_center, cy_center, cx_center = Z // 2, Y // 2, X // 2
-
     # One host transfer per chunk, not three device syncs per instance --
     # same reasoning as `arrays._stamp._insert_all`'s own loop.
-    positions_list = positions_int.cpu().tolist()
-    for i, (px_i, py_i, pz_i) in enumerate(positions_list):
-        cx_index = cx_center + px_i
-        cy_index = cy_center + py_i
-        cz_index = cz_center + pz_i
+    centres = _canvas_indices(positions, (Z, Y, X), voxel_size).cpu().tolist()
+    for i, (cz_index, cy_index, cx_index) in enumerate(centres):
         bounds = clip_insert_bounds(
             (cz_index, cy_index, cx_index), (Zp, Yp, Xp), (Z, Y, X)
         )
@@ -181,31 +174,35 @@ def _snap_to_canvas_voxel(
     return torch.round(position_xyz / voxel_size) * voxel_size
 
 
+def _canvas_indices(
+    positions_xyz: torch.Tensor,
+    shape_zyx: tuple[int, ...],
+    voxel_size: float,
+) -> torch.Tensor:
+    """Physical (x, y, z) positions, Å, ``(N, 3)`` -> ``(N, 3)`` absolute
+    (z, y, x) indices of the canvas voxel nearest each, unclipped, in the
+    canvas convention that voxel ``k`` of an axis of ``n`` is at
+    ``(k - n // 2) * voxel_size`` (the indexing
+    `insert_particles_into_micrograph` uses too). Pair it with
+    `clip_insert_bounds`, which puts a local grid's voxel ``m // 2`` on the
+    index returned: a `MembraneGenerator` grid holds its physical origin on
+    that voxel (`membrane._field._centred_origin_xyz`), so the instance
+    lands on its position exactly when that position is a canvas voxel
+    (`_snap_to_canvas_voxel`)."""
+    centre = torch.tensor([n // 2 for n in shape_zyx[:3]], device=positions_xyz.device)
+    return torch.round(positions_xyz.flip(-1) / voxel_size).long() + centre
+
+
 def _position_to_center_index(
     position_xyz: tuple[float, float, float],
     shape_zyx: tuple[int, ...],
     voxel_size: float,
 ) -> tuple[int, int, int]:
-    """Physical (x, y, z) position -> absolute (z, y, x) index of the
-    canvas voxel nearest it, in the canvas convention that voxel ``k`` of an
-    axis of ``n`` is at ``(k - n // 2) * voxel_size`` (the indexing
-    `_insert_instance_labels` above and `insert_particles_into_micrograph`
-    use). Pair it with `clip_insert_bounds`, which puts a local grid's voxel
-    ``m // 2`` on the index returned: a `MembraneGenerator` grid holds its
-    physical origin on that voxel (`membrane._field._centred_origin_xyz`),
-    so the instance lands on `position_xyz` exactly when that position is a
-    canvas voxel (`_snap_to_canvas_voxel`)."""
-    z_center, y_center, x_center = (
-        shape_zyx[0] // 2,
-        shape_zyx[1] // 2,
-        shape_zyx[2] // 2,
-    )
-    px, py, pz = position_xyz
-    return (
-        z_center + int(round(pz / voxel_size)),
-        y_center + int(round(py / voxel_size)),
-        x_center + int(round(px / voxel_size)),
-    )
+    """`_canvas_indices` for one position."""
+    z, y, x = _canvas_indices(
+        torch.tensor([position_xyz], dtype=torch.float64), shape_zyx, voxel_size
+    )[0].tolist()
+    return z, y, x
 
 
 def _insert_volume_max(

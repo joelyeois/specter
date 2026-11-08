@@ -374,10 +374,11 @@ def _deposit_splat(
 
     Every atom deposits `weight` Volts, split among its 8 neighboring
     voxels by trilinear interpolation (conserves the total per atom; the
-    split is cosmetic anti-aliasing, not real radial falloff). Centered
-    coordinate convention throughout (physical (0, 0, 0) maps to the grid
-    center), matching ``specter.potential``'s convention and the rest of
-    this generator.
+    split is cosmetic anti-aliasing, not real radial falloff). Centred
+    coordinates in the tomogram canvas's convention: voxel ``k`` of an axis
+    of ``n`` is at ``(k - n // 2) * voxel_size``, so physical (0, 0, 0) is
+    voxel ``n // 2``, where every species stamped after the film puts it
+    too.
 
     `weight` should be ``atom_potential_integral / voxel_size**3`` --
     depositing a single atom's real, physical potential integral (Volts *
@@ -420,11 +421,9 @@ def _deposit_splat(
         out = out.view(-1)
 
     center = torch.tensor(
-        [nx / 2.0, ny / 2.0, nz / 2.0], dtype=coords.dtype, device=device
+        [nx // 2, ny // 2, nz // 2], dtype=coords.dtype, device=device
     )
-    g = (
-        coords / voxel_size + center - 0.5
-    )  # voxel centers at (i + 0.5) * voxel_size - center
+    g = coords / voxel_size + center
     g0 = torch.floor(g)
     f = g - g0
     g0 = g0.long()

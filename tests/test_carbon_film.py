@@ -146,3 +146,17 @@ def test_run_build_tomogram_rejects_more_than_one_carbon_film():
     )
     with pytest.raises(ValueError, match="at most one"):
         run_build_tomogram(config)
+
+
+def test_splat_puts_a_point_on_the_canvas_voxel_it_names():
+    """Physical (x, y, z) lands on voxel ``x / voxel_size + n // 2`` along
+    each axis, the canvas convention every species stamped after the film
+    uses, for even and odd sides alike."""
+    from specter.specimen._carbon import _deposit_splat
+
+    shape, voxel_size = (6, 7, 8), 2.0
+    point = torch.tensor([[2.0, -4.0, 0.0]], dtype=torch.float64)  # x, y, z
+    out = _deposit_splat(point, 1.0, shape, voxel_size)
+    expected = (0 + shape[0] // 2, -2 + shape[1] // 2, 1 + shape[2] // 2)
+    assert float(out[expected]) == 1.0
+    assert float(out.sum()) == 1.0

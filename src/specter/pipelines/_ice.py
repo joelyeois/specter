@@ -75,6 +75,7 @@ def _build_shard(
             seed=seed,
             device=device,
             progressbars=not quiet,
+            anneal_steps=(config.anneal_hold_steps, config.anneal_cool_steps),
         )
         _report_config(metadata, device, time.time() - started)
         # Return the finished config's cached blocks to the driver before
@@ -112,6 +113,8 @@ def _report_config(metadata: dict, device: str, elapsed: float) -> None:
     the budget ran out first.
     """
     steps = metadata["n_steps_actual"]
+    # The anneal runs before the L-BFGS steps; keep it out of s/step.
+    anneal_time = metadata["recipe"].get("anneal_wall_time", 0.0)
     budget = (
         f"plateaued after {steps}"
         if metadata["stopped_early"]
@@ -121,8 +124,9 @@ def _report_config(metadata: dict, device: str, elapsed: float) -> None:
         f"  {ice_config_filename(metadata['seed'])} on {device}: "
         f"S(k) loss {metadata['sk_loss']:.4g}, "
         f"E/atom {metadata['energy']['E_per_atom']:+.4f} eV, "
-        f"{budget} steps in {format_elapsed(elapsed)} "
-        f"({elapsed / max(steps, 1):.2f} s/step)"
+        f"{budget} steps in {format_elapsed(elapsed)}, "
+        f"{format_elapsed(anneal_time)} of it annealing "
+        f"({(elapsed - anneal_time) / max(steps, 1):.2f} s/step)"
     )
 
 

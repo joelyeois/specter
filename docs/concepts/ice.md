@@ -54,6 +54,38 @@ relaxation against the ML-BOP energy (Chan et al. 2019) alone
 (`prerelax_steps`, 30 by default) first removes the overlapping molecules of
 that start, since the full loss would otherwise spend its first several
 hundred evaluations on nothing else.
+
+### Annealing
+
+The \(S(k)\) loss and the ML-BOP energy are both averages over the cell,
+so gradient descent alone can satisfy them with a mixture of three-, four-
+and five-coordinated molecules. From a random start, `optimize` leaves about
+40% of molecules with exactly four O neighbours within the first minimum of
+the reference \(g(r)\) (3.33 Å), against 94% in the LDA-80K MD frame.
+Changing a molecule's coordination means breaking one contact and forming
+another, which first raises the energy, and gradient descent does not take
+uphill steps.
+
+`GradientSKIcemaker.anneal` therefore runs Langevin dynamics on the ML-BOP
+potential before the main optimisation, integrated with the BAOAB splitting
+(Leimkuhler & Matthews 2012) at the 5 fs time step of the MD reference. The
+cell is held at 220 K for 10 ps, cooled linearly to 80 K over 110 ps, and
+then relaxed by L-BFGS to the nearest energy minimum. Thermal motion lets
+contacts break and reform, and cooling lets the network settle into the
+tetrahedral arrangement that the ML-BOP three-body term favours. The cell
+volume is fixed, at the density set by `init_random`. `optimize` then
+restores the \(S(k)\) match in a few tens of steps.
+
+In a 100 Å cell at 0.25 Å per voxel, the anneal raised the four-coordinated
+fraction to 74% and the height of the first \(g(r)\) peak from 4.8 to 5.0
+(MD reference 6.1), and the final \(S(k)\) loss was lower than without
+it. The anneal has no voxel grid or FFT, so its 24 000 steps took 3.4 min on
+an L40, and the whole recipe 4.5 min against about 10 min for `optimize`
+alone. Slower cooling raises the fraction further at proportional cost: 12 ps
+of cooling gave 58%. The MD reference itself was cooled at 5 K/ns.
+
+### Combined loss
+
 L-BFGS then optimises the positions (the default; Adam is also available)
 against the combined loss
 
@@ -295,6 +327,10 @@ fade the solvent that the exposure filter already decorrelates.
   target without a matching structural reference produces a configuration
   matched to an arbitrary energy rather than to a physically grounded
   phase.
+- **The anneal is far faster than the MD it stands in for.** It cools at
+  about 1300 K/ns against the reference's 5 K/ns, and leaves 74% of
+  molecules four-coordinated against 94%; most of the rest have five
+  neighbours.
 - **The relaxed coherence comes from an optimiser, not molecular dynamics.**
   The relaxation step matches a structure factor and an energy; its
   long-wavelength time scales are the least certain part of the model, and
@@ -370,6 +406,10 @@ fade the solvent that the exposure filter already decorrelates.
 - Kirkland, E. J. (2010). *Advanced computing in electron microscopy* (2nd
   ed.). Springer.
   [doi:10.1007/978-1-4419-6533-2](https://doi.org/10.1007/978-1-4419-6533-2)
+- Leimkuhler, B., & Matthews, C. (2012). Rational construction of
+  stochastic numerical methods for molecular sampling. *Applied Mathematics
+  Research eXpress*.
+  [doi:10.1093/amrx/abs010](https://doi.org/10.1093/amrx/abs010)
 - Liu, D. C., & Nocedal, J. (1989). On the limited memory BFGS method for
   large scale optimization. *Mathematical Programming*, 45(1–3), 503–528.
   [doi:10.1007/BF01589116](https://doi.org/10.1007/BF01589116)

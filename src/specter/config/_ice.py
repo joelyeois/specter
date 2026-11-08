@@ -16,7 +16,8 @@ class IceCacheConfig:
 
     Drives `specter.pipelines.run_build_ice_cache` (the `specter build ice`
     command), which runs `specter.ice.GradientSKIcemaker` once per
-    configuration and saves the converged coordinates. The result is a
+    configuration (an ML-BOP anneal, then L-BFGS) and saves the converged
+    coordinates. The result is a
     directory of `config_NNN.pt` files an `IceBank` can draw crops from --
     point any simulation config's `ice_cache_dir` at it to use these instead
     of the bundled `ice_data/ice_cache`.
@@ -38,8 +39,9 @@ class IceCacheConfig:
         8,
         help=(
             "Number of independent ice configurations to generate. "
-            "Each costs a full optimisation run, about 3-9 minutes on one GPU at "
-            "the default n=256, dx=1.0."
+            "Each costs an ML-BOP anneal (about 45 minutes on one L40 at the "
+            "default n=256, dx=1.0, with the default anneal steps) plus a full "
+            "optimisation run."
         ),
         check="positive",
     )
@@ -90,6 +92,25 @@ class IceCacheConfig:
             "-- a run whose loss plateaus stops early."
         ),
         check="positive",
+    )
+
+    # Langevin anneal before the L-BFGS run (GradientSKIcemaker.anneal), at
+    # 5 fs per step: held at 220 K, then cooled linearly to 80 K. Cooling
+    # longer raises the fraction of four-coordinated molecules at
+    # proportional cost; see its docstring.
+    anneal_hold_steps: int = setting(
+        2000,
+        help="Anneal steps held at 220 K before cooling (5 fs each).",
+        check="non_negative",
+    )
+    anneal_cool_steps: int = setting(
+        22000,
+        help=(
+            "Anneal steps cooling from 220 K to 80 K (5 fs each). Longer "
+            "cooling gives more four-coordinated, MD-like ice at proportional "
+            "cost."
+        ),
+        check="non_negative",
     )
 
     # --- Compute ---

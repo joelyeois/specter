@@ -396,3 +396,23 @@ def test_optimize_returns_float32_positions_from_float64_parameters():
     gd.optimize(n_steps=2, record_every=1, tol=None, max_iter=3, prerelax_steps=1)
     assert gd.positions.dtype == torch.float32
     assert float(gd.positions.abs().max()) <= gd.box_x / 2 + 1e-6
+
+
+def test_anneal_lowers_the_energy_and_keeps_atoms_in_the_cell():
+    torch.manual_seed(0)
+    gd = GradientSKIcemaker(n=24, dx=1.0, device="cpu", progressbars=False)
+    gd.init_random()
+    pos = gd.positions.clone().requires_grad_(True)
+    gd._prerelax(pos, steps=5, neighbor_cache=NeighborListCache())
+    gd.positions = pos.detach()
+    relaxed = gd.mlbop_energy()["E_per_atom"]
+    n_atoms = gd.positions.shape[0]
+
+    result = gd.anneal(hold_steps=20, cool_steps=80, prerelax_steps=0, quench_steps=5)
+
+    assert gd.positions.shape == (n_atoms, 3)
+    assert gd.positions.dtype == torch.float32
+    assert torch.isfinite(gd.positions).all()
+    assert float(gd.positions.abs().max()) <= gd.box_x / 2 + 1e-6
+    assert result["E_per_atom"] < relaxed
+    assert result["wall_time"] > 0

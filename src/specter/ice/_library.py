@@ -147,6 +147,7 @@ def build_one_ice_config(
     seed: int = 0,
     device: str | torch.device = "cuda",
     progressbars: bool = True,
+    anneal_steps: tuple[int, int] = (2000, 22000),
 ) -> dict:
     """
     Generate a single ice coordinate config and save it (fixed-point) to
@@ -154,9 +155,12 @@ def build_one_ice_config(
 
     One unit of work for :func:`build_ice_cache` and for ``specter build
     ice``, which differ only in how they schedule these calls. A fresh
-    :class:`GradientSKIcemaker` run under the standard MLBOP recipe
-    (``rep_strength=0, mlbop_strength=0.5, mlbop_target=-0.413``,
-    ``tol=1e-3``/``patience=10``). That recipe is deliberately not
+    :class:`GradientSKIcemaker` run under the standard MLBOP recipe: an
+    :meth:`~GradientSKIcemaker.anneal` (220 K for 10 ps, cooled to 80 K
+    over 110 ps), then
+    :meth:`~GradientSKIcemaker.optimize` (``rep_strength=0,
+    mlbop_strength=0.5, mlbop_target=-0.413``, ``tol=1e-3``/``patience=10``).
+    That recipe is deliberately not
     parameterised: ``mlbop_target=-0.413`` is a measured property of real
     LDA-80K MD ice rather than a preference, and configs generated under
     different recipes are different phases of ice that
@@ -186,6 +190,10 @@ def build_one_ice_config(
         Computation device. Default ``"cuda"``.
     progressbars : bool, optional
         Whether to show a progress bar over optimisation steps. Default True.
+    anneal_steps : tuple of int, optional
+        Langevin steps held at 220 K and then cooling to 80 K, at 5 fs each.
+        Default ``(2000, 22000)``, 10 ps and 110 ps; see
+        :meth:`GradientSKIcemaker.anneal` for what cooling time buys.
 
     Returns
     -------
@@ -218,7 +226,18 @@ def build_one_ice_config(
     torch.manual_seed(seed)
     gd = GradientSKIcemaker(n=n, dx=dx, device=device, progressbars=progressbars)
     gd.init_random()
-    history_size, max_iter, prerelax_steps = 100, 25, 30
+    # The anneal relaxes the random start itself, so optimize() skips its
+    # own pre-relaxation.
+    anneal_settings = {
+        "t_high": 220.0,
+        "t_low": 80.0,
+        "hold_steps": anneal_steps[0],
+        "cool_steps": anneal_steps[1],
+        "dt": 5.0,
+        "friction": 0.01,
+    }
+    anneal = gd.anneal(**anneal_settings)
+    history_size, max_iter, prerelax_steps = 100, 25, 0
     history = gd.optimize(
         n_steps=n_steps,
         record_every=n_steps,
@@ -302,6 +321,10 @@ def build_one_ice_config(
             "mlbop_target": mlbop_target,
             "tol": tol,
             "patience": patience,
+            # Configs without this key were optimised without annealing
+            # (about 40% four-coordinated rather than about 75%).
+            "anneal": anneal_settings,
+            "anneal_wall_time": anneal["wall_time"],
         },
     }
     torch.save({"positions": positions, **metadata}, save_path)
@@ -317,6 +340,7 @@ def build_ice_cache(
     device: str | torch.device = "cuda",
     seed_start: int = 0,
     progressbars: bool = True,
+    anneal_steps: tuple[int, int] = (2000, 22000),
 ) -> None:
     """
     Generate ``n_configs`` independent ice coordinate configs and save
@@ -364,6 +388,9 @@ def build_ice_cache(
         First seed used; config ``i`` uses seed ``seed_start + i``. Default 0.
     progressbars : bool, optional
         Whether to show progress bars during generation. Default True.
+    anneal_steps : tuple of int, optional
+        Hold and cooling steps of each config's anneal; see
+        :func:`build_one_ice_config`. Default ``(2000, 22000)``.
     """
     os.makedirs(cache_dir, exist_ok=True)
     for i in range(n_configs):
@@ -376,4 +403,5 @@ def build_ice_cache(
             seed=seed,
             device=device,
             progressbars=progressbars,
+            anneal_steps=anneal_steps,
         )

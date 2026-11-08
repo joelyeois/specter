@@ -316,6 +316,7 @@ def test_build_ice_cache_names_configs_by_seed(tmp_path):
         device="cpu",
         seed_start=0,
         progressbars=False,
+        anneal_steps=(2, 2),
     )
 
     written = sorted(tmp_path.glob("config_*.pt"))
@@ -337,6 +338,7 @@ def test_build_ice_cache_names_configs_by_seed(tmp_path):
         device="cpu",
         seed_start=2,
         progressbars=False,
+        anneal_steps=(2, 2),
     )
 
     assert sorted(p.name for p in tmp_path.glob("*.pt")) == [
@@ -418,7 +420,13 @@ def test_build_one_ice_config_writes_fixed_point_coordinates(tmp_path):
     _load_config doesn't have to guess."""
     path = tmp_path / "config_000.pt"
     build_one_ice_config(
-        str(path), n=8, dx=1.0, n_steps=2, device="cpu", progressbars=False
+        str(path),
+        n=8,
+        dx=1.0,
+        n_steps=2,
+        device="cpu",
+        progressbars=False,
+        anneal_steps=(2, 2),
     )
 
     raw = torch.load(path, weights_only=False)
@@ -428,6 +436,8 @@ def test_build_one_ice_config_writes_fixed_point_coordinates(tmp_path):
     # bundled library uses.
     assert raw["wall_time"] > 0
     assert raw["n_steps_actual"] == 2
+    # The anneal is part of the recipe on record, at the budget it ran with.
+    assert raw["recipe"]["anneal"]["cool_steps"] == 2
 
 
 def test_bundled_ice_data_resolves_inside_the_package():

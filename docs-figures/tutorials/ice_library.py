@@ -52,11 +52,15 @@ torch.manual_seed(1000)  # the seed build_one_ice_config set
 maker = GradientSKIcemaker(n=64, dx=1.0, device="cuda", progressbars=False)
 maker.init_random()
 start_energy = maker.mlbop_energy()["E_per_atom"]
-history = maker.optimize(n_steps=250, record_every=1)
+annealed = maker.anneal()  # Langevin dynamics under ML-BOP, then a quench
+history = maker.optimize(n_steps=250, record_every=1, prerelax_steps=0)
 final_energy = maker.mlbop_energy()["E_per_atom"]
 
 print(f"{maker.n_molecules} water molecules in the cell")
-print(f"ML-BOP energy {start_energy:.2f} -> {final_energy:.3f} eV per molecule")
+print(
+    f"ML-BOP energy {start_energy:.2f} -> {annealed['E_per_atom']:.3f} annealed "
+    f"-> {final_energy:.3f} eV per molecule"
+)
 print(f"S(k) loss {history['sk_loss'][0]:.2e} -> {history['sk_loss'][-1]:.2e}")
 # --8<-- [end:trajectory]
 

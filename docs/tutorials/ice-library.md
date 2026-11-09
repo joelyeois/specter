@@ -43,7 +43,7 @@ library. Never write into the bundled library inside the package.
 
 `build_one_ice_config` optimises one configuration and writes it to a
 library directory, named after its seed by `ice_config_filename`. A 64 Å
-cell at 1 Å per voxel keeps the example to a couple of minutes:
+cell at 1 Å per voxel keeps the example to a few seconds:
 
 ```python
 --8<-- "docs-figures/tutorials/ice_library.py:build"
@@ -56,7 +56,10 @@ cell at 1 Å per voxel keeps the example to a couple of minutes:
 The optimisation recipe is fixed rather than exposed: it matches the
 structure factor \(S(k)\) of a molecular-dynamics frame of low-density
 amorphous ice, and holds the coarse-grained ML-BOP water energy (Chan et al.
-2019) near that frame's measured −0.413 eV per molecule. Two libraries built
+2019) near that frame's measured −0.413 eV per molecule. Before the
+optimisation, Langevin dynamics under ML-BOP anneals the random start, so
+that most molecules end with four neighbours as in the MD ice (see
+[Annealing](../concepts/ice.md#annealing)). Two libraries built
 under different recipes would be two different phases of ice, and `IceBank`
 would draw from them interchangeably. The S(k) loss reported is measured on the coordinates
 as stored, which the file keeps in a fixed-point encoding, so it is what any
@@ -90,9 +93,10 @@ optimisation constrains.
 
 Uniformly random positions have no structure: their Fourier amplitude falls
 smoothly with frequency, and overlapping molecules give an ML-BOP energy of
-17.20 eV per molecule. The optimised positions follow the target's water
-ring at 0.27 Å⁻¹ (3.7 Å) and its second peak, and the energy ends at
-−0.366 eV per molecule, approaching the target value. Below 0.1 Å⁻¹ the target
+17.20 eV per molecule. The anneal brings it to −0.428 eV, and the
+optimisation, which holds the energy to the target while matching \(S(k)\),
+ends at −0.418 eV. The optimised positions follow the target's water
+ring at 0.27 Å⁻¹ (3.7 Å) and its second peak. Below 0.1 Å⁻¹ the target
 is low, the signature of a nearly incompressible liquid whose density
 fluctuates little over long distances; see
 [The optimisation target: S(k)](../concepts/ice.md#the-optimisation-target-sk).
@@ -118,7 +122,7 @@ line marks 3.7 Å.
 ///
 
 The two libraries agree where it matters for imaging: the crops' mean
-potentials, 4.55 V and 4.51 V, match, and both spectra peak at the water
+potentials, 4.55 V and 4.52 V, match, and both spectra peak at the water
 ring. Each crop is a random rotation and
 translation of a configuration, rendered with the water-molecule kernel at
 whatever voxel size the request asks for.
@@ -165,8 +169,8 @@ clashes along the seam at \(y = 0\), which every slab crosses.
 ///
 
 Unrelaxed, the clashes at the seams raise the whole canvas's energy to
-0.080 eV per molecule, against −0.366 for the configuration itself. Fifty
-steps bring it to −0.329 and 200 to −0.357, and the seam's peak in the slab
+−0.089 eV per molecule, against −0.417 for the configuration itself. Fifty
+steps bring it to −0.381 and 200 to −0.399, and the seam's peak in the slab
 profile all but disappears. Relaxation only moves molecules near the faces,
 so it costs little next to the optimisation that built the cell; a library
 of cells larger than your boxes avoids seams altogether.

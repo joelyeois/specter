@@ -8,7 +8,7 @@ multi-hour batch job needs on top of that loop:
 - **Sharding.** Configurations are fully independent, so several devices
   each take a slice of them (`config.device` as a GPU list or "auto").
   Whole configurations go to whole worker processes rather than any
-  finer-grained parallelism: one configuration is tens of minutes of work,
+  finer-grained parallelism: one configuration is minutes of work,
   which makes process-pool startup free in relative terms and buys real
   fault isolation (a GPU OOM on one device costs that shard, not the run)
   plus CUDA-context isolation per device.
@@ -87,7 +87,7 @@ def _build_shard(
         # card ran out of memory at config 17 requesting 4.91 GiB while
         # nominally holding 38 GiB, and the same config succeeded
         # immediately in a fresh process. Releasing between configs costs one
-        # cudaFree/cudaMalloc cycle against tens of minutes of compute.
+        # cudaFree/cudaMalloc cycle against minutes of compute.
         if torch.device(device).type == "cuda":
             torch.cuda.empty_cache()
 
@@ -245,7 +245,7 @@ def run_build_ice_cache(config: IceCacheConfig) -> None:
     if pending:
         console.print(
             f"Generating {len(pending)} config(s) on {', '.join(devices)} -- "
-            "expect tens of minutes each at production scale."
+            "expect a few minutes each at production scale."
         )
         started = time.time()
         if len(devices) == 1 or len(pending) == 1:

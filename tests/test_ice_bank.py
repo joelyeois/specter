@@ -658,7 +658,10 @@ def test_host_volume_blend_matches_whole_canvas_blend():
     bank.big_ice_positions = real  # type: ignore[method-assign]
     out = blend_ice_into_volume(V0.clone(), bank, dx, inplace=True)
     assert out.device.type == "cpu"
-    assert float((out - V0).mean()) == pytest.approx(float(ice.mean()), rel=0.05)
+    # Another draw, so only statistically equal: the masked mean, since ice
+    # is only added outside V's occupancy (about 5% of this canvas).
+    expected = float((ref - V0.to(dev)).mean())
+    assert float((out - V0).mean()) == pytest.approx(expected, rel=0.02)
 
 
 @pytest.mark.parametrize("chunk", [3, 7, 64])

@@ -197,11 +197,11 @@ cell size.
 
 **Budget the mean, expect the range.** A run stops when its loss plateaus, so
 how many steps it takes is part of what it costs, and that depends on the
-random initialisation. The three repeats above understate the spread if
-anything: the 20-configuration bundled library, all at `n = 256`, took
-between 75 and 250 steps and between 3m 08s and 9m 33s per configuration,
-averaging 6m 04s. Its `manifest.json` records every configuration's step
-count, wall time, S(k) loss and ML-BOP energy.
+random initialisation. The repeats above predate the anneal. The current
+20-configuration bundled library, all at `n = 256`, ran every configuration
+to the 250-step ceiling, in 2m 07s to 2m 17s each (median 2m 12s, of which
+about 1m 17s is the anneal). Its `manifest.json` records every
+configuration's step count, wall time, S(k) loss and ML-BOP energy.
 
 The two sweeps on this page share the `n = 256`, `dx = 1.0` geometry, which
 makes them a check on each other: 6m 43s against 6m 46s mean, and 7.54
@@ -283,12 +283,14 @@ that can be quoted in isolation:
   back**, so it includes the cost of storing them (see
   [Coordinate storage](#coordinate-storage)) and is a property of the file
   rather than of convergence alone. At $n = 256$, $dx = 1.0$ the bundled
-  library spans $2\times10^{-4}$ to $0.02$, median $4\times10^{-3}$.
-- The ML-BOP energy per atom is a structural diagnostic, not a distance
-  from the $-0.413$ eV/atom figure in each configuration's `recipe`: that
-  value is one weighted term in the combined loss, and the optimisation
-  isn't expected to reach it. Bundled configurations settle between
-  $-0.19$ and $-0.27$ eV/atom, median $-0.23$.
+  library spans $2\times10^{-4}$ to $0.016$, median $3\times10^{-3}$, and
+  nearly all of it sits in the few cube-corner bins beyond the Nyquist
+  sphere.
+- The ML-BOP energy per atom is a structural diagnostic as well as the
+  $-0.413$ eV/atom target in each configuration's `recipe`. Annealed
+  configurations reach it: the bundled ones settle between $-0.4139$ and
+  $-0.4148$ eV/atom. Libraries built without the anneal stopped between
+  $-0.19$ and $-0.27$.
 
 `stopped_early` is directly interpretable: it says whether the
 loss plateaued within the step budget or the budget ran out first, and so
@@ -350,14 +352,17 @@ library written before this change keeps loading. Such configurations cannot
 be upgraded in place: SPECTER discards float32 coordinates at write time,
 so only regeneration recovers the difference.
 
-The bundled library was last regenerated on 2026-09-02, from the same seeds
-under the same recipe, after the optimiser began carrying its positions in
-float64 (see [Amorphous ice](../concepts/ice.md#the-optimisation)). Every
-earlier library had stalled near $-0.10$ eV/atom at the float32 resolution
-of the coordinates; the current one reaches a median of $-0.23$ eV/atom in
-a median of 156 steps, 16 of 20 configurations plateauing before the
-250-step ceiling, for 2.0 GPU-hours in total. A library is one convergence
-level: `manifest.json` records the optimiser settings under `optimizer`,
+The bundled library was last regenerated on 2026-11-08, from the same seeds
+(1000 to 1019), with the ML-BOP anneal before the optimisation (see
+[Amorphous ice](../concepts/ice.md#annealing)) and the fused ML-BOP kernel.
+It took 0.73 GPU-hours on two L40s. Its configurations are 75% four-coordinated
+(75.0% to 75.3%) against 38% for the library it replaced, and reach a median
+ML-BOP energy of $-0.4143$ eV/atom against that library's $-0.23$. That
+library (2026-09-02) was the first built with float64 positions, which
+lifted every earlier one from about $-0.10$ eV/atom; it took a median of 156
+steps and 2.0 GPU-hours in total. A library is one convergence
+level: `manifest.json` records the optimiser settings under `optimizer`
+and the anneal schedule under `recipe.anneal`,
 and configurations generated under different settings should not share a
 directory.
 

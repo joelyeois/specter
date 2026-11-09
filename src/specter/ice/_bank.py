@@ -42,7 +42,7 @@ class IceBank(_IceTiling, DeviceModule):
     Each cached config is a single :class:`GradientSKIcemaker` run's
     positions, converged under the standard MLBOP recipe (see
     :func:`build_ice_cache`) and stored as a periodic cubic cell. Since
-    generation is a one-time cost (~tens of minutes for a production-scale
+    generation is a one-time cost (minutes for a production-scale
     config), this class turns "get a new, statistically independent ice
     volume" into a request costing single-digit milliseconds on GPU: pick a
     cached config, pick a random rotation and a random center, gather

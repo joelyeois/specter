@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-02T14:54:47+00:00",
+  "generated": "2026-11-08T17:02:36+00:00",
   "specter_version": "0.1.0",
   "configs": [
     {
@@ -10,22 +10,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 146,
-      "wall_time": 336.98138865455985,
-      "stopped_early": true,
-      "sk_loss": 0.005719106178730726,
-      "E_per_atom": -0.22825710475444794,
+      "n_steps_actual": 250,
+      "wall_time": 129.3380825209897,
+      "stopped_early": false,
+      "sk_loss": 0.00044129384332336485,
+      "E_per_atom": -0.41431573033332825,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 77.48496348317713
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -36,22 +45,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 111,
-      "wall_time": 284.22818054258823,
-      "stopped_early": true,
-      "sk_loss": 0.0042850663885474205,
-      "E_per_atom": -0.22106648981571198,
+      "n_steps_actual": 250,
+      "wall_time": 137.13781421305612,
+      "stopped_early": false,
+      "sk_loss": 0.003148437710478902,
+      "E_per_atom": -0.41398337483406067,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 79.85585544002242
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -62,22 +80,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 174,
-      "wall_time": 436.3149764984846,
-      "stopped_early": true,
-      "sk_loss": 0.0027534072287380695,
-      "E_per_atom": -0.2326744645833969,
+      "n_steps_actual": 250,
+      "wall_time": 129.97757352888584,
+      "stopped_early": false,
+      "sk_loss": 0.0012255170149728656,
+      "E_per_atom": -0.41431236267089844,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 75.62864504894242
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -88,22 +115,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 197,
-      "wall_time": 447.66057473793626,
-      "stopped_early": true,
-      "sk_loss": 0.004667419940233231,
-      "E_per_atom": -0.2481820434331894,
+      "n_steps_actual": 250,
+      "wall_time": 132.60106547595933,
+      "stopped_early": false,
+      "sk_loss": 0.00020553743524942547,
+      "E_per_atom": -0.41408178210258484,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 76.87877405295148
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -114,22 +150,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 79,
-      "wall_time": 202.16978607699275,
-      "stopped_early": true,
-      "sk_loss": 0.01905563846230507,
-      "E_per_atom": -0.1992177665233612,
+      "n_steps_actual": 250,
+      "wall_time": 130.43748592608608,
+      "stopped_early": false,
+      "sk_loss": 0.0024403571151196957,
+      "E_per_atom": -0.4141577184200287,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 75.42905131611042
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -140,22 +185,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 145,
-      "wall_time": 354.62193581834435,
-      "stopped_early": true,
-      "sk_loss": 0.0007028860272839665,
-      "E_per_atom": -0.22715958952903748,
+      "n_steps_actual": 250,
+      "wall_time": 133.75952749792486,
+      "stopped_early": false,
+      "sk_loss": 0.0009443601593375206,
+      "E_per_atom": -0.4139271676540375,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 78.12030118680559
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -166,22 +220,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 156,
-      "wall_time": 344.604045573622,
-      "stopped_early": true,
-      "sk_loss": 0.0004872970748692751,
-      "E_per_atom": -0.22841838002204895,
+      "n_steps_actual": 250,
+      "wall_time": 126.8841625819914,
+      "stopped_early": false,
+      "sk_loss": 0.003454494057223201,
+      "E_per_atom": -0.4144163727760315,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 74.77088114921935
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -192,22 +255,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 156,
-      "wall_time": 367.62265848368406,
-      "stopped_early": true,
-      "sk_loss": 0.006977390497922897,
-      "E_per_atom": -0.2294466346502304,
+      "n_steps_actual": 250,
+      "wall_time": 133.6329222631175,
+      "stopped_early": false,
+      "sk_loss": 0.001287594554014504,
+      "E_per_atom": -0.4143257141113281,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 77.53004863508977
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -219,21 +291,30 @@
       "n_atoms": 527178,
       "n_steps": 250,
       "n_steps_actual": 250,
-      "wall_time": 572.365665756166,
+      "wall_time": 129.39068104699254,
       "stopped_early": false,
-      "sk_loss": 0.0012733314651995897,
-      "E_per_atom": -0.27027735114097595,
+      "sk_loss": 0.003957439213991165,
+      "E_per_atom": -0.41385772824287415,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 75.48333571222611
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -244,22 +325,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 157,
-      "wall_time": 358.0286822281778,
-      "stopped_early": true,
-      "sk_loss": 0.0014075463404878974,
-      "E_per_atom": -0.22409404814243317,
+      "n_steps_actual": 250,
+      "wall_time": 134.25386268110014,
+      "stopped_early": false,
+      "sk_loss": 0.01142802182585001,
+      "E_per_atom": -0.4142591655254364,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 78.09033305896446
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -270,22 +360,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 75,
-      "wall_time": 195.57539170980453,
-      "stopped_early": true,
-      "sk_loss": 0.0055334498174488544,
-      "E_per_atom": -0.1944749802350998,
+      "n_steps_actual": 250,
+      "wall_time": 129.61182531691156,
+      "stopped_early": false,
+      "sk_loss": 0.0008986874017864466,
+      "E_per_atom": -0.41454118490219116,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 75.47217209194787
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -297,21 +396,30 @@
       "n_atoms": 527178,
       "n_steps": 250,
       "n_steps_actual": 250,
-      "wall_time": 564.1148760542274,
+      "wall_time": 133.4063414328266,
       "stopped_early": false,
-      "sk_loss": 0.008054591715335846,
-      "E_per_atom": -0.26212772727012634,
+      "sk_loss": 0.005901860538870096,
+      "E_per_atom": -0.4145658016204834,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 77.59403801197186
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -323,21 +431,30 @@
       "n_atoms": 527178,
       "n_steps": 250,
       "n_steps_actual": 250,
-      "wall_time": 571.1895284876227,
+      "wall_time": 130.17565163993277,
       "stopped_early": false,
-      "sk_loss": 0.0036874269135296345,
-      "E_per_atom": -0.2675064206123352,
+      "sk_loss": 0.015560852363705635,
+      "E_per_atom": -0.4146219491958618,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 75.63543342496268
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -348,22 +465,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 110,
-      "wall_time": 259.7418974302709,
-      "stopped_early": true,
-      "sk_loss": 0.003423224901780486,
-      "E_per_atom": -0.21725180745124817,
+      "n_steps_actual": 250,
+      "wall_time": 133.87042462686077,
+      "stopped_early": false,
+      "sk_loss": 0.0006943205953575671,
+      "E_per_atom": -0.41436100006103516,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 78.11312248394825
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -374,22 +500,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 190,
-      "wall_time": 416.9184254743159,
-      "stopped_early": true,
-      "sk_loss": 0.02208069898188114,
-      "E_per_atom": -0.2346072494983673,
+      "n_steps_actual": 250,
+      "wall_time": 131.90285382815637,
+      "stopped_early": false,
+      "sk_loss": 0.003997843246906996,
+      "E_per_atom": -0.41387036442756653,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 75.58770900196396
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -400,22 +535,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 87,
-      "wall_time": 213.9430774077773,
-      "stopped_early": true,
-      "sk_loss": 0.00022172431636136025,
-      "E_per_atom": -0.1959020495414734,
+      "n_steps_actual": 250,
+      "wall_time": 130.79091326706111,
+      "stopped_early": false,
+      "sk_loss": 0.004280698020011187,
+      "E_per_atom": -0.41425907611846924,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 76.61656984500587
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -426,22 +570,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 76,
-      "wall_time": 187.6080477759242,
-      "stopped_early": true,
-      "sk_loss": 0.0009745617280714214,
-      "E_per_atom": -0.19283027946949005,
+      "n_steps_actual": 250,
+      "wall_time": 130.12722818902694,
+      "stopped_early": false,
+      "sk_loss": 0.0009365497971884906,
+      "E_per_atom": -0.4140506088733673,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 75.76167859090492
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -452,22 +605,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 167,
-      "wall_time": 373.45277256146073,
-      "stopped_early": true,
-      "sk_loss": 0.0005076788365840912,
-      "E_per_atom": -0.22715455293655396,
+      "n_steps_actual": 250,
+      "wall_time": 135.76044484204613,
+      "stopped_early": false,
+      "sk_loss": 0.014983408153057098,
+      "E_per_atom": -0.41477903723716736,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 76.78834107588045
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -479,21 +641,30 @@
       "n_atoms": 527178,
       "n_steps": 250,
       "n_steps_actual": 250,
-      "wall_time": 572.8232027702034,
+      "wall_time": 132.6644250380341,
       "stopped_early": false,
-      "sk_loss": 0.00858659390360117,
-      "E_per_atom": -0.2601012885570526,
+      "sk_loss": 0.001058792695403099,
+      "E_per_atom": -0.4144657850265503,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 75.26920065004379
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     },
     {
@@ -504,22 +675,31 @@
       "box_L": 256.0,
       "n_atoms": 527178,
       "n_steps": 250,
-      "n_steps_actual": 92,
-      "wall_time": 218.7895555831492,
-      "stopped_early": true,
-      "sk_loss": 0.0011275887954980135,
-      "E_per_atom": -0.19753000140190125,
+      "n_steps_actual": 250,
+      "wall_time": 132.97325173206627,
+      "stopped_early": false,
+      "sk_loss": 0.003579856129363179,
+      "E_per_atom": -0.41398885846138,
       "recipe": {
         "rep_strength": 0.0,
         "mlbop_strength": 0.5,
         "mlbop_target": -0.413,
         "tol": 0.001,
-        "patience": 10
+        "patience": 10,
+        "anneal": {
+          "t_high": 220.0,
+          "t_low": 130.0,
+          "hold_steps": 1000,
+          "cool_steps": 7071,
+          "dt": 10.0,
+          "friction": 0.001
+        },
+        "anneal_wall_time": 78.92823011381552
       },
       "optimizer": {
         "history_size": 100,
         "max_iter": 25,
-        "prerelax_steps": 30
+        "prerelax_steps": 0
       }
     }
   ]

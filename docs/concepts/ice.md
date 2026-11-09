@@ -280,9 +280,10 @@ default; `"gaussian"` is reachable only through those functions. The
 step of variance \(\sigma_0^2\) per axis per e⁻/Å², so that
 \(\rho_k(\tau) = e^{-2\pi^2\sigma_0^2 k^2 \tau}\); they measured
 \(\sigma_0^2 = 0.38\) Å² per e⁻/Å² from the 3.7 Å ring at 300 kV. The
-`"relaxed"` model is measured instead. Periodic 256 Å boxes of library ice
-were evolved by such Gaussian kicks, each followed by the library's own
-\(S(k)\) and ML-BOP relaxation so that every state is water, and the
+`"relaxed"` model is measured instead. Periodic 256 Å boxes of library ice,
+from the library as it stood before the anneal, were evolved by such
+Gaussian kicks, each followed by the library's own \(S(k)\) and ML-BOP
+relaxation so that every state is water, and the
 coherence was measured without a grid, from the structure factor of all
 527,178 molecules at reciprocal-lattice vectors of the box, over lags of 1 to
 60 steps. It is compressed rather than exponential: every shell from 90 Å to
@@ -362,6 +363,16 @@ fade the solvent that the exposure filter already decorrelates.
   ice statistics of its own exposure, but every tilt filters the same
   underlying configuration, whereas the real ice has rearranged between
   tilts.
+- **The relaxed coherence was measured on less tetrahedral ice than the
+  library now holds.** Started from the annealed library, the same
+  kick-and-relax steps fell from 75% four-coordinated molecules to 43%
+  within four steps: a kick of 0.27 Å² per axis breaks contacts that the
+  short, gradient-only relaxation cannot rebuild. Adding an anneal to each
+  step does not close the gap: a few picoseconds at 130 K
+  rebuilt the network only to 51-57%, and the full library anneal, which
+  rebuilt it to 77%, moved molecules 0.89 Å² per axis on unkicked ice,
+  three times the kick, so the trajectory would measure the anneal rather
+  than the beam. How much the coherence of 75% ice differs is not known.
 - **Long-wavelength ice power differs between library and relaxed ice.**
   After many kick-and-relax steps the ice carries 0.5 to 0.9 of the
   library's density fluctuation at 10 to 90 Å. Both are outputs of the same

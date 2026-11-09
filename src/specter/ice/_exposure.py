@@ -20,9 +20,10 @@ Gaussian step of variance sigma0^2 per axis per e-/A^2, so the correlation is
 exp(-2 pi^2 k^2 sigma0^2 |D - D'|).
 
 ``"relaxed"``, the default, is measured on explicit trajectories: periodic
-256 A boxes of the bundled ice library evolved by Gaussian kicks of 0.272 A^2
-per axis per step, each followed by the library's own S(k) plus ML-BOP
-relaxation so that every state is water. The coherence was measured without a
+256 A boxes of the bundled ice library, as it stood before the ML-BOP anneal
+(38% four-coordinated), evolved by Gaussian kicks of 0.272 A^2 per axis per
+step, each followed by the library's own S(k) plus ML-BOP relaxation so that
+every state is water. The coherence was measured without a
 grid, from the structure factor of all 527,178 molecules summed at
 reciprocal-lattice vectors of the box, at lags of 1-60 steps over 181 steps
 of four chains. It is not a single exponential: the decay is slow over the
@@ -57,6 +58,14 @@ bright low-frequency disc that McMullan et al.'s Fig. 1(a) does not show.
 The relaxation step is a structure-matching optimisation, not molecular
 dynamics, so the long-wavelength time scales are the least certain part;
 scaling them with sigma0^2 away from the measured kick is untested.
+
+Started from the annealed library instead, the same steps fell from 75%
+four-coordinated molecules to 43% within four kicks: a kick breaks contacts
+the short gradient relaxation cannot rebuild. So the model describes less
+tetrahedral ice than the library renders. A per-step anneal does not close the gap
+without measuring itself: 2-5 ps at 130 K rebuilt only 51-57%, and the full
+library anneal, which rebuilt 77%, moved unkicked ice 0.89 A^2 per axis,
+three times one kick (2026-11-09, config 1000).
 
 References
 ----------

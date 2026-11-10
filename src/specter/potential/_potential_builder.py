@@ -7,7 +7,7 @@ import logging
 import warnings
 from collections.abc import Callable
 from importlib import resources
-from typing import Sequence
+from typing import Any, Sequence
 
 import gemmi
 from .._device_module import DeviceModule
@@ -298,9 +298,46 @@ class PotentialBuilder(DeviceModule):
         self.parameterization = parameterization
         self.avgpool2d = torch.nn.AvgPool2d(self.ssf, stride=self.ssf)
         self.avgpool3d = torch.nn.AvgPool3d(self.ssf, stride=self.ssf)
-        if parameterization in ("kirkland", "lobato"):
+        # The kernels feed method='2d'/'3d' only, and cost grows as dx**3:
+        # they are supersampled to ~0.1 A over at least three voxels, 300^3
+        # samples per species at 10 A. Built on first use (see
+        # `_ensure_kernels`), so a builder used only with method='analytic',
+        # the default, never pays for them.
+        self._kernels_built = False
+        if parameterization == "shtyrov":
+            if self.atom_species is None:
+                self.atom_species = [None] * len(self.atomic_numbers)
+            self._prepare_shtyrov_groups()
+
+    def __getattr__(self, name: str) -> Any:
+        # Reading a kernel stack builds it, so the buffers stay public and
+        # in the state dict while their contents are made on demand.
+        if name in ("atomic_potentials_2d", "atomic_potentials_3d"):
+            if not self.__dict__.get("_kernels_built", True):
+                self._ensure_kernels()
+        return super().__getattr__(name)
+
+    def _ensure_kernels(self) -> None:
+        """Build the 2D/3D kernel stacks if no caller has yet."""
+        if self._kernels_built:
+            return
+        self._kernels_built = True
+        device = self.sR_3d.device
+        if self.parameterization in ("kirkland", "lobato"):
             self.get_2d_atomic_potentials()
         self.get_3d_atomic_potentials()
+        # Built on the host from the host-side tables; follow the module.
+        for name in ("atomic_potentials_2d", "atomic_potentials_3d"):
+            buf = self._buffers[name]
+            assert buf is not None
+            self._buffers[name] = buf.to(device)
+
+    def _save_to_state_dict(
+        self, destination: Any, prefix: str, keep_vars: bool
+    ) -> None:
+        # A state dict records the kernels, never the unfilled placeholders.
+        self._ensure_kernels()
+        super()._save_to_state_dict(destination, prefix, keep_vars)
 
     def get_2d_atomic_potentials(
         self, unique_elements: torch.Tensor | None = None
@@ -319,6 +356,7 @@ class PotentialBuilder(DeviceModule):
         Potentials are supersampled and downsampled to main grid resolution.
         Results are stored in `self.atomic_potentials_2d`.
         """
+        self._kernels_built = True
         if unique_elements is None:
             unique_elements = self.unique_elements
         else:
@@ -366,10 +404,13 @@ class PotentialBuilder(DeviceModule):
         None, it is treated as `[None] * len(atomic_numbers)`, i.e. every
         atom falls back to plain per-element Peng `c4322` factors.
         """
+        self._kernels_built = True
         if self.parameterization == "shtyrov" and self.atom_species is None:
             self.atom_species = [None] * len(self.atomic_numbers)
 
         if self.parameterization == "shtyrov":
+            if self.shtyrov_groups is None:
+                self._prepare_shtyrov_groups()
             self._get_3d_shtyrov_species_potentials()
             return
 
@@ -444,9 +485,9 @@ class PotentialBuilder(DeviceModule):
             stacklevel=3,
         )
 
-    def _get_3d_shtyrov_species_potentials(self) -> None:
+    def _prepare_shtyrov_groups(self) -> None:
         """
-        Build 3D Shtyrov kernels grouped by bonded-species descriptor.
+        Group the atoms by bonded-species descriptor for the Shtyrov kernels.
 
         Atoms whose `atom_species` entry is `None` or not present in the
         species parameter table fall back to a per-element, unbonded
@@ -456,7 +497,8 @@ class PotentialBuilder(DeviceModule):
         aggregated warning (no atom is silently dropped). Populates
         `self.shtyrov_groups` (a list of `("species", name)` /
         `("element", z)` tags, one per row of `self.atomic_potentials_3d`)
-        for `forward` to consume.
+        for `forward` to consume, and `self._species_table`/
+        `self._params_path` for `_get_3d_shtyrov_species_potentials`.
         """
         params_path = self.shtyrov_params_path
         if params_path is None:
@@ -504,7 +546,14 @@ class PotentialBuilder(DeviceModule):
             ),
             persistent=False,
         )
+        self._species_table = species_table
+        self._params_path = params_path
 
+    def _get_3d_shtyrov_species_potentials(self) -> None:
+        """Build one 3D Shtyrov kernel per group in `self.shtyrov_groups`."""
+        assert self.shtyrov_groups is not None
+        species_table = self._species_table
+        params_path = self._params_path
         self.atomic_potentials_3d = torch.empty(
             len(self.shtyrov_groups),
             self.ssn // self.ssf,
@@ -814,6 +863,7 @@ class PotentialBuilder(DeviceModule):
                 "method='analytic'."
             )
 
+        self._ensure_kernels()
         if conv_backend is None:
             conv_backend = self.conv_backend
         coordinates = coordinates.to(self.device)

@@ -1148,8 +1148,10 @@ def test_potential_kernel_cache_is_transparent_and_isolated():
 
     _KERNEL_CACHE.clear()
     first = PotentialBuilder(**kwargs)
-    assert len(_KERNEL_CACHE) == 4, "one entry per unique element"
+    # The kernels are built on first use, not at construction.
+    assert len(_KERNEL_CACHE) == 0
     cold = first.atomic_potentials_3d.clone()
+    assert len(_KERNEL_CACHE) == 4, "one entry per unique element"
 
     second = PotentialBuilder(**kwargs)
     assert torch.equal(second.atomic_potentials_3d, cold)
@@ -1161,8 +1163,8 @@ def test_potential_kernel_cache_is_transparent_and_isolated():
 
     # A different voxel size is a different kernel, not a cache hit.
     other = PotentialBuilder(**{**kwargs, "dx": 1.0})
-    assert len(_KERNEL_CACHE) == 8
     assert not torch.equal(other.atomic_potentials_3d, cold)
+    assert len(_KERNEL_CACHE) == 8
 
 
 def test_potential_kernel_cache_separates_parameterizations():

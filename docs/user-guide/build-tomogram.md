@@ -215,29 +215,27 @@ Same field of view rendered at voxel_size = 10, 5, and 2 Å/voxel: a sum Z proje
 
 | `voxel_size` (Å/voxel) | Shape (Z, Y, X voxels) | Wall time | GPU peak | RAM peak |
 |---|---|---|---|---|
-| 10 | 150 × 600 × 600 | 45 s | 1.29 GB | 11.80 GB |
-| 5  | 300 × 1200 × 1200 | 29 s | 7.45 GB | 5.77 GB |
-| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 294 s (4m 54s) | 3.85 GB | 143.29 GB |
+| 10 | 150 × 600 × 600 | 15 s | 2.21 GB | 4.16 GB |
+| 5  | 300 × 1200 × 1200 | 26 s | 7.45 GB | 5.72 GB |
+| 2  | 750 × 3000 × 3000 (~6.75B voxels) | 310 s (5m 10s) | 5.66 GB | 143.27 GB |
 
-At 10 Å and 5 Å a run is dominated by per-run species rendering and packing
-overhead rather than by the canvas, and the 10 Å run is the slower of the
-two: rendering the species templates takes 34 s there against 5 s at 5 Å,
-reproducibly across three runs. The step change at 2 Å is unambiguous:
-wall time is 10× the 5 Å figure, and RAM jumps to **143 GB**.
+At 10 Å and 5 Å a run is dominated by per-run species packing and the
+membrane phase rather than by the canvas. The step change at 2 Å is
+unambiguous: wall time is 12× the 5 Å figure, and RAM jumps to **143 GB**.
 That RAM spike is `accumulator_device="auto"` doing exactly what [Compute &
 scaling flags](#compute-scaling-flags) above says it does: at ~6.75
 billion voxels the density volume alone is ~27 GB, comfortably past half
 of this GPU's free VRAM, so the shared canvas tensors get pushed to system
 RAM instead of failing with a CUDA OOM. That's also why **GPU peak falls**
-from 5 Å to 2 Å, from 7.45 GB to 3.85 GB, despite a 15× bigger canvas: the
+from 5 Å to 2 Å, from 7.45 GB to 5.66 GB, despite a 15× bigger canvas: the
 single biggest consumer (the canvas) has moved off the GPU entirely,
 leaving only per-instance rendering buffers and the membrane geometry
 behind.
 
 Where the 2 Å run's time goes is worth knowing before optimizing against
-it. The membrane phase is 11 s, and the cytosol species phase, which packs
-and renders 21,216 instances, is 2m 26s: 3 s to pack the targets, 12 s to
-pack the filler, and 1m 24s to render it. Writing the finished 27 GB volume
+it. The membrane phase is 10 s, and the cytosol species phase, which packs
+and renders 21,216 instances, is 2m 29s: 9 s to pack the targets, 14 s to
+pack the filler, and 1m 23s to render it. Writing the finished 27 GB volume
 is the remaining ~2m. All 21 structures load in **0 s**, because the parsed
 structures are already cached on disk; a cold cache adds the download and a
 one-time parse (see [Structure cache](cache.md)).

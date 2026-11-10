@@ -13,7 +13,7 @@ from ...arrays import clip_insert_bounds
 from ...arrays import insert_particles_into_micrograph
 from ...rotations import fold_subvoxel_offsets
 from ...rotations import rotate_volume
-from ..membrane import MembraneGenerator, membrane_bounding_radius
+from ..membrane import MembraneGenerator
 
 
 def _wants_atom_species(parameterization: str) -> bool:
@@ -485,15 +485,13 @@ def resolve_accumulator_device(
 
 
 def _instance_bounding_radius(generator: MembraneGenerator) -> float:
-    """Conservative bounding-sphere radius for a membrane instance's own
-    (already-resolved, see MembraneGenerator.__init__) size, used only for
-    collision-rejecting random placement -- deliberately generous rather
-    than exact (this module's own "not caring about packing tightly"
-    philosophy, see its docstring): for `swept_spline`, a wandering path's
-    true bounding box is smaller than its contour length (same reasoning
-    MembraneGenerator's own auto-sizing uses), so treating the FULL
-    contour length as if straight overestimates, not underestimates."""
-    return membrane_bounding_radius(generator.shape)
+    """
+    Bounding-sphere radius of a membrane instance, Å.
+
+    Used for collision-rejecting random placement, so it bounds the
+    organelle the generator drew and is generous for an elongated one.
+    """
+    return generator.bounding_radius
 
 
 def _insert_shell_label(

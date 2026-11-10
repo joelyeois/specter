@@ -20,8 +20,8 @@ topic appears in code. For complete command-line workflows, see the
         - [Overview](cryoet-specimen/index.md)
         - Membrane shape
             - [Overview](membrane-shape/index.md)
-            - [Spherical harmonics](membrane-shape/spherical-harmonics.md)
-            - [Swept spline](membrane-shape/swept-spline.md)
+            - [Geometry](membrane-shape/geometry.md)
+            - [Organelle kinds](membrane-shape/organelles.md)
         - [Bilayer & transmembrane proteins](cryoet-specimen/bilayer.md)
         - [Filaments](cryoet-specimen/filaments.md)
         - [Microtubules](cryoet-specimen/microtubules.md)

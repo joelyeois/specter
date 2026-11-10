@@ -28,8 +28,8 @@ combination is valid.
 | Component | What it is | Module |
 |---|---|---|
 | [Carbon support film](carbon-film.md) | A holey-grid film with a rough 3D rim | `specimen._carbon` |
-| [Membrane shape](../membrane-shape/index.md) | Organelle geometry: vesicles or wandering tubes | `specimen.membrane._field_*` |
-| [Bilayer & transmembrane proteins](bilayer.md) | Turning that geometry into calibrated potential, and embedding proteins in it | `specimen.membrane._profile`, `._raster`, `._placement` |
+| [Membrane shape](../membrane-shape/index.md) | Organelle geometry: vesicles, tubules, cisternae and mitochondria as boundaries of solids | `specimen.membrane._geometry`, `._primitives`, `._organelles` |
+| [Bilayer & transmembrane proteins](bilayer.md) | Turning that geometry into calibrated potential, and embedding proteins in it | `specimen.membrane._profile`, `._render`, `._placement` |
 | [Filaments](filaments.md) | Random-walk polymers (F-actin, single protofilaments) | `specimen.filament` |
 | [Microtubules](microtubules.md) | Closed 13-protofilament tubes, lumen and A-lattice seam | `specimen.filament` |
 | [Gold fiducial beads](beads.md) | Real fcc gold at real bulk density | `specimen._grid` |

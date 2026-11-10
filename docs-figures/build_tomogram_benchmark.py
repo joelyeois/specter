@@ -3,7 +3,7 @@ Benchmark `specter build tomogram` at fixed physical field of view, across
 three voxel sizes (10, 5, 2 A) -- the numbers behind the "Benchmarks"
 section of docs/user-guide/build-tomogram.md.
 
-Reuses quickstart.md's own example project (one spherical_harmonics
+Reuses quickstart.md's own example project (one vesicle
 membrane, target species 1bxn x20) plus filler_from_pei2016 (20 species,
 matching configs/tomogram.toml's own filler approach) so the benchmarked
 workload is the same one already shown elsewhere in the docs, just resolved
@@ -102,7 +102,7 @@ def _run_worker(voxel_size: float, out_mrc: Path, result_json: Path) -> None:
     cfg = TomogramConfig(
         targets=[{"pdb_source": "1bxn", "n_copies": 20}],
         filler_from_pei2016=True,
-        membrane=[{"shape_backend": "spherical_harmonics"}],
+        membrane=[{"kind": "vesicle"}],
         target_shape=list(shape_zyx),
         voxel_size=voxel_size,
         filler_occupancy_fraction=0.5,

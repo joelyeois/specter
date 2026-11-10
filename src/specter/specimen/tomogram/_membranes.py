@@ -183,6 +183,11 @@ class _MembraneStageMixin:
                     seed=self.seed,
                     device="cpu",  # see self.device's own docstring
                     clip_axes=self.clip_axes,
+                    # A handful of large spheres, each alone in its radius
+                    # stage: a pass is one trial, and an organelle spanning
+                    # most of the slab has a narrow window to land in.
+                    max_passes=2000,
+                    stall_patience=2000,
                     exclusion_distance_field=(
                         exclusion_field if carbon_mask is not None else None
                     ),
@@ -325,8 +330,7 @@ class _MembraneStageMixin:
                 "actually drew (clipped_at_boundary=True on its "
                 "MembraneGenerator) -- skipped rather than compositing a "
                 "visibly truncated shape. Increase that instance's own "
-                "target_shape/voxel_size, or omit target_shape "
-                "entirely for auto-sizing.",
+                "target_shape, or omit it for auto-sizing.",
                 stacklevel=3,
             )
             return None
@@ -473,8 +477,7 @@ class _MembraneStageMixin:
         Computed now, while `local_volume` is at hand, and kept as a bool:
         a GLOBAL threshold would need the full composite's peak, forcing
         every instance's full-resolution array to stay resident until the
-        loop finishes, which OOMs once `MembraneGenerator`'s
-        max_field_voxels lets one instance reach tens of GB. This
+        loop finishes, which OOMs once one instance reaches tens of GB. This
         instance's own peak (when `region_density_threshold` is auto) is
         also the right reference for labelling it: an instance with a lower
         peak (a smaller organelle on a coarser working grid, say) should

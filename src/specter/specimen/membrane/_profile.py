@@ -146,7 +146,7 @@ ATOM_KERNEL_HALF_WIDTH_ANGSTROM = 2.5
 # A. Deliberately independent of the voxel size a membrane is rendered at:
 # psi is a continuous physical quantity in volts, and the render grid's
 # resolution loss belongs downstream, applied once by
-# rasterize_membrane_density's anti-aliasing.
+# render_bilayer's voxel average of the profile.
 #
 # This constant is scaffolding for a SYNTHESIZED profile. psi(z) is
 # obtained by rendering a schematic atomic model and averaging laterally,

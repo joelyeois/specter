@@ -23,8 +23,7 @@ uses it for.
   [github.com/seung-lab/connected-components-3d](https://github.com/seung-lab/connected-components-3d)
 - **cryosparc-tools**: reading and writing CryoSPARC `.cs` files.
   [github.com/cryoem-uoft/cryosparc-tools](https://github.com/cryoem-uoft/cryosparc-tools)
-- **CuPy**: the GPU Euclidean distance transform of the spherical-harmonics
-  membrane backend. Okuta, R., Unno, Y., Nishino, D., Hido, S., & Loomis, C.
+- **CuPy**: the GPU Euclidean distance transform of the membrane geometry. Okuta, R., Unno, Y., Nishino, D., Hido, S., & Loomis, C.
   (2017). CuPy: A NumPy-compatible library for NVIDIA GPU calculations.
   *Workshop on Machine Learning Systems (LearningSys), Neural Information
   Processing Systems (NIPS)*.

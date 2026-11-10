@@ -234,7 +234,7 @@ def test_explicit_generator_controls_the_whole_bead() -> None:
 def test_lumpiness_is_isotropic() -> None:
     """A bead's irregularity must have no preferred axis. Building the
     harmonic field from bare Re/Im parts instead of the orthonormal real
-    combination (sqrt(2)*(-1)^m, via the membrane backend's
+    combination (sqrt(2)*(-1)^m, via `specimen/_spherical_harmonics.py`'s
     `_sample_sh_coefficients`/`_real_spherical_harmonic`) over-weights the
     m=0 modes, which peak at the poles: that gave ~50% more RMS
     modulation at theta=0 than at the equator."""

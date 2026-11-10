@@ -88,8 +88,7 @@ annealed single crystal instead, gives a population no shape variety at
 all, only pose variety.
 
 SPECTER ships a band-limited spherical-harmonic modulation of the radius
-instead, reusing the [membrane backend's](../membrane-shape/spherical-harmonics.md)
-own harmonic machinery:
+instead:
 
 \[
 R(\hat{u}) = s\,\bigl(1 + a\,f(\hat{u})\bigr),

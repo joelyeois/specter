@@ -8,14 +8,14 @@ A vesicle's sampled transmembrane sites with their surface normals, and the rend
 [Membrane shape](../membrane-shape/index.md) produces a signed field
 \(\phi\): the geometry. This page covers everything between that field
 and a rendered volume: the 1D potential profile \(\psi(d)\) that turns
-distance-from-the-mid-plane into volts, the anti-aliased resampling onto
-the output grid, and how proteins embed in the resulting bilayer.
+distance-from-the-mid-plane into volts, its evaluation on the output
+grid, and how proteins embed in the resulting bilayer.
 
 !!! example "In code"
     This page is the theory behind [Cellular specimens for cryo-ET](../../tutorials/cellular-specimens.md), which shows it step by step with code and figures.
 
 !!! info "Source"
-    `specter.specimen.membrane._profile`, `._raster`, `._placement`.
+    `specter.specimen.membrane._profile`, `._render`, `._placement`.
     `docs-figures/cryoet_specimen_bilayer.py` produces the figures.
 
 ## From shape to potential
@@ -142,28 +142,35 @@ between real membranes comes from defocus, ice thickness and lipid
 composition, which are modelled in their own right; an arbitrary
 multiplier on one species' potential is not a model of any of them.
 
-## Anti-aliased rasterization
+## Rendering on the output grid
 
-The field lives on its own fine working grid; the output volume is
-often coarser. Resampling between them is where a real, previously
-observed failure mode lives.
+The signed field lives on a coarse grid of 10 Å spacing, and the output
+volume is usually finer. `render_bilayer` interpolates \(\phi\) at every
+output voxel within reach of a membrane with a cubic B-spline and looks
+\(\psi\) up at the interpolated distance. The evaluation is confined to
+the blocks of the output volume that a membrane crosses, which
+[Membrane shape](../membrane-shape/geometry.md#narrow-band-rendering)
+describes.
 
-![The same membrane field rasterized at 4, 8 and 12 Å voxels, point-sampled on top and anti-aliased below, along a line through the vesicle wall.](../../assets/images/cryoet-bilayer-antialias.png){ width="900" style="display:block;margin:1.2em auto;" }
+The lookup table is not \(\psi(d)\) itself. `profile_table` first averages
+the profile over one output voxel along the membrane normal, so each voxel
+receives the mean potential across its own extent rather than the value
+at its centre.
+
+![One vesicle rendered at 4, 8 and 12 Å voxels, along a line through its wall, against the measured profile.](../../assets/images/cryoet-bilayer-antialias.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-The same membrane field rasterized at 4, 8 and 12 Å voxels, point-sampled on top and anti-aliased below, along a line through the vesicle wall.
+One vesicle of 220 Å radius rendered at 4, 8 and 12 Å voxels, along a line through its wall (teal), against the measured profile at 37 Å thickness (grey).
 ///
 
-Point-sampling the fine density directly (top row) keeps the two leaflets
-sharp and full height at *every* voxel size. The peaks land wherever the
-sample grid happens to catch them, so the apparent leaflet separation
-wanders with voxel size. The physical peak-to-peak spacing is fixed, so
-that variation is pure aliasing.
-
-Low-pass filtering first (bottom row), a Gaussian matched to the output
-voxel footprint, \(\sigma = 0.5 \times\) the output spacing, gives the
-physically correct behaviour instead: the leaflets lose amplitude and
-merge into one broad peak as resolution drops, which is what a real
-bilayer does when you stop resolving it.
+Sampling the profile at voxel centres would keep the headgroup peaks at
+full height at every voxel size and place them wherever the grid happened
+to fall, so the apparent leaflet separation would vary with the voxel
+size. Averaged over the voxel, the headgroup peaks lose amplitude and
+merge into the slab as the voxel grows: the table's maximum is 6.60 V at
+4 Å, 5.81 V at 8 Å and 5.77 V at 12 Å, against 8.5 V for the profile
+itself. The integral across the wall is unchanged, 235.0 V·Å at all three
+voxel sizes, so the projected membrane contrast does not depend on the
+grid.
 
 ## Transmembrane placement
 
@@ -172,15 +179,14 @@ mesh, the local surface normal at any point is its gradient: exact, and
 available without a mesh or a KD-tree. Placement uses that directly:
 
 1. **Project onto the surface.** Candidates drawn uniformly over the
-   working grid are moved by Newton iteration along the unit normal
+   field's grid are moved by Newton iteration along the unit normal
    \(\hat{\mathbf{n}} = \nabla\phi / |\nabla\phi|\):
    \(\mathbf{x} \leftarrow \mathbf{x} - \phi(\mathbf{x})\,\hat{\mathbf{n}}(\mathbf{x}) / \max(\partial_{\hat{\mathbf{n}}}\phi, 1)\).
    The slope term is required because a field built by a distance
    transform has no voxel centre within one spacing of the surface, so
    \(\phi\) changes by two spacings across the cell that straddles it. A
    step of \(\phi\) alone overshoots there and oscillates about the
-   surface without converging. With the slope included, 96–99% of
-   candidates converge on working grids from 1 to 8 Å.
+   surface without converging.
 2. **Reject crowded sites**, enforcing `min_transmembrane_spacing`
    centre-to-centre.
 3. **Orient.** Align the protein's canonical axis to the local normal,
@@ -211,9 +217,9 @@ then chooses a species per site by weighted random draw on `frequency`. In a
 TOML config the same field is spelled `n_copies` on a
 `[[membrane_transmembrane_specs]]` entry, and counts per membrane instance.
 The requested site count isn't guaranteed: if the surface is
-too small for that many well-spaced sites, or the working grid is too
-coarse for reliable surface projection, the generator warns and places
-what it found.
+too small for that many well-spaced sites, the generator warns and places
+what it found. Sites are sampled on the outermost membrane of an
+organelle only (see [Membrane shape](../membrane-shape/index.md#limitations)).
 
 ## Parameters at a glance
 
@@ -252,8 +258,8 @@ membrane label.
 `bilayer_layer_sigma_angstrom` is *additional* broadening, and defaults to none.
 It set the leaflet peak width of the analytic profile; the measured
 profile carries whatever width its atomic model implies, and the
-rasteriser anti-aliases to the render grid separately, so there is no
-width left to set here — only blur to add.
+renderer averages it over the output voxel separately, so the setting
+adds blur and sets no width.
 
 ## Limitations
 

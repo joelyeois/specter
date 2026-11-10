@@ -34,15 +34,18 @@ _LARGE_FIXTURE = Path(__file__).parent / "test_data" / "1bxn-assembly1.cif"
 _TARGET_SHAPE_ZYX = (64, 64, 64)
 _V_SIZE = 8.0
 
-# A spherical_harmonics ellipsoid at this scale encloses a lumen with
-# equivalent spherical radius ~59A -- comfortably bigger than 1mbo's own
-# ~31.4A radius (verified directly; smaller configs leave no room for even
-# one instance).
+# A vesicle at this scale encloses a lumen of radius ~50 A -- comfortably
+# bigger than 1mbo's own ~31.4 A radius -- and its bounding sphere (the
+# radius plus the generator's margins, 135 A) leaves the placer room in the
+# 512 A canvas. The placer draws a bounded number of candidate centres, so
+# an instance this large in this box is dropped under some seeds; the seeds
+# below are ones it fits under.
 _MEMBRANE_KWARGS = dict(
     target_shape=_TARGET_SHAPE_ZYX,
     voxel_size=_V_SIZE,
-    axes=(70.0, 70.0, 70.0),
-    amplitude=0.15,
+    radius=70.0,
+    elongation=1.0,
+    undulation=0.0,
     n_lipids_per_leaflet=6,
 )
 
@@ -123,19 +126,19 @@ def test_tomogram_specimen_generator_instance_labels_match_placements():
 
 @pytest.mark.skipif(not _SMALL_FIXTURE.exists(), reason="bundled PDB fixture missing")
 def test_tomogram_specimen_generator_warns_when_lumen_species_has_no_region():
-    # Degenerate membrane config unlikely to enclose any lumen at all --
-    # bilayer_thickness far exceeds the vesicle's own radius, so the two
-    # leaflet offset surfaces invert/overlap through the whole interior
-    # instead of leaving a hollow enclosed cavity; the point of this test
-    # is the degenerate-geometry warning path, not backend choice.
+    # Degenerate membrane config that encloses no lumen at all: the bilayer
+    # is thicker than the vesicle's diameter, so the inner leaflet fills the
+    # whole interior instead of leaving a hollow cavity. The point of this
+    # test is the degenerate-geometry warning path.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         mgen = MembraneGenerator(
-            target_shape=(24, 24, 24),
+            target_shape=(40, 40, 40),
             voxel_size=8.0,
-            shape_backend="spherical_harmonics",
-            axes=(20.0, 20.0, 20.0),
-            bilayer_thickness=150.0,  # >> axes -> no hollow lumen
+            radius=60.0,
+            elongation=1.0,
+            undulation=0.0,
+            bilayer_thickness=150.0,  # > the diameter -> no hollow lumen
             n_lipids_per_leaflet=6,
             seed=0,
         )
@@ -144,7 +147,7 @@ def test_tomogram_specimen_generator_warns_when_lumen_species_has_no_region():
         # seed with nothing to collide against; the actual thing under
         # test is the "no lumen region" warning path, not placement itself.
         membrane_instances=[MembraneInstance(generator=mgen)],
-        target_shape=(24, 24, 24),
+        target_shape=(48, 48, 48),
         voxel_size=8.0,
         protein_specs=[
             TomogramProteinSpec(pdb_source=str(_SMALL_FIXTURE), location="lumen")
@@ -275,10 +278,15 @@ def test_tomogram_specimen_generator_composites_two_non_overlapping_instances():
     # Each instance's own label should be spatially concentrated near its
     # own resolved position_xyz -- compare voxel-index centroid (converted
     # back to a physical xyz offset from the tomogram's own center) against
-    # it, loose tolerance since the rendered shape is a perturbed ellipsoid,
-    # not a perfect sphere.
+    # it. Labels are numbered in the order the placer accepted the
+    # instances, which `placed_membrane_instances` keeps and which need not
+    # be the order they were requested in.
+    assert {id(mi) for mi in gen.placed_membrane_instances} == {
+        id(instance_a),
+        id(instance_b),
+    }
     center_idx_zyx = torch.tensor(big_shape_zyx, dtype=torch.float32) / 2
-    for instance_id, mi in [(1, instance_a), (2, instance_b)]:
+    for instance_id, mi in enumerate(gen.placed_membrane_instances, start=1):
         assert mi.position_xyz is not None
         voxel_idx_zyx = (labels == instance_id).nonzero().float()
         centroid_offset_xyz = (voxel_idx_zyx.mean(dim=0) - center_idx_zyx).flip(
@@ -293,10 +301,9 @@ def test_tomogram_specimen_generator_drops_instances_that_dont_fit():
     -- some must be dropped (warned about), and a dropped instance's own
     generator is never .generate()-called (self.field stays None) since
     rejection happens before generation, not after."""
-    small_shape_zyx = (30, 30, 30)  # 30*8 = 240 A per axis
-    kwargs = dict(
-        _MEMBRANE_KWARGS, target_shape=small_shape_zyx, axes=(70.0, 70.0, 70.0)
-    )
+    # 48 * 8 = 384 A per axis: one 135 A bounding sphere fits, two cannot.
+    small_shape_zyx = (48, 48, 48)
+    kwargs = dict(_MEMBRANE_KWARGS, target_shape=small_shape_zyx)
     instances = [
         MembraneInstance(generator=MembraneGenerator(seed=i, **kwargs))
         for i in range(4)
@@ -563,19 +570,8 @@ def test_tomogram_specimen_generator_export_picks(tmp_path):
     """export_picks: coordinate conversion (corner-relative, not centered)
     against a known placement, and transmembrane species get their own
     suffixed file distinct from cytosol/lumen files."""
-    # A bigger axes than _MEMBRANE_KWARGS' own (100A vs 70A radius) --
-    # verified directly: 70A reliably finds zero transmembrane sites for
-    # 1mbo at this seed/box (Newton-projection surface search exhausts
-    # max_attempts against too-tight a curvature), 100A reliably finds one.
-    # This test doesn't need a lumen (cytosol-only protein_specs below), so
-    # unlike _MEMBRANE_KWARGS's own tuning target there's no competing
-    # constraint pulling toward a smaller radius.
     mgen = MembraneGenerator(
-        target_shape=_TARGET_SHAPE_ZYX,
-        voxel_size=_V_SIZE,
-        axes=(100.0, 100.0, 100.0),
-        amplitude=0.15,
-        n_lipids_per_leaflet=6,
+        **_MEMBRANE_KWARGS,
         transmembrane_specs=[
             TransmembraneSpec(pdb_source=str(_SMALL_FIXTURE), frequency=1)
         ],

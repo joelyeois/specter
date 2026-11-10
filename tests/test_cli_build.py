@@ -138,29 +138,13 @@ def test_cli_build_tomogram_n_tomograms(tmp_path: Path) -> None:
 def _write_membrane_test_config(
     path: Path, output_dir: Path, *, include_lumen: bool, include_transmembrane: bool
 ) -> None:
-    # Same tuned scale as tests/test_tomogram_generator.py's own
-    # A spherical_harmonics ellipsoid whose lumen comfortably holds 1mbo.
-    # The radius is load-bearing and was measured, not guessed: 1mbo packs
-    # at max_diameter/2 = 31.4 A and gap=5 on top, so a placement
-    # needs 36.4 A of clearance from the shell. Lumen voxels clearing that
-    # bar, by radius (voxel_size=8, seed=0):
-    #
-    #   70 A ->     3 of   705 lumen voxels   (RSA reliably finds none)
-    #   90 A ->   177 of 3,756
-    #  110 A ->   924 of 7,286                (used here)
-    #  130 A -> 2,641 of 12,605
-    #
-    # 70 A was the previous value and is why this test failed: a viable
-    # site existed, but at 0.4% of the region RSA never sampled one. 110 A
-    # leaves ~300x that margin while still fitting the box with room to
-    # spare, and (measured) also places transmembrane sites reliably, so
-    # both smoke tests can share one geometry.
-    sh_radius_angstrom = 110.0
-    # One requested site, the case most exposed to a failed surface
-    # projection: it gets only 20 candidate draws. On this 3.1 A working
-    # grid ~12% of candidates used to project, and the request came back
-    # empty for ~10% of seeds; ~98% project now (see
-    # sample_surface_sites).
+    # A vesicle whose lumen comfortably holds 1mbo: 1mbo packs at
+    # max_diameter/2 = 31.4 A and gap=5 on top, so a placement needs 36.4 A
+    # of clearance from the shell, and a 90 A vesicle leaves a ~30 A core
+    # of lumen that clears it. The placer keeps the instance's whole bounding
+    # sphere (170 A here) inside the 512 A box, which a larger vesicle
+    # rarely satisfies within its bounded candidate draws.
+    radius_angstrom = 90.0
     transmembrane_block = (
         f"""
 [[membrane_transmembrane_specs]]
@@ -182,8 +166,10 @@ location = "lumen"
     path.write_text(
         f"""
 [[membrane]]
-sh_axes = [{sh_radius_angstrom}, {sh_radius_angstrom}, {sh_radius_angstrom}]
-sh_amplitude = 0.15
+kind = "vesicle"
+radius = {radius_angstrom}
+elongation = 1.0
+undulation = 5.0
 n_lipids_per_leaflet = 6
 {transmembrane_block}
 {lumen_block}
@@ -269,14 +255,17 @@ def test_cli_build_tomogram_membrane_multi_instance_smoke(tmp_path: Path) -> Non
     config_path.write_text(
         f"""
 [[membrane]]
-sh_axes = [55.0, 55.0, 55.0]
-sh_amplitude = 0.15
+kind = "vesicle"
+radius = 70.0
+elongation = 1.0
+undulation = 5.0
 n_lipids_per_leaflet = 6
 
 [[membrane]]
-shape_backend = "swept_spline"
-swept_total_length = 150.0
-swept_tube_radius = 35.0
+kind = "vesicle"
+radius = 60.0
+elongation = 1.2
+undulation = 0.0
 n_lipids_per_leaflet = 6
 
 [[filler]]
@@ -286,7 +275,7 @@ location = "cytosol"
 filler_occupancy_fraction = 0.05
 
 [specimen]
-target_shape = [80, 80, 80]
+target_shape = [96, 96, 96]
 voxel_size = 8.0
 seed = 0
 
@@ -332,8 +321,13 @@ def test_cli_build_tomogram_regions_give_the_carbon_film_its_own_class(
     _write_membrane_test_config(
         config_path, tmp_path, include_lumen=False, include_transmembrane=False
     )
+    # The smallest vesicle in a wider box: its bounding sphere has to clear
+    # the film as well as the box faces, which leaves the 90 A one in the
+    # 512 A box almost nowhere to go.
     config_path.write_text(
         config_path.read_text()
+        .replace("radius = 90.0", "radius = 60.0")
+        .replace("target_shape = [64, 64, 64]", "target_shape = [80, 80, 80]")
         + """
 [[carbon_film]]
 hole_radius = 6000.0

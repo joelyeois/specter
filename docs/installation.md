@@ -91,8 +91,9 @@ newer minimum `torch`: `cu126` wheels start at torch 2.6, for instance.
     only, not `uv sync`, so treat it as an alternative to editing the pin
     rather than a replacement for it.
 
-A mismatched CuPy wheel fails safely: the `spherical_harmonics` membrane
-backend warns once and falls back to `scipy`'s CPU distance transform. A
+A mismatched CuPy wheel fails safely: the membrane geometry
+(`specimen/membrane/_geometry.py`) warns and falls back to `scipy`'s CPU
+distance transform. A
 mismatched **PyTorch** build fails at CUDA init instead of degrading.
 
 Installing with pip instead of uv bypasses `[tool.uv.index]` (a
@@ -106,13 +107,12 @@ yourself.
 
 !!! note "GPU distance transforms"
 
-    CuPy is a core dependency, so a plain `uv sync` installs GPU distance
-    transforms for the `spherical_harmonics` membrane backend too.
+    CuPy is a core dependency, so a plain `uv sync` installs the GPU
+    distance transforms the membrane geometry uses.
 
     On macOS no `cupy-cuda12x` wheels exist, so `uv sync` skips CuPy and
-    the backend falls back to `scipy`'s CPU distance transform (~3x slower
-    field generation, plus a one-time warning). The same fallback covers a
-    machine with no CUDA device available at runtime.
+    the membrane geometry runs `scipy`'s CPU distance transform. The same
+    path is taken on a machine with no CUDA device available at runtime.
 
 ## Monomer Library (for Shtyrov scattering factors)
 

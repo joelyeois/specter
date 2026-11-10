@@ -68,8 +68,12 @@ def _membrane_instances() -> list[MembraneInstance]:
         MembraneInstance(
             generator=MembraneGenerator(
                 voxel_size=VOXEL_SIZE,
-                shape_backend="spherical_harmonics",
-                axes_range=(160.0, 200.0),
+                kind="vesicle",
+                # Sized so each vesicle's bounding sphere (about 250 A) is
+                # placed whole inside the 720 A slab.
+                radius=[130.0, 160.0],
+                elongation=[1.0, 1.1],
+                undulation=[3.0, 8.0],
                 bilayer_thickness=30.0,
                 device=DEVICE,
                 seed=SEED + i,
@@ -511,8 +515,8 @@ def figure_exclusion_field() -> None:
     here, the membrane shell plus everything already placed."""
     membrane = MembraneGenerator(
         voxel_size=VOXEL_SIZE,
-        shape_backend="spherical_harmonics",
-        axes_range=(160.0, 200.0),
+        kind="vesicle",
+        radius=[160.0, 200.0],
         bilayer_thickness=30.0,
         device=DEVICE,
         seed=SEED,

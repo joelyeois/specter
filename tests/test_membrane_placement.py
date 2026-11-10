@@ -1,10 +1,8 @@
 import pytest
 import torch
 
-from specter.specimen.membrane._field import MembraneField, blend_field, SphereSource
-from specter.specimen.membrane._field_spherical_harmonics import (
-    generate_membrane_field_spherical_harmonics,
-)
+from specter.specimen.membrane import MembraneGenerator
+from specter.specimen.membrane._field import MembraneField
 from specter.specimen.membrane._placement import (
     _project_to_surface,
     align_principal_axis_to_z,
@@ -30,11 +28,7 @@ def _sphere_field(
         indexing="ij",
     )
     points_xyz = torch.stack([xx, yy, zz], dim=-1)
-    phi = blend_field(
-        [SphereSource(center_xyz=torch.zeros(3, device=device), radius=radius)],
-        points_xyz,
-        k=0.0,
-    )
+    phi = torch.linalg.norm(points_xyz, dim=-1) - radius
     return MembraneField(phi=phi, spacing_angstrom=spacing_angstrom, origin_xyz=origin)
 
 
@@ -81,34 +75,30 @@ def test_sample_surface_sites_on_sphere_are_on_surface_with_min_spacing():
     assert (cosine > 0.9).all()
 
 
-def _vesicle_field(spacing_angstrom: float, seed: int = 0) -> MembraneField:
-    """A spherical-harmonics vesicle: its phi comes from the distance
-    transform, unlike `_sphere_field`'s analytic one."""
-    n = int(round(256.0 / spacing_angstrom))
-    return generate_membrane_field_spherical_harmonics(
-        shape_zyx=(n, n, n),
-        spacing_angstrom=spacing_angstrom,
-        sh_max_degree=8,
-        sh_axes=(80.0, 80.0, 80.0),
-        sh_amplitude=0.15,
-        sh_spectrum_power=2.0,
-        device="cpu",
+def _vesicle_field(seed: int = 0) -> MembraneField:
+    """A generated vesicle's field: a redistanced solid on the coarse 10 A
+    grid, unlike `_sphere_field`'s analytic one."""
+    generator = MembraneGenerator(
+        voxel_size=12.0,
+        kind="vesicle",
+        radius=80.0,
+        elongation=1.2,
+        undulation=10.0,
+        n_lipids_per_leaflet=6,
         seed=seed,
     )
+    generator.generate()
+    assert generator.field is not None
+    return generator.field
 
 
-@pytest.mark.parametrize("spacing_angstrom", [2.0, 8.0])
-def test_project_to_surface_converges_on_a_distance_transform_field(
-    spacing_angstrom: float,
-) -> None:
-    # A distance-transform phi has no voxel centre within one spacing of the
-    # surface, so its slope across the straddling cell is ~2. A plain
-    # `x - phi * n` step overshot there and oscillated, landing only 18%
-    # (2 A) and 3% (8 A) of these candidates within tolerance; a Newton step
-    # along the normal lands 98% and 94%.
-    field = _vesicle_field(spacing_angstrom)
+def test_project_to_surface_converges_on_a_generated_field() -> None:
+    # A plain `x - phi * n` step overshoots on a field whose slope across
+    # the cell straddling the surface is not 1, and oscillates; a Newton
+    # step along the normal lands nearly every candidate.
+    field = _vesicle_field()
     nz, ny, nx = field.phi.shape
-    extent = torch.tensor([nx, ny, nz], dtype=torch.float32) * spacing_angstrom
+    extent = torch.tensor([nx, ny, nz], dtype=torch.float32) * field.spacing_angstrom
     generator = torch.Generator().manual_seed(0)
     candidates = field.origin_xyz + torch.rand((512, 3), generator=generator) * extent
     projected = _project_to_surface(field, candidates, iterations=8)
@@ -117,11 +107,9 @@ def test_project_to_surface_converges_on_a_distance_transform_field(
 
 
 def test_sample_surface_sites_places_a_single_site_on_a_coarse_vesicle() -> None:
-    # One requested site gets 20 candidate draws. With the oscillating
-    # projection above, 31 of these 50 came back empty, and so did ~10% of
-    # seeds on the 3.1 A field behind the CLI's membrane smoke test.
+    # One requested site gets 20 candidate draws; every seed has to place it.
     for field_seed in range(2):
-        field = _vesicle_field(8.0, seed=field_seed)
+        field = _vesicle_field(seed=field_seed)
         for seed in range(25):
             sites, normals = sample_surface_sites(
                 field, n_sites=1, min_spacing_angstrom=40.0, seed=seed

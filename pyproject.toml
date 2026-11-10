@@ -9,9 +9,8 @@ dependencies = [
     "click>=8.4.2",
     "connected-components-3d>=4.1.0",
     "cryosparc-tools>=5.0",
-    # GPU distance transforms for the spherical_harmonics membrane backend
-    # (specter.specimen.membrane) -- ~3x faster field generation end-to-end,
-    # and the path the membrane memory budgets are calibrated for. Marked
+    # GPU distance transforms for the membrane geometry
+    # (specter.specimen.membrane._geometry). Marked
     # off darwin because cupy-cuda12x publishes Linux and Windows wheels
     # only; specter still runs there, falling back to scipy's CPU transform
     # exactly as it does when no CUDA device is present at runtime.
@@ -20,7 +19,7 @@ dependencies = [
     # index below to match. Nothing in specter needs a specific CUDA
     # release -- see docs/installation.md, "Choosing a CUDA version". A
     # mismatch here is not fatal: the GPU transform warns once and falls
-    # back to scipy (see specimen/membrane/_field.py).
+    # back to scipy (see specimen/membrane/_geometry.py).
     "cupy-cuda12x>=13.0; sys_platform != 'darwin'",
     # Non-uniform FFTs (specter.nufft): exact point-group averaging evaluates a
     # volume's transform at rotated frequencies. cufinufft publishes Linux and

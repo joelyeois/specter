@@ -65,8 +65,11 @@ def _membrane_instances() -> list[MembraneInstance]:
         MembraneInstance(
             generator=MembraneGenerator(
                 voxel_size=VOXEL_SIZE,
-                shape_backend="spherical_harmonics",
-                axes_range=(220.0, 300.0),
+                kind="vesicle",
+                # Sized to fit the 880 A slab, which is not clippable along z.
+                radius=[200.0, 250.0],
+                elongation=[1.0, 1.15],
+                undulation=[5.0, 25.0],
                 bilayer_thickness=30.0,
                 transmembrane_specs=[
                     TransmembraneSpec(pdb_source="1C3W", frequency=25)

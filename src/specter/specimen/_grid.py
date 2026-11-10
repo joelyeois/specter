@@ -75,7 +75,7 @@ from ..arrays import soft_voxelize_coordinates
 from ..config import ScalarOrRange, parse_scalar_or_range
 from ..fft import spatial_convolve3d_same
 from ..potential import build_atomic_potential_kernel
-from .membrane._field_spherical_harmonics import (
+from ._spherical_harmonics import (
     _interpolate_angular_grid,
     _sample_sh_coefficients,
     _synthesize_angular_grid,
@@ -224,8 +224,7 @@ class _BeadShape:
         # evaluating the harmonics per point makes a bead take seconds.
         # The field is band-limited to `l_max`, so its finest angular
         # structure is ~180/l_max degrees and this grid oversamples it
-        # ~12x. Same trick, and the same helpers,
-        # `generate_membrane_field_spherical_harmonics` uses.
+        # ~12x.
         n_theta = 12 * l_max + 1
         self._table = _synthesize_angular_grid(
             self._coeffs, l_max, n_theta, 2 * n_theta

@@ -44,9 +44,6 @@ from specter.specimen import (
     FilamentSpec,
     MicrotubuleSpec,
     CarbonFilmSpec,
-    DEFAULT_SH_AXES_RANGE_ANGSTROM,
-    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
-    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
     MembraneGenerator,
     MembraneInstance,
     TomogramSpecimenGenerator,
@@ -292,149 +289,22 @@ def _protein_specs_from_dicts(
     return specs
 
 
-# MembraneGenerator's own default size-draw ranges, read rather than retyped:
-# two copies could drift with nothing failing, and only for a membrane whose
-# size the user left entirely unspecified -- the quietest possible way to be
-# wrong. Not the zero-cross-generator-coupling convention the earlier copy
-# cited: that is about generators importing each other, and this module
-# already imports MembraneGenerator to construct it. Used only as the UPPER
-# bound to cap against below; the biology-motivated LOWER bounds are never
-# shrunk.
-
-# Fraction of the tomogram box's own LIMITING axis extent an auto-sized
-# (target_shape=None) [[membrane]] instance's DIAMETER (2x bounding
-# radius) is allowed to reach. "Limiting"
-# = the smallest extent among NON-clippable axes (pack_hard_spheres_3d
-# requires the FULL sphere to fit there -- see config.clip_axes), or, if
-# every axis is clippable (nothing requires a full fit anywhere), the
-# LARGEST extent instead, purely as a "reasonable size" reference rather
-# than a geometric requirement. MembraneGenerator has no way to know the
-# outer tomogram box it'll be composited into unless told -- left
-# uncapped, its own default draw ranges are pure biology-motivated
-# "realistic organelle size" guesses with no upper limit relative to any
-# particular box, so a real box with a thin non-clippable axis (e.g. Z
-# much smaller than X/Y, as any real tomogram-shaped canvas is, if Z isn't
-# also made clippable) can end up drawing an organelle whose bounding
-# sphere literally cannot fit that axis at all -- confirmed directly:
-# swept_spline's default range alone can reach a diameter of ~3300 A, far
-# exceeding a 2000 A Z-extent even before accounting for gap or
-# multiple co-existing instances.
-#
-# 0.75 is close to the true ceiling for a NON-clippable limiting axis, not
-# a conservative default -- diameter can never reach 1.0 (the full axis)
-# regardless of this fraction there: at exactly 1.0 an instance's center
-# would have exactly ONE valid position on that axis (dead center, zero
-# slack), which pack_hard_spheres_3d's random sampling essentially never
-# finds and gap alone would already violate. Multiple co-existing
-# instances need even more slack than one. For the all-clippable fallback
-# (limiting axis = largest, no hard ceiling exists at all), 0.75 is just
-# reused as a reasonable default rather than re-deriving a second number.
-# Raise this only with the non-clippable case's real ceiling in mind, not
-# just "bigger is better".
+# A [[membrane]] entry's organelle is drawn from ranges that describe real
+# organelles, with no relation to the tomogram box it is composited into.
+# Unless the entry sizes it, its diameter is held to this fraction of the
+# box's limiting extent: the smallest axis the specimen may not be clipped
+# on, or the largest axis when every axis is clippable. At 1.0 the centre
+# would have a single valid position on that axis, which random placement
+# does not find, and several instances need more slack than one.
 _MEMBRANE_AUTO_SIZE_BOX_FRACTION = 0.75
 
 
-def _cap_membrane_auto_size_ranges(
-    instance_kwargs: dict,
-    target_shape: tuple[int, int, int] | None,
-    config: TomogramConfig,
-) -> dict:
-    """
-    Return `instance_kwargs` with a size-range override added, IF this
-    entry's own (already-resolved) `target_shape` is None AND every
-    size-controlling key for its `shape_backend` is unset in
-    `instance_kwargs` -- i.e. only when nothing already constrains how
-    big the auto-drawn organelle can get. An entry that sets ANY of those
-    explicitly is trusted as-is and returned unchanged (never second-
-    guessed here).
-
-    Caps the draw so DIAMETER (2x bounding radius) never exceeds
-    `_MEMBRANE_AUTO_SIZE_BOX_FRACTION` of the tomogram box's own LIMITING
-    axis extent (see that constant's own comment for exactly what that
-    means and why), computed from `config.target_shape`/`config.voxel_size`/
-    `config.clip_axes`.
-    """
-    if target_shape is not None:
-        return instance_kwargs
-    shape_backend = instance_kwargs.get("shape_backend", "spherical_harmonics")
-    box_extent_angstrom = tuple(
-        s * config.voxel_size for s in config.target_shape
-    )  # (Z, Y, X)
-    non_clippable_extents_angstrom = [
-        extent
-        for extent, clippable in zip(box_extent_angstrom, config.clip_axes)
-        if not clippable
-    ]
-    limiting_extent_angstrom = (
-        min(non_clippable_extents_angstrom)
-        if non_clippable_extents_angstrom
-        else max(box_extent_angstrom)
-    )
-    max_reach_angstrom = (
-        0.5 * _MEMBRANE_AUTO_SIZE_BOX_FRACTION * limiting_extent_angstrom
-    )
-
-    if shape_backend == "spherical_harmonics":
-        if "sh_axes" in instance_kwargs or "sh_axes_range" in instance_kwargs:
-            return instance_kwargs
-        lo, hi = DEFAULT_SH_AXES_RANGE_ANGSTROM
-        capped_hi = min(hi, max_reach_angstrom)
-        instance_kwargs = dict(instance_kwargs)
-        instance_kwargs["sh_axes_range"] = (min(lo, capped_hi), capped_hi)
-    elif shape_backend == "swept_spline":
-        if any(
-            k in instance_kwargs
-            for k in (
-                "swept_total_length",
-                "swept_total_length_range",
-                "swept_tube_radius",
-                "swept_tube_radius_range",
-            )
-        ):
-            return instance_kwargs
-        total_lo, total_hi = DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM
-        tube_lo, tube_hi = DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM
-        worst_case_reach_angstrom = 0.5 * total_hi + tube_hi
-        if worst_case_reach_angstrom > max_reach_angstrom:
-            scale = max_reach_angstrom / worst_case_reach_angstrom
-            instance_kwargs = dict(instance_kwargs)
-            instance_kwargs["swept_total_length_range"] = (
-                total_lo * scale,
-                total_hi * scale,
-            )
-            instance_kwargs["swept_tube_radius_range"] = (
-                tube_lo * scale,
-                tube_hi * scale,
-            )
-    return instance_kwargs
-
-
-#: The prefix a [[membrane]] table spells each backend's shape fields with,
-#: so a flat table says which backend a key belongs to.
-_SHAPE_KEY_PREFIXES = {"spherical_harmonics": "sh_", "swept_spline": "swept_"}
-
-
-def _shape_keys_unprefixed(instance_kwargs: dict) -> dict:
-    """
-    `instance_kwargs` with its shape fields under `MembraneGenerator`'s
-    names: ``sh_axes`` becomes ``axes``, ``swept_tube_radius``
-    ``tube_radius``. A field of the backend the table did not choose is
-    refused rather than ignored.
-    """
-    backend = instance_kwargs.get("shape_backend", "spherical_harmonics")
-    out = {}
-    for key, value in instance_kwargs.items():
-        for key_backend, prefix in _SHAPE_KEY_PREFIXES.items():
-            if key.startswith(prefix):
-                if key_backend != backend:
-                    raise ValueError(
-                        f"[[membrane]] sets {key!r}, a {key_backend!r} shape "
-                        f"field, under shape_backend = {backend!r}"
-                    )
-                key = key[len(prefix) :]
-                break
-        out[key] = value
-    return out
+def _membrane_max_radius(config: TomogramConfig) -> float:
+    """Largest bounding radius an auto-sized membrane may take, Å."""
+    extents = [s * config.voxel_size for s in config.target_shape]  # (Z, Y, X)
+    fixed = [e for e, clippable in zip(extents, config.clip_axes) if not clippable]
+    limiting = min(fixed) if fixed else max(extents)
+    return 0.5 * _MEMBRANE_AUTO_SIZE_BOX_FRACTION * limiting
 
 
 def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerator:
@@ -569,9 +439,10 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         target_shape = (
             tuple(target_shape_zyx_raw) if target_shape_zyx_raw is not None else None
         )
-        instance_kwargs = _shape_keys_unprefixed(
-            _cap_membrane_auto_size_ranges(instance_kwargs, target_shape, config)
-        )
+        if target_shape is None:
+            # Applies to the sizes this entry leaves at their defaults; a
+            # size the entry gives is used as it is.
+            instance_kwargs.setdefault("max_radius", _membrane_max_radius(config))
 
         # One tomogram, one set of scattering factors: the bilayer is summed
         # into the same volume as the proteins packed around it, so modelling
@@ -586,7 +457,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
             # [[membrane]] entry then never perturbs an earlier entry's own
             # instances' random realizations. The tradeoff (two entries at
             # the same index CAN start from an identical seed if they also
-            # share shape_backend/kwargs) only matters when seed is set at
+            # share kind and settings) only matters when seed is set at
             # all -- the default (seed=None) draws every instance
             # independently regardless, so this is purely an advanced-user,
             # reproducibility-mode consideration.

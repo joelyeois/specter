@@ -137,7 +137,7 @@ class MembraneInstance:
     ----------
     generator : MembraneGenerator
         Already-configured (not yet `.generate()`-called) membrane
-        generator -- any `shape_backend`, independent per instance. Always
+        generator -- any `kind`, independent per instance. Always
         centered at physical (0,0,0) (`MembraneGenerator`'s own
         convention), then shifted into place via `position_xyz` at
         composite time -- its own `target_shape` need NOT match the

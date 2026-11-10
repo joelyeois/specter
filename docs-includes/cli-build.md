@@ -10,12 +10,12 @@ specter build [OPTIONS] COMMAND [ARGS]...
 
 | Command | Description |
 | --- | --- |
-| [`tomogram`](#specter-build-tomogram) | Build a specimen tomogram from any combination of: one or more composited organic membranes (--config's TOML [[membrane]] entries, each its own shape_backend), filament species scattered through it... |
+| [`tomogram`](#specter-build-tomogram) | Build a specimen tomogram from any combination of: one or more composited organic membranes (--config's TOML [[membrane]] entries, each an organelle kind), filament species scattered through it... |
 | [`ice`](#specter-build-ice) | Generate a library of amorphous-ice configurations for `IceBank` to draw from, as an alternative to the one bundled with specter. |
 
 ## `specter build tomogram` { #specter-build-tomogram }
 
-Build a specimen tomogram from any combination of: one or more composited organic membranes (--config's TOML [[membrane]] entries, each its own shape_backend), filament species scattered through it (--actin or [[filaments]]), and densely packed protein species (--config's [targets]/[filler] tables, region-gated to cytosol/lumen when a membrane is present). Generation order is membranes, then filaments, then protein fill -- each stage avoids the previous ones' placements. Saves the volume as .mrc (usable as `specter simulate tiltseries`'s --volume_path) plus copick-style .ndjson picks and, by default, segmentation label volumes (--write_segmentation). A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below is optional and, if given, overrides one field of it.
+Build a specimen tomogram from any combination of: one or more composited organic membranes (--config's TOML [[membrane]] entries, each an organelle kind), filament species scattered through it (--actin or [[filaments]]), and densely packed protein species (--config's [targets]/[filler] tables, region-gated to cytosol/lumen when a membrane is present). Generation order is membranes, then filaments, then protein fill -- each stage avoids the previous ones' placements. Saves the volume as .mrc (usable as `specter simulate tiltseries`'s --volume_path) plus copick-style .ndjson picks and, by default, segmentation label volumes (--write_segmentation). A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below is optional and, if given, overrides one field of it.
 
 ```text
 specter build tomogram [OPTIONS]

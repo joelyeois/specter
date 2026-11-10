@@ -23,9 +23,6 @@ from specter.ice import IceProfile
 from specter.rotations._volume import build_affine_matrix, rotate_volume
 from specter.specimen._grid import BeadGenerator
 from specter.specimen.membrane import MembraneGenerator, TransmembraneSpec
-from specter.specimen.membrane._field_spherical_harmonics import (
-    generate_membrane_field_spherical_harmonics,
-)
 from specter.specimen.packing import (
     build_species_mask,
     pack_hard_spheres_3d,
@@ -91,7 +88,7 @@ def test_tomogram_beads_render_at_their_picks():
     """Each bead's density centroid is its recorded position. Inserted at the
     nearest voxel, it was up to half a voxel off per axis (0.49 voxel worst
     axis over this seed's beads)."""
-    shape = (48, 48, 48)
+    shape = (64, 64, 64)
     voxel = 8.0
     half = 5  # window half-width, voxels: the 20 A bead plus its kernel tail
     gen = TomogramSpecimenGenerator(
@@ -129,38 +126,35 @@ def test_tomogram_beads_render_at_their_picks():
 # ----------------------------------------------------------------------
 
 
-def test_a_spherical_membrane_field_is_centred_on_voxel_n_over_2():
-    """On an odd grid the field's origin must be a voxel. Built about
-    ``-n / 2`` it was half a voxel off, and the field of a sphere centred on
-    the origin was not mirror-symmetric about any voxel."""
-    shape = (31, 33, 35)
-    field = generate_membrane_field_spherical_harmonics(
-        shape_zyx=shape,
-        spacing_angstrom=4.0,
-        sh_axes=(40.0, 40.0, 40.0),
-        sh_amplitude=0.0,
-        seed=0,
-        device="cpu",
-    )
-    for axis in range(3):
-        assert torch.allclose(field.phi, field.phi.flip(axis), atol=1e-4), axis
-
-
-def test_a_membrane_volume_is_centred_on_voxel_n_over_2():
-    """The rendered membrane, not only its field: a spherical vesicle on an
-    odd grid is mirror-symmetric about voxel ``n // 2``, the voxel
-    `clip_insert_bounds` puts on the instance's position."""
+@pytest.mark.parametrize("n", [32, 33])
+def test_a_membrane_volume_is_centred_on_voxel_n_over_2(n: int) -> None:
+    """A spherical vesicle's density centroid is voxel ``n // 2`` on an odd
+    grid and on an even one: the voxel `clip_insert_bounds` puts on the
+    instance's position. Built about ``-n / 2`` it was half a voxel off on an
+    odd grid."""
+    voxel = 8.0
     gen = MembraneGenerator(
-        target_shape=(33, 33, 33),
-        voxel_size=6.0,
-        axes=(50.0, 50.0, 50.0),
-        amplitude=0.0,
+        target_shape=(n, n, n),
+        voxel_size=voxel,
+        radius=80.0,
+        elongation=1.0,
+        undulation=0.0,
+        n_lipids_per_leaflet=6,
         seed=0,
     )
-    volume = gen.generate()
-    scale = float(volume.abs().max())
-    for axis in range(3):
-        assert torch.allclose(volume, volume.flip(axis), atol=1e-4 * scale), axis
+    volume = gen.generate().double()
+    grids = torch.meshgrid(*[torch.arange(n) for _ in range(3)], indexing="ij")
+    centroid = torch.stack([(g * volume).sum() / volume.sum() for g in grids])
+    target = torch.full((3,), float(n // 2), dtype=torch.float64)
+    assert torch.allclose(centroid, target, atol=0.02)
+
+    # And the field the transmembrane sites are projected onto agrees: its
+    # zero level set is the sphere about the physical origin.
+    assert gen.field is not None
+    directions = torch.nn.functional.normalize(
+        torch.randn(64, 3, generator=torch.Generator().manual_seed(0)), dim=-1
+    )
+    assert gen.field.sample(80.0 * directions).abs().max() < 2.5
 
 
 def test_transmembrane_density_lands_on_its_site():
@@ -169,10 +163,12 @@ def test_transmembrane_density_lands_on_its_site():
     centred on ``n / 2`` it was up to a voxel off per axis on an odd grid."""
     voxel = 6.0
     gen = MembraneGenerator(
-        target_shape=(33, 33, 33),
+        target_shape=(41, 41, 41),
         voxel_size=voxel,
-        axes=(50.0, 50.0, 50.0),
-        amplitude=0.15,
+        radius=80.0,
+        elongation=1.1,
+        undulation=8.0,
+        n_lipids_per_leaflet=6,
         transmembrane_specs=[
             TransmembraneSpec("blob", template=_gaussian_template(), frequency=6)
         ],
@@ -195,12 +191,14 @@ def test_tomogram_membranes_snap_and_their_proteins_land_on_their_picks():
     position is the voxel it lands on, and a transmembrane pick (offset by
     that position) is where the protein's density is in the canvas."""
     voxel = 8.0
-    shape = (40, 40, 40)
+    shape = (64, 64, 64)
     mgen = MembraneGenerator(
-        target_shape=(25, 25, 25),
+        target_shape=(33, 33, 33),
         voxel_size=voxel,
-        axes=(60.0, 60.0, 60.0),
-        amplitude=0.15,
+        radius=80.0,
+        elongation=1.1,
+        undulation=8.0,
+        n_lipids_per_leaflet=6,
         transmembrane_specs=[
             TransmembraneSpec("blob", template=_gaussian_template(), frequency=6)
         ],

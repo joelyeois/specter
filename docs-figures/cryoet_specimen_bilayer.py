@@ -1,10 +1,10 @@
 """
 Generate the figures for docs/concepts/cryoet-specimen/bilayer.md, which
 explains how a membrane's shape becomes scattering potential
-(``specter.specimen.membrane._profile``, ``._raster``, ``._placement``).
+(``specter.specimen.membrane._profile``, ``._render``, ``._placement``).
 
 Calls the shipped `build_measured_bilayer_profile`/
-`compute_bilayer_profile`/`rasterize_membrane_density` and a real
+`compute_bilayer_profile`/`profile_table` and a real
 `MembraneGenerator` run rather than reimplementing any of them. The one
 exception is `_superseded_two_gaussian`, the profile specter rendered with
 until 2026-08-31: it is reconstructed here, not imported, because the
@@ -36,7 +36,7 @@ from specter.specimen.membrane._profile import (
     compute_bilayer_profile,
     native_bilayer_thickness_angstrom,
 )
-from specter.specimen.membrane._raster import rasterize_membrane_density
+from specter.specimen.membrane._render import profile_table
 
 OUT_DIR = "docs/assets/images"
 # Expanded: passed through unexpanded, a literal "~" directory gets
@@ -147,8 +147,8 @@ def _vesicle(transmembrane: bool = False) -> MembraneGenerator:
     )
     gen = MembraneGenerator(
         voxel_size=4.0,
-        shape_backend="spherical_harmonics",
-        axes_range=(200.0, 240.0),
+        kind="vesicle",
+        radius=[200.0, 240.0],
         bilayer_thickness=30.0,
         transmembrane_specs=specs,
         pdb_cache_dir=PDB_CACHE,
@@ -159,41 +159,45 @@ def _vesicle(transmembrane: bool = False) -> MembraneGenerator:
     return gen
 
 
-def figure_antialias() -> None:
-    """The same membrane field rasterized at three output voxel sizes,
-    with and without the anti-aliasing pre-filter, along a line through
-    the vesicle wall. Point-sampling a few-Angstrom-wide feature at a
-    coarse voxel size makes the leaflet separation wander with voxel size
-    -- an artifact, since the physical spacing is fixed. Filtering first
-    gives the physically right answer instead: the two leaflets merge into
-    one broad peak as resolution drops."""
-    gen = _vesicle()
-    field, profile = gen.field, gen.profile
-    extent_angstrom = 700.0
+def figure_voxel_size() -> None:
+    """The same vesicle rendered at three output voxel sizes, along a line
+    through its wall. `profile_table` averages psi(d) over one voxel along
+    the membrane normal before the lookup, so the two leaflets lose
+    amplitude and merge into one broad peak as the voxel grows, and the
+    integral across the wall stays the same."""
+    profile = build_measured_bilayer_profile(thickness_angstrom=37.0)
+    fine_d = profile.distance_angstrom.cpu().numpy()
+    fine_psi = profile.psi.cpu().numpy()
 
-    fig, axes = plt.subplots(2, 3, figsize=(11.0, 5.2), sharex=True, sharey=True)
-    for col, voxel_size in enumerate([4.0, 8.0, 12.0]):
-        n = int(round(extent_angstrom / voxel_size)) // 2 * 2
-        shape = (n, n, n)
-        for row, antialias in enumerate([0.0, None]):
-            volume = rasterize_membrane_density(
-                field, profile, shape, voxel_size, antialias_sigma_angstrom=antialias
-            ).cpu()
-            line = volume[n // 2, n // 2].numpy()
-            x = (np.arange(n) - n / 2 + 0.5) * voxel_size
-            ax = axes[row, col]
-            ax.plot(x, line, "o-", color=TEAL if row else ORANGE, markersize=3)
-            ax.set_xlim(-320, -140)
-            if row == 0:
-                ax.set_title(f"{voxel_size:g} A/voxel", fontsize=11)
-            if col == 0:
-                ax.set_ylabel(
-                    "point-sampled\npotential (V)"
-                    if row == 0
-                    else "anti-aliased\npotential (V)",
-                    fontsize=10,
-                )
-            ax.set_xlabel("x (A)" if row == 1 else "")
+    fig, axes = plt.subplots(1, 3, figsize=(11.0, 3.4), sharey=True)
+    for ax, voxel_size in zip(axes, [4.0, 8.0, 12.0]):
+        gen = MembraneGenerator(
+            voxel_size=voxel_size,
+            kind="vesicle",
+            radius=220.0,
+            elongation=1.0,
+            undulation=0.0,
+            device=DEVICE,
+            seed=SEED,
+        )
+        volume = gen.generate().cpu()
+        nz, ny, nx = volume.shape
+        line = volume[nz // 2, ny // 2].numpy()
+        x = (np.arange(nx) - nx // 2) * voxel_size
+        table, d0, step = profile_table(profile, voxel_size, DEVICE)
+        table_d = d0 + step * np.arange(table.numel())
+        integral = float(np.trapezoid(table.cpu().numpy(), table_d))
+        print(
+            f"voxel {voxel_size:g} A: peak along the line {line.max():.2f} V, "
+            f"voxel-averaged profile peak {float(table.max()):.2f} V, "
+            f"integral {integral:.1f} V*A"
+        )
+        ax.plot(-220.0 + fine_d, fine_psi, color="#bbbbbb", linewidth=1.0)
+        ax.plot(x, line, "o-", color=TEAL, markersize=3)
+        ax.set_xlim(-270, -170)
+        ax.set_title(f"{voxel_size:g} A/voxel", fontsize=11)
+        ax.set_xlabel("x (A)")
+    axes[0].set_ylabel("potential (V)")
     plt.tight_layout()
     path = f"{OUT_DIR}/cryoet-bilayer-antialias.png"
     plt.savefig(path, dpi=180)
@@ -250,5 +254,5 @@ def figure_transmembrane() -> None:
 
 if __name__ == "__main__":
     figure_profile()
-    figure_antialias()
+    figure_voxel_size()
     figure_transmembrane()

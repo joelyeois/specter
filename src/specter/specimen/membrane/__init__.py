@@ -1,26 +1,60 @@
-from ._extent import (
-    DEFAULT_SH_AXES_RANGE_ANGSTROM,
-    DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM,
-    DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM,
-    membrane_bounding_radius,
-)
-from ._shape import SphericalHarmonicsShape, SweptSplineShape
 from ._generator import (
     MembraneGenerator,
     TransmembranePlacement,
     TransmembraneSpec,
     render_transmembrane_template,
 )
+from ._geometry import Grid, ReachError, reach, regularise, surface_mesh
+from ._organelles import ORGANELLE_DEFAULTS, OrganellePlan, plan_organelle
+from ._primitives import (
+    ball,
+    cap,
+    circle,
+    curve,
+    ellipsoid,
+    half_space,
+    nested,
+    random_walk,
+    rot_to,
+    sheet,
+    subtract,
+    tube,
+    undulate,
+    union,
+    wobbly,
+)
+from ._profile import BilayerProfile, build_measured_bilayer_profile
+from ._render import render_bilayer
 
 __all__ = [
-    "DEFAULT_SH_AXES_RANGE_ANGSTROM",
-    "DEFAULT_SWEPT_TOTAL_LENGTH_RANGE_ANGSTROM",
-    "DEFAULT_SWEPT_TUBE_RADIUS_RANGE_ANGSTROM",
-    "membrane_bounding_radius",
+    "BilayerProfile",
+    "Grid",
     "MembraneGenerator",
-    "SphericalHarmonicsShape",
-    "SweptSplineShape",
+    "ORGANELLE_DEFAULTS",
+    "OrganellePlan",
+    "ReachError",
     "TransmembranePlacement",
     "TransmembraneSpec",
+    "ball",
+    "build_measured_bilayer_profile",
+    "cap",
+    "circle",
+    "curve",
+    "ellipsoid",
+    "half_space",
+    "nested",
+    "plan_organelle",
+    "random_walk",
+    "reach",
+    "regularise",
+    "render_bilayer",
     "render_transmembrane_template",
+    "rot_to",
+    "sheet",
+    "subtract",
+    "surface_mesh",
+    "tube",
+    "undulate",
+    "union",
+    "wobbly",
 ]

@@ -10,21 +10,22 @@ from specter.specimen.tomogram import MembraneInstance, TomogramSpecimenGenerato
 def make_generator(retain=None, device="cpu"):
     membrane = MembraneGenerator(
         target_shape=(24, 24, 24),
-        voxel_size=5.0,
-        axes=(30.0, 30.0, 30.0),
+        voxel_size=10.0,
+        radius=70.0,
+        elongation=1.0,
+        undulation=0.0,
         n_lipids_per_leaflet=6,
         seed=11,
         device=device,
     )
     instance = MembraneInstance(membrane)
-    instance.position_xyz = (0, 0, 0)
     return TomogramSpecimenGenerator(
         membrane_instances=[instance],
-        target_shape=(24, 24, 24),
-        voxel_size=5.0,
+        target_shape=(40, 40, 40),
+        voxel_size=10.0,
         protein_specs=[],
         progressbars=False,
-        seed=11,
+        seed=0,  # a placement seed under which the one instance fits
         device=device,
         **({} if retain is None else {"retain_membrane_fields": retain}),
     )

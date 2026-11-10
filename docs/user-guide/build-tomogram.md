@@ -46,13 +46,14 @@ The second command, with a fixed seed, builds the volume below:
 
 ![A slab through the built volume, a zoomed region, and a side view.](../assets/images/cli-guides/build_tomogram-volume.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-A 40 Å slab through z = 65 of the 300 slices, the slice that cuts the most
+A 40 Å slab through z = 239 of the 300 slices, the slice that cuts the most
 bilayer, low-pass filtered to 20 Å (top left); the boxed 2000 Å region (top
 right); and a 400 Å slab along the dashed line seen from the side, with z
-running down (bottom). Bilayers are dark rings, the gold beads dark discs,
-and the filaments straight rods, with the protein fill packed around them.
-In the side view the two bilayers on the dashed line run into the slab's
-top face.
+running down (bottom). Bilayers are dark outlines, here a vesicle at the
+left edge and a mitochondrion with its cristae at the centre, and the
+microtubules are straight rods, with the protein fill packed around them.
+In the side view both organelles on the dashed line run into the face of
+the slab at the bottom of the panel.
 ///
 
 ## What you'll usually tune
@@ -63,11 +64,13 @@ top face.
   `filler_from_cryoetsim` (packed around targets up to
   `filler_occupancy_fraction`, also exported to picks by default). See
   [Placement order & regions](#placement-order-regions) below.
-- **Membranes**: `[[membrane]]` entries: `shape_backend`
-  (`spherical_harmonics` or `swept_spline`), size ranges
-  (`sh_axes_range`/`swept_total_length_range`/etc., omit for realistic
-  auto-sizing), and `n_copies` for multiple independently-placed copies
-  of one template.
+- **Membranes**: `[[membrane]]` entries: `kind` (`"vesicle"`,
+  `"tubules"`, `"cisterna"` or `"mitochondrion"`), that kind's settings
+  (`radius`, `length`, `lumen_width` and so on, each a number or a
+  `[low, high]` range drawn per copy; omit them for defaults sized to the
+  box), and `n_copies` for several independently drawn and placed copies.
+  [Organelle kinds](../concepts/membrane-shape/organelles.md) lists every
+  setting.
 - **Filaments**: `actin` (quick built-in F-actin preset) or hand-written
   `[[filaments]]` entries for other single-strand species.
 - **Microtubules**: `[[microtubules]]` entries: real 13-protofilament tubes
@@ -132,7 +135,7 @@ warning naming the region's free voxel count. Keeping the widest
 organelle to roughly two thirds of the slab thickness makes an enclosed
 interior the normal outcome. It is not a guarantee: placement remains
 random and clipping remains permitted, so an occasional draw still
-encloses little or nothing. Omitting the size ranges does not solve this
+encloses little or nothing. Omitting the size settings does not solve this
 on its own, since the automatic cap measures the widest axis whenever
 `clip_axes` permits clipping on all three, clipping being a legitimate
 outcome for a lamella. Set `seed` when a run has to reproduce a specimen
@@ -205,7 +208,7 @@ benchmark builds a specimen at `configs/tomogram.toml`'s own
 **production-scale field of view** (1500 × 6000 × 6000 Å) at three voxel
 sizes, so only the voxel grid resolution changes between runs, not the
 physical amount of specimen content. The specimen itself: one
-`spherical_harmonics` membrane, target species `1bxn` × 20, and
+vesicle membrane, target species `1bxn` × 20, and
 `filler_from_pei2016` (20 species sharing a 0.5 occupancy-fraction budget,
 same filler approach as the canonical config). A single hand-picked
 filler species came first, then got rejected: at this box size it
@@ -281,17 +284,10 @@ slightly more crudely, and it is what allows a fine `voxel_size` to remain
 tractable at all: colliding natively at 1 Å over this field of view would
 require a 36 GB occupancy grid.
 
-At 2 Å you will also see a warning that the membrane is being generated on
-a coarser grid and upsampled. That is deliberate: resolving the bilayer
-directly at this voxel size would need ~125M working-grid voxels, past the
-memory one field generation is allowed to cost, so it builds at ~100M and
-upsamples instead. The membrane's physical size and position are preserved
-exactly; only its bilayer sub-structure is resolved less crisply. The
-budget behind that switch is fixed (identical on every machine, so the same
-config produces the same specimen anywhere) and sized so one field
-generation fits an 8 GB card and a 16 GB host; it is not something you
-configure. If you want a crisper membrane, use a coarser `voxel_size` or a
-smaller field of view.
+The membrane's geometry does not grow with the voxel grid. Its signed
+distance is held on a 10 Å grid at every `voxel_size`, and the bilayer is
+rendered only in the blocks of the volume a membrane crosses (see
+[Geometry](../concepts/membrane-shape/geometry.md#narrow-band-rendering)).
 
 **Hardware**: single NVIDIA L40 (46 GB VRAM, one idle card selected via
 `SPECTER_BENCHMARK_DEVICE` (`cuda:3` for this run), with the host otherwise
@@ -344,8 +340,8 @@ every species:
 
 ![The three segmentation volumes on one slice.](../assets/images/cli-guides/build_tomogram-labels.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-The three label volumes on the slice shown above: 1939 protein instances,
-each in its own colour; the four bilayers this slice cuts; and the region
+The three label volumes on the slice shown above: 1875 protein instances,
+each in its own colour; the two membranes this slice cuts; and the region
 classes. None of this draw's membranes encloses a sealed compartment, so
 their interiors are classified as cytosol and the lumen class rounds to
 0.00% of the volume. The carbon film, class 3, does not reach this slice.
@@ -399,8 +395,9 @@ CLI calls. Build a `TomogramConfig` directly in Python (or load one with
   [beads](../concepts/cryoet-specimen/beads.md),
   [carbon film](../concepts/cryoet-specimen/carbon-film.md),
   [regions & packing](../concepts/cryoet-specimen/packing.md)).
-- [Membrane shape](../concepts/membrane-shape/index.md): the
-  `spherical_harmonics`/`swept_spline` geometry backends.
+- [Membrane shape](../concepts/membrane-shape/index.md): how a membrane
+  is built as the boundary of a solid, and the settings of each organelle
+  kind.
 - [Generate a tilt series](tilt-series.md): imaging the volume this page
   builds.
 - [Configure a run](configuration.md): general TOML/CLI field reference

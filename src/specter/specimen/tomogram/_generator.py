@@ -40,7 +40,7 @@ move on"). Two consequences of the approximate stages:
   rendered before protein packing purely so the packer can avoid them.
 
 Membranes: each :class:`MembraneInstance` has its own `MembraneGenerator`
-(potentially a different `shape_backend`), renders in its own centered
+(potentially a different `kind`), renders in its own centered
 local frame on a working grid auto-sized to the organelle, and is
 max-merged into the shared canvas at a `position_xyz` resolved by
 `pack_hard_spheres_3d` (treating the instance as a bounding sphere against
@@ -49,8 +49,7 @@ regions are classified once on the composite; `classify_membrane_regions`'s
 connected-components approach handles several disjoint compartments
 without special-casing. An instance whose `clipped_at_boundary` is set
 after generation (its local grid was too small for what was drawn) is
-dropped with a warning; the bounding-sphere check is necessarily
-approximate for `swept_spline`'s wandering shape.
+dropped with a warning.
 
 Labels: `membrane_labels` records which membrane instance a shell voxel
 belongs to; `instance_labels` records which protein object a voxel belongs

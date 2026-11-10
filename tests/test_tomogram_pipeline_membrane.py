@@ -8,6 +8,7 @@ generate(), which none of these tests call."""
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,7 @@ _BASE_KWARGS = dict(
 
 def test_membrane_entry_defaults_to_auto_size_and_auto_position():
     config = TomogramConfig(
-        membrane=[{"shape_backend": "swept_spline"}],
+        membrane=[{"kind": "tubules"}],
         **_BASE_KWARGS,
     )
     gen = build_tomogram_generator(config)
@@ -47,8 +48,8 @@ def test_membrane_entry_explicit_target_shape_zyx_is_honored():
     config = TomogramConfig(
         membrane=[
             {
-                "shape_backend": "spherical_harmonics",
-                "sh_axes": [50.0, 50.0, 50.0],
+                "kind": "vesicle",
+                "radius": 80.0,
                 "target_shape": [20, 20, 20],
             }
         ],
@@ -59,39 +60,111 @@ def test_membrane_entry_explicit_target_shape_zyx_is_honored():
     assert instance.generator.target_shape == (20, 20, 20)
 
 
-def test_membrane_table_shape_keys_reach_the_shape_group():
-    """A [[membrane]] table spells shape fields with their backend's prefix;
-    the generator's shape group receives them unprefixed."""
+def test_membrane_table_fields_reach_the_organelle_plan():
+    """A [[membrane]] table's kind and fields are the generator's own."""
     config = TomogramConfig(
         membrane=[
             {
-                "shape_backend": "swept_spline",
-                "swept_tube_radius": 120.0,
-                "swept_flexibility": 0.2,
+                "kind": "vesicle",
+                "radius": 90.0,
+                "elongation": 1.0,
+                "undulation": 0.0,
             }
         ],
         **_BASE_KWARGS,
     )
     generator = build_tomogram_generator(config).membrane_instances[0].generator
-    assert generator.shape_backend == "swept_spline"
-    assert generator.shape.tube_radius == 120.0
-    assert generator.shape.flexibility == 0.2
+    assert generator.kind == "vesicle"
+    assert generator.params["radius"] == 90.0
+    assert generator.params["elongation"] == 1.0
+    assert generator.params["undulation"] == 0.0
 
 
-def test_membrane_table_refuses_the_other_backends_shape_keys():
+def test_membrane_table_refuses_a_field_of_another_kind():
     config = TomogramConfig(
-        membrane=[{"shape_backend": "swept_spline", "sh_axes": [50.0, 50.0, 50.0]}],
+        membrane=[{"kind": "vesicle", "crista_spacing": 250.0}],
         **_BASE_KWARGS,
     )
-    with pytest.raises(ValueError, match="sh_axes"):
+    with pytest.raises(ValueError, match="crista_spacing"):
         build_tomogram_generator(config)
+
+
+def test_membrane_table_refuses_an_unknown_kind():
+    config = TomogramConfig(membrane=[{"kind": "metaball"}], **_BASE_KWARGS)
+    with pytest.raises(ValueError, match="metaball"):
+        build_tomogram_generator(config)
+
+
+def test_n_copies_makes_that_many_instances():
+    config = TomogramConfig(
+        membrane=[{"kind": "vesicle", "n_copies": 3}, {"kind": "vesicle"}],
+        seed=2,
+        **_BASE_KWARGS,
+    )
+    gen = build_tomogram_generator(config)
+    assert len(gen.membrane_instances) == 4
+    # Copies of one entry are different draws, not one organelle repeated.
+    radii = [mi.generator.params["radius"] for mi in gen.membrane_instances[:3]]
+    assert len(set(radii)) == 3
+
+
+def test_auto_sized_membranes_are_shrunk_to_fit_the_tomogram():
+    """
+    Without a `target_shape`, the entry's default-sized fields are capped so
+    the organelle fits the box: 0.75 of the limiting extent, as a diameter.
+    """
+    from specter.pipelines._tomogram import _membrane_max_radius
+
+    config = TomogramConfig(membrane=[{"kind": "vesicle"}], seed=0, **_BASE_KWARGS)
+    limit = _membrane_max_radius(config)
+    assert limit == pytest.approx(0.5 * 0.75 * 64 * 8.0)
+
+    generator = build_tomogram_generator(config).membrane_instances[0].generator
+    assert generator.bounding_radius <= limit + 1e-6
+    # The default vesicle radius range starts at 200 A, above this limit.
+    assert generator.params["radius"] < 200.0
+
+
+def test_max_radius_follows_the_axes_that_cannot_clip():
+    from specter.pipelines._tomogram import _membrane_max_radius
+
+    thin = TomogramConfig(
+        target_shape=[20, 100, 100],
+        voxel_size=10.0,
+        clip_axes=[True, False, False],
+        filler=[{"pdb_source": "1mbo"}],
+    )
+    assert _membrane_max_radius(thin) == pytest.approx(0.5 * 0.75 * 1000.0)
+    all_fixed = dataclasses.replace(thin, clip_axes=[False, False, False])
+    assert _membrane_max_radius(all_fixed) == pytest.approx(0.5 * 0.75 * 200.0)
+
+
+def test_an_explicit_size_is_never_shrunk_to_fit() -> None:
+    config = TomogramConfig(
+        membrane=[{"kind": "vesicle", "radius": 400.0}], seed=0, **_BASE_KWARGS
+    )
+    generator = build_tomogram_generator(config).membrane_instances[0].generator
+    assert generator.params["radius"] == 400.0
+
+
+def test_an_explicit_target_shape_turns_the_size_cap_off() -> None:
+    """`max_radius` is passed only for an auto-sized working grid."""
+    config = TomogramConfig(
+        membrane=[{"kind": "vesicle", "target_shape": [90, 90, 90]}],
+        seed=0,
+        **_BASE_KWARGS,
+    )
+    generator = build_tomogram_generator(config).membrane_instances[0].generator
+    assert generator.target_shape == (90, 90, 90)
+    # Drawn from the uncapped default range.
+    assert generator.params["radius"] >= 200.0
 
 
 def test_n_copies_restarts_per_entry_not_running_across_entries():
     config = TomogramConfig(
         membrane=[
-            {"shape_backend": "spherical_harmonics", "n_copies": 2},
-            {"shape_backend": "swept_spline", "n_copies": 2},
+            {"kind": "vesicle", "n_copies": 2},
+            {"kind": "tubules", "n_copies": 2},
         ],
         seed=5,
         **_BASE_KWARGS,
@@ -104,24 +177,24 @@ def test_n_copies_restarts_per_entry_not_running_across_entries():
 
 
 def test_membrane_config_entry_dict_never_mutated():
-    entry = {"shape_backend": "spherical_harmonics", "n_copies": 2}
+    entry = {"kind": "vesicle", "n_copies": 2}
     config = TomogramConfig(membrane=[entry], seed=0, **_BASE_KWARGS)
     build_tomogram_generator(config)
-    assert entry == {"shape_backend": "spherical_harmonics", "n_copies": 2}
+    assert entry == {"kind": "vesicle", "n_copies": 2}
 
 
 @pytest.mark.parametrize(
     "membrane_entry, config_kwargs, expected_workers, expected_devices, expected_device",
     [
         (
-            {"shape_backend": "spherical_harmonics", "n_copies": 2},
+            {"kind": "vesicle", "n_copies": 2},
             {"render_workers": 4, "device": "0,1"},
             4,
             [torch.device("cuda:0"), torch.device("cuda:1")],
             "cuda:0",
         ),
         (
-            {"shape_backend": "spherical_harmonics"},
+            {"kind": "vesicle"},
             {"device": "cpu"},
             1,
             [torch.device("cpu")],
@@ -159,7 +232,7 @@ def test_render_workers_and_devices_reach_membrane_tomogram_generator(
 
 def test_filaments_config_builds_filament_specs():
     config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics"}],
+        membrane=[{"kind": "vesicle"}],
         filaments=[{"code": "1TUB", "step": 82.0, "flex_deg": 3.0, "n_copies": 4}],
         **_BASE_KWARGS,
     )
@@ -174,7 +247,7 @@ def test_filaments_config_builds_filament_specs():
 
 def test_actin_flag_is_additive_to_filaments():
     config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics"}],
+        membrane=[{"kind": "vesicle"}],
         filaments=[{"code": "1TUB", "step": 82.0, "flex_deg": 3.0}],
         actin=True,
         **_BASE_KWARGS,
@@ -200,7 +273,7 @@ def test_transmembrane_n_copies_maps_onto_spec_frequency(spec_dict, expected):
     # A local fixture path, not a PDB code: build_tomogram_generator renders
     # transmembrane templates eagerly, so a code would download here.
     config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics"}],
+        membrane=[{"kind": "vesicle"}],
         membrane_transmembrane_specs=[{"pdb_source": str(_SMALL_FIXTURE), **spec_dict}],
         **_BASE_KWARGS,
     )
@@ -216,7 +289,7 @@ def test_transmembrane_n_copies_maps_onto_spec_frequency(spec_dict, expected):
 )
 def test_bead_n_copies_maps_onto_spec_count(spec_dict, expected):
     config = TomogramConfig(
-        membrane=[{"shape_backend": "spherical_harmonics"}],
+        membrane=[{"kind": "vesicle"}],
         beads=[{"radius": 100.0, **spec_dict}],
         **_BASE_KWARGS,
     )
@@ -264,7 +337,7 @@ def test_scattering_factors_reach_every_renderer_in_the_tomogram():
     """
     config = TomogramConfig(
         scattering_factors="lobato",
-        membrane=[{"shape_backend": "swept_spline"}],
+        membrane=[{"kind": "tubules"}],
         membrane_transmembrane_specs=[{"pdb_source": "1mbo"}],
         **_BASE_KWARGS,
     )
@@ -281,7 +354,7 @@ def test_membrane_entry_may_override_the_tomogram_scattering_factors():
     naming its own parameterization still wins for that population."""
     config = TomogramConfig(
         scattering_factors="kirkland",
-        membrane=[{"shape_backend": "swept_spline", "parameterization": "lobato"}],
+        membrane=[{"kind": "tubules", "parameterization": "lobato"}],
         **_BASE_KWARGS,
     )
     gen = build_tomogram_generator(config)

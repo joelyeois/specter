@@ -7,7 +7,7 @@
 | [`specter simulate micrograph`](simulate.md#specter-simulate-micrograph) | Simulate one or more cryo-EM micrographs and save them as .mrcs + .star. |
 | [`specter simulate tiltseries`](simulate.md#specter-simulate-tiltseries) | Simulate a cryo-ET tilt series from a pre-built specimen volume (--volume_path) and save it as .mrcs + .star. |
 | [`specter build`](build.md#specter-build) | Build specimen volumes and reusable assets |
-| [`specter build tomogram`](build.md#specter-build-tomogram) | Build a specimen tomogram from any combination of: one or more composited organic membranes (--config's TOML [[membrane]] entries, each its own shape_backend), filament species scattered through it... |
+| [`specter build tomogram`](build.md#specter-build-tomogram) | Build a specimen tomogram from any combination of: one or more composited organic membranes (--config's TOML [[membrane]] entries, each an organelle kind), filament species scattered through it... |
 | [`specter build ice`](build.md#specter-build-ice) | Generate a library of amorphous-ice configurations for `IceBank` to draw from, as an alternative to the one bundled with specter. |
 | [`specter reconstruct`](reconstruct.md#specter-reconstruct) | Reconstruct 3D volumes from experimental images |
 | [`specter reconstruct particle`](reconstruct.md#specter-reconstruct-particle) | Reconstruct a 3D volume from an experimental single-particle stack, by fitting the same physics-based forward model `specter simulate particles` generates with. |

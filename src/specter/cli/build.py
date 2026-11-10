@@ -139,7 +139,7 @@ def build_build_group() -> click.RichGroup:
             _tomogram_callback,
             help="Build a specimen tomogram from any combination of: one or "
             "more composited organic membranes (--config's TOML [[membrane]] "
-            "entries, each its own shape_backend), filament "
+            "entries, each an organelle kind), filament "
             "species scattered through it (--actin or [[filaments]]), and "
             "densely packed protein species (--config's [targets]/[filler] "
             "tables, region-gated to cytosol/lumen when a membrane is present). "

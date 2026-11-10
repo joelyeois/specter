@@ -218,50 +218,36 @@ class TomogramConfig:
         "unseeded, so every run differs.",
     )
 
-    # --- Organic membrane (optional) ---
-    # One or more dicts, [[membrane]] tables -- one membrane TEMPLATE each,
-    # composited into the shared tomogram (see specter.specimen.tomogram.
-    # MembraneInstance). Empty (default): no membrane at all -- the whole
-    # tomogram is then one cytosol region. Keys are passed as **kwargs
-    # into specter.specimen.membrane.MembraneGenerator, a shape field
-    # spelled with its backend's prefix (sh_ for SphericalHarmonicsShape,
-    # swept_ for SweptSplineShape) that the pipeline strips -- e.g.
-    # {"shape_backend": "spherical_harmonics", "sh_axes": [300.0, 300.0,
-    # 300.0], "sh_amplitude": 0.15, "bilayer_thickness": 37.0} -- PLUS
-    # three keys not real MembraneGenerator kwargs, popped before that call:
-    #   - "n_copies" (int, default 1): expands this one entry into that
-    #     many independent instances sharing the same template, each its
-    #     own seed (config.seed + i, restarting at i=0 per entry -- editing/
-    #     adding another [[membrane]] entry never perturbs an earlier
-    #     entry's own instances). Every instance's position is resolved via
-    #     collision-rejecting random placement against every other instance
-    #     (see TomogramSpecimenGenerator's own docstring) -- an instance
-    #     that doesn't fit is dropped, not retried. There is no manual-
-    #     placement override.
-    #   - "target_shape" = [Z, Y, X] voxels. Default omitted (None):
-    #     MembraneGenerator auto-sizes a small local working grid from the
-    #     organelle's own size (see its own docstring) instead of every
-    #     instance rendering on a grid the size of the WHOLE tomogram
-    #     canvas. Give it explicitly only if this instance genuinely needs
-    #     a specific working-grid size.
-    # voxel_size/seed/device/pdb_cache_dir still come from this config's own
-    # voxel_size/seed/device/pdb_cache_dir fields for every instance, not from
-    # this dict (shape_backend one of "spherical_harmonics" (default) or
-    # "swept_spline").
+    # --- Membranes (optional) ---
+    # [[membrane]] tables, one organelle TEMPLATE each, composited into the
+    # shared tomogram (specter.specimen.tomogram.MembraneInstance). Empty
+    # (default): no membrane, and the whole tomogram is one cytosol region.
+    # A table names a `kind` ("vesicle", "tubules", "cisterna",
+    # "mitochondrion") and any of that kind's settings, each a scalar or a
+    # [low, high] range drawn per instance, e.g. {"kind": "vesicle",
+    # "radius": [200.0, 300.0], "n_copies": 3}. The keys are passed to
+    # specter.specimen.membrane.MembraneGenerator, except two:
+    #   - "n_copies" (int, default 1): that many independent instances of
+    #     the template, seeded config.seed + i, restarting at i = 0 per
+    #     entry so that adding an entry never changes an earlier one's
+    #     instances. Positions come from collision-rejecting random
+    #     placement; an instance that does not fit is dropped.
+    #   - "target_shape" = [Z, Y, X] voxels. Default omitted: sized to the
+    #     organelle that was drawn.
+    # voxel_size, seed, device and pdb_cache_dir come from this config.
     membrane: list[dict[str, Any]] = setting(
         factory=list,
         help=(
-            "One or more MembraneGenerator kwargs dicts (TOML-only, "
-            "[[membrane]] tables, one per composited TEMPLATE) -- optional, empty "
-            "by default (no membrane at all; the whole tomogram is then one "
-            "cytosol region). e.g. {'shape_backend': 'spherical_harmonics', "
-            "'n_copies': 3}. Shape fields take their backend's prefix: "
-            "SphericalHarmonicsShape's as sh_<field>, SweptSplineShape's as "
-            "swept_<field>. See MembraneGenerator's own docstring for the rest; "
-            "plus 'n_copies' (int, default 1, expands "
-            "one entry into that many independently-seeded instances, each "
-            "collision-rejecting-random-placed) and 'target_shape' (default "
-            "omitted = auto-sized per instance)."
+            "Membrane-bound organelles (TOML only, one [[membrane]] table per "
+            "template); empty by default, which leaves the whole tomogram one "
+            "cytosol region. Each table names a kind ('vesicle', 'tubules', "
+            "'cisterna' or 'mitochondrion') and any of that kind's settings, "
+            "each a scalar or a [low, high] range in Angstrom: vesicle "
+            "radius/elongation/undulation/layers; tubules radius/length/"
+            "branches; cisterna diameter/lumen_width/fenestrations; "
+            "mitochondrion radius/length/crista_spacing/membrane_gap. "
+            "'n_copies' (default 1) places that many independently drawn "
+            "instances; a size left unset is held to what the box can hold."
         ),
     )
     # Each {"pdb_source": <code or path>, "n_copies": 1, "parameterization":

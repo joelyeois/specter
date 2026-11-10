@@ -44,7 +44,7 @@ def _project_to_surface(
     Each step is a one-dimensional Newton step along the unit normal ``n``:
     the point moves by ``phi / s``, where ``s`` is the slope of ``phi``
     along ``n``, clamped below at 1. The slope is not 1 everywhere. A field
-    from ``_signed_distance_transform`` is ``dist_out - dist_in``, which
+    built from two distance transforms is ``dist_out - dist_in``, which
     leaves no voxel centre with ``|phi|`` below one spacing, so across the
     cell that straddles the surface ``phi`` changes by two spacings over
     one and ``s ~= 2``. A step of ``phi`` there overshoots by the distance

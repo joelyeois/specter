@@ -58,7 +58,10 @@ def membranes() -> list[MembraneInstance]:
         MembraneInstance(
             MembraneGenerator(
                 voxel_size=voxel_size,
-                axes_range=(200.0, 320.0),  # semi-axes, Å
+                kind="vesicle",
+                radius=[180.0, 240.0],  # Å
+                elongation=[1.0, 1.15],
+                undulation=[5.0, 25.0],  # Å
                 bilayer_thickness=37.0,
                 transmembrane_specs=[TransmembraneSpec("1C3W", frequency=20)],
                 device="cuda",

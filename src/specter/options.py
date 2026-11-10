@@ -113,8 +113,10 @@ GridConvention = Literal["relion", "torch"]
 #: ``torch.nn.functional.grid_sample`` padding modes.
 GridSamplePadding = Literal["zeros", "border", "reflection"]
 
+#: Organelle kind a membrane is built as, see :mod:`specter.specimen.membrane`.
+MembraneKind = Literal["vesicle", "tubules", "cisterna", "mitochondrion"]
+
 #: Organic membrane shape generator, see :mod:`specter.specimen.membrane`.
-ShapeBackend = Literal["spherical_harmonics", "swept_spline"]
 
 #: Which edge of the frame a carbon-film hole is placed against.
 CarbonEdgeSide = Literal["random", "left", "right", "top", "bottom"]
@@ -166,6 +168,6 @@ __all__ = [
     "ScatteringFactors",
     "ScatteringModel",
     "Scheduler",
-    "ShapeBackend",
+    "MembraneKind",
     "TiltAxis",
 ]

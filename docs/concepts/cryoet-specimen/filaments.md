@@ -56,12 +56,12 @@ All four paths shown have identical contour length; only the tangling
 differs. That makes `flex_deg` the persistence knob: raise it, and the
 same length of polymer occupies a smaller end-to-end span.
 
-This construction differs from the
-[swept-spline membrane backend](../membrane-shape/swept-spline.md)'s
-path, which blends the previous direction with a fresh random one at a
-fixed weight. Here, the turn is a bounded rotation of the previous
-direction, so `flex_deg` caps how sharply a filament can kink over a
-single monomer, the physically relevant quantity for a stiff polymer.
+This construction differs from the path of a
+[`tubules` membrane](../membrane-shape/organelles.md#tubules), which
+blends the previous direction with a fresh random one at a fixed weight.
+Here, the turn is a bounded rotation of the previous direction, so
+`flex_deg` caps how sharply a filament can kink over a single monomer,
+the physically relevant quantity for a stiff polymer.
 
 ## Orientation: a transported frame plus screw twist
 

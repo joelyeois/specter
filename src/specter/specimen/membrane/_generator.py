@@ -1,45 +1,45 @@
 """
 Public membrane specimen generator.
 
-Ties the four membrane submodules together into one class: organic shape (``_field``), calibrated bilayer potential
-(``_profile``), anti-aliased rasterization onto an output grid
-(``_raster``), and normal-aligned transmembrane protein insertion
+Ties the membrane submodules together into one class: the organelle recipe
+(``_organelles``) composed from skeleton primitives (``_primitives``) and
+regularised on a coarse grid (``_geometry``), the calibrated bilayer
+potential (``_profile``) rendered in a narrow band about each mid-surface
+(``_render``), and normal-aligned transmembrane protein insertion
 (``_placement``).
 
-Everything shares one centered-origin physical coordinate frame: physical
-``(0, 0, 0)`` is the volume's own center, matching the convention already
-used throughout ``_field``/``_raster``. This generator does not place a
-membrane instance off-center within a larger tomogram itself -- that
-compositing step (offsetting, collision-rejecting random placement)
-belongs to ``specter.specimen.tomogram.TomogramSpecimenGenerator``, the
-same way the other specimen generators in this package are used standalone
-before being composited.
+Everything shares one centred physical frame: physical ``(0, 0, 0)`` is the
+organelle's centre and lies on voxel ``n // 2`` of each output axis. This
+generator does not place a membrane off-centre within a larger tomogram;
+that compositing step belongs to
+``specter.specimen.tomogram.TomogramSpecimenGenerator``.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import math
 import warnings
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import numpy as np
 import torch
 
+from specter.options import MembraneKind, ScatteringFactors
+
 from ...arrays import clip_insert_bounds
-from ...rotations import fold_subvoxel_offsets
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB
-from ...rotations import build_affine_matrix, rotate_volume
+from ...random_seed import derive_seed
+from ...rotations import build_affine_matrix, fold_subvoxel_offsets, rotate_volume
 from .._parallel_render import (
     build_templates_concurrently,
     resolve_render_devices,
     resolve_render_workers,
 )
 from ..packing import estimate_protein_box_size
-from ._extent import membrane_bounding_radius
-from ._field import MembraneField, _centred_origin_xyz, _grid_points_xyz
-from ._field_spherical_harmonics import generate_membrane_field_spherical_harmonics
-from ._field_swept_spline import generate_membrane_field_swept_spline
+from ._field import MembraneField, _centred_origin_xyz
+from ._geometry import Grid, ReachError
+from ._organelles import OrganellePlan, plan_organelle
 from ._placement import (
     align_principal_axis_to_z,
     align_transmembrane_depth,
@@ -50,86 +50,13 @@ from ._profile import (
     BilayerProfile,
     build_measured_bilayer_profile,
 )
-from ._raster import rasterize_membrane_density
-from ._shape import (
-    MembraneShape,
-    SphericalHarmonicsShape,
-    SweptSplineShape,
-    membrane_shape,
-    resolve_sizes,
-)
-from specter.options import ScatteringFactors, ShapeBackend
-
-# target_shape auto-sizing/clamping (spherical_harmonics/swept_spline
-# only -- see MembraneGenerator.__init__): an organelle's own half-extent
-# may occupy at most this fraction of the working box's own half-extent,
-# leaving margin for undulation/wander rather than letting a drawn/explicit
-# size exactly touch the boundary.
-_SIZE_MARGIN_FRACTION = 0.85
-# Below this safe half-extent, refuse rather than silently clamp every
-# instance down to a degenerate, barely-there size.
-_MIN_SAFE_HALF_EXTENT_A = 50.0
-
-
-# Per-call element budget for _chunked_upsample_density's grid_sample calls
-# -- chosen well under the ~2^31 total-element limit confirmed directly on
-# both F.interpolate and F.grid_sample's CUDA kernels ("invalid
-# configuration argument", regardless of available memory), with enough
-# margin that the per-chunk coordinate buffer (3 floats/point) also stays
-# small (~1.2 GB at this budget).
-_UPSAMPLE_CHUNK_VOXELS = 100_000_000
+from ._render import render_bilayer
 
 # Voxels of rotated transmembrane templates held at once while placing them
 # (512 MB of float32): `place_transmembrane` rotates a chunk of sites per
 # batched `rotate_volume` call rather than one site per call.
 _TRANSMEMBRANE_ROTATION_BATCH_VOXELS = 2**27
 
-
-# How much memory one membrane field generation may cost, and the measured
-# per-working-grid-voxel costs it converts through. Deliberately sized against
-# a MODEST machine rather than the one this was developed on: the previous
-# 200M-voxel budget implied ~27 GB of resident memory for a single field,
-# which quietly required a workstation.
-#
-# The dominant cost is `_field._signed_distance_transform` -- two exact
-# Euclidean distance transforms over the working grid. It has two paths, and
-# they spend memory in different places, so the budget has to satisfy both:
-#
-#   * with cupy (a core dependency on Linux/Windows), the transforms run on
-#     the GPU: ~37 B/voxel of VRAM, plus ~96 B/voxel of host RSS that doesn't
-#     go away (the boolean interior mask and grid coordinates are built with
-#     numpy on the CPU either way)
-#   * without it -- macOS, where no cupy-cuda12x wheels exist, or no CUDA
-#     device at runtime -- scipy runs both transforms on the CPU in float64:
-#     ~134 B/voxel of host RSS, no VRAM
-#
-# Measured as peak RSS above baseline (and, on the GPU path, as a
-# mem_get_info free-memory delta, which unlike torch.cuda.max_memory_allocated
-# also sees cupy's separate pool), one grid per process since RSS is a
-# process high-water mark:
-#
-#   ===========  =========  =========  =========  ==========  ==========
-#   grid voxels  VRAM B/vx  RSS B/vx   RSS B/vx   time (gpu)  time (cpu)
-#                (cupy)     (cupy)     (scipy)
-#   ===========  =========  =========  =========  ==========  ==========
-#   13.5M        40.4       97.5       134        2.7 s       5.5 s
-#   32M          38.6       96.5       134        5.0 s       13.7 s
-#   62.5M        37.4       96.3       134        9.6 s       26.0 s
-#   108M         36.8       96.2       134        14.9 s      46.1 s
-#   ===========  =========  =========  =========  ==========  ==========
-#
-# (The docstring this replaces claimed "~14x a single array's own size"; the
-# real figure is 33.5x a float32 array on the scipy path, 24x on the cupy one.)
-#
-# Budgets: 6 GiB of VRAM, so an 8 GB card is enough, and 12 GiB of host RAM,
-# so a 16 GB machine is. Converting each cost through its own budget gives
-# 174M (VRAM), 134M (RSS, cupy) and 96M (RSS, scipy) -- the cap is one
-# constant for everyone (a memory-dependent cap would make the same config
-# produce differently-resolved membranes on different machines), so it takes
-# the tightest: ~100M.
-_FIELD_VRAM_BUDGET_BYTES = 6 * 1024**3
-_FIELD_RAM_BUDGET_BYTES = 12 * 1024**3
-_FIELD_VRAM_BYTES_PER_VOXEL = 37  # cupy path only
 #: Default fraction of the bilayer's own peak density above which a
 #: transmembrane protein is treated as having displaced the lipid it sits
 #: in -- see `MembraneGenerator.transmembrane_occupancy_fraction`. Named
@@ -137,77 +64,19 @@ _FIELD_VRAM_BYTES_PER_VOXEL = 37  # cupy path only
 #: displacement is switched off entirely.
 _DEFAULT_TRANSMEMBRANE_OCCUPANCY_FRACTION = 0.05
 
-_FIELD_BYTES_PER_VOXEL = 134  # host RSS, scipy fallback (96 with cupy)
-
-#: Working-grid voxel ceiling for field generation: past this, `generate()`
-#: builds on a coarser grid and upsamples (see `MembraneGenerator`'s
-#: `max_field_voxels`). At 100M that is ~3.7 GB VRAM + ~9.6 GB RSS and ~15 s
-#: with cupy, or ~13.4 GB RSS and ~43 s on the scipy fallback. The cap
-#: satisfies BOTH paths, so a macOS run resolves membranes identically.
-#:
-#: Internal on purpose -- a user tunes the physical parameters (`voxel_size`,
-#: field of view, organelle size), never a voxel budget, which is a property
-#: of the machine rather than of the specimen.
-_MAX_FIELD_VOXELS = 100_000_000
-
-
-def _chunked_upsample_density(
-    coarse_volume: torch.Tensor,
-    gen_voxel_size: float,
-    origin_xyz: torch.Tensor,
-    target_shape: tuple[int, int, int],
-    voxel_size: float,
-) -> torch.Tensor:
-    """
-    Upsample a coarse density raster onto a fine target grid, in Z-chunks.
-
-    Reuses `MembraneField.sample()` -- the same trilinear point-sampling
-    machinery `rasterize_membrane_density` already uses for the primary
-    (non-decoupled) raster path -- rather than `F.interpolate`, so both
-    agree on the exact same align_corners=False/pixel-center convention
-    (`MembraneField._normalized_grid`). Chunked along Z so neither the
-    coordinate buffer nor any one CUDA kernel launch has to handle the
-    whole (potentially multi-billion-voxel) fine grid at once -- see
-    `_UPSAMPLE_CHUNK_VOXELS`.
-
-    Parameters
-    ----------
-    coarse_volume : torch.Tensor
-        Density raster on the coarse generation grid, shape matching
-        `coarse_volume.shape`, spacing `gen_voxel_size`.
-    gen_voxel_size : float
-        Coarse grid's voxel size, Å.
-    origin_xyz : torch.Tensor
-        Physical `(x, y, z)` location of index `(0, 0, 0)`, shared by both
-        the coarse and fine grids (same physical extent, see caller).
-    target_shape : tuple of int
-        Fine output grid shape.
-    voxel_size : float
-        Fine grid's voxel size, Å.
-
-    Returns
-    -------
-    torch.Tensor
-        Density volume, shape `target_shape`, same device/dtype as
-        `coarse_volume`.
-    """
-    coarse_field = MembraneField(
-        phi=coarse_volume, spacing_angstrom=gen_voxel_size, origin_xyz=origin_xyz
-    )
-    nz, ny, nx = target_shape
-    chunk_z = max(1, _UPSAMPLE_CHUNK_VOXELS // max(1, ny * nx))
-    fine = torch.empty(
-        target_shape, dtype=coarse_volume.dtype, device=coarse_volume.device
-    )
-    for z0 in range(0, nz, chunk_z):
-        z1 = min(nz, z0 + chunk_z)
-        chunk_origin = origin_xyz.clone()
-        chunk_origin[2] = chunk_origin[2] + z0 * voxel_size
-        points_xyz = _grid_points_xyz(
-            (z1 - z0, ny, nx), voxel_size, chunk_origin, coarse_volume.device
-        )
-        fine[z0:z1] = coarse_field.sample(points_xyz)
-    return fine
+# Spacing of the coarse grid the geometry is built on, A. A third of the
+# smallest radius of curvature the regularisation leaves (30 A).
+_COARSE_SPACING = 10.0
+# Most coarse-grid nodes one membrane may take. The geometry holds about
+# 0.4 GiB per million nodes while it is regularised; past this the grid is
+# coarsened, which rounds the tightest features more.
+_MAX_COARSE_NODES = 24_000_000
+# How far the bilayer's potential reaches from the mid-surface, A; the
+# margin an auto-sized output box leaves around the organelle.
+_BILAYER_MARGIN = 45.0
+# Times the path-dependent randomness of a kind (undulation, a tubule's
+# walk) is redrawn when a draw cannot be regularised to a kink-free surface.
+_BUILD_ATTEMPTS = 4
 
 
 @dataclass
@@ -345,365 +214,113 @@ class TransmembranePlacement:
     rotation_matrix: torch.Tensor
 
 
-def _fit_shape_to_box(
-    target_shape: tuple[int, int, int] | None,
-    voxel_size: float,
-    shape: MembraneShape,
-    max_output_voxels: int,
-) -> tuple[tuple[int, int, int], MembraneShape]:
-    """
-    Reconcile the organelle's size with its box.
-
-    With no ``target_shape`` the box is sized to the organelle, scaled down
-    if that would exceed ``max_output_voxels``. With one, the organelle is
-    clamped (spherical harmonics) or scaled (swept spline) to what the box
-    can hold without clipping. Returns the box and the shape, its sizes
-    resolved (`resolve_sizes`) and possibly adjusted.
-    """
-    shape_backend = shape.backend
-    if isinstance(shape, SphericalHarmonicsShape):
-        assert shape.axes is not None
-        axes = shape.axes
-    else:
-        assert shape.total_length is not None and shape.tube_radius is not None
-        assert shape.step_length_angstrom is not None
-        total_length = shape.total_length
-        tube_radius = shape.tube_radius
-        step_length = shape.step_length_angstrom
-    if target_shape is None:
-        safe_half_extent_angstrom = (
-            membrane_bounding_radius(shape) / _SIZE_MARGIN_FRACTION
-        )
-        n = max(1, math.ceil(2.0 * safe_half_extent_angstrom / voxel_size))
-        # This OUTPUT canvas (what becomes self.volume) is a SEPARATE
-        # concern from the internal working field max_field_voxels
-        # already protects (generate()'s own field_spacing_angstrom
-        # coarsening) -- and, since generation-resolution decoupling
-        # was added (see max_field_voxels' own docstring), a large n
-        # here is now normally absorbed by generating at a coarser
-        # grid and upsampling, WITHOUT shrinking the organelle at all.
-        # max_output_voxels below is the last-resort fallback for when
-        # even the upsampled FINAL array (materialized via chunked
-        # point-sampling, not one giant call -- see
-        # _chunked_upsample_density) still wouldn't fit -- SHRINKS the
-        # organelle's own physical size to fit, the same mechanism the
-        # explicit-target_shape branch below already uses.
-        if n**3 > max_output_voxels:
-            n_capped = max(1, round(max_output_voxels ** (1.0 / 3.0)))
-            scale = n_capped / n
-            if shape_backend == "spherical_harmonics":
-                new_axes = (
-                    axes[0] * scale,
-                    axes[1] * scale,
-                    axes[2] * scale,
-                )
-                warnings.warn(
-                    f"MembraneGenerator: axes {axes} at "
-                    f"voxel_size={voxel_size:.2f} A implies a {n}^3 output canvas, "
-                    f"exceeding max_output_voxels ({max_output_voxels:,}) -- "
-                    f"scaled down by {scale:.2f}x (to "
-                    f"{tuple(round(a, 1) for a in new_axes)}) to avoid "
-                    "an OOM materializing the final array. Raise "
-                    "max_output_voxels if you have the memory to spare, "
-                    "increase voxel_size, or set axes explicitly to get "
-                    "the originally requested size.",
-                    stacklevel=2,
-                )
-                axes = new_axes
-            else:
-                new_total_length_angstrom = total_length * scale
-                new_tube_radius_angstrom = tube_radius * scale
-                warnings.warn(
-                    "MembraneGenerator: total_length/"
-                    f"tube_radius ({total_length:.1f} A/"
-                    f"{tube_radius:.1f} A) at voxel_size={voxel_size:.2f} A "
-                    f"imply a {n}^3 output canvas, exceeding "
-                    f"max_output_voxels ({max_output_voxels:,}) -- scaled "
-                    f"both down by {scale:.2f}x (to {new_total_length_angstrom:.1f} "
-                    f"A/{new_tube_radius_angstrom:.1f} A) to avoid an OOM "
-                    "materializing the final array. Raise max_output_voxels "
-                    "if you have the memory to spare, or increase voxel_size, "
-                    "to get the originally requested size.",
-                    stacklevel=2,
-                )
-                total_length = new_total_length_angstrom
-                tube_radius = new_tube_radius_angstrom
-                if step_length > tube_radius:
-                    step_length = 0.5 * tube_radius
-            n = n_capped
-        target_shape = (n, n, n)
-    else:
-        tz, ty, tx = target_shape
-        box_extent_angstrom = (tx * voxel_size, ty * voxel_size, tz * voxel_size)
-        safe_half_extent_angstrom = (
-            _SIZE_MARGIN_FRACTION * min(box_extent_angstrom) / 2.0
-        )
-        if safe_half_extent_angstrom < _MIN_SAFE_HALF_EXTENT_A:
-            raise ValueError(
-                f"MembraneGenerator: target_shape={target_shape!r} at "
-                f"voxel_size={voxel_size:.2f} A/voxel gives a box too small (safe "
-                f"half-extent {safe_half_extent_angstrom:.1f} A) to hold any "
-                f"reasonably-sized {shape_backend!r} organelle -- increase "
-                "target_shape or voxel_size."
-            )
-        if shape_backend == "spherical_harmonics":
-            clamped = (
-                min(axes[0], safe_half_extent_angstrom),
-                min(axes[1], safe_half_extent_angstrom),
-                min(axes[2], safe_half_extent_angstrom),
-            )
-            if clamped != axes:
-                warnings.warn(
-                    f"MembraneGenerator: axes {axes} exceeds what "
-                    f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
-                    f"can safely hold -- clamped to "
-                    f"{tuple(round(c, 1) for c in clamped)} to avoid clipping. "
-                    "Increase target_shape/voxel_size, or set axes "
-                    "explicitly to a smaller value, to get the originally "
-                    "requested size.",
-                    stacklevel=2,
-                )
-                axes = clamped
-        else:
-            reach = membrane_bounding_radius(shape)
-            if reach > safe_half_extent_angstrom:
-                scale = safe_half_extent_angstrom / reach
-                new_total_length_angstrom = total_length * scale
-                new_tube_radius_angstrom = tube_radius * scale
-                warnings.warn(
-                    "MembraneGenerator: total_length/"
-                    f"tube_radius ({total_length:.1f} A/"
-                    f"{tube_radius:.1f} A) exceed what "
-                    f"target_shape={target_shape!r}/voxel_size={voxel_size:.2f} "
-                    f"can safely hold -- scaled both down by {scale:.2f}x (to "
-                    f"{new_total_length_angstrom:.1f} A/{new_tube_radius_angstrom:.1f} A) to "
-                    "avoid clipping. Increase target_shape/voxel_size to get "
-                    "the originally requested size.",
-                    stacklevel=2,
-                )
-                total_length = new_total_length_angstrom
-                tube_radius = new_tube_radius_angstrom
-                if step_length > tube_radius:
-                    step_length = 0.5 * tube_radius
-
-    if isinstance(shape, SphericalHarmonicsShape):
-        return target_shape, dataclasses.replace(shape, axes=axes)
-    return target_shape, dataclasses.replace(
-        shape,
-        total_length=total_length,
-        tube_radius=tube_radius,
-        step_length_angstrom=step_length,
-    )
-
-
 class MembraneGenerator:
     """
-    Generate an organic membrane specimen volume with transmembrane inserts.
+    Generate one organelle's membranes, with transmembrane inserts.
+
+    An organelle is drawn as a `kind`, a recipe over thickened-skeleton
+    primitives whose settings are measurable sizes. The solid it composes
+    is regularised on a coarse grid, so that no membrane curves tighter
+    than 30 Å or passes within 50 Å of another, and the calibrated bilayer
+    potential is rendered about each mid-surface at the output voxel size.
 
     Parameters
     ----------
     target_shape : tuple of int, optional
-        Output volume shape, ``(Z, Y, X)``. Default `None`: auto-sized from
-        the (possibly randomly drawn, see the shape group's ``*_range`` fields
-        below) organelle size, with margin. When given
-        explicitly, the organelle size is instead CLAMPED to whatever this
-        box can safely hold (with a warning if that changes anything) --
-        either way, a random or explicit size can never silently produce a
-        clipped shape from a mismatched box. See `MembraneField.
-        clipped_at_boundary` for the last-resort check this backs up.
+        Output volume shape, ``(Z, Y, X)``. Default None: sized to hold the
+        organelle that was drawn. A given shape is used as it is; a
+        membrane that reaches past it is cut at the faces and
+        `clipped_at_boundary` is set.
     voxel_size : float, optional
-        Output voxel size, Å. Also used to render transmembrane
-        protein templates, so their scale matches the membrane's. Default
-        5.0.
-    shape : SphericalHarmonicsShape or SweptSplineShape, optional
-        The organic shape model and its parameters, which build the
-        underlying :class:`~specter.specimen.membrane._field.MembraneField`.
-        Pass the group, or its fields as keywords (`**shape_settings`) with
-        `shape_backend` naming which group they belong to; never both.
-        Default: a `SphericalHarmonicsShape` with its defaults.
-        `SphericalHarmonicsShape` perturbs an ellipsoid (vesicles, nuclei,
-        roughly ellipsoidal mitochondria; star-convex only);
-        `SweptSplineShape` sweeps a sphere along a wandering path (an
-        ER-tubule-like tube that can loop back near itself). Both are read
-        afterwards only through `MembraneField`'s public contract, so the
-        calibrated bilayer profile and transmembrane placement are identical
-        either way. ``self.shape`` holds the group with every size resolved.
-    shape_backend : {"spherical_harmonics", "swept_spline"}, optional
-        Which group `**shape_settings` builds when `shape` is not given.
-        Default None: ``"spherical_harmonics"``, or the backend of `shape`.
+        Output voxel size, Å. Also used to render transmembrane protein
+        templates. Default 5.0.
+    kind : {"vesicle", "tubules", "cisterna", "mitochondrion"}, optional
+        The organelle recipe. ``"vesicle"`` is a closed, gently undulating
+        spheroid, optionally with nested layers; ``"tubules"`` a branching
+        network of tubes; ``"cisterna"`` a flattened, curved sac, optionally
+        fenestrated; ``"mitochondrion"`` a capsule with an outer membrane
+        and an inner boundary membrane folded into lamellar cristae.
+        Default ``"vesicle"``.
     n_lipids_per_leaflet : int, optional
-        Reference lipid patch size, passed to
+        Reference lipid patch size, for callers building a patch of their
+        own with
         :func:`~specter.specimen.membrane._profile.build_reference_lipid_patch`.
-        Has NO effect on `generate()`'s output: the profile is measured on
-        its own fixed reference patch (`CALIBRATION_N_LIPIDS_PER_LEAFLET`)
-        precisely so it cannot drift with a caller's choice here. Kept for
-        callers building a patch of their own to inspect. Default 200.
+        It has no effect on `generate`. Default 200.
     parameterization : str, optional
-        PotentialBuilder parameterization for the lipid reference patch.
-        Default "shtyrov".
+        Scattering factors of the lipid reference patch and the
+        transmembrane templates. Default "shtyrov".
     bilayer_thickness : float, optional
-        Phosphate-to-phosphate (outer-leaflet-peak to inner-leaflet-peak)
-        spacing, Å. The measured profile
-        (:func:`~specter.specimen.membrane._profile.
-        build_measured_bilayer_profile`) is rescaled along z to this
-        value, at fixed amplitude, so the bilayer's integrated potential
-        scales with it as lipid-volume conservation requires.
-
-        Default 37.0, the spacing measured for fully hydrated fluid POPC
-        at 30 °C [2]_, the lipid the reference template is built from.
-        Fluid phosphatidylcholines span 35-38 Å: 35.3 Å for DMPC and
-        36.7 Å for DOPC at 30 °C [2]_, 38.3 Å for DPPC at 50 °C [3]_.
-        `polnet`'s [1]_ `MB_THICK_RG` range (25.0, 35.0) sits entirely
-        below the experimental one and is not followed: a 30 Å bilayer
-        renders about 19% less integrated potential than a 37 Å one, since
-        the integral scales with thickness.
-
-        The reference lipid template's own geometry gives 40 Å
-        (:func:`~specter.specimen.membrane._profile.
-        native_bilayer_thickness_angstrom`), so the default compresses it by
-        0.925. That the template sits ~2 Å above the experimental range at
-        all is a property of its hand-picked z-offsets, and is the part
-        of this model still waiting on real coordinates -- not something
-        to correct by squeezing harder at render time.
+        Phosphate-to-phosphate spacing, Å. The measured profile
+        (:func:`~specter.specimen.membrane._profile.build_measured_bilayer_profile`)
+        is rescaled along its normal to this value at fixed amplitude, so
+        the integrated potential scales with it. Default 37.0, the spacing
+        measured for fully hydrated fluid POPC at 30 °C [2]_; fluid
+        phosphatidylcholines span 35-38 Å [2]_ [3]_.
     bilayer_layer_sigma_angstrom : float, optional
-        ADDITIONAL Gaussian broadening applied along z, Å. Default 0.0.
-
-        The measured profile carries whatever leaflet width its atomic
-        model implies, so there is no width to set here -- only extra
-        blur to add on top, which the rasterizer's own anti-aliasing
-        already handles for the render grid. Raise it only to
-        deliberately smear a bilayer.
+        Additional Gaussian broadening of the profile along the normal, Å.
+        Default 0.0.
     transmembrane_specs : list of TransmembraneSpec, optional
-        Transmembrane protein species to attempt placing. Default None (no
-        transmembrane proteins).
+        Transmembrane protein species to place. Default None.
     transmembrane_occupancy_fraction : float, optional
-        Controls how transmembrane protein density is combined with the
-        membrane's own density at each placement, in `_insert_blend`. A
-        real transmembrane protein displaces lipid where it sits rather
-        than coexisting with it, so naively adding the two (the previous
-        behaviour) double-counts density in the overlap and is physically
-        wrong. Instead, wherever the (already-rendered) protein template's
-        own density exceeds `1.5 * transmembrane_occupancy_fraction *
-        self.profile.psi.max()` (the bilayer's own calibrated peak
-        density -- an already-computed, physically anchored scale, rather
-        than an arbitrary constant), the membrane's density there is fully
-        replaced by the protein's instead of summed with it; below `0.5 *`
-        that same threshold, the membrane is left completely untouched. In
-        between, a smoothstep (not a sigmoid -- a sigmoid's tail never
-        truly reaches 0, which left a template's near-zero background,
-        e.g. `rotate_volume`'s own zero-padding, weakly but non-negligibly
-        suppressing membrane density across the whole inserted bounding
-        box rather than just near the protein's actual mass) blends the
-        two, avoiding a visible cutout edge at the template's own decaying
-        density tail while still saturating to exactly 0/1 away from it.
-        See `_insert_blend`'s own implementation for the exact band. This
-        reuses the
-        template density already computed for insertion as a proxy for
-        occupancy rather than building a separate excluded-volume/solvent-
-        accessible-surface geometry step from the atom coordinates -- a
-        deliberately simpler approximation: the "hole" boundary tracks
-        wherever the atomic potential happens to decay past this
-        threshold, not a true van-der-Waals silhouette. Default 0.05.
+        Fraction of the bilayer's peak potential above which a protein
+        template displaces the lipid it sits in instead of adding to it;
+        see `_insert_blend` for the blend between the two. Default 0.05.
     pdb_cache_dir : str, optional
-        Passed to `PDB` for PDB-backed transmembrane specs. Default is
-        `$SPECTER_PDB_CACHE`, else `$XDG_CACHE_HOME/specter/pdb`, else
-        `~/.cache/specter/pdb` (see `config.default_pdb_cache_dir`).
-    max_field_voxels : int, optional
-        Safety cap on the working field grid's total voxel count, AND (see
-        `max_output_voxels` below for the distinction) on the resolution
-        `generate()` actually GENERATES the output raster at. The field's
-        own spacing is derived to resolve the bilayer's physical extent
-        (see `generate`'s inline comment) independent of `target_shape`
-        -- fine at the small scales this was built and tested at, but that
-        spacing applied UNIFORMLY across a real production-scale volume
-        (hundreds of voxels per axis) produces a working grid orders of
-        magnitude larger than `target_shape` itself: confirmed a (200,
-        600, 600)-voxel, 10 A/voxel target implying a 500x1500x1500 (~1.1
-        billion voxel) field, ballooning to 50+ GB of resident memory
-        across the several such arrays field generation allocates, well
-        past what's practical. If the naive spacing would exceed this
-        budget, it's coarsened (increased) just enough to fit, with a
-        warning -- a real, disclosed accuracy tradeoff (a coarser-than-
-        ideal field resolves the bilayer's own sub-structure less
-        crisply), not a silent one; this is a stopgap, not a fix for the
-        underlying issue (the field is one uniform grid over the WHOLE
-        domain regardless of how much of it is actually near a membrane
-        surface -- a real architectural limitation, worth a proper
-        adaptive/local-patch redesign later, not attempted here).
-
-        Separately, if `target_shape` (explicit or auto-sized from
-        organelle size/`voxel_size`) itself exceeds this many voxels,
-        `generate()` GENERATES the field/raster on a coarser grid of
-        exactly this budget -- covering the SAME physical extent as
-        `target_shape`, just at coarser spacing -- and upsamples onto
-        the full-resolution `target_shape` afterward via
-        `_chunked_upsample_density` (trilinear point-sampling in Z-chunks,
-        not a single `F.interpolate` call -- both `F.interpolate` and
-        plain `F.grid_sample` hit a hard CUDA kernel "invalid
-        configuration argument" past ~2^31 total elements, confirmed
-        directly, regardless of available memory; chunking sidesteps it).
-        This decouples the EXPENSIVE part (dense field generation, a
-        measured 134 bytes of resident memory per working-grid voxel --
-        33.5x a float32 array of the same shape, since the signed distance
-        transform holds two float64 EDT outputs plus scipy's internals; see
-        `_FIELD_BYTES_PER_VOXEL`) from the requested output resolution: a
-        large, fine-`voxel_size` organelle that would otherwise need hundreds of
-        GB to generate directly can instead generate cheaply at this budget
-        and upsample for close to just the final array's own size (each
-        upsample chunk is a small, bounded point-sampling call -- see
-        `_UPSAMPLE_CHUNK_VOXELS`). The
-        organelle's PHYSICAL size is preserved exactly -- only its
-        resolved sub-structure crispness is traded away, same as the
-        field-coarsening tradeoff above. See `max_output_voxels` for the
-        separate, much larger ceiling on the upsampled FINAL array itself.
-
-        Default `_MAX_FIELD_VOXELS` (100M voxels): an internal
-        tuning parameter, not a user-facing knob -- it encodes how much
-        memory one field generation may cost on a modest machine, which is a
-        property of the hardware, not of the specimen. Tune the physical
-        parameters (`voxel_size`, field of view, organelle size) instead; this
-        argument exists so tests can force the coarsening path cheaply.
-    max_output_voxels : int, optional
-        Hard ceiling on `target_shape`'s own total voxel count -- i.e.
-        on the size of the single dense array `generate()` must ultimately
-        materialize as `self.volume` (post-upsample, see `max_field_voxels`
-        above), regardless of how cheaply generation itself is made via
-        the coarse-then-upsample mechanism. When `target_shape` is
-        auto-sized (omitted), exceeding this SHRINKS the organelle's own
-        physical size to fit, with a warning -- this only fires for genuinely
-        extreme requests, since `max_field_voxels`-based decoupling above
-        already handles the common case of "fits fine once materialized,
-        just too expensive to generate directly" without shrinking
-        anything. When `target_shape` is given explicitly and exceeds
-        this budget, raises instead of silently resizing what the caller
-        explicitly asked for. Default 4_000_000_000 (~16 GB at float32 --
-        comfortably fits a 24+ GB GPU; raise for a larger card, e.g. a
-        40 GB budget comfortably covers several billion voxels once
-        `max_field_voxels` is keeping generation itself cheap).
+        Passed to `PDB` for PDB-backed transmembrane specs.
+    readd_hydrogens : bool or "auto", optional
+        Passed to `PDB`. Default "auto".
+    monomer_library_path : str, optional
+        Passed to `PDB`. Default None.
+    use_deposited_bfactors : bool, optional
+        Whether transmembrane templates are blurred by their deposited
+        B-factors. Default False.
     device : str or torch.device, optional
         Device for generation. Default "cpu".
     seed : int, optional
-        Random seed. Default None.
+        Random seed. Default None: drawn from torch's global generator.
     render_workers : int or "auto", optional
-        Number of `transmembrane_specs` species rendered concurrently (on
-        background threads) when building each species' `PotentialBuilder`
-        template -- see `_build_template`. Only matters when
-        `transmembrane_specs` has more than one entry AND none of them
-        already supply their own `TransmembraneSpec.template` (those are
-        never rebuilt regardless of this setting). Default 1: fully serial,
-        identical to the pre-parallel behaviour. `"auto"` resolves via
-        `recommend_render_workers(len(transmembrane_specs))` -- see that
-        function's own docstring.
+        Number of transmembrane species rendered concurrently. Default 1.
     render_devices : list of str or torch.device, optional
-        Device pool to round-robin those concurrent species across (e.g.
-        multiple GPUs). Default None: every species renders on `device`
-        above, still concurrently across `render_workers` threads, just not
-        spread across multiple physical devices.
-    **shape_settings
-        The fields of `shape_backend`'s group, when `shape` is not given:
-        ``axes``, ``amplitude``, ... for ``"spherical_harmonics"``;
-        ``tube_radius``, ``total_length``, ... for ``"swept_spline"``. A
-        field of the other group is refused.
+        Device pool those species are spread across. Default None:
+        `device`.
+    max_radius : float, optional
+        Largest `bounding_radius` the organelle may have, Å. A draw that
+        exceeds it has the size settings left at their defaults scaled
+        down to fit; a size given in `kind_settings` is never changed.
+        Default None: no limit.
+    **kind_settings
+        The settings of `kind`, each a scalar or a ``[low, high]`` range
+        from which this membrane's value is drawn, in Å or as a count:
+
+        - ``"vesicle"``: ``radius``, ``elongation`` (long axis over short,
+          at least 1), ``undulation`` (amplitude), ``layers``.
+        - ``"tubules"``: ``radius``, ``length`` (of each branch),
+          ``branches``.
+        - ``"cisterna"``: ``diameter``, ``lumen_width``, ``fenestrations``.
+        - ``"mitochondrion"``: ``radius``, ``length`` (of the axis between
+          the end caps), ``crista_spacing``, ``membrane_gap`` (between the
+          outer and inner boundary membranes).
+
+        An omitted setting takes the default in
+        `~specter.specimen.membrane.ORGANELLE_DEFAULTS`. A setting of
+        another kind is refused.
+
+    Attributes
+    ----------
+    params : dict
+        The value drawn for each setting of `kind`.
+    bounding_radius : float
+        Radius of a sphere about the organelle's centre that holds its
+        membranes, Å. Known before `generate`.
+    field : MembraneField or None
+        Signed distance to the outermost membrane's mid-surface after
+        `generate`, on the coarse grid.
+    clipped_at_boundary : bool or None
+        Whether the outermost membrane reaches past the output box.
+
+    Notes
+    -----
+    Transmembrane proteins are placed on the outermost membrane only.
 
     References
     ----------
@@ -711,7 +328,6 @@ class MembraneGenerator:
        Simulating the cellular context in synthetic datasets for cryo-electron
        tomography. *IEEE Transactions on Medical Imaging*, 43(11), 3742–3754.
        https://doi.org/10.1109/TMI.2024.3398401
-       (polnet source: https://github.com/anmartinezs/polnet)
     .. [2] Kučerka, N., Tristram-Nagle, S., & Nagle, J. F. (2005). Structure of
        fully hydrated fluid phase lipid bilayers with monounsaturated chains.
        *Journal of Membrane Biology*, 208(3), 193–202.
@@ -726,9 +342,8 @@ class MembraneGenerator:
         self,
         target_shape: tuple[int, int, int] | None = None,
         voxel_size: float = 5.0,
-        shape: MembraneShape | None = None,
+        kind: MembraneKind = "vesicle",
         *,
-        shape_backend: ShapeBackend | None = None,
         n_lipids_per_leaflet: int = 200,
         parameterization: ScatteringFactors = "shtyrov",
         bilayer_thickness: float = 37.0,
@@ -739,81 +354,34 @@ class MembraneGenerator:
         readd_hydrogens: bool | str = "auto",
         monomer_library_path: str | None = None,
         use_deposited_bfactors: bool = False,
-        max_field_voxels: int = _MAX_FIELD_VOXELS,
-        max_output_voxels: int = 4_000_000_000,
         device: str | torch.device = "cpu",
         seed: int | None = None,
         render_workers: int | Literal["auto"] = 1,
         render_devices: list[str | torch.device] | None = None,
-        **shape_settings: Any,
+        max_radius: float | None = None,
+        **kind_settings: Any,
     ):
-        voxel_size = float(voxel_size)
-        shape = resolve_sizes(
-            membrane_shape(shape, shape_backend, shape_settings), seed
+        self.voxel_size = float(voxel_size)
+        self.kind: MembraneKind = kind
+        self.seed = seed
+        # One base seed for the sizes and for every redraw of the geometry.
+        self._base_seed = (
+            int(seed)
+            if seed is not None
+            else int(torch.randint(0, 2**31 - 1, (1,)).item())
         )
-
-        target_shape, shape = _fit_shape_to_box(
-            target_shape, voxel_size, shape, max_output_voxels
+        self._plan: OrganellePlan = plan_organelle(
+            kind,
+            np.random.default_rng(derive_seed(self._base_seed, 0)),
+            max_radius=None if max_radius is None else max_radius - _BILAYER_MARGIN,
+            **kind_settings,
         )
-
+        if target_shape is None:
+            reach = self._plan.half_extent + _BILAYER_MARGIN
+            nx, ny, nz = (2 * int(math.ceil(r / self.voxel_size)) + 2 for r in reach)
+            target_shape = (nz, ny, nx)
         tz, ty, tx = target_shape
         self.target_shape: tuple[int, int, int] = (int(tz), int(ty), int(tx))
-        n_out_voxels = (
-            self.target_shape[0] * self.target_shape[1] * self.target_shape[2]
-        )
-        if n_out_voxels > max_output_voxels:
-            # Only reachable for an EXPLICIT target_shape -- the auto-
-            # sizing branch above already shrinks the organelle so its own
-            # n**3 satisfies max_output_voxels, so n_out_voxels can't
-            # exceed it there. An explicit shape is a direct caller
-            # request, so raise rather than silently resize it.
-            raise ValueError(
-                f"MembraneGenerator: target_shape={self.target_shape!r} "
-                f"({n_out_voxels:,} voxels) exceeds max_output_voxels "
-                f"({max_output_voxels:,}) -- this many voxels can't be safely "
-                "materialized as one dense output array regardless of "
-                "generation-resolution decoupling (see max_output_voxels' own "
-                "docstring). Raise max_output_voxels, or reduce "
-                "target_shape/voxel_size."
-            )
-        # Decouple GENERATION resolution from the fine voxel_size the output
-        # canvas above must end up at -- see max_field_voxels' own
-        # docstring for the coarse-then-upsample mechanism and its
-        # measured cost. Physical extent is preserved exactly (same
-        # origin, same span); only the requested sub-structure crispness
-        # is traded away when this triggers.
-        if n_out_voxels > max_field_voxels:
-            gen_scale = (max_field_voxels / n_out_voxels) ** (1.0 / 3.0)
-            self._gen_shape_zyx: tuple[int, int, int] = (
-                max(1, round(self.target_shape[0] * gen_scale)),
-                max(1, round(self.target_shape[1] * gen_scale)),
-                max(1, round(self.target_shape[2] * gen_scale)),
-            )
-            self._gen_voxel_size = voxel_size / gen_scale
-            self._needs_upsample = True
-            warnings.warn(
-                f"MembraneGenerator: generating the membrane on a coarser "
-                f"grid and upsampling. target_shape="
-                f"{self.target_shape!r} ({n_out_voxels:,} voxels) at "
-                f"voxel_size={voxel_size:.2f} A would cost about "
-                f"{n_out_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f} GB to "
-                f"generate directly, past the "
-                f"{max_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f} GB "
-                f"budget -- generating {self._gen_shape_zyx!r} at "
-                f"{self._gen_voxel_size:.2f} A/voxel instead, then upsampling "
-                "(trilinear) to the full requested resolution. The membrane's "
-                "physical size and position are preserved exactly; only its "
-                "bilayer sub-structure is resolved less crisply.",
-                stacklevel=2,
-            )
-        else:
-            self._gen_shape_zyx = self.target_shape
-            self._gen_voxel_size = voxel_size
-            self._needs_upsample = False
-        self.voxel_size = voxel_size
-        self.max_output_voxels = max_output_voxels
-        self.shape: MembraneShape = shape
-        self.shape_backend: ShapeBackend = shape.backend
         self.n_lipids_per_leaflet = n_lipids_per_leaflet
         self.parameterization = parameterization
         self.bilayer_thickness = bilayer_thickness
@@ -824,9 +392,7 @@ class MembraneGenerator:
         self.readd_hydrogens = readd_hydrogens
         self.use_deposited_bfactors = use_deposited_bfactors
         self.monomer_library_path = monomer_library_path
-        self.max_field_voxels = max_field_voxels
         self.device = torch.device(device)
-        self.seed = seed
         self.render_workers = resolve_render_workers(
             render_workers, len(self.transmembrane_specs)
         )
@@ -846,175 +412,103 @@ class MembraneGenerator:
         self.clipped_at_boundary: bool | None = None
         self._origin_xyz: torch.Tensor | None = None
 
+    @property
+    def params(self) -> dict[str, float]:
+        """The value drawn for each setting of `kind`."""
+        return dict(self._plan.params)
+
+    @property
+    def bounding_radius(self) -> float:
+        """Radius of a sphere about the centre holding the membranes, Å."""
+        return self._plan.bounding_radius + _BILAYER_MARGIN
+
+    def _coarse_grid(self) -> Grid:
+        """The grid the geometry is built on, covering the output box."""
+        nz, ny, nx = self.target_shape
+        box = (nx * self.voxel_size, ny * self.voxel_size, nz * self.voxel_size)
+        assert self._origin_xyz is not None
+        lo = tuple(float(v) for v in self._origin_xyz)
+        grid = Grid(box, h=_COARSE_SPACING, lo=lo, device=self.device)
+        if grid.n_nodes > _MAX_COARSE_NODES:
+            h = _COARSE_SPACING * (grid.n_nodes / _MAX_COARSE_NODES) ** (1 / 3)
+            warnings.warn(
+                f"MembraneGenerator: a {box[0]:.0f} x {box[1]:.0f} x "
+                f"{box[2]:.0f} A membrane box needs {grid.n_nodes:,} geometry "
+                f"nodes at {_COARSE_SPACING:.0f} A; building it at {h:.1f} A "
+                "instead, which rounds the tightest membrane features more.",
+                stacklevel=3,
+            )
+            grid = Grid(box, h=h, lo=lo, device=self.device)
+        return grid
+
     def generate(self) -> torch.Tensor:
         """
-        Build the calibrated bilayer profile and organic field, and
-        rasterize into ``self.volume``.
+        Build the organelle's membranes and render them into ``self.volume``.
 
-        Sets ``self.clipped_at_boundary`` (from the underlying
-        ``MembraneField``'s own flag): ``True`` if the organelle's solid
-        interior touched the working grid's edge -- an unphysical flat-cut
-        truncation, not a subtle issue -- rather than only firing a
-        warning. Callers compositing many instances (e.g.
-        ``TomogramSpecimenGenerator``) check this to drop a visibly-clipped
-        instance instead of compositing it.
+        Sets ``self.profile``, ``self.field`` (the outermost membrane) and
+        ``self.clipped_at_boundary``.
 
         Returns
         -------
         torch.Tensor
-            Density volume, shape ``target_shape``.
+            Potential volume, shape ``target_shape``.
+
+        Raises
+        ------
+        ReachError
+            If no redraw of the kind's path-dependent randomness could be
+            regularised to a kink-free surface.
         """
         # The MEASURED psi(z), not a two-Gaussian form: two Gaussians on
         # vacuum discard the acyl core, which carries most of the bilayer's
-        # integrated potential (4.4x at the default 37 A thickness, 4.8x at
-        # the template's native 40 A) and shows up as weak membranes in
-        # projection. See build_measured_bilayer_profile's docstring.
+        # integrated potential. See build_measured_bilayer_profile.
         self.profile = build_measured_bilayer_profile(
             thickness_angstrom=self.bilayer_thickness,
             extra_sigma_angstrom=self.bilayer_layer_sigma_angstrom,
             parameterization=self.parameterization,
             device=self.device,
         )
-
-        # The field's working spacing must stay fine enough to resolve the
-        # bilayer's own extent (curvature capping, leaflet offset) --
-        # derived from the profile's actual rendered table rather than a
-        # hardcoded thickness, so this stays correct if the profile's
-        # template is retuned later.
-        #
-        # Measured from where psi is actually non-negligible, NOT from the
-        # table's full z-range. The measured profile carries a decaying
-        # tail out to +-32 A, and taking the raw range let that tail
-        # COARSEN the field grid (spacing is capped at half_extent/8
-        # below), which broke sample_surface_sites' Newton projection
-        # outright: transmembrane placement silently found zero sites. The
-        # 1% cutoff is the gentlest one that drops only the numerically
-        # irrelevant tail; it gives +-20 A here.
-        psi_abs = self.profile.psi.abs()
-        support = self.profile.distance_angstrom[psi_abs > 0.01 * float(psi_abs.max())]
-        half_extent_angstrom = float(
-            support.abs().max()
-            if support.numel()
-            else self.profile.distance_angstrom.abs().max()
-        )
-        # Keyed to _gen_voxel_size (the resolution generate() actually renders
-        # at), not the fine self.voxel_size the output ends up at post-
-        # upsample -- resolving the field finer than the raster it feeds
-        # would buy nothing once generation-resolution decoupling is
-        # already coarsening that raster (see max_field_voxels' own
-        # docstring). Equal to self.voxel_size whenever decoupling didn't
-        # trigger, matching the pre-decoupling behaviour exactly.
-        field_spacing_angstrom = min(self._gen_voxel_size, half_extent_angstrom / 8)
-
-        nz, ny, nx = self.target_shape
-        extent_angstrom = (
-            torch.tensor([nx, ny, nz], dtype=torch.float32) * self.voxel_size
-        )
         # Physical (0, 0, 0) -- the organelle's own centre, and the point a
         # caller's `position_xyz` places -- on voxel n // 2 of each axis,
         # which is where `clip_insert_bounds` puts a local grid's insertion
-        # point. `-extent / 2` put it half a voxel off on every odd axis.
+        # point.
         self._origin_xyz = _centred_origin_xyz(self.target_shape, self.voxel_size)
+        grid = self._coarse_grid()
 
-        field_shape_zyx = (
-            int(torch.ceil(extent_angstrom[2] / field_spacing_angstrom)),
-            int(torch.ceil(extent_angstrom[1] / field_spacing_angstrom)),
-            int(torch.ceil(extent_angstrom[0] / field_spacing_angstrom)),
+        surfaces: list[torch.Tensor] | None = None
+        for attempt in range(_BUILD_ATTEMPTS):
+            rng = np.random.default_rng(derive_seed(self._base_seed, 1 + attempt))
+            try:
+                surfaces = self._plan.build(grid, rng)
+                break
+            except ReachError:
+                if attempt == _BUILD_ATTEMPTS - 1:
+                    raise
+        assert surfaces is not None
+
+        outer = surfaces[0]
+        self.field = MembraneField(
+            phi=outer.permute(2, 1, 0).contiguous(),
+            spacing_angstrom=grid.h,
+            origin_xyz=grid.origin.detach().cpu().to(torch.float32),
         )
-        n_field_voxels = field_shape_zyx[0] * field_shape_zyx[1] * field_shape_zyx[2]
-        if n_field_voxels > self.max_field_voxels:
-            # coarsen just enough to fit max_field_voxels (voxel count
-            # scales as 1/spacing^3) -- see max_field_voxels' own
-            # docstring for why this is needed and what it trades away.
-            field_spacing_angstrom *= (n_field_voxels / self.max_field_voxels) ** (
-                1.0 / 3.0
-            )
-            field_shape_zyx = (
-                int(torch.ceil(extent_angstrom[2] / field_spacing_angstrom)),
-                int(torch.ceil(extent_angstrom[1] / field_spacing_angstrom)),
-                int(torch.ceil(extent_angstrom[0] / field_spacing_angstrom)),
-            )
-        # Report the clamp only when __init__'s generation-resolution
-        # decoupling did NOT already report one. When it did, this is the
-        # same decision described twice: both clamps divide the same
-        # physical extent by the same max_field_voxels budget, so the
-        # spacing landed on here is the `_gen_voxel_size` that warning
-        # already named. All the second message adds is a different,
-        # larger byte figure for the grid that was never going to be
-        # built, which reads as a second, worse problem.
-        if n_field_voxels > self.max_field_voxels and not self._needs_upsample:
-            warnings.warn(
-                f"MembraneGenerator: coarsening the working field grid. Fully "
-                f"resolving the bilayer would need {n_field_voxels:,} voxels "
-                f"(about "
-                f"{n_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f} GB), "
-                f"past the "
-                f"{self.max_field_voxels * _FIELD_BYTES_PER_VOXEL / 1024**3:.1f}"
-                f" GB budget -- using field_spacing_angstrom={field_spacing_angstrom:.2f} A "
-                f"({field_shape_zyx[2]}x{field_shape_zyx[1]}x{field_shape_zyx[0]}"
-                " voxels) instead. The membrane's physical size and position "
-                "are preserved exactly; only its bilayer sub-structure is "
-                "resolved less crisply.",
-                stacklevel=2,
-            )
-        shape = self.shape
-        if isinstance(shape, SphericalHarmonicsShape):
-            assert shape.axes is not None  # resolved in __init__
-            self.field = generate_membrane_field_spherical_harmonics(
-                shape_zyx=field_shape_zyx,
-                spacing_angstrom=field_spacing_angstrom,
-                sh_max_degree=shape.max_degree,
-                sh_axes=shape.axes,
-                sh_amplitude=shape.amplitude,
-                sh_spectrum_power=shape.spectrum_power,
-                device=self.device,
-                seed=self.seed,
-            )
-        else:
-            assert isinstance(shape, SweptSplineShape)
-            # Resolved in __init__ (`resolve_sizes`).
-            assert shape.total_length is not None and shape.tube_radius is not None
-            assert shape.step_length_angstrom is not None
-            assert shape.flexibility is not None and shape.radius_variation is not None
-            self.field = generate_membrane_field_swept_spline(
-                shape_zyx=field_shape_zyx,
-                spacing_angstrom=field_spacing_angstrom,
-                total_length_angstrom=shape.total_length,
-                step_length_angstrom=shape.step_length_angstrom,
-                tube_radius_angstrom=shape.tube_radius,
-                flexibility=shape.flexibility,
-                radius_variation=shape.radius_variation,
-                radius_variation_sigma_points=shape.radius_variation_sigma_points,
-                blend_sharpness_angstrom=shape.blend_sharpness_angstrom,
-                path_smoothing_sigma_points=shape.path_smoothing_sigma_points,
-                curvature_iterations=shape.curvature_iterations,
-                curvature_step_fraction=shape.curvature_step_fraction,
-                device=self.device,
-                seed=self.seed,
-            )
+        solid = (outer < 0).nonzero().to(torch.float32) * grid.h + grid.origin
+        lo = self._origin_xyz.to(solid)
+        nz, ny, nx = self.target_shape
+        hi = lo + (torch.tensor([nx, ny, nz]).to(solid) - 1) * self.voxel_size
+        self.clipped_at_boundary = bool(
+            solid.numel() > 0 and ((solid < lo) | (solid > hi)).any()
+        )
+        self.field.clipped_at_boundary = self.clipped_at_boundary
 
-        self.clipped_at_boundary = self.field.clipped_at_boundary
-
-        self.volume = rasterize_membrane_density(
-            self.field,
+        self.volume = render_bilayer(
+            surfaces,
+            grid,
             self.profile,
-            target_shape=self._gen_shape_zyx,
-            target_spacing_angstrom=self._gen_voxel_size,
-            target_origin_xyz=self._origin_xyz,
+            self.target_shape,
+            self.voxel_size,
+            origin_xyz=self._origin_xyz,
         )
-        if self._needs_upsample:
-            # _gen_shape_zyx/_gen_voxel_size cover the SAME physical extent as
-            # target_shape/voxel_size, anchored at the same origin (see
-            # __init__) -- see _chunked_upsample_density's own docstring
-            # for why this goes through MembraneField.sample() in chunks
-            # rather than a single F.interpolate call.
-            self.volume = _chunked_upsample_density(
-                self.volume,
-                self._gen_voxel_size,
-                self._origin_xyz,
-                self.target_shape,
-                self.voxel_size,
-            )
         return self.volume
 
     def place_transmembrane(
@@ -1066,11 +560,7 @@ class MembraneGenerator:
                 "reaching the target count. Common causes: the membrane's surface "
                 "area is too small for this many well-spaced sites at this "
                 "min_spacing_angstrom (try reducing min_spacing_angstrom or n_sites/frequency), "
-                "or -- shape_backend='spherical_harmonics' specifically -- the "
-                "working field grid is too coarse relative to sh_axes for "
-                "reliable surface projection (see "
-                "generate_membrane_field_spherical_harmonics's own Notes; that "
-                "function also warns proactively on this). This is not "
+                "or the membrane is mostly outside its box. This is not "
                 "raised as an error since a partial/empty result is sometimes "
                 "intended (e.g. deliberately testing a too-small membrane), but "
                 f"placements will be missing/absent if not: {n_found} of "
@@ -1105,8 +595,7 @@ class MembraneGenerator:
         # int16, not int32: these ids are LOCAL to this membrane (1..n_sites,
         # a few hundred at most), remapped onto the shared counter by the
         # caller. Halves the footprint of an array that is the same shape as
-        # `self.volume`, which for a decoupled instance is already hundreds
-        # of MB (see max_field_voxels).
+        # `self.volume`, which for a large organelle is hundreds of MB.
         self.transmembrane_labels = torch.zeros(
             self.volume.shape, dtype=torch.int16, device=self.volume.device
         )

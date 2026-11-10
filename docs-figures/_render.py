@@ -1,7 +1,7 @@
 """Shared 3D isosurface rendering helpers for docs-figures/ scripts.
 
 Not domain math -- just the matplotlib/marching-cubes plumbing common to
-every hero shot, factored out once both membrane shape backends needed it.
+every hero shot, shared by the membrane and gold-bead figures.
 """
 
 from __future__ import annotations

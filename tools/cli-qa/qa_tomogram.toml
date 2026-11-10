@@ -31,9 +31,9 @@ filler_from_pei2016 = false
 scattering_factors = "shtyrov"
 
 [[membrane]]
-shape_backend = "spherical_harmonics"
+kind = "vesicle"
 bilayer_thickness = 30.0
-sh_axes_range = [200.0, 400.0]
+radius = [150.0, 220.0]
 n_copies = 1
 
 [[membrane_transmembrane_specs]]

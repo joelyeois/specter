@@ -187,4 +187,75 @@ def render_bilayer(
     return out
 
 
-__all__ = ["profile_table", "render_bilayer"]
+def render_interior(
+    phi: torch.Tensor,
+    grid: Grid,
+    shape_zyx: tuple[int, int, int],
+    voxel_size: float,
+    origin_xyz: torch.Tensor | Sequence[float] | None = None,
+    out_device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """
+    Which output voxels lie inside a membrane's solid.
+
+    The signed distance is interpolated trilinearly, a z-slab at a time.
+    Its error is far below the bilayer's half-thickness for a surface with
+    the regularised reach, so a voxel misclassified near the mid-surface is
+    one the bilayer's shell already covers.
+
+    Parameters
+    ----------
+    phi : torch.Tensor
+        Signed distance of the membrane's mid-surface on `grid`, indexed
+        ``(x, y, z)``, negative inside the solid.
+    grid : Grid
+        Coarse grid `phi` lives on.
+    shape_zyx : tuple of int
+        Output shape ``(Z, Y, X)``.
+    voxel_size : float
+        Output voxel size, Å.
+    origin_xyz : torch.Tensor or sequence of float, optional
+        Physical ``(x, y, z)`` of output voxel ``(0, 0, 0)``, Å. Default
+        puts the physical origin on voxel ``n // 2`` of each axis.
+    out_device : torch.device or str, optional
+        Device of the returned mask. Default the grid's.
+
+    Returns
+    -------
+    torch.Tensor
+        Boolean mask, shape `shape_zyx`, True inside the solid.
+    """
+    dev = grid.device
+    out_device = dev if out_device is None else torch.device(out_device)
+    if origin_xyz is None:
+        origin_xyz = _centred_origin_xyz(shape_zyx, voxel_size)
+    lo = torch.as_tensor(origin_xyz, dtype=torch.float32).to(dev)
+    nz, ny, nx = shape_zyx
+    out = torch.zeros(shape_zyx, dtype=torch.bool, device=out_device)
+    # (Z, Y, X) as (D, H, W), so a sample point's (x, y, z) indexes (W, H, D).
+    field = phi.permute(2, 1, 0)[None, None].to(torch.float32)
+    size = torch.tensor(grid.shape, device=dev, dtype=torch.float32)
+
+    def _norm(n: int, k: int) -> torch.Tensor:
+        p = lo[k] + torch.arange(n, device=dev, dtype=torch.float32) * voxel_size
+        return (p - grid.origin[k]) / grid.h / (size[k] - 1) * 2 - 1
+
+    gx, gy = _norm(nx, 0), _norm(ny, 1)
+    gz_all = _norm(nz, 2)
+    slab = max(1, _BATCH_VOXELS // max(1, nx * ny))
+    for z0 in range(0, nz, slab):
+        gz = gz_all[z0 : z0 + slab]
+        pts = torch.stack(
+            torch.broadcast_tensors(
+                gx.view(1, 1, -1), gy.view(1, -1, 1), gz.view(-1, 1, 1)
+            ),
+            -1,
+        )
+        val = F.grid_sample(
+            field, pts[None], mode="bilinear", padding_mode="border", align_corners=True
+        )[0, 0]
+        out[z0 : z0 + gz.numel()] = (val < 0).to(out_device)
+    return out
+
+
+__all__ = ["profile_table", "render_bilayer", "render_interior"]

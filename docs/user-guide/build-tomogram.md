@@ -124,22 +124,14 @@ for both) instead of hand-listing PDB codes; both are additive
 and can be combined with each other and with hand-written `[[filler]]`
 entries.
 
-A `"lumen"` entry needs an organelle that actually encloses one. Membrane
-sizes are constrained by the thinnest box axis, not the widest: an
-organelle wider than the slab is cut open where it meets the z walls, and
-an open shape has no interior for the region classifier to find. A
-`[[membrane]]` population sized against the field of view rather than
-against `target_shape[0] * voxel_size` therefore leaves the lumen region
-empty or near-empty, and every species declared for it is dropped with a
-warning naming the region's free voxel count. Keeping the widest
-organelle to roughly two thirds of the slab thickness makes an enclosed
-interior the normal outcome. It is not a guarantee: placement remains
-random and clipping remains permitted, so an occasional draw still
-encloses little or nothing. Omitting the size settings does not solve this
-on its own, since the automatic cap measures the widest axis whenever
-`clip_axes` permits clipping on all three, clipping being a legitimate
-outcome for a lamella. Set `seed` when a run has to reproduce a specimen
-whose lumen you have already checked.
+A `"lumen"` entry is packed inside the membranes: a vesicle's lumen, a
+mitochondrion's matrix and intermembrane space, the inside of a tubule or a
+cistern. An organelle cut open by a face of the box keeps the part of its
+interior that lies inside the box, so the lumen's volume follows the
+membranes that were placed. A run with no `[[membrane]]` table, or whose
+membranes are all dropped at placement, has no lumen, and every species
+declared for it is dropped with a warning naming the region's free voxel
+count.
 
 ## Scattering factors & hydrogens
 
@@ -340,11 +332,11 @@ every species:
 
 ![The three segmentation volumes on one slice.](../assets/images/cli-guides/build_tomogram-labels.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-The three label volumes on the slice shown above: 1875 protein instances,
+The three label volumes on the slice shown above: 1859 protein instances,
 each in its own colour; the two membranes this slice cuts; and the region
-classes. None of this draw's membranes encloses a sealed compartment, so
-their interiors are classified as cytosol and the lumen class rounds to
-0.00% of the volume. The carbon film, class 3, does not reach this slice.
+classes. The membranes' interiors are lumen, 1.00% of the volume, including
+the organelles that the box's faces cut open. The carbon film, class 3,
+does not reach this slice.
 ///
 
 `protein_labels` holds every protein instance on one id counter,

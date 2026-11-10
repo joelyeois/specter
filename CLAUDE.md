@@ -496,7 +496,7 @@ ice-data/                     # Two 32 MB legacy MD-derived .pt files nothing re
 | `finufft`, `cufinufft` | Type-2 non-uniform FFTs (`nufft.py`) behind exact point-group averaging; `cufinufft` is off on macOS, where `finufft` runs the same transform on the CPU, as it does when cuFINUFFT cannot load |
 | `vesin-torch` | Pairwise neighbor search for the MLBOP ice energy (`ice/_energy.py`), replaces the old ASE-based path |
 | `cupy-cuda12x` | GPU exact Euclidean distance transform for the membrane geometry (`specimen/membrane/_geometry.py`); core dep on Linux/Windows, absent on macOS where scipy's CPU path takes over |
-| `connected-components-3d` (`cc3d`) | 26-connected labelling of the non-shell space in `specimen/tomogram/_regions.py` (which empty space touches the volume faces = cytosol, the rest = lumen); same partition as `scipy.ndimage.label`, 3.7-5x faster, and the largest single phase of a 2 A `build tomogram` (2m39s -> 43 s). LGPL-3.0, used unmodified as a runtime dependency |
+| `connected-components-3d` (`cc3d`) | 26-connected labelling of the non-shell space in `specimen/tomogram/_regions.py`'s topological fallback (which empty space touches the volume faces = cytosol, the rest = lumen; a tomogram build instead takes lumen from each membrane's own solid, `MembraneGenerator.interior`, so a cut organelle keeps its lumen); same partition as `scipy.ndimage.label`, 3.7-5x faster, and the largest single phase of a 2 A `build tomogram` (2m39s -> 43 s). LGPL-3.0, used unmodified as a runtime dependency |
 | `click`, `rich-click` | The `specter` CLI (`cli/` package) |
 | `ruff`, `mypy` | Code quality |
 

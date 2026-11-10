@@ -303,3 +303,27 @@ def test_streaming_mrc_writer_matches_mrcfile_set_data(tmp_path) -> None:
                 assert got == pytest.approx(want, rel=1e-6, abs=1e-6), (
                     f"{name}: header {field} {got!r} != {want!r}"
                 )
+
+
+def test_an_interior_keeps_the_lumen_of_a_shell_cut_by_a_face() -> None:
+    """A vesicle cut open by the volume's face is cytosol inside by topology,
+    and lumen once the membrane's own interior is supplied."""
+    n, radius = 40, 12.0
+    zz, yy, xx = torch.meshgrid(
+        torch.arange(n), torch.arange(n), torch.arange(n), indexing="ij"
+    )
+    r = torch.sqrt((zz - 4.0) ** 2 + (yy - 20.0) ** 2 + (xx - 20.0) ** 2).float()
+    density = torch.exp(-((r - radius) ** 2) / (2 * 1.5**2))
+    interior = r < radius
+    centre = (4, 20, 20)
+
+    topological = classify_membrane_regions(density)
+    assert bool(topological["cytosol"][centre])
+    assert int(topological["lumen"].sum()) == 0
+
+    masks = classify_membrane_regions(density, interior=interior)
+    assert bool(masks["lumen"][centre])
+    assert bool(masks["cytosol"][0, 0, 0])
+    total = masks["shell"].int() + masks["lumen"].int() + masks["cytosol"].int()
+    assert bool((total == 1).all())
+    assert not bool((masks["lumen"] & ~interior).any())

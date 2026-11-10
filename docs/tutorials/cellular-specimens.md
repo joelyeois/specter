@@ -113,14 +113,14 @@ vesicles:
 ///caption
 The specimen projected along the beam after each stage, each panel on its
 own grey scale: the vesicles and the carbon film along one edge; then actin
-filaments and two microtubules; then six gold beads; then 1,691 packed
+filaments and two microtubules; then six gold beads; then 1,689 packed
 proteins. The vesicles, filaments and beads keep their positions from stage
 to stage.
 ///
 
 Both targets, the human 80S ribosome (`6QZP`; Natchiar et al. 2017) and
 human apoferritin (`7VD8`; Fan et al. 2021), reached their exact counts. The
-filler stopped at 1,660 cytosolic copies of 11 species and 7 RuBisCO
+filler stopped at 1,660 cytosolic copies of 11 species and 5 RuBisCO
 complexes (`1BXN`; Hansen et al. 1999) in the three small lumens. In the final panel the dense protein fill lowers the contrast of the
 vesicles and microtubules, while the gold beads still stand out.
 
@@ -141,9 +141,9 @@ as copick-style (Ermel et al. 2026) `.ndjson` files:
 --8<-- "docs-includes/tutorials/cellular_specimens-ground-truth.txt"
 ```
 
-The 1,767 instance ids account for every placed object: 60 transmembrane
+The 1,765 instance ids account for every placed object: 60 transmembrane
 proteins, 8 actin filaments and 2 microtubules (one id each, however many
-monomers they contain), 6 beads, 24 targets and 1,667 filler proteins.
+monomers they contain), 6 beads, 24 targets and 1,665 filler proteins.
 Filaments and microtubules also get a `_path.ndjson` file, one entry per
 filament or tube, alongside the monomer picks. Filler picks are written by
 default; pass `include_filler=False` to keep only the targets.
@@ -163,9 +163,9 @@ and the picks of the two target species over the projected specimen
 (right).
 ///
 
-The regions come from topology rather than geometry: empty space that
-reaches a face of the box is cytosol and space sealed inside a membrane is
-lumen, which is why a lumen filler species cannot leak out of a vesicle.
+The regions come from each membrane's own solid: space inside a membrane
+is lumen, even where the box cuts the organelle open, and the rest is
+cytosol, which is why a lumen filler species cannot leak out of a vesicle.
 [Regions](../concepts/cryoet-specimen/index.md#regions) and
 [Ground truth](../concepts/cryoet-specimen/index.md#ground-truth) describe
 both in full.

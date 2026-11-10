@@ -1,8 +1,8 @@
 shell      3.6% of the volume
 lumen      0.8% of the volume
 cytosol   95.6% of the volume
-instance ids: 1767, membrane ids: 3
-1BXN-lumen-1.0_orientedpoint.ndjson              7 picks
+instance ids: 1765, membrane ids: 3
+1BXN-lumen-1.0_orientedpoint.ndjson              5 picks
 1BXR-cytosol-1.0_orientedpoint.ndjson          179 picks
 1C3W-transmembrane-1.0_orientedpoint.ndjson     60 picks
 1GYT-cytosol-1.0_orientedpoint.ndjson          207 picks

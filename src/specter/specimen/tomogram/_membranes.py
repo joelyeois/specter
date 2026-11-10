@@ -98,7 +98,7 @@ class _MembraneStageMixin:
             "  Generation & compositing",
             disable=not self.progressbars or not to_composite,
         )
-        volume, instance_labels, next_instance_id, instance_shell_masks = (
+        volume, instance_labels, next_instance_id, instance_shell_masks, interior = (
             self._composite_membranes(
                 to_composite,
                 volume,
@@ -122,7 +122,7 @@ class _MembraneStageMixin:
             "  Region classification",
             disable=not self.progressbars or not self.membrane_instances,
         )
-        self._classify_regions(volume)
+        self._classify_regions(volume, interior)
         phase_done(
             "  Region classification",
             _membrane_regions_start,
@@ -229,10 +229,17 @@ class _MembraneStageMixin:
         box: tuple[float, float, float],
         voxel_size: float,
     ) -> tuple[
-        torch.Tensor, torch.Tensor, int, list[tuple[MembraneInstance, torch.Tensor]]
+        torch.Tensor,
+        torch.Tensor,
+        int,
+        list[tuple[MembraneInstance, torch.Tensor]],
+        torch.Tensor | None,
     ]:
         """Generate each placed instance, embed its transmembrane proteins,
-        max-merge it into the canvas and keep its shell mask for labelling."""
+        max-merge it into the canvas and keep its shell mask for labelling.
+
+        Also returns the union of the instances' interiors on the canvas
+        (None when none was composited), from which lumen is classified."""
         # Generate + place transmembrane proteins per instance, each in its
         # own centered local frame, then composite densities into the
         # shared canvas (max-merge) before any region classification --
@@ -240,6 +247,7 @@ class _MembraneStageMixin:
         # per-instance pieces.
         self.transmembrane_placements = []
         self.placed_membrane_instances = []
+        interior: torch.Tensor | None = None
         instance_shell_masks: list[tuple[MembraneInstance, torch.Tensor]] = []
         membrane_progress = TqdmProgress(
             transient=True, disable=not self.progressbars or not to_composite
@@ -275,6 +283,17 @@ class _MembraneStageMixin:
                 volume = _insert_volume_max(
                     volume, local_volume, mi.position_xyz, voxel_size
                 )
+                local_interior = mi.generator.interior
+                assert local_interior is not None
+                if interior is None:
+                    interior = torch.zeros(
+                        volume.shape, dtype=torch.bool, device=volume.device
+                    )
+                interior = _insert_volume_max(
+                    interior, local_interior, mi.position_xyz, voxel_size
+                )
+                mi.generator.interior = None
+                del local_interior
 
                 shell_mask = self._instance_shell_mask(local_volume, bare_peak)
                 # The membrane label is the BILAYER, not the bilayer plus
@@ -307,7 +326,7 @@ class _MembraneStageMixin:
                 mi.generator.volume = None
                 del local_volume
                 self._release_device_memory()
-        return volume, instance_labels, next_instance_id, instance_shell_masks
+        return volume, instance_labels, next_instance_id, instance_shell_masks, interior
 
     def _generate_instance(
         self, mi: MembraneInstance
@@ -324,6 +343,7 @@ class _MembraneStageMixin:
             if not self.retain_membrane_fields:
                 mi.generator.field = None
                 mi.generator.volume = None
+                mi.generator.interior = None
             warnings.warn(
                 "TomogramSpecimenGenerator: a membrane instance's own "
                 "working grid was too small for the organelle size it "
@@ -505,8 +525,13 @@ class _MembraneStageMixin:
             gc.collect()
             torch.cuda.empty_cache()
 
-    def _classify_regions(self, volume: torch.Tensor) -> None:
-        """Classify the composite into shell, lumen and cytosol (``self.regions``)."""
+    def _classify_regions(
+        self, volume: torch.Tensor, interior: torch.Tensor | None
+    ) -> None:
+        """Classify the composite into shell, lumen and cytosol (``self.regions``).
+
+        Lumen is the membranes' own `interior` minus the shell, so an
+        organelle cut by a volume face keeps its lumen."""
         # classify_membrane_regions' own threshold: needs the FULL
         # composite's peak (unlike `_instance_shell_mask`'s per-instance
         # thresholds), so can only be resolved after every instance
@@ -515,7 +540,9 @@ class _MembraneStageMixin:
         if threshold is None:
             peak = float(volume.max())
             threshold = 0.05 * peak if peak > 0 else 0.0
-        self.regions = classify_membrane_regions(volume, threshold)
+        if interior is None:
+            interior = torch.zeros(volume.shape, dtype=torch.bool, device=volume.device)
+        self.regions = classify_membrane_regions(volume, threshold, interior)
 
     def _label_membrane_shells(
         self,

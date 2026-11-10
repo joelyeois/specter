@@ -11,7 +11,11 @@ from specter.specimen.membrane._profile import (
     BilayerProfile,
     build_measured_bilayer_profile,
 )
-from specter.specimen.membrane._render import profile_table, render_bilayer
+from specter.specimen.membrane._render import (
+    profile_table,
+    render_bilayer,
+    render_interior,
+)
 
 _RADIUS = 120.0
 
@@ -145,3 +149,23 @@ def test_surfaces_add_and_origin_moves_the_window(profile: BilayerProfile) -> No
     )
     centred = render_bilayer([outer], grid, profile, shape, voxel_size)
     assert torch.allclose(shifted[:, :, :-4], centred[:, :, 4:], atol=1e-5)
+
+
+def test_interior_is_the_ball_and_follows_the_origin() -> None:
+    grid = Grid((400.0, 400.0, 400.0), lo=(-200.0, -200.0, -200.0))
+    phi = ball(grid, (0.0, 0.0, 0.0), _RADIUS)
+    n, voxel = 80, 5.0
+    inside = render_interior(phi, grid, (n, n, n), voxel)
+    idx = torch.arange(n, dtype=torch.float32)
+    r = torch.sqrt(
+        sum(
+            ((idx - n // 2) * voxel).view(s) ** 2
+            for s in [(-1, 1, 1), (1, -1, 1), (1, 1, -1)]
+        )
+    )
+    # Exact away from the surface; within a voxel of it, either answer.
+    assert bool(inside[r < _RADIUS - voxel].all())
+    assert not bool(inside[r > _RADIUS + voxel].any())
+    # A window shifted by the radius sees the ball's centre on its low corner.
+    shifted = render_interior(phi, grid, (n, n, n), voxel, origin_xyz=(0.0, 0.0, 0.0))
+    assert bool(shifted[0, 0, 0]) and not bool(shifted[-1, -1, -1])

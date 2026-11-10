@@ -1,2 +1,2 @@
-slice z = 239: 1875 protein instances, 2 membranes
-whole volume: cytosol 98.35%, shell 0.77%, lumen 0.00%, carbon film 0.89%
+slice z = 239: 1859 protein instances, 2 membranes
+whole volume: cytosol 97.35%, shell 0.77%, lumen 1.00%, carbon film 0.89%

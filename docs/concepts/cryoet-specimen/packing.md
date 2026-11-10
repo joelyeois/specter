@@ -22,35 +22,35 @@ running occupancy grid.
     `specter.specimen`.
     `docs-figures/cryoet_specimen_packing.py` produces the figures.
 
-## Regions from topology, not geometry
+## Regions from each membrane's solid
 
-A membrane field's sign only distinguishes lipid-solid from
-not-lipid-solid. It says nothing about which *side* of a closed shell a
-given empty point is on, and that is exactly what a biologist means by
-"in the lumen."
-
-Recovering it needs real topology. You label the shell's complement with
-connected components (full 26-connectivity, so thresholding noise doesn't
-fracture one region into spurious pieces), and call whichever
-component(s) touch the volume's own boundary faces **cytosol**: by
-construction that is the one region reachable from outside. Everything
-else non-shell is enclosed, and therefore **lumen**.
+Every membrane is the boundary of a solid, a field `phi` that is negative
+inside it (see [Membrane geometry](../membrane-shape/geometry.md)). That
+solid is the organelle's interior: a vesicle's lumen, the matrix and
+intermembrane space of a mitochondrion, the inside of a tubule or a
+cistern. Each instance's generator evaluates its outermost solid on its own
+output grid, the generator composites those interiors into one mask, and
+the classifier reads the regions off it:
 
 ```
-shell   = density > threshold          (bilayer material, and carbon film)
-cytosol = complement component(s) touching a boundary face
-lumen   = everything else
+shell   = density > threshold                    (bilayer material, and carbon film)
+lumen   = inside any membrane's solid, and not shell
+cytosol = everything else
 ```
 
 The three masks partition the volume: every voxel belongs to exactly one.
+The signed distance is interpolated trilinearly from its 10 Å grid; the
+interpolation error is a fraction of an ångström for a surface with the
+regularised reach, far inside the band the shell already claims, so the
+choice of side is exact wherever it matters.
 
-This is deliberately shape-agnostic. It works for a single vesicle,
-several disjoint vesicles from one instance or many, a sheet, or no
-membrane at all, in which case shell and lumen are empty and the whole
-box is cytosol, with no special-casing anywhere. Keying off the membrane
-generator's internal shape state instead would have needed a branch per
-backend, and would not have handled several disjoint compartments emerging
-from one instance.
+An organelle cut by a face of the box keeps its lumen. A connected-component
+reading of the shell's complement, which the classifier still provides for
+a density with no membranes behind it, cannot do this: the cut opens the
+interior to the face, and the interior then counts as reachable from
+outside. The same reading calls any pocket sealed off by shell lumen, such
+as the space between two touching membranes or under the carbon film,
+where the solid-based classification correctly leaves it in the cytosol.
 
 It also means the **carbon film lands in `shell`** for free. To this
 stage, "shell" means dense material nothing may be packed into, and the

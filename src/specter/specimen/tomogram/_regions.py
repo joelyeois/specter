@@ -6,15 +6,18 @@ boundary) -- so that downstream placement can restrict a protein species to
 the region its biology dictates (see module docstring of
 :mod:`.generator`).
 
-`MembraneField.phi`'s sign only distinguishes lipid-solid from not-lipid-
-solid; it says nothing about which side of a closed shell a given "not
-lipid solid" point is on. Recovering that requires real topology: this
-module labels the shell's connected complement with
+Two classifications are offered. Given the membranes' own interior (each
+`MembraneGenerator` knows which voxels lie inside its solid, ``phi < 0``),
+lumen is that interior minus the shell. This is what a tomogram build uses:
+an organelle cut by a volume face still has an inside, and only a membrane
+generator can say where it is. Without it, the classifier falls back to
+topology: it labels the shell's connected complement with
 :func:`cc3d.connected_components` (full 26-connectivity, so voxelization/
 thresholding noise doesn't fracture a single open region into spurious
 pieces) and calls whichever labeled component(s) touch the volume's own
-boundary faces "cytosol" -- by construction, that's the one region that
-must be reachable from outside the volume.
+boundary faces "cytosol". That reading calls a cut organelle's interior
+cytosol, and any pocket enclosed by shell (between two touching membranes,
+or under the carbon film) lumen.
 
 `cc3d` (``connected-components-3d``) rather than :func:`scipy.ndimage.label`:
 the two return the same partition, but scipy's labeller is generic over
@@ -22,12 +25,7 @@ N dimensions and structuring elements, while cc3d is a fixed-connectivity
 3-D decision-tree scan. Measured on this classifier's own input, a
 300x900x900 shell mask, 3.28 s against 0.62 s, and in a real build at 2 A
 (a 750x3000x3000 box) 2m 39s against 43 s -- the single largest phase of
-that build. Both are single-threaded; neither uses the GPU. Everything else non-shell is
-enclosed, and thus "lumen". This is deliberately membrane-shape-agnostic:
-it works for a single vesicle, several disjoint vesicles, a sheet, or no
-membrane at all (in which case shell/lumen are empty and cytosol is
-everything) without any special-casing, unlike an approach that keyed off
-the membrane generator's own internal shape-construction state.
+that build. Both are single-threaded; neither uses the GPU.
 """
 
 from __future__ import annotations
@@ -77,6 +75,7 @@ def _shell_bounding_box(
 def classify_membrane_regions(
     density: torch.Tensor,
     density_threshold: float | None = None,
+    interior: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """
     Split a rasterized membrane density volume into shell/lumen/cytosol
@@ -96,6 +95,13 @@ def classify_membrane_regions(
         ``tomogram/_helpers.py``'s ``_INSTANCE_LABEL_REL_THRESHOLD``). If
         ``density`` is all zero (no membrane present), every voxel is
         classified as cytosol.
+    interior : torch.Tensor, optional
+        Boolean mask of the voxels inside any membrane's solid, shaped like
+        `density`, as `MembraneGenerator.interior` gives it. When given,
+        lumen is that interior minus the shell and cytosol is the rest, so
+        an organelle cut by a volume face keeps its lumen. Default None
+        classifies topologically: non-shell space that reaches the volume's
+        faces is cytosol and every enclosed pocket is lumen.
 
     Returns
     -------
@@ -110,6 +116,9 @@ def classify_membrane_regions(
 
     shell_mask = density > density_threshold
     non_shell = ~shell_mask
+    if interior is not None:
+        lumen = interior.to(non_shell.device) & non_shell
+        return {"shell": shell_mask, "lumen": lumen, "cytosol": non_shell & ~lumen}
 
     # Label the shell's own BOUNDING BOX, not the whole volume. Outside
     # that box there is no shell by construction, so the space out there is

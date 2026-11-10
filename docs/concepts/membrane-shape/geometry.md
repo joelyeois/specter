@@ -66,10 +66,13 @@ The result of a union or a subtraction has the right sign everywhere and
 is not a distance near the creases where the operands meet. The
 regularisation that follows restores the distance.
 
-![Four compositions outside the organelle kinds, each a central section of the rendered potential.](../../assets/images/membrane-shape-compositions.png){ width="900" style="display:block;margin:1.2em auto;" }
-///caption
-Four compositions outside the organelle kinds, each a central section of the potential rendered at 10 Å per voxel: two vesicles joined by a neck, a vesicle with two nested layers 90 Å apart, a sheet continuous with three tubules, and a plasma membrane with a pit and a bud.
-///
+The gallery at the top of the [overview](index.md) shows twenty shapes
+built this way. Among them, the bud on a neck is a `union` of two balls
+and a tube; the plasma membrane is a `half_space` from which a pit and a
+shallow dimple are subtracted and to which a bud on a tube is added; and
+the flattened contact is two overlapping balls, each limited to the
+points at least 110 Å nearer its own surface than the other's, which
+flattens both where they meet and leaves a 110 Å gap between them.
 
 A membrane system is a list of such surfaces. A multilamellar vesicle is
 an outer surface and its `nested` copies, and a mitochondrion is an outer

@@ -1,8 +1,8 @@
 # Membrane shape
 
-![The four organelle kinds at their default settings: the outermost mid-surface above, a central section of the rendered potential below.](../../assets/images/membrane-shape-kinds.png){ width="900" style="display:block;margin:1.2em auto;" }
+![Twenty membrane shapes composed from the same primitives, from a vesicle to a mitochondrion and a double envelope with pores: each shown as a cut-open 3D view of the bilayer above a central section of its rendered potential.](../../assets/images/membrane-shape-gallery.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-The four organelle kinds at their default settings: the outermost mid-surface above, a central section of the rendered potential at 10 Å per voxel below.
+Twenty shapes, each composed from the primitives on the [Geometry](geometry.md#composition) page, regularised and rendered by the same code. In each pair the upper panel is the bilayer shell of the mid-surface: the face looking away from the lumen is blue, the face looking into it orange, and the bilayer is dark where it is cut by the box or by a plane through the centre. The lower panel is a central section of the rendered potential at 4 Å per voxel. Each caption gives the smallest reach on any of the shape's surfaces and the time to build and regularise its geometry on one GPU. The four organelle kinds of [Organelle kinds](organelles.md) are presets among such compositions.
 ///
 
 A membrane is modelled as the boundary of a solid. The solid is held as a

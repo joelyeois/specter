@@ -33,7 +33,7 @@ combination is valid.
 | [Filaments](filaments.md) | Random-walk polymers (F-actin, single protofilaments) | `specimen.filament` |
 | [Microtubules](microtubules.md) | Closed 13-protofilament tubes, lumen and A-lattice seam | `specimen.filament` |
 | [Gold fiducial beads](beads.md) | Real fcc gold at real bulk density | `specimen._grid` |
-| [Regions & protein packing](packing.md) | Cytosol/lumen classification, shape- and sphere-based RSA placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen` (the crowding tables) |
+| [Regions & protein packing](packing.md) | Cytosol/lumen classification from each membrane's solid, shape- and sphere-based RSA placement, crowding tables | `specimen.packing`, `specimen.tomogram._regions`, `specimen` (the crowding tables) |
 
 Amorphous ice is **not** one of them. A `specter build tomogram` volume is
 the specimen alone; you add ice downstream, when you image the volume.
@@ -88,8 +88,8 @@ The same specimen as the hero image, a thin mid-Z slab, painted by component fro
 
 Once every membrane has been composited, the generator classifies the
 volume once, on the composite, into three disjoint regions: `shell`
-(bilayer material), `lumen` (any enclosed compartment), and `cytosol`
-(everything reachable from the volume's own boundary). Protein species
+(bilayer material), `lumen` (the inside of any membrane's solid, including
+an organelle cut open by the box), and `cytosol` (everything else). Protein species
 declare which of the latter two they belong to; the packer places them
 only there.
 

@@ -50,7 +50,7 @@ from ._profile import (
     BilayerProfile,
     build_measured_bilayer_profile,
 )
-from ._render import render_bilayer
+from ._render import render_bilayer, render_interior
 
 # Voxels of rotated transmembrane templates held at once while placing them
 # (512 MB of float32): `place_transmembrane` rotates a chunk of sites per
@@ -401,6 +401,10 @@ class MembraneGenerator:
         self.field: MembraneField | None = None
         self.profile: BilayerProfile | None = None
         self.volume: torch.Tensor | None = None
+        # Which voxels of `volume`'s grid lie inside the outermost
+        # membrane's solid: the organelle's lumen plus its own shell. Set by
+        # `generate`.
+        self.interior: torch.Tensor | None = None
         # Which voxels each transmembrane protein displaced lipid from,
         # 1-based and local to this membrane; 0 is lipid or empty. Set by
         # `place_transmembrane`, and the basis for BOTH ground-truth
@@ -445,7 +449,8 @@ class MembraneGenerator:
         """
         Build the organelle's membranes and render them into ``self.volume``.
 
-        Sets ``self.profile``, ``self.field`` (the outermost membrane) and
+        Sets ``self.profile``, ``self.field`` (the outermost membrane),
+        ``self.interior`` (the voxels inside it) and
         ``self.clipped_at_boundary``.
 
         Returns
@@ -505,6 +510,13 @@ class MembraneGenerator:
             surfaces,
             grid,
             self.profile,
+            self.target_shape,
+            self.voxel_size,
+            origin_xyz=self._origin_xyz,
+        )
+        self.interior = render_interior(
+            outer,
+            grid,
             self.target_shape,
             self.voxel_size,
             origin_xyz=self._origin_xyz,

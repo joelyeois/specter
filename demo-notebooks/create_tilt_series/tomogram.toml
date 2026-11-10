@@ -25,15 +25,17 @@ targets = [
 # filler_from_pei2016 = true
 
 # The slab is 64 x 5 = 320 A thick and no axis is clippable, so the vesicle's
-# bounding sphere (125 A here: its radius plus a fixed margin for the bilayer
-# and the working grid) has to fit inside it with room to spare; a membrane
-# that finds no position is dropped with a warning. 60 A is the smallest
-# vesicle radius, and what this thin slab holds.
+# bounding sphere has to fit inside it; a membrane that finds no position is
+# dropped with a warning. The bounding radius is the long semi-axis plus
+# three times the undulation plus a fixed 65 A margin for the bilayer and the
+# working grid, at most 157 A for the values below against the slab's 160 A
+# half-thickness. The default elongation and undulation ranges do not fit a
+# slab this thin.
 [[membrane]]
 kind = "vesicle"
-radius = 60.0
-elongation = 1.0
-undulation = 0.0
+radius = 80.0
+elongation = 1.1
+undulation = 2.0
 
 [output]
 output_dir = "tomograms"

@@ -6,38 +6,38 @@ Device: cuda
 Carbon film: 2s
 ────────────────────────────────── Membranes ───────────────────────────────────
 ─────────────────────────────────   Placement ──────────────────────────────────
-  Placement: 21s
+  Placement: 5s
 ──────────────────────────   Generation & compositing ──────────────────────────
-  Generation & compositing: 8s
+  Generation & compositing: 11s
 ───────────────────────────   Region classification ────────────────────────────
-  Region classification: 5s
+  Region classification: 2s
 ──────────────────────────────   Shell labelling ───────────────────────────────
   Shell labelling: 0s
-Membranes (5/6 instance(s) placed): 35s
+Membranes (6/6 instance(s) placed): 20s
 ────────────────────────────────── Filaments ───────────────────────────────────
 Filaments (816 monomer instance(s), 5 microtubule(s)): 1s
 ──────────────────────────── Loading PDB structures ────────────────────────────
 Loaded 26 PDB structure(s): 0s
 ─────────────────────────────── Cytosol species ────────────────────────────────
-  Target packing (cytosol): 3s
+  Target packing (cytosol): 2s
   Target rendering (cytosol): 0s
   Filler packing (cytosol): 7s
   Filler rendering (cytosol): 3s
 Cytosol species: 14s
 ──────────────────────────────── Lumen species ─────────────────────────────────
-  Filler packing (lumen): 2s
+  Filler packing (lumen): 1s
   Filler rendering (lumen): 0s
-Lumen species: 2s
-  Membrane instances: 5/6 placed
-  Transmembrane: 152 placed
+Lumen species: 1s
+  Membrane instances: 6/6 placed
+  Transmembrane: 199 placed
   Filaments: 816 monomer instance(s) placed (1 species)
-  Microtubules: 5 tube(s), 4660 dimer instance(s) placed
+  Microtubules: 5 tube(s), 4718 dimer instance(s) placed
   Carbon film: generated
-  Cytosol: 90 target(s), 19849 filler placed
-  Occupancy: 38.1% of volume
+  Cytosol: 90 target(s), 20113 filler placed
+  Occupancy: 37.8% of volume
 ──────────────────────────────────── Saving ────────────────────────────────────
 
-Total time: 1m 21s
+Total time: 1m 2s
 ───────────── Loading specimen volume from tomograms/tomogram.mrc ──────────────
   Volume shape: (300, 1200, 1200)  (Z, Y, X)
 ────────────────────────── Preparing the tilt series ───────────────────────────
@@ -47,4 +47,4 @@ Total time: 1m 21s
   ✓ tiltseries/tilt_series.mrcs
   ✓ tiltseries/tilt_series.star
 
-Total time: 22m 53s
+Total time: 12m 24s

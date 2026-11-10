@@ -1,2 +1,2 @@
-vesicles placed: 2 of 3
-transmembrane proteins: 40
+vesicles placed: 3 of 3
+transmembrane proteins: 60

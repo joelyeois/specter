@@ -886,6 +886,9 @@ class PotentialBuilder(DeviceModule):
         groups: list[tuple[str, int | str]] = self.shtyrov_groups or [
             ("element", int(z)) for z in self.unique_elements
         ]
+        # `atomic_numbers` is a plain attribute that `.to()` does not move,
+        # while `_species_group_ids` is a buffer that it does.
+        atomic_numbers = self.atomic_numbers.to(self.device)
 
         with TqdmProgress(transient=True, disable=not self.progressbars) as progress:
             task = progress.add_task("Building element ...", total=len(groups))
@@ -899,7 +902,7 @@ class PotentialBuilder(DeviceModule):
                 else:
                     assert isinstance(key, int)
                     label = str(atom_symbol(key))
-                    mask = self.atomic_numbers == key
+                    mask = atomic_numbers == key
                     if self.shtyrov_groups:
                         # A Peng fallback group takes only this element's
                         # UNMATCHED atoms: the matched ones were rendered by

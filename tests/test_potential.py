@@ -187,6 +187,30 @@ def test_shtyrov_3d_renders_each_atom_once_when_its_element_also_falls_back():
     assert both == pytest.approx(total([0], species) + total([1], species), rel=1e-5)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_shtyrov_3d_renders_on_a_builder_moved_to_the_gpu():
+    """
+    A species-grouped builder moved with `.to()` renders its kernel path on
+    the GPU as it does on the host. `.to()` moves the species-group buffer
+    but not `atomic_numbers`, and the Peng fallback group compared the two.
+    """
+    coords = torch.tensor([[[-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]]])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pb = PotentialBuilder(
+            48,
+            1.0,
+            torch.tensor([8, 8], dtype=torch.long),
+            parameterization="shtyrov",
+            atom_species=["O(HH)", "O(unmatched)"],
+            progressbars=False,
+        )
+    host = pb(coords, method="3d")
+    gpu = pb.to("cuda")(coords.to("cuda"), method="3d")
+    assert gpu.device.type == "cuda"
+    torch.testing.assert_close(gpu.cpu(), host, rtol=1e-4, atol=1e-5)
+
+
 def test_shtyrov_species_potential_matches_analytic_closed_form():
     """
     shtyrov_atomic_potential_3d_by_species must match the analytic 3D

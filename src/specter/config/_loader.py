@@ -37,41 +37,13 @@ ConfigT = TypeVar(
 
 
 @overload
-def load_config(
-    path: str, config_cls: type[ParticleStackConfig] = ...
-) -> ParticleStackConfig: ...
+def load_config(path: str) -> ParticleStackConfig: ...
 @overload
-def load_config(path: str, config_cls: type[MicrographConfig]) -> MicrographConfig: ...
-@overload
-def load_config(path: str, config_cls: type[TiltSeriesConfig]) -> TiltSeriesConfig: ...
-@overload
-def load_config(path: str, config_cls: type[TomogramConfig]) -> TomogramConfig: ...
-@overload
-def load_config(path: str, config_cls: type[IceCacheConfig]) -> IceCacheConfig: ...
-@overload
-def load_config(
-    path: str, config_cls: type[ReconstructionConfig]
-) -> ReconstructionConfig: ...
-@overload
-def load_config(path: str, config_cls: type[MatchConfig]) -> MatchConfig: ...
+def load_config(path: str, config_cls: type[ConfigT]) -> ConfigT: ...
 def load_config(
     path: str,
-    config_cls: type[ParticleStackConfig]
-    | type[MicrographConfig]
-    | type[TiltSeriesConfig]
-    | type[TomogramConfig]
-    | type[IceCacheConfig]
-    | type[ReconstructionConfig]
-    | type[MatchConfig] = ParticleStackConfig,
-) -> (
-    ParticleStackConfig
-    | MicrographConfig
-    | TiltSeriesConfig
-    | TomogramConfig
-    | IceCacheConfig
-    | ReconstructionConfig
-    | MatchConfig
-):
+    config_cls: type[ConfigT] | type[ParticleStackConfig] = ParticleStackConfig,
+) -> ConfigT | ParticleStackConfig:
     """
     Load a config dataclass from a TOML file.
 

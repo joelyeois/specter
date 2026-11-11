@@ -306,3 +306,15 @@ def test_the_loss_ignores_residuals_inside_the_edge_band() -> None:
     assert float(model._compute_loss(sim, inside, 0)) > 0.0
     model.use_fov_mask = False
     assert float(model._compute_loss(sim, edge, 0)) > 0.0
+
+
+def test_propagation_curvature_sign_reaches_the_scattering(tr_kwargs: dict) -> None:
+    """`Propagation.ews_curvature_sign` is the sign the model propagates with."""
+    for sign in ("negative", "positive"):
+        model = TomogramReconstructor(
+            **tr_kwargs,
+            propagation=Propagation(
+                scattering_model="multislice", ews_curvature_sign=sign
+            ),
+        )
+        assert model.iterative_scattering.ews_curvature_sign == sign

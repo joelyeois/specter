@@ -229,6 +229,7 @@ class TomogramReconstructor(_BaseReconstructor):
             oversample=propagation.oversample,
             crop=False,
             alpha=propagation.alpha,
+            ews_curvature_sign=propagation.ews_curvature_sign,
             # The same canvas `TiltSeries` propagates on, kept through the
             # transfer function as it keeps it, so the two agree.
             pad_fft=propagation.pads(True),

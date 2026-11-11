@@ -603,6 +603,7 @@ class TiltSeries:
             oversample=p.oversample,
             crop=False,
             alpha=p.alpha,
+            ews_curvature_sign=p.ews_curvature_sign,
             progressbars=False,
             roi_padding_mode="zeros",
             pad_fft=p.pads(True),

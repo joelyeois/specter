@@ -428,6 +428,7 @@ class Sample:
             oversample=p.oversample,
             crop=False,
             alpha=p.alpha,
+            ews_curvature_sign=p.ews_curvature_sign,
             progressbars=False,
         ).to(device)
         if sample.absorption is None:

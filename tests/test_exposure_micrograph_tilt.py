@@ -339,3 +339,28 @@ def test_tilt_solvent_motion_per_tilt_with_specimen_damage():
         torch.testing.assert_close(model.volume, damaged + ice[i], rtol=1e-5, atol=1e-5)
 
     assert spy_on_tilts(model, check) == [0, 1, 2]
+
+
+def test_curvature_sign_reaches_micrograph_and_tilt_scattering():
+    """`ews_curvature_sign` set on the propagation settings is the sign a
+    micrograph and a tilt series propagate with."""
+    volume = tilt_volume()
+    waves = {}
+    for sign in ("negative", "positive"):
+        sample = Sample.from_volume(volume.clone(), DX).prepare(voltage=300.0)
+        with torch.no_grad():
+            waves[sign] = sample.scatter(
+                voltage=300.0, scattering_model="multislice", ews_curvature_sign=sign
+            ).pixels()
+        series = Sample.from_volume(volume.clone(), DX).tilt_series(
+            Poses.tilt_series(ANGLES),
+            Exposure.tilt_series(5.0, len(ANGLES)),
+            voltage=300.0,
+            micrograph_size=32,
+            ews_curvature_sign=sign,
+            tilt=TiltGeometry(taper_width=2),
+            log=False,
+        )
+        assert series.scattering.ews_curvature_sign == sign
+    # The volume is not symmetric in z, so the two traversal orders differ.
+    assert not torch.allclose(waves["negative"], waves["positive"])

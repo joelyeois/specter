@@ -646,3 +646,19 @@ def test_a_leading_tilde_in_a_path_field_is_expanded(tmp_path) -> None:
     apply_overrides(config, {"output_dir": "~/runs", "filename": "~stack"})
     assert config.output_dir == os.path.expanduser("~/runs")
     assert config.filename == "~stack"
+
+
+def test_simulation_and_reconstruction_default_to_one_curvature_sign() -> None:
+    """A default stack reconstructed with defaults must use one Ewald-sphere
+    sign: the particle help says a mismatch costs resolution."""
+    import dataclasses
+
+    from specter.config import ParticleStackConfig, ReconstructionConfig
+
+    def default(cls: type) -> str:
+        (field,) = (
+            f for f in dataclasses.fields(cls) if f.name == "ews_curvature_sign"
+        )
+        return field.default
+
+    assert default(ParticleStackConfig) == default(ReconstructionConfig) == "negative"

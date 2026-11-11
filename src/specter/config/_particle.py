@@ -390,7 +390,7 @@ class ParticleStackConfig:
 
     # --- Advanced: scattering ---
     ews_curvature_sign: EwaldSphereSign = setting(
-        "positive",
+        "negative",
         help=(
             "Ewald-sphere curvature sign. Reconstruct the stack with the same sign: "
             "a mismatch costs resolution wherever the curvature matters."

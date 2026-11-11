@@ -4,6 +4,8 @@ import torch
 from specter.arrays import (
     rfft_frequency_squared,
     center_crop,
+    radial_profile_2d,
+    radial_profile_3d,
     soft_voxelize_coordinates,
     soft_voxelize_xy_coordinates,
     tile_volume_from_blocks_blended,
@@ -202,3 +204,75 @@ def test_rfft_frequency_squared_is_the_half_of_the_full_spectrum(shape) -> None:
     half = rfft_frequency_squared(shape, d)
     assert half.shape == (*shape[:-1], shape[-1] // 2 + 1)
     torch.testing.assert_close(half, full[..., : shape[-1] // 2 + 1])
+
+
+# ---------------------------------------------------------------------------
+# radial_profile_2d / radial_profile_3d
+# ---------------------------------------------------------------------------
+
+
+def _naive_radial_profile(data: torch.Tensor, center: tuple) -> torch.Tensor:
+    """Bin each element by its rounded distance from `center`, then average."""
+    sums: dict[int, float] = {}
+    counts: dict[int, int] = {}
+    for idx in torch.cartesian_prod(*(torch.arange(n) for n in data.shape)):
+        idx = idx.reshape(-1)
+        r = int(
+            torch.sqrt(
+                sum((float(i) - c) ** 2 for i, c in zip(idx.tolist(), center))
+                * torch.ones((), dtype=torch.float32)
+            ).round()
+        )
+        sums[r] = sums.get(r, 0.0) + float(data[tuple(idx.tolist())])
+        counts[r] = counts.get(r, 0) + 1
+    n = max(sums) + 1
+    return torch.tensor(
+        [sums.get(r, 0.0) / max(counts.get(r, 0), 1) for r in range(n)],
+        dtype=data.dtype,
+    )
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("center", [None, (1, 4)])
+def test_radial_profile_2d_bins_by_rounded_index_distance(dtype, center) -> None:
+    # Integer values keep every sum exact, so the comparison can be bitwise.
+    data = torch.arange(35, dtype=dtype).reshape(5, 7)
+    profile = radial_profile_2d(data, center=center)
+    assert profile.dtype == dtype
+    expected = _naive_radial_profile(data, center or (5 // 2, 7 // 2))
+    assert torch.allclose(profile, expected, rtol=1e-6, atol=0)
+    r, again = radial_profile_2d(data, center=center, return_r=True)
+    assert torch.equal(again, profile)
+    assert torch.equal(r, torch.arange(len(profile)))
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("center", [None, (0, 1, 3)])
+def test_radial_profile_3d_bins_by_rounded_index_distance(dtype, center) -> None:
+    data = torch.arange(4 * 5 * 6, dtype=dtype).reshape(4, 5, 6)
+    profile = radial_profile_3d(data, center=center)
+    assert profile.dtype == dtype
+    expected = _naive_radial_profile(data, center or (2, 2, 3))
+    assert torch.allclose(profile, expected, rtol=1e-6, atol=0)
+    r, again = radial_profile_3d(data, center=center, return_r=True)
+    assert torch.equal(again, profile)
+    assert torch.equal(r, torch.arange(len(profile)))
+
+
+def test_radial_profiles_pinned_values() -> None:
+    """Exact outputs, so a rewrite of either function must reproduce them."""
+    assert torch.equal(
+        radial_profile_2d(torch.arange(30.0).reshape(5, 6)),
+        torch.tensor([15.0, 15.0, 15.0, 96.0 / 7.0, 12.0]),
+    )
+    assert torch.equal(
+        radial_profile_3d(torch.arange(60.0).reshape(3, 4, 5)),
+        torch.tensor([32.0, 32.0, 206.0 / 7.0, 22.0]),
+    )
+
+
+def test_radial_profiles_reject_the_wrong_rank() -> None:
+    with pytest.raises(ValueError, match="2D"):
+        radial_profile_2d(torch.zeros(2, 3, 4))
+    with pytest.raises(ValueError, match="3D"):
+        radial_profile_3d(torch.zeros(2, 3))

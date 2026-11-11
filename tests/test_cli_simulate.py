@@ -6,6 +6,7 @@ import traceback
 from pathlib import Path
 
 import pytest
+import starfile
 from click.testing import CliRunner
 
 from specter.cli._cli import cli
@@ -205,6 +206,9 @@ def _run_micrograph_cli(
     return _invoke_cli(args)
 
 
+_MICROGRAPH_STAR_COLUMNS = ['rlnMicrographName', 'rlnVoltage', 'rlnSphericalAberration', 'rlnAmplitudeContrast', 'rlnImagePixelSize', 'rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle', 'specterDosePerAngstrom', 'specterCoincidenceRadius']  # fmt: skip
+
+
 @pytest.mark.parametrize("n_micrographs", [1, 2], ids=["default", "override"])
 def test_cli_micrograph_smoke(tmp_path: Path, n_micrographs: int) -> None:
     """--n_micrographs overrides the loaded TOML config's value end to end."""
@@ -217,6 +221,15 @@ def test_cli_micrograph_smoke(tmp_path: Path, n_micrographs: int) -> None:
 
     with mrcfile.open(tmp_path / "micrographs.mrcs") as mrc:
         assert mrc.data.shape == (n_micrographs, 64, 64)
+    # The files written and the STAR columns are the format downstream tools
+    # read; pinned so a pipeline refactor cannot change them unnoticed.
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "micrographs.mrcs",
+        "micrographs.star",
+    ]
+    assert list(starfile.read(tmp_path / "micrographs.star").columns) == [
+        *_MICROGRAPH_STAR_COLUMNS
+    ]
 
 
 def test_cli_tiltseries_smoke(tmp_path: Path) -> None:
@@ -266,6 +279,15 @@ def test_cli_tiltseries_smoke(tmp_path: Path) -> None:
 
     with mrcfile.open(tmp_path / "tiltseries.mrcs") as mrc:
         assert mrc.data.shape == (3, 48, 48)
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "tiltseries.mrcs",
+        "tiltseries.star",
+        "volume.pt",
+    ]
+    assert list(starfile.read(tmp_path / "tiltseries.star").columns) == [
+        *_MICROGRAPH_STAR_COLUMNS,
+        "specterTiltAngle",
+    ]
 
 
 def test_cli_tiltseries_tomogram_config_chains_build_and_simulate(

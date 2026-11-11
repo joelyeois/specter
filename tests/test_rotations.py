@@ -888,3 +888,62 @@ def test_a_generator_makes_rotation_draws_repeatable() -> None:
     default = random_quaternion(6)
     torch.manual_seed(5)
     assert torch.equal(default, roma.random_unitquat(size=(6,)))
+
+
+# ---------------------------------------------------------------------------
+# VolumeRotator methods and the module functions are one computation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shape", [(12, 12, 12), (9, 12, 10)])
+@pytest.mark.parametrize("origin", ["relion", "center"])
+@pytest.mark.parametrize("padding_mode", ["border", "zeros"])
+@pytest.mark.parametrize("align_corners", [False, True])
+@pytest.mark.parametrize("requires_grad", [False, True])
+def test_volume_rotator_rotate_real_is_rotate_volume(
+    shape, origin, padding_mode, align_corners, requires_grad
+) -> None:
+    """`VolumeRotator.rotate_real` equals `rotate_volume` bit for bit, value
+    and gradient, in float32 and in both the no-grad and checkpointed paths."""
+    torch.manual_seed(1)
+    V = torch.rand(shape, requires_grad=requires_grad)
+    theta = _random_theta(3, torch.float32)
+    rot = VolumeRotator(
+        *shape, origin=origin, align_corners=align_corners, padding_mode=padding_mode
+    )
+    out_m = rot.rotate_real(V, theta)
+    out_f = rotations.rotate_volume(
+        V, theta, origin=origin, padding_mode=padding_mode, align_corners=align_corners
+    )
+    assert out_m.dtype == out_f.dtype == torch.float32
+    assert torch.equal(out_m, out_f)
+    if requires_grad:
+        weight = torch.rand_like(out_m)
+        (g_m,) = torch.autograd.grad((out_m * weight).sum(), V)
+        (g_f,) = torch.autograd.grad((out_f * weight).sum(), V)
+        assert torch.equal(g_m, g_f)
+
+
+@pytest.mark.parametrize(
+    ("shape", "origin"),
+    [((12, 12, 12), "relion"), ((12, 12, 12), "center"), ((9, 12, 10), "relion")],
+)
+@pytest.mark.parametrize("requires_grad", [False, True])
+def test_volume_rotator_rotate_fourier_is_rotate_volume_fourier(
+    shape, origin, requires_grad
+) -> None:
+    """`VolumeRotator.rotate_fourier` equals `rotate_volume_fourier` bit for
+    bit, translation included, value and gradient."""
+    torch.manual_seed(2)
+    V = torch.rand(shape, requires_grad=requires_grad)
+    theta = _random_theta(2, torch.float32)
+    rot = VolumeRotator(*shape, origin=origin)
+    out_m = rot.rotate_fourier(V, theta)
+    out_f = rotations.rotate_volume_fourier(V, theta, origin=origin)
+    assert out_m.dtype == out_f.dtype
+    assert torch.equal(out_m, out_f)
+    if requires_grad:
+        weight = torch.rand_like(out_m)
+        (g_m,) = torch.autograd.grad((out_m * weight).sum(), V)
+        (g_f,) = torch.autograd.grad((out_f * weight).sum(), V)
+        assert torch.equal(g_m, g_f)

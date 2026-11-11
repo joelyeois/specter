@@ -155,6 +155,30 @@ def test_radial_spectrum_matches_apply_radial_envelope():
     assert torch.equal(out, expected)
 
 
+def test_dose_series_and_tilt_render_one_exposure_alike():
+    """
+    `_DoseSeries.render` (micrographs) and `TiltSeries._render_exposure`
+    write the same damaged volume, bit for bit: the dry specimen's spectrum
+    filtered by the exposure's envelope, then the solvent added.
+    """
+    from specter.imaging._field import _DoseSeries
+
+    volume = tilt_volume()
+    model = tilt_series(volume, Ice(model="random"))
+    assert model._solvent is not None
+    exposure = Exposure.tilt_series(5.0, len(ANGLES))
+    for dose, pre in ((5.0, 0.0), (5.0, 10.0)):
+        with torch.no_grad():
+            model._render_exposure(dose, pre)
+        series = _DoseSeries.__new__(_DoseSeries)
+        series.spectrum = model._spectrum
+        series.solvent = model._solvent
+        series.rendered = None
+        out = torch.empty_like(model.volume)
+        series.render(out, exposure, dose, pre, 300.0)
+        assert torch.equal(out, model.volume)
+
+
 def test_each_tilt_is_damaged_at_its_own_pre_exposure():
     """
     Tilt i's specimen is the dry specimen under the envelope of its own dose

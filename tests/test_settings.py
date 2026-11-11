@@ -49,6 +49,48 @@ def test_bundle_from_config_prefix_and_overrides():
     assert packing.gap == 0.0
 
 
+# Which settings-group fields each pipeline config supplies to
+# `bundle_from_config`. A field missing here silently takes the group's own
+# default, so a rename on either side changes a run without failing it; this
+# table makes it fail. Update it deliberately when a field is added.
+_BUNDLED_FIELDS = {
+    ("ParticleStackConfig", "Camera", ""): ['detector_model', 'detector_pixel_size', 'dose_weights_max_frequency', 'dose_weights_path', 'n_frames', 'noise_model'],
+    ("ParticleStackConfig", "Envelopes", ""): ['cc', 'convergence_angle', 'deltaI_I', 'deltaV_V', 'dose_envelope', 'dose_envelope_target', 'energy_spread', 'temporal_coherence'],
+    ("ParticleStackConfig", "Crowding", "crowd_"): ['chunk_size', 'max_distance_xy', 'max_distance_z', 'method', 'min_distance', 'n_points', 'seed'],
+    ("ParticleStackConfig", "Ice", "ice_"): ['cache_dir', 'model', 'motion_variance', 'relax_steps', 'thickness'],
+    ("ParticleStackConfig", "Propagation", ""): ['absorption_model', 'alpha', 'ews_curvature_sign', 'inelastic_mfp_solvent', 'inelastic_mfp_specimen', 'klim', 'oversample', 'pad_fft', 'rotate_mode', 'scattering_model'],
+    ("MicrographConfig", "Camera", ""): ['detector_model', 'n_frames', 'noise_model'],
+    ("MicrographConfig", "Envelopes", ""): ['cc', 'convergence_angle', 'deltaI_I', 'deltaV_V', 'dose_envelope', 'dose_envelope_target', 'energy_spread', 'temporal_coherence'],
+    ("MicrographConfig", "Crowding", "crowd_"): ['chunk_size', 'max_distance_z', 'min_distance'],
+    ("MicrographConfig", "Ice", "ice_"): ['cache_dir', 'model', 'motion_variance', 'profile', 'thickness'],
+    ("MicrographConfig", "Packing", "packing_"): ['backend', 'gap', 'max_retries', 'seed', 'stall_patience'],
+    ("MicrographConfig", "Propagation", ""): ['absorption_model', 'alpha', 'inelastic_mfp_solvent', 'inelastic_mfp_specimen', 'klim', 'oversample', 'pad_fft', 'scattering_model'],
+    ("TiltSeriesConfig", "Camera", ""): ['detector_model', 'n_frames', 'noise_model'],
+    ("TiltSeriesConfig", "Envelopes", ""): ['cc', 'convergence_angle', 'deltaI_I', 'deltaV_V', 'dose_envelope', 'dose_envelope_target', 'energy_spread', 'temporal_coherence'],
+    ("TiltSeriesConfig", "Deformation", "deformation_"): ['burst_dose', 'correlation_length', 'height', 'hole_offset', 'hole_radius', 'model'],
+    ("TiltSeriesConfig", "Ice", "ice_"): ['cache_dir', 'model', 'motion_variance', 'relax_steps'],
+    ("TiltSeriesConfig", "TiltGeometry", ""): ['tilt_axis'],
+    ("TiltSeriesConfig", "Propagation", ""): ['absorption_model', 'alpha', 'inelastic_mfp_solvent', 'inelastic_mfp_specimen', 'klim', 'oversample', 'pad_fft', 'scattering_model'],
+    ("ReconstructionConfig", "Propagation", ""): ['alpha', 'ews_curvature_sign', 'klim', 'rotate_mode', 'scattering_model'],
+}  # fmt: skip
+
+
+@pytest.mark.parametrize(("config", "bundle", "prefix"), sorted(_BUNDLED_FIELDS))
+def test_bundle_from_config_reads_the_pinned_fields(config, bundle, prefix):
+    import dataclasses
+
+    from specter import config as configs
+    from specter import settings
+
+    config_fields = {f.name for f in dataclasses.fields(getattr(configs, config))}
+    read = sorted(
+        f.name
+        for f in dataclasses.fields(getattr(settings, bundle))
+        if prefix + f.name in config_fields
+    )
+    assert read == _BUNDLED_FIELDS[(config, bundle, prefix)]
+
+
 def test_specimen_generator_derives_nz_from_the_ice(small_volume):
     # No ice: the template's own depth.
     gen = MicrographSpecimenGenerator(small_volume, 2.0, 32, progressbars=False)

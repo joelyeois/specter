@@ -7,6 +7,35 @@ from typing import Literal, overload
 import torch
 
 
+def _radial_profile(
+    data: torch.Tensor, center: tuple[float, ...]
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Average `data` over shells of rounded index distance from `center`.
+
+    The squared distance is summed from the last axis to the first
+    (``x**2 + y**2 + z**2``). Returns the shell radii and the profile.
+    """
+    device = data.device
+    axes = [
+        torch.arange(size, device=device) - c
+        for size, c in zip(data.shape, center, strict=True)
+    ]
+    grids = torch.meshgrid(*axes, indexing="ij")
+
+    # Radial distance of every element, rounded to its shell.
+    squared = grids[-1] ** 2
+    for g in reversed(grids[:-1]):
+        squared = squared + g**2
+    r_bin = torch.sqrt(squared).round().long().flatten()
+
+    # Sum values and count elements per shell; empty shells average to 0.
+    max_r = int(r_bin.max().item()) + 1
+    sum_bin = torch.bincount(r_bin, weights=data.flatten(), minlength=max_r)
+    count_bin = torch.bincount(r_bin, minlength=max_r)
+    return torch.arange(max_r, device=device), sum_bin / count_bin.clamp(min=1)
+
+
 @overload
 def radial_profile_3d(
     data: torch.Tensor,
@@ -47,35 +76,10 @@ def radial_profile_3d(
         raise ValueError("Input data must be a 3D tensor.")
 
     m, n, o = data.shape
-    device = data.device
-
-    # Default integer center
     if center is None:
         center = (m // 2, n // 2, o // 2)
-
-    # Create coordinate grids relative to center
-    z = torch.arange(m, device=device) - center[0]
-    y = torch.arange(n, device=device) - center[1]
-    x = torch.arange(o, device=device) - center[2]
-    zz, yy, xx = torch.meshgrid(z, y, x, indexing="ij")
-
-    # Compute radial distances and integer bins
-    r = torch.sqrt(xx**2 + yy**2 + zz**2)
-    r_bin = r.round().long().flatten()
-    data_flat = data.flatten()
-
-    # Sum values per bin and count voxels per bin
-    max_r = int(r_bin.max().item()) + 1
-    sum_bin = torch.bincount(r_bin, weights=data_flat, minlength=max_r)
-    count_bin = torch.bincount(r_bin, minlength=max_r)
-
-    # Avoid division by zero
-    radialprofile = sum_bin / count_bin.clamp(min=1)
-
-    if return_r:
-        return torch.arange(max_r, device=device), radialprofile
-    else:
-        return radialprofile
+    r, radialprofile = _radial_profile(data, center)
+    return (r, radialprofile) if return_r else radialprofile
 
 
 @overload
@@ -118,31 +122,7 @@ def radial_profile_2d(
         raise ValueError("Input data must be a 2D tensor.")
 
     m, n = data.shape
-    device = data.device
-
-    # Default integer center
     if center is None:
         center = (m // 2, n // 2)
-
-    # Create coordinate grids relative to center
-    y = torch.arange(m, device=device) - center[0]
-    x = torch.arange(n, device=device) - center[1]
-    yy, xx = torch.meshgrid(y, x, indexing="ij")
-
-    # Compute radial distances and integer bins
-    r = torch.sqrt(xx**2 + yy**2)
-    r_bin = r.round().long().flatten()
-    data_flat = data.flatten()
-
-    # Sum values per bin and count pixels per bin
-    max_r = int(r_bin.max().item()) + 1
-    sum_bin = torch.bincount(r_bin, weights=data_flat, minlength=max_r)
-    count_bin = torch.bincount(r_bin, minlength=max_r)
-
-    # Avoid division by zero
-    radialprofile = sum_bin / count_bin.clamp(min=1)
-
-    if return_r:
-        return torch.arange(max_r, device=device), radialprofile
-    else:
-        return radialprofile
+    r, radialprofile = _radial_profile(data, center)
+    return (r, radialprofile) if return_r else radialprofile

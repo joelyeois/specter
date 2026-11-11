@@ -214,6 +214,9 @@ class IceBank(_IceTiling, DeviceModule):
         ----------
         crop_extent : tuple of float
             Requested ``(box_x, box_y, box_z)`` in Å.
+        generator : torch.Generator, optional
+            Source of the config choice, rotation and translation draws, made
+            on the generator's device. Default is the global RNG.
 
         Returns
         -------

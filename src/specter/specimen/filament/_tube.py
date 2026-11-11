@@ -141,6 +141,8 @@ def microtubule_axis_path(
     Parameters
     ----------
     spec : MicrotubuleSpec
+        The microtubule; supplies the lattice's dimer repeat (the step
+        between rings) and, if set, ``bend_radius``.
     n_rings : int
         Number of rings (dimer repeats) along the tube.
     origin_xyz : torch.Tensor
@@ -148,6 +150,8 @@ def microtubule_axis_path(
     direction_xyz : torch.Tensor
         Overall direction, shape ``(3,)``.
     generator : torch.Generator, optional
+        Random generator for the path's turns, or for the bend plane when
+        ``spec.bend_radius`` is set. Default None (torch's global RNG).
 
     Returns
     -------
@@ -199,6 +203,7 @@ def build_tube_instances(
     axis_xyz : torch.Tensor
         Axis points, shape ``(n_rings, 3)``.
     lattice : TubeLattice
+        Surface lattice: protofilament count, wall radius and stagger.
 
     Returns
     -------
@@ -272,6 +277,7 @@ def place_microtubules(
     Parameters
     ----------
     specs : list of MicrotubuleSpec
+        Microtubule species to place; each contributes ``n_copies`` tubes.
     target_shape : tuple of int
         Specimen volume shape ``(Z, Y, X)``, voxels.
     voxel_size : float

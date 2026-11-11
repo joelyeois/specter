@@ -140,6 +140,16 @@ def _windowed_grid_sample(
     grid : torch.Tensor
         Normalized grid_sample-convention coordinates into `V`, shape
         (B, K, ny_roi, nx_roi, 3), on `V`'s device.
+    nz, ny, nx : int
+        `V`'s full extent along Z, Y and X, in voxels; used to convert `grid`
+        to pixel coordinates and to clip the block to the real volume edge.
+    align_corners : bool
+        ``grid_sample``'s ``align_corners`` convention, used both to
+        unnormalise `grid` and for the final ``grid_sample`` call.
+    padding_mode : GridSamplePadding
+        Passed through to ``grid_sample``.
+    device : torch.device
+        Device the block is transferred to and interpolated on.
     margin : int
         Extra padding (px) around the query's exact pixel-space bounding
         box. 2 is generous headroom for bilinear interpolation; validated
@@ -394,6 +404,8 @@ class VolumeRotator(DeviceModule):
             Translations in normalized units, shape (B, 3).
         scale : torch.Tensor
             Per-axis isotropic scale factors, shape (1, 1, 3).
+        origin : {"relion", "center"}, optional
+            Rotation origin for this call; None (default) uses ``self.origin``.
 
         Returns
         -------

@@ -361,9 +361,27 @@ class IterativeScattering(DeviceModule):
 
         Parameters
         ----------
+        V : torch.Tensor
+            Potential volume, shape ``(B, Z, Y, X)``.
         slice_positions : torch.Tensor or slice
             Slice indices in processing order. A Python slice avoids an
             advanced-indexing copy for consecutive, unrotated planes.
+        is_identity : bool
+            True to read the slices directly out of `V`, without resampling.
+        rotator : VolumeRotator or None
+            Samples the rotated slices; None, and unused, for the identity.
+        theta_matrix : torch.Tensor
+            Affine rotation matrices, shape ``(B, 3, 4)``; unused for the
+            identity.
+        nz_new : int
+            Number of Z-slices traversed, used to centre the slice indices
+            on the rotated volume.
+        y_start : int
+            Top row of the ROI within `V`'s Y extent (identity only).
+        x_start : int
+            Left column of the ROI within `V`'s X extent (identity only).
+        device : str or torch.device
+            Device the returned slices are placed on.
         roi_size : int, optional
             Size of the square ROI to fetch. Defaults to ``self.nxy``; callers
             that need a larger canvas (e.g. ``multislice`` with ``pad_fft=True``)
@@ -436,6 +454,15 @@ class IterativeScattering(DeviceModule):
 
         Parameters
         ----------
+        V : torch.Tensor
+            Potential volume, shape ``(B, Z, Y, X)``.
+        theta_matrix : torch.Tensor
+            Affine rotation matrices, shape ``(B, 3, 4)``.
+        slice_batchsize : int
+            Slices fetched per `_fetch_volume_slices` call for a rotated
+            volume; the identity fetches one at a time.
+        description : str
+            Label of the progress bar.
         roi_size : int, optional
             Size of the square ROI to fetch per slice. Defaults to ``self.nxy``;
             ``multislice`` passes ``self.padded_nxy`` when ``pad_fft=True``.
@@ -553,7 +580,7 @@ class IterativeScattering(DeviceModule):
         exitwave = torch.ones(B, fine, fine, device=device, dtype=torch.complex64)
 
         if checkpoint_chunks is None:
-            for i, _, slice_sample in self._iter_slices(
+            for _, _, slice_sample in self._iter_slices(
                 V,
                 theta_matrix,
                 slice_batchsize,
@@ -1156,6 +1183,17 @@ class IterativeScattering(DeviceModule):
             If torch.Tensor, interpreted as affine matrix (B, 3, 4).
         slice_batchsize : int
             Number of slices to batch for sampling.
+        checkpoint_chunks : int or None
+            If set, run the slice loop in gradient-checkpointed chunks of this
+            many slices (see :meth:`multislice`). Default None, no
+            checkpointing.
+        absorption_source : torch.Tensor, optional
+            Absorption field in volts, same shape and geometry as `V`; when
+            given, the exit wave is computed by :meth:`multislice_absorptive`.
+        absorption_filter : callable, optional
+            Maps each sampled transverse slice of `absorption_source` to an
+            imaginary potential (see :meth:`multislice_absorptive`); requires
+            `absorption_source`.
         """
         if isinstance(pose, (int, float)) or (
             isinstance(pose, torch.Tensor) and pose.ndim == 0

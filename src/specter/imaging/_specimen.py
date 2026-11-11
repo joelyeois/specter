@@ -432,6 +432,10 @@ class Specimen:
             ``oversample``, ``pad_fft``, ...). An unset ``rotate_mode`` is
             ``"exact"``: the template is turned through its own transform,
             without interpolation.
+        **settings
+            `Propagation`'s fields as keywords, from which the group is built
+            when `propagation` is not given; passing both raises
+            ``TypeError``.
 
         Returns
         -------

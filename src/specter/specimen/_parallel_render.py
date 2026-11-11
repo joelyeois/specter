@@ -313,7 +313,8 @@ def _estimated_parse_seconds(
             if os.path.isfile(path):
                 try:
                     resolved = _resolve_monomer_library_path(monomer_library_path)
-                except Exception:
+                # A cost estimate must not fail on a monomer-library lookup; fall back to none.
+                except Exception:  # noqa: BLE001
                     resolved = None
                 parsed = _parsed_cache_path(
                     pdb_cache_dir, path, compute_atom_species, readd_hydrogens, resolved
@@ -432,6 +433,13 @@ def build_pdb_cache_concurrently(
         by its own source count still reaches the total. Meant for a
         caller-side progress tick; exceptions from it propagate
         immediately.
+    compute_atom_species : bool, optional
+        Passed through to every `PDB(...)` call; type each atom's bonded
+        species (required for Shtyrov). Default False.
+    readd_hydrogens : {"auto", True, False}, optional
+        Passed through to every `PDB(...)` call. Default ``"auto"``.
+    monomer_library_path : str, optional
+        Passed through to every `PDB(...)` call as `monomer_library_path`.
 
     Returns
     -------

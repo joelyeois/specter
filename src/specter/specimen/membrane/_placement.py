@@ -100,6 +100,7 @@ def sample_surface_sites(
     Parameters
     ----------
     field : MembraneField
+        The membrane whose zero level set (mid-surface) is sampled.
     n_sites : int
         Target number of sites.
     min_spacing_angstrom : float

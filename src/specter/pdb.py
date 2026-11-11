@@ -212,7 +212,7 @@ def _load_parsed_structure(
             blob["atom_species"],
             blob["b_factors"],
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -247,7 +247,7 @@ def _store_parsed_structure(
             tmp,
         )
         os.replace(tmp, path)
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
 
 
@@ -778,7 +778,8 @@ class PDB:
             )
             if verbose:
                 logger.info("Assemblies available: " + ", ".join(assemblies))
-        except Exception as e:
+        # Assembly listing is informational; an unreachable RCSB must not raise.
+        except Exception as e:  # noqa: BLE001
             if verbose:
                 logger.warning(f"Error fetching assemblies for {pdb_id}: {e}")
             return
@@ -918,6 +919,10 @@ class PDB:
             `None`.
         verbose : bool, optional
             Print how many atoms were successfully typed. Default True.
+        readd_hydrogens : {"auto", True, False}, optional
+            Whether to replace existing hydrogens with the monomer library's
+            ideal geometry; ``"auto"`` (default) re-adds them only when the
+            structure carries none. See :class:`PDB` for the full semantics.
 
         Returns
         -------

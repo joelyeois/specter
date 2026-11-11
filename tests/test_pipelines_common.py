@@ -222,7 +222,7 @@ def test_cpu_is_left_alone_with_no_warning(monkeypatch) -> None:
     from specter.devices import resolve_available_device
 
     for present in (True, False):
-        monkeypatch.setattr(torch.cuda, "is_available", lambda: present)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: present)  # noqa: B023 - used within this iteration
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             assert resolve_available_device("cpu") == "cpu"

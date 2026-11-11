@@ -770,7 +770,8 @@ class Reconstructor(_BaseReconstructor):
                     )
                 curves.append(self._cryosparc_curve)
                 labels.append("CryoSPARC")
-        except Exception as exc:
+        # A diagnostic FSC must never fail the run.
+        except Exception as exc:  # noqa: BLE001
             logger.warning(f"map-to-model FSC skipped: {exc}")
             return
         save_fsc_figure(path, curves, labels, self.voxel_size)
@@ -857,7 +858,7 @@ class Reconstructor(_BaseReconstructor):
                 f"Epoch {epoch} gold-standard resolution: {resolution}"
                 + (f"  (masked {masked})" if masked is not None else "")
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             # A diagnostic must never take the run down with it -- the same
             # rule save_fsc_figure follows. Drop the claim so the empty record
             # isn't mistaken for a computed one.

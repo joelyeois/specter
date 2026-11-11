@@ -42,7 +42,8 @@ def save_plot3d_preview(path: Path, v: torch.Tensor, title: str) -> None:
         assert fig is not None
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
-    except Exception as exc:
+    # A diagnostic plot must never fail the run.
+    except Exception as exc:  # noqa: BLE001
         logger.warning(f"plot3d preview skipped: {exc}")
 
 
@@ -81,7 +82,8 @@ def save_halfmap_fsc_figure(
         )
         save_fsc_figure(path, [curve], ["gold-standard"], voxel_size, halfmap=True)
         return curve
-    except Exception as exc:
+    # A diagnostic plot must never fail the run.
+    except Exception as exc:  # noqa: BLE001
         logger.warning(f"half-map FSC plot skipped: {exc}")
         return None
 
@@ -126,5 +128,6 @@ def save_fsc_figure(
         fig = plot_fsc_curves(curves, labels, voxel_size, threshold, title)
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
-    except Exception as exc:
+    # A diagnostic plot must never fail the run.
+    except Exception as exc:  # noqa: BLE001
         logger.warning(f"FSC plot skipped: {exc}")

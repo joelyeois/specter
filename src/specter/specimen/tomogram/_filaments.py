@@ -505,6 +505,18 @@ class _FilamentStageMixin:
 
         Parameters
         ----------
+        volume : torch.Tensor
+            The shared potential canvas the copies are inserted into.
+        instance_labels : torch.Tensor
+            The canvas's instance-label volume; each copy's footprint is
+            written with its id.
+        next_instance_id : int
+            First id to number instances from when `instance_ids` is None;
+            returned advanced past the ids used.
+        voxel_size : float
+            Voxel size, Å.
+        instances : list of FilamentInstance
+            The placed copies to render.
         instance_ids : torch.Tensor, optional
             Per-instance segmentation ids, shape ``(len(instances),)``.
             Default None: number them sequentially from

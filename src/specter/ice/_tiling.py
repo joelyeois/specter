@@ -130,17 +130,27 @@ class _IceTiling:
 
         Parameters
         ----------
-        to_host : bool, optional
-            Move each tile's atoms to the host as they are drawn, so the
-            device never holds the whole assembled set (3 GB at a
-            4096-pixel micrograph, plus as much again for the final
-            concatenation). Default False.
+        tile_grid_shape : tuple of int
+            Number of tiles ``(nx, ny, nz)`` along each axis.
+        tile_extent : float
+            Edge length of each cubic tile, in Å.
+        seam_margin : float
+            Distance (Å) from a tile's own face within which its atoms are
+            flagged mobile (see ``mobile_mask`` below).
+        generator : torch.Generator, optional
+            Source of every tile's random rotation and translation, passed to
+            ``_extract_crop``. Default is the global RNG.
         halo_margin : float, optional
             Extra distance (Å) beyond ``seam_margin``, used to additionally
             flag frozen atoms close enough to a face that a mobile atom
             (from this tile or a neighbor sharing that face) could still be
             within interaction range of them -- see ``halo_mask`` below.
             Default 0.0 (``halo_mask`` then equals ``mobile_mask``).
+        to_host : bool, optional
+            Move each tile's atoms to the host as they are drawn, so the
+            device never holds the whole assembled set (3 GB at a
+            4096-pixel micrograph, plus as much again for the final
+            concatenation). Default False.
 
         Returns
         -------
@@ -308,10 +318,8 @@ class _IceTiling:
 
         Parameters
         ----------
-        n, dx, nz, tile_extent, seam_margin, relax_steps, relax_lr,
-        mlbop_target, device, generator
+        n, dx, nz, tile_extent, seam_margin, relax_steps, relax_lr, mlbop_target, device, generator
             As for :meth:`generate_big_ice_deltas`.
-
         to_host : bool, optional
             Collect the tiles on the host as they are drawn and return the
             result there, so the device never holds the whole set; see

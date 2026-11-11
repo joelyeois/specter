@@ -251,6 +251,7 @@ def _sample_sh_coefficients(
     spectrum_power : float
         Exponent ``p`` in ``Var(a_lm) ~ 1 / [l*(l+1)]**p``.
     rng : np.random.Generator
+        Source of the coefficient draws.
 
     Returns
     -------

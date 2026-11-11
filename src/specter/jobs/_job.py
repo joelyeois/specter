@@ -72,7 +72,8 @@ def _get_git_commit() -> str:
             check=True,
         )
         return result.stdout.strip()
-    except Exception:
+    # The commit is provenance only; no git, or no checkout, must not fail a job.
+    except Exception:  # noqa: BLE001
         return "unknown"
 
 

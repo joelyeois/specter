@@ -138,6 +138,9 @@ def ctf_params_dict_to_parameters(
         set (regardless of whether it's zero, absent, or a stale nonzero
         leftover in ``ctf_params``) rather than raising
         ``CTFParameters``'s own mutual-exclusivity error.
+    amplitude_contrast : float, optional
+        Amplitude contrast fraction, in [0, 1], passed straight through to
+        ``CTFParameters``. Default 0.0 (see ``CTFParameters`` for why).
 
     Returns
     -------

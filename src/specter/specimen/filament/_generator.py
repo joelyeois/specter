@@ -250,6 +250,7 @@ def place_filaments(
     Parameters
     ----------
     specs : list of FilamentSpec
+        Filament species to place; each contributes ``n_copies`` filaments.
     target_shape : tuple of int
         Specimen volume shape (Z, Y, X), voxels.
     voxel_size : float

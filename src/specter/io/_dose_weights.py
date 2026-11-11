@@ -66,7 +66,7 @@ def _pixel_size_from_hyperparams(directory: str) -> float | None:
         if field not in data.fields():
             return None
         return float(np.asarray(data[field]).reshape(-1)[0])
-    except Exception:
+    except Exception:  # noqa: BLE001
         # A metadata file that cannot be read is not a reason to fail: the
         # caller can still supply the frequency explicitly.
         return None

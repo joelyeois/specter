@@ -8,8 +8,8 @@ import torch
 
 matplotlib.use("Agg")
 
-from specter.fft import fsc_crossing  # noqa: E402
-from specter.plots import (  # noqa: E402
+from specter.fft import fsc_crossing
+from specter.plots import (
     MAP_TO_MODEL_FSC_THRESHOLD,
     fsc_resolution,
     plot_map_to_model_fsc,

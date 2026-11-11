@@ -237,6 +237,9 @@ def plot_particle_stack(
         Defocus values in Å, shape (N,). Default is None.
     max_images : int, optional
         Maximum number of images to display. Default is 5.
+    fftmax : float or None, optional
+        Upper limit of the FFT-magnitude colour scale, also applied as the
+        top y-limit of the first radial-profile panel. Default None (autoscale).
     """
     n = min(len(images), max_images)
     images = images[:n]

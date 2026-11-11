@@ -380,6 +380,7 @@ def validate_config(config: Any) -> None:
     Parameters
     ----------
     config : ParticleStackConfig | MicrographConfig | TiltSeriesConfig | TomogramConfig
+        The pipeline config to check; it is read, never modified.
 
     Raises
     ------

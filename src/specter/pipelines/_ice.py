@@ -177,7 +177,8 @@ def _write_manifest(config: IceCacheConfig, path: str) -> list[dict]:
         from importlib.metadata import version
 
         specter_version = version("specter")
-    except Exception:
+    # The version is provenance only; an uninstalled checkout must not fail the write.
+    except Exception:  # noqa: BLE001
         specter_version = "unknown"
 
     with open(path, "w") as f:

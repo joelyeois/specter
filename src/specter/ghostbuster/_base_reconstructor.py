@@ -315,6 +315,10 @@ class _BaseReconstructor(DeviceModule):
 
         Parameters
         ----------
+        include_loss_std : bool
+            If True, include the per-epoch loss standard deviation.
+        include_lr_min : bool
+            If True, include the per-epoch minimum learning rate.
         write : bool
             Write ``metrics<suffix>.json`` to ``self._run_dir``. ``Reconstructor``
             passes ``False`` and folds the returned dict into a single

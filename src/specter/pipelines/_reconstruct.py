@@ -769,6 +769,9 @@ def _run_gold_standard(config: ReconstructionConfig, base_dir: str) -> Path:
     ----------
     config : ReconstructionConfig
         Run configuration with ``halfset="gold"``.
+    base_dir : str
+        Root directory the run's `Job` is opened under, passed to
+        `specter.jobs.Job` as ``base_dir``.
 
     Returns
     -------

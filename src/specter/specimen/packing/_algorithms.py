@@ -73,7 +73,9 @@ def estimate_protein_box_size(max_diameter: float, voxel_size: float) -> int:
     Parameters
     ----------
     max_diameter : float
+        Maximum diameter of the molecule, Å.
     voxel_size : float
+        Voxel size, Å.
 
     Returns
     -------

@@ -168,6 +168,10 @@ class Sample:
             (``scattering_model``, ``alpha``, ``absorption_model``,
             ``oversample``, ``pad_fft``, ...); the absorption fields decide
             the field.
+        **settings
+            `Propagation`'s fields as keywords, from which the group is built
+            when `propagation` is not given; passing both raises
+            ``TypeError``.
 
         Returns
         -------
@@ -364,6 +368,10 @@ class Sample:
             How the exit wave is computed, or its fields as keywords
             (``scattering_model``, ``alpha``, ``absorption_model``,
             ``oversample``, ``pad_fft``, ...).
+        **settings
+            `Propagation`'s fields as keywords, from which the group is built
+            when `propagation` is not given; passing both raises
+            ``TypeError``.
 
         Returns
         -------
@@ -604,6 +612,10 @@ class Field:
             (``scattering_model``, ``alpha``, ``absorption_model``,
             ``oversample``, ``pad_fft``, ...); the absorption fields decide
             which field is built here, from the dry specimen.
+        **settings
+            `Propagation`'s fields as keywords, from which the group is built
+            when `propagation` is not given; passing both raises
+            ``TypeError``.
 
         Returns
         -------

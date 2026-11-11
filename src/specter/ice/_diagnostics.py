@@ -75,7 +75,7 @@ def plot_ice_bank_diagnostics(
     fig1.tight_layout()
 
     fig2, ax2 = plt.subplots(figsize=(7, 5))
-    for i, (prof, dk) in enumerate(zip(sk_profiles, dks)):
+    for prof, dk in zip(sk_profiles, dks):
         k_axis = torch.arange(len(prof)) * dk
         ax2.plot(k_axis[1:], prof[1:], alpha=0.5, lw=1, color="C0")
     ax2.plot(

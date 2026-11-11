@@ -180,9 +180,15 @@ class FrozenPlasmonForward(nn.Module):
             dose = intensity.new_full((len(intensity),), frame_doses[step.frame])
             radius = torch.full_like(dose, coincidence_radius)
 
+            # `detect` is called within the iteration that defines it, so the
+            # loop variables it closes over are this iteration's.
             def detect() -> torch.Tensor:
                 return self.detector.from_intensity(
-                    intensity, dose, radius, anisomag, nxy
+                    intensity,  # noqa: B023
+                    dose,  # noqa: B023
+                    radius,  # noqa: B023
+                    anisomag,
+                    nxy,
                 )
 
             if detector_seed is None:

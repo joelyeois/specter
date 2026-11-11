@@ -485,6 +485,25 @@ class PotentialBuilder(DeviceModule):
             stacklevel=3,
         )
 
+    def _load_species_table(self) -> tuple[str, dict[str, torch.Tensor]]:
+        """
+        The Shtyrov species table: `shtyrov_params_path`, or the bundled
+        ``params_cat.json`` when it is None.
+
+        Returns
+        -------
+        params_path : str
+            The file read.
+        species_table : dict
+            As `specter.atom.load_shtyrov_species_parameters` returns it.
+        """
+        params_path = self.shtyrov_params_path
+        if params_path is None:
+            params_path = str(
+                resources.files("specter.atom_data").joinpath("params_cat.json")
+            )
+        return params_path, load_shtyrov_species_parameters(params_path)
+
     def _prepare_shtyrov_groups(self) -> None:
         """
         Group the atoms by bonded-species descriptor for the Shtyrov kernels.
@@ -500,12 +519,7 @@ class PotentialBuilder(DeviceModule):
         for `forward` to consume, and `self._species_table`/
         `self._params_path` for `_get_3d_shtyrov_species_potentials`.
         """
-        params_path = self.shtyrov_params_path
-        if params_path is None:
-            params_path = str(
-                resources.files("specter.atom_data").joinpath("params_cat.json")
-            )
-        species_table = load_shtyrov_species_parameters(params_path)
+        params_path, species_table = self._load_species_table()
 
         assert self.atom_species is not None
         matched = sorted(
@@ -650,12 +664,7 @@ class PotentialBuilder(DeviceModule):
             return cached
 
         assert self.atom_species is not None
-        params_path = self.shtyrov_params_path
-        if params_path is None:
-            params_path = str(
-                resources.files("specter.atom_data").joinpath("params_cat.json")
-            )
-        species_table = load_shtyrov_species_parameters(params_path)
+        params_path, species_table = self._load_species_table()
 
         group_of_atom: list[str | tuple[str, int]] = [
             s if (s is not None and s in species_table) else ("elem", int(z))

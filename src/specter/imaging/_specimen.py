@@ -19,7 +19,7 @@ import torch
 
 from .. import rotations
 from ..aberrations import defocus_midplane_shift
-from ..arrays import compute_nz, pad_volume
+from ..arrays import compute_nz, pad_volume, padded_nxy
 from ..cpu_threads import limited_cpu_threads
 from ..crowding import CrowdWithDuplicates
 from ..ice import IceBank, RandomIcemaker, resolve_icemaker
@@ -261,7 +261,7 @@ class Specimen:
 
     def pad_nxy(self, pad_fft: bool) -> int:
         """Lateral size of the propagation box, with an ``nxy // 2`` FFT margin."""
-        return self.nxy + (self.nxy // 2) * 2 if pad_fft else self.nxy
+        return padded_nxy(self.nxy, pad_fft)
 
     def crowd(
         self,

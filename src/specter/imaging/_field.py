@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 import torch
 
 from ..aberrations import defocus_midplane_shift
-from ..arrays import pad_volume
+from ..arrays import pad_volume, padded_nxy
 from ..fft import RadialSpectrum, apply_radial_envelope_
 from ..ice import (
     IceBank,
@@ -415,7 +415,7 @@ class Sample:
             self.profile is not None
             and (self.profile.mode != "flat" or self.profile.tilt != 0.0)
         )
-        pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
+        pad_nxy = padded_nxy(nxy, pad_fft)
         # Every view of one sample sees the same specimen, so it is propagated
         # once and the wave shared between the images.
         V = pad_volume(sample.volume, nxy, nz, None, pad_fft, xy_pad_mode="reflect")

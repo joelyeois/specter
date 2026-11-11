@@ -18,7 +18,7 @@ import torch
 
 import specter
 from specter import rotations
-from specter.arrays import compute_nz
+from specter.arrays import compute_nz, padded_nxy
 from specter.config import ParticleStackConfig, validate_config
 from specter.ice import IceBank, RandomIcemaker, resolve_icemaker
 from specter.image import normalize_particles
@@ -654,11 +654,7 @@ def _resolve_batchsize(
     if config.batchsize != "auto":
         return int(config.batchsize)
     nz = compute_nz(config.n_pixels, config.ice_thickness, run.pixel_size)
-    pad_nxy = (
-        config.n_pixels + (config.n_pixels // 2) * 2
-        if config.pad_fft
-        else config.n_pixels
-    )
+    pad_nxy = padded_nxy(config.n_pixels, config.pad_fft)
     ice = config.ice_model not in (None, "none")
     sizing_device = min(devices, key=available_memory_bytes)
     batchsize = recommend_batchsize(

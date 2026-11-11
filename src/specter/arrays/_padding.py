@@ -136,6 +136,25 @@ def compute_nz(base_nz: int, ice_thickness: float | None, pixel_size: float) -> 
     return int(ice_thickness // pixel_size)
 
 
+def padded_nxy(nxy: int, pad_fft: bool) -> int:
+    """
+    Lateral size of a box after `pad_volume`'s FFT margin.
+
+    Parameters
+    ----------
+    nxy : int
+        Lateral size before padding, in pixels.
+    pad_fft : bool
+        Whether the ``nxy // 2`` margin is added on each side.
+
+    Returns
+    -------
+    int
+        ``nxy + 2 * (nxy // 2)`` with the margin, else `nxy`.
+    """
+    return nxy + (nxy // 2) * 2 if pad_fft else nxy
+
+
 def pad_volume(
     volume: torch.Tensor,
     nxy: int,

@@ -23,6 +23,7 @@ from ._padding import (
     compute_nz,
     fourier_crop,
     pad_volume,
+    padded_nxy,
     radial_symmetrize,
 )
 from ._profiles import radial_profile_2d, radial_profile_3d
@@ -51,6 +52,7 @@ __all__ = [
     "kgrid_1d",
     "kgrid_2d",
     "pad_volume",
+    "padded_nxy",
     "radial_grid_2d",
     "radial_grid_3d",
     "radial_profile_2d",

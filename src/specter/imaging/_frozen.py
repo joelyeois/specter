@@ -15,6 +15,7 @@ import torch
 
 from .._defaults import CC_MM, DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ..aberrations import FocalSpread
+from ..arrays import padded_nxy
 from ..aberrations import defocus_midplane_shift
 from ..constants import energy_to_wavelength
 from ..detectors import detector_mtf, dqe0_for_detector
@@ -134,7 +135,7 @@ def simulate_frozen(
     """
     from ..inelastic import FrozenPlasmonForward
 
-    pad_nxy = nxy + (nxy // 2) * 2 if pad_fft else nxy
+    pad_nxy = padded_nxy(nxy, pad_fft)
     scattering = IterativeScattering(
         pad_nxy,
         voxel_size,

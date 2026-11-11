@@ -42,7 +42,7 @@ class MicrotubuleInstance:
     Attributes
     ----------
     tube_id : int
-        Index of this microtubule within its species.
+        Index of this microtubule among every one placed.
     code : str
         Dimer structure the tube was built from.
     axis_xyz : torch.Tensor
@@ -309,13 +309,15 @@ def place_microtubules(
     instances: list[FilamentInstance] = []
     tubes: list[MicrotubuleInstance] = []
 
+    # Numbered across specs, so no two tubes share an id.
+    tube_id = 0
     for spec in specs:
         lattice = spec.lattice()
         code = spec.code or extract_mt_dimer(pdb_cache_dir=pdb_cache_dir)
         length = spec.length if spec.length is not None else diagonal
         n_rings = max(2, int(round(length / lattice.dimer_repeat)))
 
-        for tube_id in range(spec.n_copies):
+        for _ in range(spec.n_copies):
             origin = torch.rand(3, generator=generator) * extent_xyz
             direction = _sample_direction(
                 length, extent_xyz, spec.confine_to_slab, generator
@@ -329,5 +331,6 @@ def place_microtubules(
                     tube_id=tube_id, code=code, axis_xyz=axis, lattice=lattice
                 )
             )
+            tube_id += 1
 
     return instances, tubes

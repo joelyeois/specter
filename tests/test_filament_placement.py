@@ -291,3 +291,16 @@ def test_place_filaments_start_within_volume_extent():
     for inst in instances:
         assert bool((inst.position_xyz >= 0).all())
         assert bool((inst.position_xyz <= extent_xyz).all())
+
+
+def test_same_code_specs_are_separate_filaments() -> None:
+    """Two specs of one code, one filament each, give two filaments: ids are
+    numbered across specs, so the boundary between them is seen."""
+    from specter.specimen.tomogram._filaments import _filament_runs
+
+    specs = [
+        FilamentSpec(code="X", step=10.0, flex_deg=5.0, n_copies=1, n_monomers=4),
+        FilamentSpec(code="X", step=10.0, flex_deg=5.0, n_copies=1, n_monomers=4),
+    ]
+    instances = place_filaments(specs, (32, 64, 64), 4.0, generator=seeded(0))
+    assert [len(run) for run in _filament_runs(instances)] == [4, 4]

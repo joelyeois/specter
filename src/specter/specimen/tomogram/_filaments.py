@@ -76,17 +76,10 @@ def _filament_runs(
     shared by instance labelling and pick export so the two ground truths
     cannot disagree about what an object is.
 
-    A boundary is a change of ``(code, filament_id)`` between CONSECUTIVE
-    instances, not a change of the key alone. Both placers number
-    filaments with ``range(spec.n_copies)``, restarting per spec, so every
-    spec contributes a filament 0; each emits one filament's monomers
-    consecutively, which is what makes runs the right unit.
-
-    One case this cannot separate: a spec contributing exactly one
-    filament, followed immediately by a same-`code` filament 0 from the
-    next spec. Separating those needs the placers to number filaments
-    globally, which is the real fix if it ever matters -- `filament_id` is
-    internal and never written to picks.
+    A boundary is a change of ``(code, filament_id)`` between consecutive
+    instances. Both placers number filaments across every spec they place
+    and emit one filament's monomers consecutively, so each run is exactly
+    one filament. `filament_id` is internal and never written to picks.
     """
     run: list[FilamentInstance] = []
     previous: tuple[str, int] | None = None
@@ -209,19 +202,11 @@ class _FilamentStageMixin:
         765 separate objects, and a picker evaluated against them is being
         asked to find monomers.
 
-        Grouped on runs of equal ``(code, filament_id)`` rather than on
-        the key alone. Both placers number filaments with
-        ``range(spec.n_copies)``, restarting per spec, so two specs each
-        contribute a filament 0; keying on the pair alone would merge
-        them. Every placer emits one filament's monomers consecutively,
-        so a change of key is a filament boundary.
-
-        That leaves one case this cannot separate: a spec contributing
-        exactly one filament, immediately followed by a filament of the
-        same `code` and id from the next spec. Distinguishing those needs
-        the placers to number filaments globally, which is the real fix if
-        it ever matters -- `filament_id` is internal, used only here and
-        never written to picks.
+        Grouped on runs of equal ``(code, filament_id)`` (see
+        `_filament_runs`): the placers number filaments across specs and
+        emit each one's monomers consecutively, so each run is one
+        filament. `filament_id` is internal, used only here and never
+        written to picks.
         """
         ids: list[int] = []
         current = next_instance_id

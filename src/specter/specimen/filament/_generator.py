@@ -206,7 +206,8 @@ class FilamentInstance:
     Microtubules (``_tube.place_microtubules``) reuse this type so that the
     tomogram generator's existing filament stamping renders them unchanged;
     for those, `filament_id` identifies the tube and `protofilament_index`
-    says which of its protofilaments the copy belongs to.
+    says which of its protofilaments the copy belongs to. Ids are unique
+    across every spec a placer handles.
     """
 
     code: str
@@ -266,8 +267,10 @@ def place_filaments(
     extent_xyz = torch.tensor(target_shape[::-1], dtype=torch.float32) * voxel_size
 
     instances: list[FilamentInstance] = []
+    # Numbered across specs, so no two filaments share an id.
+    filament_id = 0
     for spec in specs:
-        for filament_id in range(spec.n_copies):
+        for _ in range(spec.n_copies):
             n = _monomer_count(spec.n_monomers, generator)
             origin_xyz = torch.rand(3, generator=generator) * extent_xyz
             positions = generate_filament_path(
@@ -284,4 +287,5 @@ def place_filaments(
                         rotation_matrix=rotations[i],
                     )
                 )
+            filament_id += 1
     return instances

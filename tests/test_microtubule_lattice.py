@@ -976,3 +976,17 @@ def test_filament_runs_handles_a_single_monomer_filament():
     instances = place_filaments([spec], (300, 1200, 1200), 5.0, rng)
     runs = list(_filament_runs(instances))
     assert len(runs) == 4 and all(len(r) == 1 for r in runs)
+
+
+def test_same_code_microtubule_specs_get_distinct_tube_ids() -> None:
+    """Tube ids are numbered across specs, so two specs of one code never
+    produce two tubes with the same id."""
+    specs = [
+        MicrotubuleSpec(code="x.cif", n_copies=1, length=2000.0),
+        MicrotubuleSpec(code="x.cif", n_copies=1, length=2000.0),
+    ]
+    instances, tubes = place_microtubules(
+        specs, (64, 128, 128), 8.0, generator=seeded(0)
+    )
+    assert [t.tube_id for t in tubes] == [0, 1]
+    assert {inst.filament_id for inst in instances} == {0, 1}

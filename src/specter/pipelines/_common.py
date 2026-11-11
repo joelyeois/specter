@@ -371,12 +371,28 @@ def _seed_or_draw(seed: int | None, *, announce: bool = True) -> int:
         The seed the run was seeded with.
     """
     if seed is None:
-        seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
-        specter.seed(seed)
-        if announce:
-            console.print(f"[dim]No seed given -- using seed={seed}[/dim]")
-    else:
-        specter.seed(seed)
+        seed = _draw_seed(announce=announce)
+    specter.seed(seed)
+    return seed
+
+
+def _draw_seed(*, announce: bool = True) -> int:
+    """
+    A fresh seed from the global stream, printed unless `announce` is False.
+
+    Parameters
+    ----------
+    announce : bool, optional
+        Whether to print the drawn seed.
+
+    Returns
+    -------
+    int
+        A seed in ``[0, 2**31 - 1)``.
+    """
+    seed = int(torch.randint(0, 2**31 - 1, (1,)).item())
+    if announce:
+        console.print(f"[dim]No seed given -- using seed={seed}[/dim]")
     return seed
 
 

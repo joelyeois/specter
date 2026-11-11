@@ -214,8 +214,8 @@ class TomogramConfig:
     pdb_cache_dir: str = pdb_cache_dir_setting()
     seed: int | None = seed_setting(
         "specimen assembly: placement, orientations and membrane shapes",
-        "Tomogram i of --n_tomograms uses seed + i. Unset leaves the run "
-        "unseeded, so every run differs.",
+        "Tomogram i of --n_tomograms uses seed + i. Unset draws one and prints "
+        "it, so every run differs and any run can be repeated.",
     )
 
     # --- Membranes (optional) ---

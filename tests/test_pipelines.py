@@ -773,3 +773,30 @@ def test_run_tilt_series_writes_the_bend_each_tilt_imaged(tmp_path: Path) -> Non
         np.testing.assert_allclose(
             rotation[:2, 2], [-fraction * w_x, -fraction * w_y], rtol=1e-3
         )
+
+
+def test_unseeded_tomogram_builds_differ_and_are_repeatable(tmp_path: Path) -> None:
+    """With no seed, `run_build_tomogram` draws one from the global stream: two
+    runs place their beads differently, and after the same `specter.seed` they
+    place them identically."""
+    import specter
+    from specter.config import TomogramConfig
+
+    def picks(name: str) -> str:
+        run_build_tomogram(
+            TomogramConfig(
+                target_shape=[16, 48, 48],
+                voxel_size=10.0,
+                beads=[{"radius": 30.0, "n_copies": 3}],
+                device="cpu",
+                output_dir=str(tmp_path / name),
+            )
+        )
+        (pick_file,) = (tmp_path / name).glob("gold-bead*_point.ndjson")
+        return pick_file.read_text()
+
+    assert picks("a") != picks("b")
+    specter.seed(5)
+    first = picks("c")
+    specter.seed(5)
+    assert picks("d") == first

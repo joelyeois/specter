@@ -62,6 +62,7 @@ from specter.specimen._parallel_render import (
 from specter.devices import parse_device, resolve_available_device
 from specter.progress import console, section
 from ._common import (
+    _draw_seed,
     _print_total_time,
     _deterministic_tracked_path,
     _tracked_output_dir,
@@ -221,8 +222,8 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         overwrite them across tomograms. If ``config.seed`` is set, each
         tomogram also gets its own seed (``config.seed``, ``config.seed +
         1``, ...) so runs are reproducible but distinct; if ``config.seed``
-        is ``None``, each call simply draws from wherever the global RNG
-        state already is, which likewise differs run to run.
+        is ``None``, one is drawn from the global stream and printed, and
+        used the same way.
     """
     # n_tomograms is a call argument rather than a config field, so
     # validate_config never sees it.
@@ -246,6 +247,12 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
             "-- there is only one carbon film per tomogram, at most one "
             "[[carbon_film]] table is allowed."
         )
+    # Every component of the build takes its own seed, and one left unseeded
+    # draws the same specimen every run; drawing the run's seed here makes
+    # unseeded runs differ and lets any of them be repeated. The global
+    # stream is not reseeded, so a seeded build is the one it always was.
+    if config.seed is None:
+        config = dataclasses.replace(config, seed=_draw_seed())
     with _tracked_output_dir(config, "tomograms") as base_output_dir:
         for i in range(n_tomograms):
             if n_tomograms > 1:

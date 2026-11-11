@@ -415,3 +415,30 @@ def test_mrc_round_trip_keeps_values_and_voxel_size(tmp_path) -> None:
 
     write_mrc(tmp_path / "a.mrcs", np.ones((2, 4, 4)))
     assert read_mrc(tmp_path / "a.mrcs")[0].shape == (2, 4, 4)
+
+
+def test_phase_shift_is_written_in_degrees_and_read_back(tmp_path) -> None:
+    """RELION's rlnPhaseShift is in degrees; specter carries radians. A
+    nonzero shift is needed: zero reads the same in either unit."""
+    n = 3
+    phase = torch.tensor([0.0, math.pi / 2, math.pi])
+    create_particle_starfile(
+        torch.randn(n, 16, 16),
+        rotations=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(n, 1),
+        translations=torch.zeros(n, 2),
+        ctf_params={
+            "cs": torch.full((n,), 2.7e7),
+            "dfu": torch.full((n,), 1e4),
+            "phaseshift": phase,
+        },
+        dx=1.0,
+        voltage=300.0,
+        alpha=0.1,
+        filename="p",
+        output_dir=str(tmp_path),
+    )
+    df = starfile.read(tmp_path / "p.star")
+    df = df["particles"] if isinstance(df, dict) else df
+    assert df["rlnPhaseShift"].to_numpy() == pytest.approx([0.0, 90.0, 180.0])
+    back = extract_parameters_from_starfile(str(tmp_path / "p.star"))
+    torch.testing.assert_close(back.ctf_params["phaseshift"], phase)

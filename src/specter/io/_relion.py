@@ -486,7 +486,8 @@ def create_particle_starfile(
         "rlnDefocusU": dfu,
         "rlnDefocusV": dfv,
         "rlnDefocusAngle": dfang,
-        "rlnPhaseShift": pshift,
+        # RELION reads the phase shift in degrees; specter carries radians.
+        "rlnPhaseShift": torch.as_tensor(pshift) * 180 / torch.pi,
         "rlnOriginXAngst": translations[:, 0],
         "rlnOriginYAngst": translations[:, 1],
     }

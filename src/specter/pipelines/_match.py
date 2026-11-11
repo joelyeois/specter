@@ -406,69 +406,68 @@ def run_match(config: MatchConfig) -> MatchReport:
         if not report.pose.passed:
             render_report(report, pose_stack, exp_probe, out_dir)
             _write_matched_toml(out_dir, base, report, complete=False)
-            return report
-
-        # ---------------------------------------------------------------- 3
-        probe_base = _derive_detector_settings(
-            config,
-            report,
-            base,
-            voltage,
-            pixel_size,
-            pixel_size_p,
-            pixel_note,
-            probe_geometry,
-        )
-
-        # ---------------------------------------------------------------- 4
-        _probe_ice_and_crowding(
-            config,
-            runner,
-            base,
-            probe_base,
-            report,
-            probe_dir,
-            exp_probe,
-            diameter,
-            pixel_size_p,
-            seed,
-        )
-
-        # ---------------------------------------------------------------- 5
-        sim_a, exp_b = _compare_two_seeds(
-            config, runner, base, report, probe_dir, exp, pixel_size, seed
-        )
-
-        # ---------------------------------------------------------------- 6
-        section("Writing matched.toml and the report")
-        toml_path = _write_matched_toml(out_dir, base, report, complete=True)
-        md_path, png_path = render_report(report, sim_a, exp_b, out_dir)
-        console.print(
-            f"[green]✓[/green] {toml_path}\n[green]✓[/green] {md_path}\n[green]✓[/green] {png_path}"
-        )
-        console.print(f"[bold]{report.verdict}[/bold]")
-
-        if config.write_stack > 0:
-            section(
-                f"Simulating {config.write_stack} particles with the matched config"
+        else:
+            # ---------------------------------------------------------------- 3
+            probe_base = _derive_detector_settings(
+                config,
+                report,
+                base,
+                voltage,
+                pixel_size,
+                pixel_size_p,
+                pixel_note,
+                probe_geometry,
             )
-            # In-process, so its progress shows on the terminal.
-            _simulate_job(
-                _job(
-                    base,
-                    out_dir,
-                    "matched_particles",
-                    config.write_stack,
-                    seed + 2,
-                    device=runner.devices[0],
+
+            # ---------------------------------------------------------------- 4
+            _probe_ice_and_crowding(
+                config,
+                runner,
+                base,
+                probe_base,
+                report,
+                probe_dir,
+                exp_probe,
+                diameter,
+                pixel_size_p,
+                seed,
+            )
+
+            # ---------------------------------------------------------------- 5
+            sim_a, exp_b = _compare_two_seeds(
+                config, runner, base, report, probe_dir, exp, pixel_size, seed
+            )
+
+            # ---------------------------------------------------------------- 6
+            section("Writing matched.toml and the report")
+            toml_path = _write_matched_toml(out_dir, base, report, complete=True)
+            md_path, png_path = render_report(report, sim_a, exp_b, out_dir)
+            console.print(
+                f"[green]✓[/green] {toml_path}\n[green]✓[/green] {md_path}\n[green]✓[/green] {png_path}"
+            )
+            console.print(f"[bold]{report.verdict}[/bold]")
+
+            if config.write_stack > 0:
+                section(
+                    f"Simulating {config.write_stack} particles with the matched config"
                 )
-            )
+                # In-process, so its progress shows on the terminal.
+                _simulate_job(
+                    _job(
+                        base,
+                        out_dir,
+                        "matched_particles",
+                        config.write_stack,
+                        seed + 2,
+                        device=runner.devices[0],
+                    )
+                )
 
-        _log_to_job(out_dir, report)
-        console.print(
-            f"[dim]Done in {format_elapsed(time.perf_counter() - t_start)}[/dim]"
-        )
-        return report
+    # After the job closes: `Job.__exit__` rewrites job.json from its own
+    # record, which would drop results merged in while it was open.
+    _log_to_job(out_dir, report)
+    console.print(f"[dim]Done in {format_elapsed(time.perf_counter() - t_start)}[/dim]")
+    return report
 
 
 def _read_refinement(

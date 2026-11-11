@@ -411,7 +411,10 @@ def _write_csfile_with_random_poses(
 def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
     """A stack specter simulated itself is matched by the recipe: the pose check
     passes, the matched config is crowded at a candidate spacing,
-    and matched.toml loads back as a ParticleStackConfig."""
+    matched.toml loads back as a ParticleStackConfig, and the tracked run's
+    job.json records the results."""
+    import json
+
     from specter.config import load_config
     from specter.pipelines import run_match, run_particle_stack
 
@@ -455,10 +458,14 @@ def test_run_match_on_a_synthetic_experiment(tmp_path: Path) -> None:
         write_stack=4,  # and the in-process path for the final stack
         seed=7,
         output_dir=str(tmp_path / "out"),
+        project="synthetic",
     )
     report = run_match(cfg)
     assert report.pose.passed, vars(report.pose)
-    out = tmp_path / "out"
+    out = tmp_path / "out" / "synthetic" / "match" / "J001"
+    job = json.loads((out / "job.json").read_text())
+    assert job["status"] == "complete"
+    assert job["params"]["results"]["verdict"] == report.verdict
     assert (out / "probes" / "pose_check.log").exists()
     with mrcfile.open(out / "matched_particles.mrcs") as m:
         assert m.data.shape == (4, box, box)

@@ -926,15 +926,28 @@ class PDB:
 
         Returns
         -------
+        atomic_numbers : list of int
+            Atomic number per atom of the completed model, in file/chain/
+            residue/atom order. Alternate conformers after the first, the
+            zero-occupancy dummies backfilled only to type their neighbours,
+            and (when a library was used) the hydrogens gemmi zero-
+            occupancies as ambiguous are all omitted.
+        positions : list of list of float
+            Cartesian ``[x, y, z]`` coordinates per atom, Å, aligned with
+            `atomic_numbers`.
         species : list of str or None
-            One entry per atom, in the same file/chain/residue/atom order
-            as `get_atoms_and_coordinates`. `None` where no neighbors could
-            be determined (e.g. isolated ions, or unresolved components).
+            Bonded-neighbour descriptor per atom, aligned with
+            `atomic_numbers`. `None` where no neighbors could be determined
+            (e.g. isolated ions, or unresolved components).
         b_factors : list of float
             Isotropic B-factor per atom, Å². Atoms the monomer library adds
             carry gemmi's own value for them (0 for one built from ideal
             geometry), since the file supplies no B for an atom it does not
             contain.
+        used_library : bool
+            Whether a monomer library with entries was loaded, so that the
+            model could be completed. Always False for a non-mmCIF input,
+            which returns the file's own atoms with every species `None`.
         """
         if not filepath.lower().endswith("cif"):
             warnings.warn(

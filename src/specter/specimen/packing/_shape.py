@@ -275,6 +275,12 @@ def _rotation_cache(
         Trimmed boolean footprint per orientation.
     geom : list of tuple
         ``(nz, ny, nx, hz, hy, hx)`` per orientation, Python ints.
+    centre_solid : list of bool
+        Whether the footprint's own center voxel is set. Only when it is
+        does "center voxel already occupied" imply a guaranteed collision,
+        which is what licenses the loop's cheap pre-test -- a molecule with
+        a hollow center (a shell, a channel) can legitimately be placed
+        over an occupied center voxel.
     probes : list of np.ndarray
         Up to `_N_PROBE` (i, j, k) indices of set voxels per orientation,
         sampled once. A placement whose footprint covers an occupied voxel
@@ -283,12 +289,6 @@ def _rotation_cache(
         time, which is what makes it worth checking a few dozen voxels
         before the full footprint (measured 7.3 us against 46.6 us, and
         catching 100% of rejections at 25% occupancy).
-    centre_solid : list of bool
-        Whether the footprint's own center voxel is set. Only when it is
-        does "center voxel already occupied" imply a guaranteed collision,
-        which is what licenses the loop's cheap pre-test -- a molecule with
-        a hollow center (a shell, a channel) can legitimately be placed
-        over an occupied center voxel.
     origin_offsets : np.ndarray
         Per orientation, where the molecule origin sits relative to the
         footprint's anchor voxel ``(hz, hy, hx)``, in voxels of `mask`'s own
@@ -538,8 +538,9 @@ def pack_shapes_3d(
         A per voxel, shared by `species_masks`, `occupancy` and `region_mask`.
     occupancy : torch.Tensor, optional
         Boolean (Z, Y, X) grid, True where an instance may NOT go. Seed it
-        with membranes/filaments/carbon already rendered. Modified in place
-        as instances are placed. Default None (empty).
+        with membranes/filaments/carbon already rendered. The argument is
+        not modified: the packer works on a copy and returns the updated
+        grid as `occupancy`. Default None (empty).
     region_mask : torch.Tensor, optional
         Boolean (Z, Y, X); each attempt's anchor voxel (the middle of its
         trimmed footprint, not necessarily the molecule origin) is drawn

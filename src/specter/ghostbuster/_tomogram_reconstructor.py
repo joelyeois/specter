@@ -546,9 +546,9 @@ class TomogramReconstructor(_BaseReconstructor):
 
         loss = total_loss / max(len(tilt_indices), 1)
 
-        # Gathered/averaged across ranks under multi-GPU (DDP) for logging
-        # only -- `loss` itself (fed to manual_backward below) stays the
-        # local, per-rank value; DDP synchronises gradients on its own.
+        # Gathered/averaged across ranks under multi-GPU for logging
+        # only -- `loss` itself (fed to `_optimise` below) stays the
+        # local, per-rank value; `_optimise` averages the gradients itself.
         # Kept on the device, as in `Reconstructor`: a `.cpu()` here is a
         # host sync per step. The lists are read once, when the metrics are
         # built.
@@ -564,7 +564,7 @@ class TomogramReconstructor(_BaseReconstructor):
     def on_fit_start(self) -> None:
         """Create run directory and write hyperparameter metadata.
 
-        Rank-0-only under multi-GPU (DDP): every replica would otherwise
+        Rank-0-only under multi-GPU: every replica would otherwise
         race to create/write the same files.
         """
         if not self._make_run_dir():
@@ -583,10 +583,10 @@ class TomogramReconstructor(_BaseReconstructor):
     def on_train_epoch_end(self) -> None:
         """Save per-epoch volume as MRC.
 
-        Rank-0-only under multi-GPU (DDP): ``self.V`` is already identical
-        across replicas at this point (kept in sync by DDP's gradient
-        all-reduce every step), so every rank would otherwise race to write
-        the same file.
+        Rank-0-only under multi-GPU: ``self.V`` is already identical
+        across replicas at this point (kept in sync by the gradient
+        all-reduce in ``_optimise`` every step), so every rank would
+        otherwise race to write the same file.
         """
         if self._run_dir is None or not self.is_global_zero:
             return
@@ -598,7 +598,7 @@ class TomogramReconstructor(_BaseReconstructor):
     def on_fit_end(self) -> None:
         """Save final reconstructed volume and training metrics.
 
-        Rank-0-only under multi-GPU (DDP), same reasoning as
+        Rank-0-only under multi-GPU, same reasoning as
         ``on_train_epoch_end``.
         """
         self._save_metrics()

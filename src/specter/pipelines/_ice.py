@@ -102,11 +102,11 @@ def _report_config(metadata: dict, device: str, elapsed: float) -> None:
     - `sk_loss` is measured on the coordinates as stored, so its scale
       depends on the box size and the storage encoding as well as on
       convergence. At n=256, dx=1.0 the bundled `ice_data/ice_cache` spans
-      4e-4 to 0.02 under the current fixed-point encoding.
+      2e-4 to 0.016 under the current fixed-point encoding.
     - `E_per_atom` is not a distance from `mlbop_target` either: that
-      target is one weighted term in a combined loss, not a value the
-      optimisation is expected to reach. Bundled configs sit between
-      -0.19 and -0.27 eV/atom against a -0.413 target.
+      target is one weighted term in a combined loss, so the optimisation
+      lands near it rather than on it. Bundled configs sit between
+      -0.4148 and -0.4139 eV/atom against a -0.413 target.
 
     `stopped_early` is the one reliable signal here, and it answers a
     narrow question: whether the loss plateaued within the step budget or

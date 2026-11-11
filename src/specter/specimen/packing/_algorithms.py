@@ -3,8 +3,9 @@ Multi-species hard-sphere packing for specimen generation.
 
 :func:`pack_hard_spheres_3d` -- Random Sequential Addition (RSA) [1]_, fully
 vectorized across candidates, fast (sub-second to a few seconds at a few
-thousand instances). This is the backend behind `specter build tomogram`
-(`specimen.tomogram.TomogramSpecimenGenerator`).
+thousand instances). `specter build tomogram`
+(`specimen.tomogram.TomogramSpecimenGenerator`) places membrane instances
+and gold beads with it; proteins go through `pack_shapes_3d`.
 
 RSA saturates well below random close packing: identical spheres in three
 dimensions reach 0.3841 at saturation [2]_ (0.38278 in [3]_). This packer

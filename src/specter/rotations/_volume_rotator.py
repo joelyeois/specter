@@ -388,7 +388,9 @@ class VolumeRotator(DeviceModule):
         Apply the isotropic rotate-and-translate transform to normalized
         (grid_sample-convention) sampling points.
 
-        Recenters on `self.center` (RELION convention only), rescales to
+        Recenters on `self.center_dc`, the RELION centre ``n // 2`` on each
+        axis (``origin="relion"`` only, whatever the constructor's
+        `origin`), rescales to
         isotropic pixel-like units, rotates by R, undoes the rescale/recenter,
         then translates by t. Shared by `_build_grid` (identity base grid) and
         `sample_rotated_slices` (ROI query points mapped into this same

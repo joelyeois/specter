@@ -154,7 +154,7 @@ Each of these looks like a safe simplification and is not. Nothing fails when on
 - **Pose optimisers use `weight_decay=0`.** AdamW's default pulls refined parameters towards zero.
 
 ### Dependencies and caches
-- **torch-ctf is pinned `<0.6` because `ctf/_legacy.py` multiplies by `rho_max**3`.** Lift the pin and delete the workaround together, never separately. `ctf/` has no call sites on purpose: it is the planned successor to the legacy backend, not dead code.
+- **torch-ctf is pinned `<0.6` because `ctf/_legacy.py` multiplies by `rho_max**3`.** Lift the pin and delete the workaround together, never separately. `ctf/` is the opt-in `Optics(aberration_backend="torch_ctf")` path (`imaging/_engines.py`, `imaging/_waves.py`) and the planned successor to the default `"legacy"` backend, not dead code.
 - **Bump `_PARSED_CACHE_VERSION`** when changing `_build_typed_model`, `get_atoms_and_coordinates` or `get_atom_species`, or stale parsed structures are returned silently.
 - **Never copy user files into the PDB cache.** Everything in it must be re-derivable, which is what makes `specter cache clean` safe.
 

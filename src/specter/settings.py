@@ -26,8 +26,8 @@ image formation, and which of them a class accepts says what it models:
 - `Crowding` and `Packing`: how duplicates of a particle template are
   placed around it, and which collision test decides where they fit.
 
-Per-image data (poses, CTF parameters, dose, coincidence radius, potential
-scale) stays as direct tensor arguments, and the two scalars that define
+Per-image data (poses, CTF parameters, dose, coincidence radius) stays as
+direct tensor arguments, and the two scalars that define
 the sampling of the experiment, ``pixel_size`` and ``voltage``, are direct
 arguments too, since every stage consumes them.
 

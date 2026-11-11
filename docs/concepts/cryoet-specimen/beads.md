@@ -115,10 +115,10 @@ SPECTER deliberately does **not** expose the band limit
 (\(\ell_{\max} = 6\)) and spectrum (flat, equal power per mode).
 \(\ell_{\max} = 6\) puts
 the finest lumps at ~30° of arc, roughly a quarter of the bead across,
-which is the scale colloidal gold irregularity shows. The flat spectrum
-is a deliberate departure from the membrane backend's
-\(\propto \ell^{-2}\) default: that encodes the Helfrich (1973) thermal
-bending spectrum of a lipid bilayer, which has no analogue in a metal
+which is the scale colloidal gold irregularity shows. The spectrum is
+flat rather than the coefficient variance
+\(\propto [\ell(\ell+1)]^{-2}\) of the Helfrich (1973) thermal bending
+spectrum of a lipid bilayer, which has no analogue in a metal
 nanoparticle. A bead's irregularity comes from growth and twinning, not
 bending modes. Neither is known well enough to fit, so exposing them
 would only invite tuning an uncalibrated model until an image looked

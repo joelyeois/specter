@@ -43,17 +43,18 @@ def _project_to_surface(
 
     Each step is a one-dimensional Newton step along the unit normal ``n``:
     the point moves by ``phi / s``, where ``s`` is the slope of ``phi``
-    along ``n``, clamped below at 1. The slope is not 1 everywhere. A field
-    built from two distance transforms is ``dist_out - dist_in``, which
-    leaves no voxel centre with ``|phi|`` below one spacing, so across the
-    cell that straddles the surface ``phi`` changes by two spacings over
-    one and ``s ~= 2``. A step of ``phi`` there overshoots by the distance
-    it set out to cover, and the point oscillates about the surface at
-    constant amplitude instead of converging; on an 8 A grid only ~2% of
-    candidates ended within ``phi_tolerance_angstrom``. The clamp keeps a
-    step no longer than ``|phi|``, which bounds the distance to the surface
-    in a distance field, so where ``s < 1`` (near the medial axis, or in a
-    smooth-min blend) the step is the plain ``phi`` it would otherwise be.
+    along ``n``, clamped below at 1. A membrane field is a signed distance
+    (`regularise` returns one), so ``s`` is close to 1 and the step is close
+    to plain ``phi``. The slope is measured rather than assumed because a
+    field that is not a distance can have ``s > 1`` across the surface: a
+    field built as ``dist_out - dist_in`` from two distance transforms
+    changes by two spacings over the cell that straddles the surface, so
+    ``s ~= 2``, and a step of ``phi`` there overshoots by the distance it
+    set out to cover, leaving the point oscillating about the surface at
+    constant amplitude instead of converging. The clamp keeps a step no
+    longer than ``|phi|``, which bounds the distance to the surface in a
+    distance field, so where ``s < 1`` (near the medial axis) the step is
+    the plain ``phi`` it would otherwise be.
     """
     eps = 0.5 * field.spacing_angstrom
     x = points_xyz.clone()
@@ -90,8 +91,8 @@ def sample_surface_sites(
     land close enough to the surface and are not within
     ``min_spacing_angstrom`` of any already-accepted site
     (self-avoiding-walk style, not a true blue-noise Poisson-disc sampler).
-    About 96-99% of candidates converge onto the surface, on working grids
-    from 1 to 8 A and on both shape backends, so the default budget of 20
+    About 98-99% of candidates converge onto the surface (measured on the
+    10 A geometry grid for every organelle kind), so the default budget of 20
     draws per site is spent on the spacing test rather than on failed
     projections. Measured on a 110 A vesicle at 40 A spacing, whose random
     sequential adsorption limit is about 66 sites: 50 sites always filled,

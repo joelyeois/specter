@@ -46,8 +46,8 @@ def find_specter_project_root(start: str | Path | None = None) -> Path:
 
     Pure: never creates the marker, never prompts. `ensure_project_root`
     is the find-or-create counterpart, and is deliberately the only thing
-    with side effects -- a non-main DDP rank calls *this* to agree on a
-    path without racing its siblings to create anything.
+    with side effects -- a process that does not own the run calls *this*
+    to agree on a path without racing its siblings to create anything.
 
     Parameters
     ----------
@@ -79,8 +79,8 @@ def ensure_project_root(
 
     The find-or-create counterpart to `find_specter_project_root`, and the
     only function here with side effects. Call it exactly once per run,
-    from the process that owns the run -- see that function's note on DDP
-    ranks.
+    from the process that owns the run -- see that function's note on
+    processes that do not.
 
     When no ancestor carries a marker, ``start`` becomes a new project
     root. Whether that is confirmed first depends on ``interactive``:

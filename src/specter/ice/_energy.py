@@ -1,5 +1,5 @@
 """
-ML-BOP coarse-grained water potential — structural diagnostic for ice beads.
+ML-BOP coarse-grained water potential for ice beads.
 
 Implements the machine-learned bond-order potential (ML-BOP) for
 coarse-grained water, as described in:
@@ -24,12 +24,14 @@ Total energy (standard Tersoff normalization, since b_ij != b_ji in general):
 
     E = 0.5 * sum_i sum_{j != i} f_C(r_ij) * [f_R(r_ij) + b_ij * f_A(r_ij)]
 
-This is used here purely as a **diagnostic**: each icemaker bead is a
-coarse-grained water molecule, so scoring a generated configuration with
-ML-BOP gives a lower-is-more-ice-like structural sanity check that is
-independent of whatever objective the icemaker itself optimized (RDF
-matching, kernel matching, etc.). It is not wired into any generation
-hot path — call it manually on coordinates you want to inspect.
+Each icemaker bead is a coarse-grained water molecule, so ML-BOP scores
+how ice-like a configuration's local structure is. The energy drives
+generation: :meth:`~specter.ice.GradientSKIcemaker.anneal` integrates its
+forces, :meth:`~specter.ice.GradientSKIcemaker.optimize` adds
+``mlbop_strength * (E_per_atom - mlbop_target) ** 2`` to the S(k) loss,
+and :class:`~specter.ice._bank.IceBank` uses it to relax tile seams when
+``relax_steps > 0``. It is also recorded as a per-configuration quality
+measure in the ice library.
 
 UNITS
 -----

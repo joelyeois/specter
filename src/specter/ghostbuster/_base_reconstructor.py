@@ -168,7 +168,7 @@ class _BaseReconstructor(DeviceModule):
         Create ``run_dir`` and its ``epochs/`` folder if this rank writes.
 
         Returns False when there is no run directory or this is not the
-        global-zero rank: under multi-GPU (DDP) every replica would
+        global-zero rank: under multi-GPU every replica would
         otherwise race to create and write the same files.
         """
         if self._run_dir is None or not self.is_global_zero:
@@ -280,16 +280,16 @@ class _BaseReconstructor(DeviceModule):
         """
         Reduce a per-rank scalar to a single global value, for logging only.
 
-        Under multi-GPU (DDP), each rank computes ``value`` from a different
-        local batch -- averaging across ranks here (matching DDP's own
-        gradient all-reduce semantics) makes the logged value reflect the
+        Under multi-GPU, each rank computes ``value`` from a different
+        local batch -- averaging across ranks here (matching the gradient
+        all-reduce in ``_optimise``) makes the logged value reflect the
         true global-batch loss, not just one rank's local view. A no-op
         (returns ``value`` detached) on one device, or outside a fit (e.g.
         calling ``_compute_loss`` directly).
 
         Only ever call this on a value being logged/recorded. Never use its
-        result in place of the original ``value`` for ``backward()`` -- DDP
-        already synchronises gradients correctly via its own hook, and
+        result in place of the original ``value`` for ``backward()`` --
+        ``_optimise`` already averages the gradients across ranks, and
         averaging the loss a second time here before backward would double
         that averaging and silently change the effective learning rate.
         """
@@ -305,11 +305,11 @@ class _BaseReconstructor(DeviceModule):
     ) -> dict[str, Any] | None:
         """Build training metrics (loss, lr) and, by default, save them to JSON.
 
-        Rank-0-only under multi-GPU (DDP) to avoid every replica racing to
+        Rank-0-only under multi-GPU to avoid every replica racing to
         write the same file. ``log_total_loss`` is
         gathered/averaged across ranks at the point it is recorded (see
-        ``_gather_for_logging``), so under DDP the saved metrics reflect the
-        true global-batch loss, not just rank 0's local view.
+        ``_gather_for_logging``), so under multi-GPU the saved metrics
+        reflect the true global-batch loss, not just rank 0's local view.
         ``log_lrs`` needs no such gathering -- the learning rate is a
         deterministic function of step count, not of data.
 

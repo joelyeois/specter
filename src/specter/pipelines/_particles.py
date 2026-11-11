@@ -1,8 +1,7 @@
 """Particle-stack generation pipeline: `ParticleStackConfig` in, .mrcs + .star out.
 
-Moved here from `demo-scripts/generate_particle_stack.py` so the logic is a real,
-importable function instead of being trapped inside a script's ``main()`` -- callable
-from `specter.cli`, from plain Python, or from a notebook, with identical behavior.
+An importable function behind `specter simulate particles`, callable from
+`specter.cli`, from plain Python, or from a notebook, with identical behavior.
 """
 
 from __future__ import annotations
@@ -161,9 +160,9 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     config : ParticleStackConfig
         Fully-resolved run configuration, e.g. from
         :func:`specter.config.load_config`, or constructed directly in
-        Python. Poses, defocus, dose, coincidence radius, and potential
-        scale are all randomly sampled per particle from the ranges given
-        in ``config``, unless ``config.cs_path``/``config.star_path`` points
+        Python. Poses, defocus, dose, and coincidence radius are all
+        randomly sampled per particle from the ranges given in ``config``,
+        unless ``config.cs_path``/``config.star_path`` points
         at a real dataset to take poses and CTF from instead.
 
     Notes
@@ -544,9 +543,9 @@ def _sample_poses_and_ctf(
     """
     if dataset_particles is not None:
         # Poses/CTF/translations/anisomag come straight from the dataset --
-        # dose, coincidence radius, and potential scale aren't recorded in
-        # either a CryoSPARC passthrough .cs or a RELION .star, so those three
-        # are still sampled below.
+        # dose and coincidence radius aren't recorded in either a CryoSPARC
+        # passthrough .cs or a RELION .star, so the caller still samples
+        # those two from the config's ranges.
         (
             _,
             _,

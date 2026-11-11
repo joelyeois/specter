@@ -319,17 +319,17 @@ class CrowdWithDuplicates(DeviceModule):
     V : torch.Tensor
         The 3D volume to be duplicated, shape (D, H, W).
     dx : float
-        Pixel size of the volume in the same units as `min_distance` (pixels).
+        Voxel size of the volume, Å/pixel.
     min_distance : float
-        Minimum separation between particle duplicates in pixels for Poisson-disk sampling.
+        Minimum separation between particle duplicates for Poisson-disk sampling, Å.
     nxy_out : int, optional
-        Output micrograph size in xy dimensions (pixels). Defaults to V.shape[1].
+        Output micrograph size in xy dimensions (pixels). Defaults to V.shape[0].
     nz_out : int, optional
         Output micrograph size in z dimension (pixels). Defaults to V.shape[0].
     max_distance_z : float, optional
-        Maximum extent in z for placing duplicates (pixels). Defaults to nz_out * dx + min_distance.
+        Maximum extent in z for placing duplicates, Å. Defaults to V.shape[0] * dx + min_distance.
     max_distance_xy : float, optional
-        Maximum extent in xy for placing duplicates (pixels). Defaults to nxy_out * dx + min_distance.
+        Maximum extent in xy for placing duplicates, Å. Defaults to V.shape[0] * dx + min_distance.
     method : {'2d', '3d'}, optional
         Poisson-disk sampling method. '2d' samples in xy plane only (z=0),
         '3d' samples in full 3D volume. Default is '3d'.

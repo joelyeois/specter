@@ -417,13 +417,13 @@ def build_pdb_cache_concurrently(
     pdb_cache_dir : str
         Passed through to every `PDB(...)` call as `pdb_cache_dir`.
     max_workers : int
-        Number of PDB sources fetched/parsed concurrently. ``<= 1``, or
-        fewer than `_MIN_SOURCES_FOR_PROCESS_POOL` unique sources, skips
-        process-pool startup entirely and runs fully serially in-process --
-        matches the pre-parallel behaviour exactly for a trivially small
-        job, and avoids the measured net LOSS from paying spawn overhead
-        without enough work to amortize it (see that constant's own
-        comment for the numbers).
+        Number of PDB sources fetched/parsed concurrently. ``<= 1``, or a
+        job whose estimated parse work would not pay for the pool's spawn
+        cost (`_process_pool_is_worth_it`), skips process-pool startup
+        entirely and runs fully serially in-process. This avoids the
+        measured net LOSS from paying spawn overhead without enough work to
+        amortize it (see the comments on `_POOL_SPAWN_OVERHEAD_S` and
+        `_POOL_REQUIRED_MARGIN` for the numbers).
     on_result : callable, optional
         ``on_result(pdb_source)``, called once per unique INPUT source as
         soon as its `PDB` is available -- in COMPLETION order when the

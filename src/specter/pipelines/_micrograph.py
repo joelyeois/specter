@@ -1,9 +1,8 @@
 """Micrograph generation pipeline: `MicrographConfig` in, .mrcs + .star out.
 
-Moved here from `demo-scripts/generate_micrograph.py` so the logic is a real,
-importable function instead of being trapped inside a script's ``main()`` --
-callable from `specter.cli`, from plain Python, or from a notebook, with
-identical behavior.
+An importable function behind `specter simulate micrograph`, callable from
+`specter.cli`, from plain Python, or from a notebook, with identical
+behavior.
 
 Single-device only (unlike `run_particle_stack`): each micrograph is its own
 specimen draw (`Field.draw`), and a single micrograph is already the unit of
@@ -101,8 +100,8 @@ def run_micrograph(config: MicrographConfig) -> None:
     config : MicrographConfig
         Fully-resolved run configuration, e.g. from
         :func:`specter.config.load_config`, or constructed directly in
-        Python. Defocus, dose, coincidence radius, and potential scale are
-        randomly sampled per micrograph from the ranges given in ``config``.
+        Python. Defocus, dose, and coincidence radius are randomly sampled
+        per micrograph from the ranges given in ``config``.
     """
     validate_config(config)
     device = resolve_available_device(config.device)

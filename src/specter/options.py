@@ -135,7 +135,8 @@ DeformationModel = Literal["dome", "random", "none"]
 #: dose.
 ImageUnits = Literal["normalized", "counts"]
 
-#: Learning-rate scheduler for a reconstruction, by ``torch.optim`` name.
+#: Learning-rate scheduler for a reconstruction, by ``torch.optim`` name;
+#: ``"MultiplicativeLR"`` builds an ``ExponentialLR`` with gamma 0.9999.
 Scheduler = Literal[
     "LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"
 ]

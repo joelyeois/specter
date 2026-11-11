@@ -84,7 +84,8 @@ class Ghostbuster(_GhostbusterBase):
         function, damping high-resolution signal. None or 0.0 means no
         envelope. Default None.
     scheduler : {"LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts", "MultiplicativeLR"}
-        LR scheduler for the volume optimiser.
+        LR scheduler for the volume optimiser. ``"MultiplicativeLR"`` builds
+        an ``ExponentialLR`` with ``gamma=0.9999`` per step.
     lr_decay : float, optional
         Decay rate for the ``"LambdaLR"`` schedule: multiplier =
         ``1 / (1 + lr_decay * sqrt(global_step))``. Unused by other

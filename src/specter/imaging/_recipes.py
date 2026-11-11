@@ -57,8 +57,8 @@ def simulate_particles(
     scatter, optics, coherence, camera : dict, optional
         Keywords for :meth:`Specimen.scatter`, :meth:`ExitWave.apply_ctf`,
         :meth:`ExitWave.intensity` and :meth:`Image.detect`. A tensor with
-        one row per image (a potential scale, a coincidence radius, an
-        anisomag stack) is cut to each batch.
+        one row per image (a coincidence radius, an anisomag stack) is cut
+        to each batch.
 
     Returns
     -------

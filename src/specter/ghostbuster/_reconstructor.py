@@ -93,6 +93,8 @@ class Reconstructor(_BaseReconstructor):
         aggressively over the configured run, which is useful for short
         screening jobs (the one-cycle policy of Smith & Topin [2]_).
         ``"CosineAnnealingWarmRestarts"`` is SGDR [1]_.
+        ``"MultiplicativeLR"`` builds an ``ExponentialLR`` decaying the LR
+        by a factor 0.9999 per step.
     symmetry : str, optional
         Symmetry group to enforce (e.g. "C3", "D2"). None disables symmetry.
     propagation : Propagation, optional
@@ -518,11 +520,11 @@ class Reconstructor(_BaseReconstructor):
         worse (EMPIAR-10083: pooled held-out FRC 0.0389 against 0.0408 at
         8-4.5 A) although the reconstructed map came out the same.
 
-        Under multi-GPU (DDP), the *logged* loss is
+        Under multi-GPU, the *logged* loss is
         gathered/averaged across ranks (see ``_gather_for_logging``) so it
         reflects the true global-batch loss -- but the ``loss`` this method
-        returns (which feeds ``manual_backward``) stays the local, per-rank
-        value throughout; DDP synchronises gradients on its own.
+        returns (which feeds ``_optimise``) stays the local, per-rank
+        value throughout; ``_optimise`` averages the gradients across ranks.
         """
         scale = self.scale[idx]  # (B,)
         level = self.dose_per_angstrom * self.voxel_size**2
@@ -577,7 +579,7 @@ class Reconstructor(_BaseReconstructor):
     def on_fit_start(self) -> None:
         """Create the run directory and record metadata in memory.
 
-        Rank-0-only under multi-GPU (DDP): every replica would otherwise
+        Rank-0-only under multi-GPU: every replica would otherwise
         race to create/write the same files. The hyperparameters here are not
         written to disk on their own -- ``results_summary()`` folds them into
         the single ``job.json`` a caller writes once this worker has exited
@@ -603,10 +605,10 @@ class Reconstructor(_BaseReconstructor):
     def on_fit_end(self) -> None:
         """Save the final reconstructed volume, FSC figure, and training metrics.
 
-        Rank-0-only under multi-GPU (DDP): ``self.V`` is already identical
-        across replicas at this point (kept in sync by DDP's gradient
-        all-reduce every step), so every rank would otherwise race to write
-        the same output files.
+        Rank-0-only under multi-GPU: ``self.V`` is already identical
+        across replicas at this point (kept in sync by the gradient
+        all-reduce in ``_optimise`` every step), so every rank would
+        otherwise race to write the same output files.
         """
         # Build metrics first (before v is computed, so they capture all
         # epochs). write=False: kept in memory for results_summary() rather
@@ -628,7 +630,7 @@ class Reconstructor(_BaseReconstructor):
     def on_train_epoch_end(self) -> None:
         """Enforce symmetry, save per-epoch volume, plot3d preview, and FSC.
 
-        Symmetrisation runs on every rank under multi-GPU (DDP) -- it mutates
+        Symmetrisation runs on every rank under multi-GPU -- it mutates
         each replica's local ``V.data`` in place, and skipping it on
         non-zero ranks would desync the replicas for the next epoch. Only
         the file-writing tail below is rank-0-only.

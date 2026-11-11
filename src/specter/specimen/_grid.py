@@ -115,10 +115,10 @@ _SHAPE_QUADRATURE_POINTS = 4096
 # l_max=6 puts the finest lumps at ~30 degrees of arc, i.e. features
 # roughly a quarter of the bead across, which is the scale colloidal gold
 # irregularity actually shows. spectrum_power=0.0 gives equal power per
-# mode; note the membrane backend's own default of 2.0 encodes the
-# Helfrich thermal bending spectrum of a lipid bilayer, which has no
-# analogue in a metal nanoparticle -- a bead's irregularity comes from
-# growth and twinning, not bending modes.
+# mode. A power of 2.0 would instead encode the Helfrich thermal bending
+# spectrum of a lipid bilayer, which has no analogue in a metal
+# nanoparticle -- a bead's irregularity comes from growth and twinning,
+# not bending modes.
 _ROUGHNESS_L_MAX = 6
 _ROUGHNESS_SPECTRUM_POWER = 0.0
 
@@ -205,8 +205,8 @@ class _BeadShape:
         self.roughness = roughness
         l_max = _ROUGHNESS_L_MAX
 
-        # Reuse the membrane backend's harmonic machinery rather than
-        # rolling a second copy: `_sample_sh_coefficients` normalises the
+        # The harmonic machinery lives in `_spherical_harmonics`:
+        # `_sample_sh_coefficients` normalises the
         # coefficient set so the perturbation's RMS over the sphere is
         # exactly 1 by Parseval (no empirical rescaling needed), and its
         # real-SH combination carries the sqrt(2)*(-1)^m factors an

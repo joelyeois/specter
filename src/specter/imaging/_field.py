@@ -380,9 +380,8 @@ class Sample:
 
         Notes
         -----
-        Every image sees the same volume at the same pose, so with a unit
-        potential scale the beam is propagated once and the exit wave
-        repeated per image.
+        Every image sees the same volume at the same pose, so the beam is
+        propagated once and the exit wave repeated per image.
         """
         p = settings_group(Propagation, propagation, settings)
         ids = torch.zeros(1, dtype=torch.long) if ids is None else ids

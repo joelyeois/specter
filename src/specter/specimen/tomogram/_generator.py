@@ -310,7 +310,8 @@ class TomogramSpecimenGenerator(
         Number of cytosol/lumen `protein_specs` species rendered/fetched
         concurrently (`_render_species_pool`'s own `PotentialBuilder`
         templates on threads, and `generate()`'s PDB preload on processes
-        above `_MIN_SOURCES_FOR_PROCESS_POOL`). Default 1: fully serial,
+        when the estimated parse work pays for the pool's spawn cost; see
+        `_parallel_render._process_pool_is_worth_it`). Default 1: fully serial,
         identical to the pre-parallel behaviour. `"auto"` resolves via
         `recommend_render_workers(len(protein_specs))` -- min(n_species, 8),
         the measured sweet spot from a full production-scale sweep (see

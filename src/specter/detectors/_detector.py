@@ -514,7 +514,7 @@ class Detector(DeviceModule):
         # are independently displaced is still a Poisson point process. The blur lives
         # in the ensemble mean (hence MTF < 1) and not in any single event. That is the
         # right model for K2/K3/Falcon counting mode -- every MTF bundled in
-        # detectors.py is a counting-mode curve -- and it is the published behaviour:
+        # detectors/_catalogue.py is a counting-mode curve -- and it is the published behaviour:
         # a counting detector's NPS is flat "due to the counting mode which assigns
         # detected electrons to single pixels" (Ruskin, Yu & Grigorieff 2013,
         # J. Struct. Biol. 184, 385-393).

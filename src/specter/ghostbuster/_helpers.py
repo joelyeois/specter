@@ -38,7 +38,8 @@ def _build_lr_scheduler(
     ----------
     scheduler : str
         One of "LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts",
-        "MultiplicativeLR".
+        "MultiplicativeLR". "MultiplicativeLR" builds an ``ExponentialLR``
+        with ``gamma=0.9999`` per step.
     optimizer : torch.optim.Optimizer
         The volume optimiser.
     lr : float
@@ -209,10 +210,9 @@ def _build_epoch_metrics(
     lrs : list of float
         Per-batch learning rate of the volume optimiser.
     batches_per_epoch : int
-        Training batches per epoch (``Trainer.num_training_batches``). The
-        epoch count follows from it, a last partial epoch counting as one;
-        ``LightningModule.current_epoch`` cannot serve, since it has already
-        advanced past the last epoch by ``on_fit_end``.
+        Training batches per epoch on this rank
+        (``TrainingState.batches_per_epoch``). The epoch count follows from
+        it, a last partial epoch counting as one.
     include_loss_std : bool
         If True, include the per-epoch loss standard deviation.
     include_lr_min : bool

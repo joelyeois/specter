@@ -42,6 +42,7 @@ from specter.settings import (
 from specter.progress import console, section, track
 from ._common import (
     _Microscope,
+    _absorption_alpha,
     _mm_to_angstrom,
     _normalize_images,
     _print_total_time,
@@ -209,7 +210,7 @@ def run_tilt_series(
     cs_angstrom = _mm_to_angstrom(config.cs)
     # The mean-free-path model replaces the amplitude-contrast ratio as the
     # source of the imaginary potential; keeping both would absorb twice.
-    alpha = 0.0 if config.absorption_model == "inelastic_mfp" else config.alpha
+    alpha = _absorption_alpha(config, config.alpha)
 
     ctf_params = {
         "cs": torch.tensor([cs_angstrom]),

@@ -49,6 +49,9 @@ from specter.progress import console, section, track
 
 from ._common import (
     _Microscope,
+    _absorption_alpha,
+    _ice_model,
+    _n_frames,
     _crowd_min_distance,
     _mm_to_angstrom,
     _print_total_time,
@@ -206,9 +209,7 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     )
     dose = sample_uniform(config.dose, n)
     coincidence_radius = sample_uniform(config.coincidence_radius, n)
-    n_frames = (
-        config.n_frames if config.n_frames is not None else int(dose.mean().item())
-    )
+    n_frames = _n_frames(config, dose)
     weights, weights_max_frequency = read_dose_weights(
         bundle_from_config(Camera, config, n_frames=n_frames)
     )
@@ -519,14 +520,7 @@ def _resolve_imaging_parameters(
         voltage = config.voltage
         alpha = config.alpha
 
-    if config.absorption_model == "inelastic_mfp":
-        # The dataset's amplitude contrast is not a measurement of absorption
-        # -- CTF estimation takes it as an input and never fits it -- so under
-        # this model it is dropped rather than allowed to override. Leaving it
-        # in would double-count against the mean-free-path term, which
-        # `Propagation` rejects outright. See
-        # `potential.apply_amplitude_contrast` for the evidence.
-        alpha = 0.0
+    alpha = _absorption_alpha(config, alpha)
 
     return dataset_particles, pixel_size, voltage, alpha
 
@@ -628,7 +622,7 @@ def _build_icemaker(
     config: ParticleStackConfig, pixel_size: float, device: str
 ) -> IceBank | RandomIcemaker | None:
     """The run's icemaker on `device`, where the images are made, or None."""
-    ice_model = None if config.ice_model == "none" else config.ice_model
+    ice_model = _ice_model(config)
     ice_nz = compute_nz(config.n_pixels, config.ice_thickness, pixel_size)
     icemaker = resolve_icemaker(
         ice_model,
@@ -655,7 +649,7 @@ def _resolve_batchsize(
         return int(config.batchsize)
     nz = compute_nz(config.n_pixels, config.ice_thickness, run.pixel_size)
     pad_nxy = padded_nxy(config.n_pixels, config.pad_fft)
-    ice = config.ice_model not in (None, "none")
+    ice = _ice_model(config) is not None
     sizing_device = min(devices, key=available_memory_bytes)
     batchsize = recommend_batchsize(
         config.n_pixels,

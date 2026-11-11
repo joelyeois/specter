@@ -20,6 +20,7 @@ from specter.config import (
     ensure_project_root,
     find_specter_project_root,
 )
+from specter.options import IceModel
 from specter.settings import Camera, Envelopes, bundle_from_config
 
 if TYPE_CHECKING:
@@ -391,6 +392,31 @@ def _crowd_min_distance(configured: float | None, max_diameter: float) -> float 
     if configured is None:
         return max_diameter
     return configured
+
+
+def _absorption_alpha(config: Any, alpha: float) -> float:
+    """
+    The amplitude contrast a run images with: `alpha`, or 0 under
+    ``absorption_model="inelastic_mfp"``.
+
+    A dataset's amplitude contrast is not a measurement of absorption -- CTF
+    estimation takes it as an input and never fits it -- so under the
+    mean-free-path model it is dropped rather than allowed to override.
+    Leaving it in would double-count against the mean-free-path term, which
+    `Propagation` rejects outright. See `potential.apply_amplitude_contrast`
+    for the evidence.
+    """
+    return 0.0 if config.absorption_model == "inelastic_mfp" else alpha
+
+
+def _ice_model(config: Any) -> IceModel | None:
+    """A config's ``ice_model``, with the ``"none"`` sentinel read as None."""
+    return None if config.ice_model == "none" else config.ice_model
+
+
+def _n_frames(config: Any, dose: torch.Tensor) -> int:
+    """A config's ``n_frames``, or one frame per e/A^2 of the mean dose."""
+    return config.n_frames if config.n_frames is not None else int(dose.mean().item())
 
 
 def _mm_to_angstrom(value_mm: float) -> float:

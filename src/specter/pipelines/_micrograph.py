@@ -39,6 +39,9 @@ from specter.progress import console, section, track
 
 from ._common import (
     _Microscope,
+    _absorption_alpha,
+    _ice_model,
+    _n_frames,
     _crowd_min_distance,
     _mm_to_angstrom,
     _normalize_images,
@@ -126,7 +129,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     cs_angstrom = _mm_to_angstrom(config.cs)
     # The mean-free-path model replaces the amplitude-contrast ratio as the
     # source of the imaginary potential; keeping both would absorb twice.
-    alpha = 0.0 if config.absorption_model == "inelastic_mfp" else config.alpha
+    alpha = _absorption_alpha(config, config.alpha)
 
     # Built on the compute device and moved to the host: the template is
     # one particle box (a few hundred MB at most), the analytic renderer is
@@ -141,7 +144,7 @@ def run_micrograph(config: MicrographConfig) -> None:
 
     n = config.n_micrographs
 
-    ice_model = None if config.ice_model == "none" else config.ice_model
+    ice_model = _ice_model(config)
     crowd_min_distance = _crowd_min_distance(
         config.crowd_min_distance, pdb.max_diameter
     )
@@ -152,9 +155,7 @@ def run_micrograph(config: MicrographConfig) -> None:
     dose = sample_uniform(config.dose, n)
     coincidence_radius = sample_uniform(config.coincidence_radius, n)
 
-    n_frames = (
-        config.n_frames if config.n_frames is not None else int(dose.mean().item())
-    )
+    n_frames = _n_frames(config, dose)
     ctf_params = {
         "cs": torch.tensor([cs_angstrom] * n),
         "dfu": defocus_angstrom,

@@ -235,66 +235,70 @@ def run_micrograph(config: MicrographConfig) -> None:
     propagation = asdict(bundle_from_config(Propagation, config, alpha=alpha))
     ctf = CTF(ctf_params)
 
-    # --- Generating images ---
-    # A fresh specimen (ice/crowding) for every micrograph, each drawn from
-    # its own seed, then the i-th CTF.
-    section(f"Generating {n} micrograph(s) on {device}")
-    images: list[torch.Tensor] = []
-    exitwaves: list[torch.Tensor] | None = [] if config.save_exitwaves else None
-    clean_exitwaves: list[torch.Tensor] | None = (
-        [] if config.save_clean_exitwaves else None
-    )
-
-    for i in track(range(n), description="Generating micrographs"):
-        one = slice(i, i + 1)
-        with torch.no_grad():
-            sample = field.draw(
-                voltage=config.voltage,
-                exposure=exposure[one],
-                seed=run_seed,
-                index=i,
-                keep_dry=config.save_clean_exitwaves,
-                objective_aperture=config.objective_aperture,
-                device=device,
-                **propagation,
-            )
-            beam = dict(
-                voltage=config.voltage,
-                ids=torch.tensor([i]),
-                exposure=exposure[one],
-                device=device,
-                **propagation,
-            )
-            waves = sample.scatter(**beam)
-            if exitwaves is not None:
-                exitwaves.append(waves.pixels().cpu())
-            if clean_exitwaves is not None:
-                clean_exitwaves.append(sample.clean().scatter(**beam).pixels().cpu())
-            image = microscope.image(
-                waves,
-                ctf[one],
-                exposure[one],
-                coincidence_radius=coincidence_radius[one],
-                seed=run_seed,
-            )
-            del sample, waves
-        images.append(image.array.cpu())
-
-    images_t = torch.concat(images, dim=0)
-    exitwaves_t = torch.concat(exitwaves, dim=0) if exitwaves is not None else None
-    clean_exitwaves_t = (
-        torch.concat(clean_exitwaves, dim=0) if clean_exitwaves is not None else None
-    )
-
-    # --- Post-processing ---
-    section("Post-processing")
-    if config.normalize_micrographs:
-        images_t = _normalize_images(images_t)
-
-    # --- Saving ---
-    section("Saving .mrcs + .star")
-
     with _tracked_output_dir(config, "micrographs") as output_dir:
+        # --- Generating images ---
+        # A fresh specimen (ice/crowding) for every micrograph, each drawn from
+        # its own seed, then the i-th CTF.
+        section(f"Generating {n} micrograph(s) on {device}")
+        images: list[torch.Tensor] = []
+        exitwaves: list[torch.Tensor] | None = [] if config.save_exitwaves else None
+        clean_exitwaves: list[torch.Tensor] | None = (
+            [] if config.save_clean_exitwaves else None
+        )
+
+        for i in track(range(n), description="Generating micrographs"):
+            one = slice(i, i + 1)
+            with torch.no_grad():
+                sample = field.draw(
+                    voltage=config.voltage,
+                    exposure=exposure[one],
+                    seed=run_seed,
+                    index=i,
+                    keep_dry=config.save_clean_exitwaves,
+                    objective_aperture=config.objective_aperture,
+                    device=device,
+                    **propagation,
+                )
+                beam = dict(
+                    voltage=config.voltage,
+                    ids=torch.tensor([i]),
+                    exposure=exposure[one],
+                    device=device,
+                    **propagation,
+                )
+                waves = sample.scatter(**beam)
+                if exitwaves is not None:
+                    exitwaves.append(waves.pixels().cpu())
+                if clean_exitwaves is not None:
+                    clean_exitwaves.append(
+                        sample.clean().scatter(**beam).pixels().cpu()
+                    )
+                image = microscope.image(
+                    waves,
+                    ctf[one],
+                    exposure[one],
+                    coincidence_radius=coincidence_radius[one],
+                    seed=run_seed,
+                )
+                del sample, waves
+            images.append(image.array.cpu())
+
+        images_t = torch.concat(images, dim=0)
+        exitwaves_t = torch.concat(exitwaves, dim=0) if exitwaves is not None else None
+        clean_exitwaves_t = (
+            torch.concat(clean_exitwaves, dim=0)
+            if clean_exitwaves is not None
+            else None
+        )
+
+        # --- Post-processing ---
+        section("Post-processing")
+        if config.normalize_micrographs:
+            images_t = _normalize_images(images_t)
+
+        # --- Saving ---
+        section("Saving .mrcs + .star")
+
         os.makedirs(output_dir, exist_ok=True)
         mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")
         write_mrc(mrcs_path, images_t, config.pixel_size)

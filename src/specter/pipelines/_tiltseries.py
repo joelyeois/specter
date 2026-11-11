@@ -245,36 +245,36 @@ def run_tilt_series(
     )
     ctf = CTF(ctf_params)
 
-    # --- Generating ---
-    section(f"Generating tilt series on {device_target}")
-    images_list: list[torch.Tensor] = []
-    exitwaves_list: list[torch.Tensor] = []
-    with torch.no_grad():
-        for i in track(range(config.n_tilts), description="Generating tilt series"):
-            one = slice(i, i + 1)
-            waves = series.scatter(i, device=device_target)
-            if config.save_exitwaves:
-                exitwaves_list.append(waves.pixels().cpu())
-            image = microscope.image(
-                waves,
-                ctf,
-                exposure[one],
-                coincidence_radius=config.coincidence_radius,
-                seed=run_seed,
-            )
-            images_list.append(image.array.cpu())
-    images = torch.cat(images_list)  # (n_tilts, H, W)
-    exitwaves = torch.cat(exitwaves_list) if config.save_exitwaves else None
-
-    # --- Post-processing ---
-    if config.normalize_tilt_series:
-        section("Normalizing")
-        images = _normalize_images(images)
-
-    # --- Saving ---
-    section("Saving")
-
     with _tracked_output_dir(config, "tiltseries") as output_dir:
+        # --- Generating ---
+        section(f"Generating tilt series on {device_target}")
+        images_list: list[torch.Tensor] = []
+        exitwaves_list: list[torch.Tensor] = []
+        with torch.no_grad():
+            for i in track(range(config.n_tilts), description="Generating tilt series"):
+                one = slice(i, i + 1)
+                waves = series.scatter(i, device=device_target)
+                if config.save_exitwaves:
+                    exitwaves_list.append(waves.pixels().cpu())
+                image = microscope.image(
+                    waves,
+                    ctf,
+                    exposure[one],
+                    coincidence_radius=config.coincidence_radius,
+                    seed=run_seed,
+                )
+                images_list.append(image.array.cpu())
+        images = torch.cat(images_list)  # (n_tilts, H, W)
+        exitwaves = torch.cat(exitwaves_list) if config.save_exitwaves else None
+
+        # --- Post-processing ---
+        if config.normalize_tilt_series:
+            section("Normalizing")
+            images = _normalize_images(images)
+
+        # --- Saving ---
+        section("Saving")
+
         os.makedirs(output_dir, exist_ok=True)
 
         mrcs_path = os.path.join(output_dir, config.filename + ".mrcs")

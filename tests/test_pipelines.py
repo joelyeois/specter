@@ -800,3 +800,39 @@ def test_unseeded_tomogram_builds_differ_and_are_repeatable(tmp_path: Path) -> N
     first = picks("c")
     specter.seed(5)
     assert picks("d") == first
+
+
+@pytest.mark.parametrize(
+    ("make_config", "run", "job_type", "target"),
+    [
+        (_tracked_micrograph_config, run_micrograph, "micrographs", "Field.draw"),
+        (
+            _tracked_tilt_series_config,
+            run_tilt_series,
+            "tiltseries",
+            "TiltSeries.scatter",
+        ),
+    ],
+    ids=["micrograph", "tilt_series"],
+)
+def test_a_run_failing_in_generation_is_recorded_as_failed(
+    tmp_path: Path, monkeypatch, make_config, run, job_type: str, target: str
+) -> None:
+    """The job opens before generation, so a crash there leaves a `failed`
+    record rather than no record at all."""
+    import json
+
+    import specter.imaging as imaging
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("generation failed")
+
+    cls, method = target.split(".")
+    monkeypatch.setattr(getattr(imaging, cls), method, fail)
+    with pytest.raises(RuntimeError, match="generation failed"):
+        run(make_config(tmp_path))
+    job = json.loads(
+        (tmp_path / "apoferritin" / job_type / "J001" / "job.json").read_text()
+    )
+    assert job["status"] == "failed"
+    assert "generation failed" in job["error"]

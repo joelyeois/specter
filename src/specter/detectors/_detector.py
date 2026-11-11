@@ -196,6 +196,11 @@ class Detector(DeviceModule):
         super().__init__()
         if not 0.0 < dqe0 <= 1.0:
             raise ValueError(f"dqe0 must be in (0, 1], got {dqe0}")
+        if aberration_model not in ("nonlinear", "linear"):
+            raise ValueError(
+                f"aberration_model must be 'nonlinear' or 'linear', got "
+                f"{aberration_model!r}"
+            )
         self.pixel_size = pixel_size
         self.aberration_model = aberration_model
         self.noise_model = noise_model

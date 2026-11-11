@@ -408,3 +408,8 @@ def test_camera_rejects_a_non_positive_detector_pixel() -> None:
 
     with pytest.raises(ValueError, match="detector_pixel_size"):
         Camera(detector_pixel_size=0.0)
+
+
+def test_unknown_aberration_model_is_rejected() -> None:
+    with pytest.raises(ValueError, match="aberration_model"):
+        Detector(pixel_size=1.0, aberration_model="nonlinar")  # type: ignore[arg-type]

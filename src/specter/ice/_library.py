@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 
@@ -228,7 +228,7 @@ def build_one_ice_config(
     gd.init_random()
     # The anneal relaxes the random start itself, so optimize() skips its
     # own pre-relaxation.
-    anneal_settings = {
+    anneal_settings: dict[str, Any] = {
         "t_high": 220.0,
         "t_low": 130.0,
         "hold_steps": anneal_steps[0],

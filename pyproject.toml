@@ -116,6 +116,7 @@ module = [
     "starfile.*",
     "torchinterp1d.*",
     "tqdm.*",
+    "triton.*",
     "vesin_torch.*",
 ]
 ignore_missing_imports = true
@@ -167,7 +168,23 @@ markers = [
     "network: needs internet access (fetches structures from RCSB)",
 ]
 
+[tool.ruff.lint]
+# The default set plus the families that catch real defects in library code:
+# bugbear, blind `except`, stray `print` (library code reports through
+# `specter.logger`), stale `noqa`, legacy NumPy RNG and undocumented
+# parameters. B008 (calls in defaults) and B905 (`zip` without `strict=`)
+# are off: both flag established, deliberate idioms here.
+select = ["E4", "E7", "E9", "F", "B", "BLE", "T20", "RUF100", "NPY", "D417"]
+ignore = ["B008", "B905"]
+
 [tool.ruff.lint.per-file-ignores]
+# Scripts, notebooks and tests print, use the legacy NumPy RNG their numbers
+# were drawn with, and carry no parameter docs; only the default rule set
+# applies to them.
+"docs-figures/**" = ["B", "BLE", "T20", "RUF100", "NPY", "D417"]
+"demo-notebooks/**" = ["B", "BLE", "T20", "RUF100", "NPY", "D417"]
+"tools/**" = ["B", "BLE", "T20", "RUF100", "NPY", "D417"]
+"tests/**" = ["B028", "T20", "NPY002", "D417"]
 # A walkthrough script imports where its page first quotes the import, so
 # the code a reader sees on the page reads top to bottom, even when the
 # script's own plotting code imported the same module earlier.

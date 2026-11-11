@@ -848,26 +848,39 @@ class IterativeScattering(DeviceModule):
         scattered = fft2(1j * self.sigma * self.pixel_size * slices_c) * F_chunk[None]
         return phase_sum + ifft2(scattered.sum(dim=1))
 
-    def projection(
-        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1
+    def _projected_potential(
+        self,
+        V: torch.Tensor,
+        theta_matrix: torch.Tensor,
+        slice_batchsize: int,
+        description: str,
     ) -> torch.Tensor:
         """
-        Compute exit wave using iterative projection approximation on a transformed volume.
+        Sum the transformed volume's slices along the beam, ``(B, nxy, nxy)``.
+
+        Parameters
+        ----------
+        V : torch.Tensor
+            Potential volume, shape ``(B, Z, Y, X)``.
+        theta_matrix : torch.Tensor
+            Affine rotation matrices, shape ``(B, 3, 4)``.
+        slice_batchsize : int
+            Slices fetched per `_fetch_volume_slices` call for a rotated
+            volume; the identity fetches one at a time.
+        description : str
+            Label of the progress bar.
         """
         nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
         B = V.shape[0]
         device = self.device
 
         total_potential = torch.zeros((B, self.nxy, self.nxy), device=device)
-        # Note: unlike the other iterative models, projection sums slices in
-        # a commutative accumulation, so it does not apply the EWS curvature
-        # traversal order.
         indices = torch.arange(nz_new, device=V.device)
         y_start, x_start = self._roi_start(V)
 
         pbar = track(
             range(nz_new),
-            description="Projection (Iterative)",
+            description=description,
             transient=True,
             disable=not (self.progressbars),
         )
@@ -902,6 +915,20 @@ class IterativeScattering(DeviceModule):
                     )
                 assert slices_block is not None
                 total_potential += slices_block[:, i % slice_batchsize]
+
+        return total_potential
+
+    def projection(
+        self, V: torch.Tensor, theta_matrix: torch.Tensor, slice_batchsize: int = 1
+    ) -> torch.Tensor:
+        """
+        Compute exit wave using iterative projection approximation on a transformed volume.
+        """
+        # A commutative sum of the slices, so, unlike the other iterative
+        # models, projection does not apply the EWS curvature traversal order.
+        total_potential = self._projected_potential(
+            V, theta_matrix, slice_batchsize, "Projection (Iterative)"
+        )
 
         total_complex = apply_amplitude_contrast(total_potential, alpha=self.alpha)
         exitwave = oversampled_exp(
@@ -1112,53 +1139,14 @@ class IterativeScattering(DeviceModule):
         """
         Compute iterative projected potential (for CTF) with transformed sampling.
         """
-        nz_new, rotator, is_identity = self._resolve_tilt_setup(V, theta_matrix)
-        B = V.shape[0]
-        device = self.device
-
-        total_potential = torch.zeros((B, self.nxy, self.nxy), device=device)
-        # Note: like projection, this is a commutative sum, so it does not
-        # apply the EWS curvature traversal order.
-        indices = torch.arange(nz_new, device=V.device)
-        y_start, x_start = self._roi_start(V)
-
-        pbar = track(
-            range(nz_new),
-            description="CTF Projection (Iterative)",
-            transient=True,
-            disable=not (self.progressbars),
+        total_potential = self._projected_potential(
+            V,
+            theta_matrix,
+            slice_batchsize,
+            # Like projection, a commutative sum, so it does not apply the EWS
+            # curvature traversal order.
+            "CTF Projection (Iterative)",
         )
-
-        slices_block: torch.Tensor | None = None
-        for i in pbar:
-            if is_identity:
-                total_potential += self._fetch_volume_slices(
-                    V,
-                    indices[i : i + 1],
-                    is_identity,
-                    rotator,
-                    theta_matrix,
-                    nz_new,
-                    y_start,
-                    x_start,
-                    device,
-                )[:, 0]
-            else:
-                if i % slice_batchsize == 0:
-                    batch_end = min(i + slice_batchsize, nz_new)
-                    slices_block = self._fetch_volume_slices(
-                        V,
-                        indices[i:batch_end],
-                        is_identity,
-                        rotator,
-                        theta_matrix,
-                        nz_new,
-                        y_start,
-                        x_start,
-                        device,
-                    )
-                assert slices_block is not None
-                total_potential += slices_block[:, i % slice_batchsize]
 
         return 2 * self.sigma * self.pixel_size * total_potential
 

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
-    from ..plots import FSCCurve
+    from ..fsc import FSCCurve
 
 # ---------------------------------------------------------------------------
 # Volume/figure saving helpers shared by Reconstructor and TomogramReconstructor
@@ -75,7 +75,7 @@ def save_halfmap_fsc_figure(
         figure could not be produced.
     """
     try:
-        from ..plots import HALFMAP_FSC_THRESHOLD, fsc_curve
+        from ..fsc import HALFMAP_FSC_THRESHOLD, fsc_curve
 
         curve = fsc_curve(
             volume_a, volume_b, voxel_size, HALFMAP_FSC_THRESHOLD, fsc_mask

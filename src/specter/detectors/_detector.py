@@ -34,7 +34,7 @@ from .._device_module import DeviceModule
 from ..aberrations import FocalSpread
 from ..arrays import center_crop, rfft_frequency_squared
 from ..fft import fft2, ifft2
-from ..scattering._kernels import fourier_crop_xy
+from ..arrays import fourier_crop_xy
 from ..progress import track
 from specter.options import AberrationModel, NoiseModel
 

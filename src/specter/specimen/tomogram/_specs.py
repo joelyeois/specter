@@ -7,7 +7,7 @@ from typing import Literal
 
 import torch
 
-from ...config import ScalarOrRange, parse_scalar_or_range
+from ..._scalar_range import ScalarOrRange, parse_scalar_or_range
 from ..membrane import MembraneGenerator
 
 

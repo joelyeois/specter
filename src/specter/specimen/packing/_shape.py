@@ -49,8 +49,7 @@ import torch
 import torch.nn.functional as F
 
 from ...random_seed import derive_seed
-from ...rotations._random import random_rotation_matrix
-from ...rotations._volume import build_affine_matrix, rotate_volume
+from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
 
 # Above this allowed-fraction, draw centers uniformly from the whole grid
 # and let the occupancy test reject the rest, instead of enumerating the

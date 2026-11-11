@@ -26,7 +26,7 @@ import numpy as np
 import torch
 from scipy.spatial.transform import Rotation
 
-from ...config import parse_scalar_or_range
+from ..._scalar_range import parse_scalar_or_range
 from ...options import MembraneKind
 from ._geometry import Grid, regularise
 from ._primitives import (

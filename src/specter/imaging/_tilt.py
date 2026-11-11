@@ -28,10 +28,10 @@ from specter import logger
 from .._defaults import FFT_PAD_MARGIN
 from .. import rotations
 from .. import tilt as tilt_geometry
-from ..aberrations._functions import defocus_midplane_shift
+from ..aberrations import defocus_midplane_shift
 from ..fft import RadialSpectrum
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
-from ..ice._exposure import solvent_exposure_envelope
+from ..ice import solvent_exposure_envelope
 from ..potential import aperture_lowpass_isotropic
 from ..progress import status
 from ..random_seed import derive_seed, seeded_rng

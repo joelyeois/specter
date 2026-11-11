@@ -8,7 +8,7 @@ import torch
 from torch import nn
 
 from specter.scattering import IterativeScattering
-from specter.scattering._kernels import fourier_crop_xy
+from specter.arrays import fourier_crop_xy
 from specter.arrays import center_crop
 from specter.detectors import Detector
 from ._exposure import ExposureStep, exposure_steps

@@ -72,7 +72,7 @@ import roma
 import torch
 
 from ..arrays import soft_voxelize_coordinates
-from ..config import ScalarOrRange, parse_scalar_or_range
+from .._scalar_range import ScalarOrRange, parse_scalar_or_range
 from ..fft import spatial_convolve3d_same
 from ..potential import build_atomic_potential_kernel
 from ._spherical_harmonics import (

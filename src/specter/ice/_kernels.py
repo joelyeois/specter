@@ -24,7 +24,16 @@ from ..ice_data import bundled_ice_data
 from ..potential import build_atomic_potential_kernel, potential_from_deltas
 from specter.options import KernelParameterization
 
-__all__ = ["build_atomic_potential_kernel", "build_water_kernel"]
+__all__ = [
+    "WATER_OH_DISTANCE",
+    "build_atomic_potential_kernel",
+    "build_water_kernel",
+    "compute_native_target",
+    "ice_kspace_radial_grid",
+    "ice_potential_from_deltas",
+    "interpolate_target_kernel",
+    "load_mdsim_f_radial_avg",
+]
 
 # Geometry of a water molecule, used to place its hydrogens' scattering
 # density. Only the O-H distance matters here: the icemakers orient every

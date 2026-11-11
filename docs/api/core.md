@@ -46,6 +46,10 @@ Standalone top-level modules, outside any subpackage.
 
 ::: specter.nufft
 
+## specter.fsc
+
+::: specter.fsc
+
 ## specter.filters
 
 ::: specter.filters

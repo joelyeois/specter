@@ -72,7 +72,7 @@ from typing import Literal
 import numpy as np
 import torch
 
-from ...config import ScalarOrRange
+from ..._scalar_range import ScalarOrRange
 from ...arrays import count_nonzero_chunked
 from ...arrays import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB, canonical_pdb_source

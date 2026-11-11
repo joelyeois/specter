@@ -14,7 +14,6 @@ import os
 from typing import TYPE_CHECKING
 
 from .._device_module import DeviceModule
-import matplotlib.figure
 import torch
 
 
@@ -28,7 +27,7 @@ from ._kernels import build_water_kernel, ice_potential_from_deltas
 from specter.options import IceModel, ScatteringFactors
 
 if TYPE_CHECKING:
-    pass
+    import matplotlib.figure
 
 from ._library import FIXED_POINT_ENCODING, decode_positions, default_ice_cache_dir
 from ._tiling import _IceTiling

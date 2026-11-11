@@ -606,16 +606,20 @@ def test_aperture_cross_section_follows_the_ice_library_density(
 ) -> None:
     """
     The aperture rate is a number density times a cross section, and the
-    density is read from `ice.ndensity_of_amorphous_ice`, the one the
+    density is read from `constants.ndensity_of_amorphous_ice`, the one the
     icemakers and the bundled library are built at, not from a second copy.
     """
-    import specter.ice._helpers as helpers
+    import specter.constants as constants
+    from specter.ice import ndensity_of_amorphous_ice
     from specter.potential import aperture_mfp_ice
 
+    assert ndensity_of_amorphous_ice is constants.ndensity_of_amorphous_ice
     base = aperture_mfp_ice(12.0, VOLTAGE)
     assert base == pytest.approx(14_206, rel=1e-3)  # 0.94 g/cm^3
     monkeypatch.setattr(
-        helpers, "ndensity_of_amorphous_ice", 2 * helpers.ndensity_of_amorphous_ice
+        constants,
+        "ndensity_of_amorphous_ice",
+        2 * constants.ndensity_of_amorphous_ice,
     )
     assert aperture_mfp_ice(12.0, VOLTAGE) == pytest.approx(base / 2, rel=1e-12)
 

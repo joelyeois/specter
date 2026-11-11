@@ -35,7 +35,7 @@ from ..potential import (
     potential_occupancy_slabs,
 )
 from ..random_seed import derive_seed, seeded_rng
-from ..scattering._kernels import fourier_crop_xy, fourier_upsample_xy
+from ..arrays import fourier_crop_xy, fourier_upsample_xy
 from ..settings import Camera, Ice, Optics, Propagation
 
 if TYPE_CHECKING:
@@ -142,7 +142,7 @@ def solvent_exposure_filter(
     """
     if ice.motion_variance is None:
         return None
-    from ..ice._exposure import apply_solvent_exposure
+    from ..ice import apply_solvent_exposure
 
     variance = ice.motion_variance
     n_frames = exposure.n_frames or 1

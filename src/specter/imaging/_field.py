@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
-from ..aberrations._functions import defocus_midplane_shift
+from ..aberrations import defocus_midplane_shift
 from ..arrays import pad_volume
 from ..fft import RadialSpectrum, apply_radial_envelope_
 from ..ice import (

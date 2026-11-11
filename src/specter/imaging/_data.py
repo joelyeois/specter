@@ -20,7 +20,7 @@ import roma
 import torch
 
 from .. import rotations
-from ..config._scalar_range import ScalarOrRange, parse_scalar_or_range
+from .._scalar_range import ScalarOrRange, parse_scalar_or_range
 
 __all__ = ["CTF", "Exposure", "Poses"]
 

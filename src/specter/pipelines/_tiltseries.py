@@ -24,7 +24,7 @@ from specter.config import (
     TomogramConfig,
     validate_config,
 )
-from specter.config._scalar_range import parse_scalar_or_range
+from specter.config import parse_scalar_or_range
 from specter.imaging import CTF, Exposure, Poses, Sample, TiltSeries
 from specter.imaging._stages import SEED_STAGE_SPECIMEN, read_dose_weights
 from specter.random_seed import derive_seed

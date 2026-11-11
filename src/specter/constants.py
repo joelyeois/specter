@@ -1,7 +1,8 @@
 """
 Physical constants and the electron-optics quantities derived from them:
 the relativistic wavelength and the interaction parameter at a given
-accelerating voltage. CODATA values via `scipy.constants`.
+accelerating voltage, and the number density of amorphous ice. CODATA
+values via `scipy.constants`.
 """
 
 from __future__ import annotations
@@ -11,6 +12,19 @@ from typing import overload
 
 import torch
 from scipy import constants as _sc
+
+
+avogadro = _sc.Avogadro
+# The one ice density in the package. RandomIcemaker and GradientSKIcemaker
+# fill their boxes to it, so the bundled IceBank library is at it too (527,178
+# molecules per 256 A cube), and `potential.aperture_mfp_ice` reads it for its
+# number density. The LDA-80K MD frame the S(k) target is computed from is
+# slightly less dense, 0.932 g/cm3 (64,000 molecules in a 127.12 A cell).
+density_of_amorphous_ice = 0.94  # [g/cm3]
+molar_mass_of_water = 18.01528  # [g/mol]
+ndensity_of_amorphous_ice = (
+    density_of_amorphous_ice * avogadro / molar_mass_of_water * 1e-24
+)  # [particles / Å³]
 
 
 def rest_mass_energy() -> float:

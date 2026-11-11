@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from .._defaults import LR_DECAY, SCHEDULER
 from .. import tilt as tilt_geometry
-from ..aberrations._functions import defocus_midplane_shift
+from ..aberrations import defocus_midplane_shift
 from ..arrays import center_crop
 from ..constants import energy_to_wavelength
 from ..imaging import CTF, ExitWave

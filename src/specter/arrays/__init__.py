@@ -1,4 +1,4 @@
-"""Array utilities: grids, voxelization, radial profiles, padding/cropping, stamping, and block tiling."""
+"""Array utilities: grids, voxelization, radial profiles, padding/cropping, Fourier resampling, stamping, and block tiling."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from ._padding import (
     radial_symmetrize,
 )
 from ._profiles import radial_profile_2d, radial_profile_3d
+from ._resample import fourier_crop_xy, fourier_upsample_xy
 from ._tiling import tile_volume_from_blocks_blended
 from ._voxelize import (
     soft_voxelize_coordinates,
@@ -41,6 +42,8 @@ __all__ = [
     "compute_nz",
     "disk2d",
     "fourier_crop",
+    "fourier_crop_xy",
+    "fourier_upsample_xy",
     "grid_1d",
     "grid_2d",
     "grid_3d",

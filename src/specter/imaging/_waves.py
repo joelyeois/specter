@@ -15,7 +15,7 @@ import torch
 
 from .._defaults import CC_MM, DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ..aberrations import FocalSpread
-from ..aberrations._envelopes import cc_envelope
+from ..aberrations import cc_envelope
 from ..constants import energy_to_wavelength
 from ..detectors import detector_mtf, dqe0_for_detector
 from ..detectors import Detector

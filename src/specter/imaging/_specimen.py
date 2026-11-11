@@ -18,7 +18,7 @@ import roma
 import torch
 
 from .. import rotations
-from ..aberrations._functions import defocus_midplane_shift
+from ..aberrations import defocus_midplane_shift
 from ..arrays import compute_nz, pad_volume
 from ..cpu_threads import limited_cpu_threads
 from ..crowding import CrowdWithDuplicates

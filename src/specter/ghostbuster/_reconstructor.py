@@ -22,7 +22,7 @@ from .._defaults import LR_DECAY, SCHEDULER
 from ..io import read_mrc
 from .. import nufft
 from ..imaging import CTF, Exposure, Poses, Specimen
-from ..plots import MAP_TO_MODEL_FSC_THRESHOLD, FSCCurve, fsc_curve
+from ..fsc import MAP_TO_MODEL_FSC_THRESHOLD, FSCCurve, fsc_curve
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
 from ._converge import ADJOINT_TOLERANCE

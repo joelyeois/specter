@@ -77,7 +77,7 @@ from specter.match import (
     twin_test,
     water_ring_excess,
 )
-from specter.match._metadata import recorded_box, rescale_metadata
+from specter.match import recorded_box, rescale_metadata
 from specter.match._report import DerivedValue, coarse_excess, ratio_text
 from specter.pdb import PDB
 

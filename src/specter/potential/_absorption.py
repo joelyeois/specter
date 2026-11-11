@@ -40,7 +40,7 @@ import warnings
 import torch
 
 from ..arrays import rfft_frequency_squared
-from ..atom._atomic_potentials import kirkland_atomic_potential_3d_fourier
+from ..atom import kirkland_atomic_potential_3d_fourier
 from ..constants import (
     bohr_radius,
     electron_charge_volt_angstrom,
@@ -474,10 +474,9 @@ def aperture_mfp_ice(aperture_mrad: float, voltage_kv: float) -> float:
     .. [1] Kirkland, E. J. (2010). *Advanced computing in electron microscopy*
        (2nd ed.). Springer. https://doi.org/10.1007/978-1-4419-6533-2
     """
-    # Imported here rather than at module level: `specter.ice` imports
-    # `specter.potential` while it initialises, so a module-level import
-    # would be circular.
-    from ..ice._helpers import ndensity_of_amorphous_ice
+    # Read at call time, so this rate follows the one ice density the
+    # icemakers and the bundled library are built at.
+    from ..constants import ndensity_of_amorphous_ice
 
     k_ap = _aperture_k(aperture_mrad, voltage_kv)
     k = _K_GRID

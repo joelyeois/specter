@@ -591,11 +591,10 @@ class Reconstructor(_BaseReconstructor):
         assert self._run_dir is not None
 
         saved_arrays: list[str] = []
-        for name in ("kmask",):
-            tensor = getattr(self, name, None)
-            if isinstance(tensor, torch.Tensor):
-                torch.save(tensor.detach().cpu(), self._run_dir / f"{name}.pt")
-                saved_arrays.append(name)
+        kmask = getattr(self, "kmask", None)
+        if isinstance(kmask, torch.Tensor):
+            torch.save(kmask.detach().cpu(), self._run_dir / "kmask.pt")
+            saved_arrays.append("kmask")
 
         self._extra_params.update(dict(self.hparams))
         if saved_arrays:

@@ -382,19 +382,17 @@ class VolumeRotator(DeviceModule):
         R: torch.Tensor,
         t: torch.Tensor,
         scale: torch.Tensor,
-        origin: GridOrigin | None = None,
     ) -> torch.Tensor:
         """
         Apply the isotropic rotate-and-translate transform to normalized
         (grid_sample-convention) sampling points.
 
-        Recenters on `self.center_dc`, the RELION centre ``n // 2`` on each
-        axis (``origin="relion"`` only, whatever the constructor's
-        `origin`), rescales to
-        isotropic pixel-like units, rotates by R, undoes the rescale/recenter,
-        then translates by t. Shared by `_build_grid` (identity base grid) and
-        `sample_rotated_slices` (ROI query points mapped into this same
-        normalized convention).
+        When ``self.origin`` is "relion", recenters on `self.center_dc`, the
+        RELION centre ``n // 2`` on each axis; then rescales to isotropic
+        pixel-like units, rotates by R, undoes the rescale/recenter, and
+        translates by t. Used by `sample_rotated_slices` on ROI query points
+        mapped into this normalized convention; `_build_grid` evaluates the
+        same chain on an identity grid as one affine matrix.
 
         Parameters
         ----------
@@ -406,8 +404,6 @@ class VolumeRotator(DeviceModule):
             Translations in normalized units, shape (B, 3).
         scale : torch.Tensor
             Per-axis isotropic scale factors, shape (1, 1, 3).
-        origin : {"relion", "center"}, optional
-            Rotation origin for this call; None (default) uses ``self.origin``.
 
         Returns
         -------
@@ -415,7 +411,7 @@ class VolumeRotator(DeviceModule):
             Rotated normalized sampling coordinates, shape (B, N, 3).
         """
         t = self._translation_per_axis(t)
-        if (origin or self.origin) == "relion":
+        if self.origin == "relion":
             grid = (grid - self.center_dc) * scale
             grid = grid @ R.transpose(1, 2)
             grid = (grid / scale) + self.center_dc

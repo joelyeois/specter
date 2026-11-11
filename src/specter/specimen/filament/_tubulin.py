@@ -212,34 +212,8 @@ def _fit_tube_axis(
     names = list(centroids)
     coords = np.stack([centroids[n] for n in names])
 
-    # Group chains into protofilament columns. Do it in 3-D first with a
-    # generous radius, then refine: monomers of one protofilament are
-    # collinear, so a column's own spread defines the axis direction.
-    columns: list[list[str]] = []
-    seeds: list[np.ndarray] = []
-    for name, centroid in zip(names, coords):
-        for column, seed in zip(columns, seeds):
-            offset = centroid - seed
-            # Distance from the seed measured perpendicular to the
-            # column's own extent is not yet known, so use the fact that
-            # within a column consecutive monomers are ~41 A apart while
-            # columns are ~53 A apart in a fixed direction: cluster on the
-            # two coordinates that vary least within a column.
-            if np.linalg.norm(offset) < _COLUMN_RADIUS:
-                column.append(name)
-                break
-        else:
-            columns.append([name])
-            seeds.append(centroid)
-            continue
-        # Re-seed with the running mean so a long column keeps growing.
-        seeds[columns.index(column)] = np.stack([centroids[c] for c in column]).mean(
-            axis=0
-        )
-
-    # The clustering above only merges near-coincident chains, so refine:
-    # direction = dominant direction of within-structure nearest-neighbour
-    # offsets at the monomer rise (~41 A).
+    # The axis direction is the dominant direction of within-structure
+    # nearest-neighbour offsets at the monomer rise (~41 A).
     offsets = []
     for i, a in enumerate(coords):
         for b in coords[i + 1 :]:
@@ -254,9 +228,9 @@ def _fit_tube_axis(
     direction = np.mean(offsets, axis=0)
     direction = direction / np.linalg.norm(direction)
 
-    # Now regroup into true columns: chains whose offsets are parallel to
-    # the axis belong to the same protofilament.
-    columns = []
+    # Group chains into protofilament columns: chains whose offsets are
+    # parallel to the axis belong to the same protofilament.
+    columns: list[list[str]] = []
     for name, centroid in zip(names, coords):
         for column in columns:
             ref = centroids[column[0]]

@@ -76,8 +76,7 @@ from ...config import ScalarOrRange
 from ...arrays import count_nonzero_chunked
 from ...arrays import insert_particles_into_micrograph
 from ...pdb import DEFAULT_PDB_CACHE_DIR, PDB, canonical_pdb_source
-from ...random_seed import derive_seed
-from ...rotations import build_affine_matrix, random_rotation_matrix
+from ...rotations import build_affine_matrix
 from .._carbon import CarbonFilmGenerator, CarbonFilmSpec, edge_hole_center
 from .._grid import BeadGenerator
 from .._parallel_render import (
@@ -124,10 +123,6 @@ from ._membranes import _MembraneStageMixin
 from ._picks import _PickExportMixin
 from ...progress import TqdmProgress, phase, phase_done, phase_start, status
 from specter.options import ScatteringFactors
-
-#: `derive_seed` key of the stream `_render_species_pool` draws copy
-#: orientations from when the packer did not choose them.
-_SEED_RENDER_ROTATIONS = 1
 
 
 class TomogramSpecimenGenerator(
@@ -555,7 +550,6 @@ class TomogramSpecimenGenerator(
         # rasterizes once. Not keyed on id(pdb): CPython reuses an id once
         # its object is freed, so a later PDB could hit a stale mask.
         self._mask_cache: dict[tuple, torch.Tensor] = {}
-        self._rotation_rng: torch.Generator | None = None
         self.filament_instances: list[FilamentInstance] = []
         self.microtubule_instances: list[MicrotubuleInstance] = []
         self.microtubule_dimer_instances: list[FilamentInstance] = []
@@ -570,18 +564,6 @@ class TomogramSpecimenGenerator(
         torch.Tensor
             Shape `target_shape`, dtype float32.
         """
-        # Orientations of rendered copies the packer did not choose, drawn
-        # in render order from their own stream: generate() neither reads
-        # nor reseeds the global one. Unseeded, they come off the global
-        # stream, as `specter.seed` expects.
-        self._rotation_rng = (
-            None
-            if self.seed is None
-            else torch.Generator().manual_seed(
-                derive_seed(self.seed, _SEED_RENDER_ROTATIONS)
-            )
-        )
-
         # Per-run outputs: a second generate() must not append to the first's.
         self.bead_instances = []
 
@@ -1377,7 +1359,8 @@ class TomogramSpecimenGenerator(
         location: str,
         voxel_size: float,
         role: Literal["target", "filler"] = "target",
-        rotations: torch.Tensor | None = None,
+        *,
+        rotations: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, int]:
         active_species_i = [
             species_i
@@ -1437,17 +1420,12 @@ class TomogramSpecimenGenerator(
                         f"{location}, {role})"
                     ),
                 )
-                if rotations is not None:
-                    # Shape-based packing already committed to an
-                    # orientation per instance -- that rotation IS part of
-                    # the collision result, so re-drawing here would render
-                    # a volume that does not match the geometry the packer
-                    # actually tested (overlaps, and picks that miss).
-                    R = rotations[mask].to(self.device)
-                else:
-                    R = random_rotation_matrix(
-                        n_instances, device=self.device, generator=self._rotation_rng
-                    )
+                # Shape-based packing already committed to an orientation
+                # per instance -- that rotation IS part of the collision
+                # result, so re-drawing here would render a volume that does
+                # not match the geometry the packer actually tested
+                # (overlaps, and picks that miss).
+                R = rotations[mask].to(self.device)
                 if R.dim() == 2:
                     R = R.unsqueeze(0)
                 theta = build_affine_matrix(R)

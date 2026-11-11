@@ -12,17 +12,14 @@ from typing import Literal, Sequence
 from .._device_module import DeviceModule
 import torch
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint
 
-from ..fft import fft3, ifft3
 from ._exact import DEFAULT_EXACT_TOLERANCE, rotate_volume_exact
 from ._volume import (
     _isotropic_half_widths,
     _translation_per_axis,
-    apply_fourier_translation,
-    fourier_origin_displacement,
+    rotate_volume,
+    rotate_volume_fourier,
     rotation_sampling_grid,
-    split_affine_translation,
 )
 from specter.options import GridOrigin, GridSamplePadding, RotateMode
 
@@ -455,6 +452,12 @@ class VolumeRotator(DeviceModule):
             domain,
         )
 
+    def _as_grid_volume(self, V: torch.Tensor) -> torch.Tensor:
+        """`V` broadcast to this rotator's ``(nz, ny, nx)``; itself if it is that shape."""
+        if tuple(V.shape) == (self.nz, self.ny, self.nx):
+            return V
+        return V.expand(self.nz, self.ny, self.nx)
+
     # ------------------------------------------------------------------
     # Real-space rotation
     # ------------------------------------------------------------------
@@ -466,82 +469,49 @@ class VolumeRotator(DeviceModule):
         domain: Literal["real", "fourier"] = "real",
     ) -> torch.Tensor:
         """
-        Rotate a volume in real space.
+        Rotate a volume in real space, by :func:`~specter.rotations.rotate_volume`
+        with this rotator's origin, padding and ``align_corners``.
+
         V: (Z, Y, X)
         theta: (B, 3, 4)
-        origin: overrides self.origin for this call; used by `rotate_fourier`,
-            whose spectrum must always be rotated about the DC term.
-        domain: "fourier" when `V` is one part of an fftshifted spectrum, as
-            `rotate_fourier` passes it; see
+        origin: overrides self.origin for this call.
+        domain: "fourier" when `V` is one part of an fftshifted spectrum; see
             :func:`~specter.rotations.rotation_sampling_grid`.
         Returns: (B, Z, Y, X)
         """
-        B = theta.shape[0]
-
-        def sample(vol: torch.Tensor, theta_b: torch.Tensor) -> torch.Tensor:
-            grid = self._build_grid(theta_b, origin=origin, domain=domain)
-            vin = vol[None, None].expand(theta_b.shape[0], 1, self.nz, self.ny, self.nx)
-            return F.grid_sample(
-                vin,
-                grid,
-                align_corners=self.align_corners,
-                padding_mode=self.padding_mode,
-            )[:, 0]
-
-        if torch.is_grad_enabled() and V.requires_grad:
-            # Training (a reconstruction): the sampling grid is three floats
-            # per voxel per image, 1.6 GB at a 512 box, and grid_sample's
-            # backward needs it, so a batch of three kept 4.8 GB of grids
-            # alive from the forward to the backward. Recomputing each
-            # image's grid in the backward (one broadcast write) and
-            # sampling one image at a time took a reconstruction step's peak
-            # from 16 to 10 GiB for ~5% more time. The values are the same:
-            # grid_sample is per-voxel, so batching changes no arithmetic.
-            return torch.cat(
-                [
-                    checkpoint(sample, V, theta[b : b + 1], use_reentrant=False)
-                    for b in range(B)
-                ],
-                dim=0,
-            )
-        return sample(V, theta)  # (B, Z, Y, X)
+        resolved = origin or self.origin
+        if resolved not in ("relion", "center"):
+            raise ValueError(f"Unknown origin: {resolved}.")
+        return rotate_volume(
+            self._as_grid_volume(V),
+            theta,
+            origin="relion" if resolved == "relion" else "center",
+            padding_mode=self.padding_mode,
+            align_corners=self.align_corners,
+            domain=domain,
+        )
 
     # ------------------------------------------------------------------
     # Fourier-space rotation
     # ------------------------------------------------------------------
     def rotate_fourier(self, V: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
         """
-        Rotate a volume in Fourier space via real/imag decomposition.
+        Rotate a volume in Fourier space via real/imag decomposition, by
+        :func:`~specter.rotations.rotate_volume_fourier` with this rotator's
+        origin, padding and ``align_corners``.
 
         Any translation carried by `theta` is applied as a phase ramp rather than
         by resampling the spectrum, which would modulate the density instead of
         moving it. `self.origin` is folded into the same ramp: the rotation itself
         is always centred on the spectrum's DC term at ``n // 2``.
         """
-        V_f = fft3(V, shift=True)  # complex, (Z, Y, X)
-
-        theta_rot, displacement = split_affine_translation(theta)
-        # x-normalised, like `rotate_real`'s translation; see there. The phase
-        # ramp reads n / 2 voxels per normalised unit whatever align_corners is.
-        displacement = self._translation_per_axis(displacement, align_corners=False)
-        if self.origin == "center":
-            displacement = displacement + fourier_origin_displacement(
-                theta, self.nz, self.ny, self.nx
-            )
-
-        V_f_rot_real = self.rotate_real(
-            V_f.real, theta_rot, origin="relion", domain="fourier"
+        return rotate_volume_fourier(
+            self._as_grid_volume(V),
+            theta,
+            origin=self.origin,
+            padding_mode=self.padding_mode,
+            align_corners=self.align_corners,
         )
-        V_f_rot_imag = self.rotate_real(
-            V_f.imag, theta_rot, origin="relion", domain="fourier"
-        )
-
-        V_f_rot = apply_fourier_translation(
-            torch.complex(V_f_rot_real, V_f_rot_imag), displacement
-        )
-        V_rot = ifft3(V_f_rot, shift=True)
-
-        return V_rot.real  # (B, Z, Y, X)
 
     # ------------------------------------------------------------------
     # Forward with optional per-call mode override

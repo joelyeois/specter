@@ -81,6 +81,7 @@ from specter.match._metadata import recorded_box, rescale_metadata
 from specter.match._report import DerivedValue, coarse_excess, ratio_text
 from specter.pdb import PDB
 
+from specter._defaults import DELTA_I_I, DELTA_V_V
 from specter.devices import parse_device, resolve_available_device
 from specter.progress import console, format_elapsed, section
 from ._common import (
@@ -800,7 +801,7 @@ def _derive_detector_settings(
             config.cc,
             "acquisition card",
             f"mm; with a {config.energy_spread:g} eV FWHM source, a "
-            f"{focal_spread_sigma(config.cc * 1e7, voltage * 1e3, config.energy_spread, 0.06e-6, 0.01e-6):.0f} A "
+            f"{focal_spread_sigma(config.cc * 1e7, voltage * 1e3, config.energy_spread, DELTA_V_V, DELTA_I_I):.0f} A "
             "focal spread, integrated over at the detector"
             if config.cc
             else "focal spread off",

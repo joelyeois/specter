@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from ._common_fields import (
     job_id_setting,
 )
+from .._defaults import LR_DECAY, SCHEDULER
 from ._field import help_of, setting
 from typing import Literal
 from specter.options import (
@@ -150,10 +151,10 @@ class ReconstructionConfig:
         check="non_negative",
     )
     scheduler: Scheduler = setting(
-        "LambdaLR", help="Learning-rate schedule for the volume optimiser."
+        SCHEDULER, help="Learning-rate schedule for the volume optimiser."
     )
     lr_decay: float = setting(
-        0.1,
+        LR_DECAY,
         help=(
             "Decay rate for the LambdaLR schedule: multiplier = "
             "1 / (1 + lr_decay * sqrt(global_step)). Unused by other schedulers."

@@ -11,7 +11,7 @@ import gemmi
 import numpy as np
 import torch
 
-from ..constants import bohr_radius, electron_charge_volt_angstrom
+from ..constants import potential_prefactor
 
 
 class GemmiPotentialBuilder:
@@ -62,9 +62,7 @@ class GemmiPotentialBuilder:
         self.atomic_numbers = atomic_numbers
 
         # scaling prefactor
-        a0 = bohr_radius()  # [Å]
-        e = electron_charge_volt_angstrom()  # [V·Å]
-        self.c1 = 2 * torch.pi * e * a0
+        self.c1 = potential_prefactor()
         """float: Scaling factor for electrostatic potential (2π*e*a₀)."""
 
     def build_model(

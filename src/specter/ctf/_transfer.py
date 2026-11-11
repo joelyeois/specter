@@ -17,6 +17,7 @@ from torch_ctf import calc_LPP_ctf_2D, calculate_ctf_2d
 
 from ..aberrations import b_envelope, cc_envelope, cs_envelope, dose_envelope
 from ..arrays import kgrid_2d
+from .._defaults import DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ..constants import energy_to_wavelength
 from ..fft import fft2, ifft2
 from ._parameters import CTFParameters
@@ -105,9 +106,9 @@ class TransferFunction(nn.Module):
         bfactor: float | torch.Tensor | None = None,
         convergence_angle: float | None = None,
         cc: float | None = None,
-        energy_spread: float = 0.7,
-        deltaV_V: float = 0.06e-6,
-        deltaI_I: float = 0.01e-6,
+        energy_spread: float = ENERGY_SPREAD_EV,
+        deltaV_V: float = DELTA_V_V,
+        deltaI_I: float = DELTA_I_I,
         dose_envelope: bool = False,
         dose_weighted: bool = True,
     ) -> None:

@@ -23,7 +23,7 @@ from ..atom import (
     shtyrov_atomic_potential_3d_by_species,
     yukawa_shell_average,
 )
-from ..constants import bohr_radius, electron_charge_volt_angstrom
+from ..constants import bohr_radius, electron_charge_volt_angstrom, potential_prefactor
 from ..fft import fftconvolve, spatial_convolve3d_same
 from specter.options import (
     ConvBackend,
@@ -323,9 +323,7 @@ def build_potential_volume_analytic_scatter(
        factors. *Acta Crystallographica Section A*, 52(2), 257–276.
        https://doi.org/10.1107/S0108767395014371
     """
-    a0 = bohr_radius()  # [Å]
-    e = electron_charge_volt_angstrom()  # [V·Å]
-    c1 = 2 * torch.pi * e * a0
+    c1 = potential_prefactor()
 
     if b_factors is not None:
         if b_factors.shape[0] != coords.shape[0]:

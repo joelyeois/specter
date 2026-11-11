@@ -13,6 +13,7 @@ from typing import Literal
 
 import torch
 
+from .._defaults import CC_MM, DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ..aberrations import FocalSpread
 from ..aberrations._envelopes import cc_envelope
 from ..constants import energy_to_wavelength
@@ -201,10 +202,10 @@ class ExitWave:
     def intensity(
         self,
         *,
-        cc: float | None = 2.7,
-        energy_spread: float = 0.7,
-        deltaV_V: float = 0.06e-6,
-        deltaI_I: float = 0.01e-6,
+        cc: float | None = CC_MM,
+        energy_spread: float = ENERGY_SPREAD_EV,
+        deltaV_V: float = DELTA_V_V,
+        deltaI_I: float = DELTA_I_I,
         temporal_coherence: TemporalCoherence = "integrated",
     ) -> Image:
         """

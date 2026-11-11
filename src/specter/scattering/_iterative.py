@@ -9,6 +9,7 @@ import functools
 
 from collections.abc import Callable, Iterator
 
+from .._defaults import FFT_PAD_MARGIN
 from .._device_module import DeviceModule
 import torch
 from torch.utils.checkpoint import checkpoint as _gradient_checkpoint
@@ -67,7 +68,7 @@ class IterativeScattering(DeviceModule):
         progressbars: bool = True,
         roi_padding_mode: GridSamplePadding = "zeros",
         pad_fft: bool = False,
-        fft_pad_margin: int = 32,
+        fft_pad_margin: int = FFT_PAD_MARGIN,
         oversample: int = 1,
         crop: bool = True,
         keep_pad: bool = False,

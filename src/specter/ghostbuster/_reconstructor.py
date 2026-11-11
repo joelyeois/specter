@@ -18,6 +18,7 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler
 
+from .._defaults import LR_DECAY, SCHEDULER
 from ..io import read_mrc
 from .. import nufft
 from ..imaging import CTF, Exposure, Poses, Specimen
@@ -146,8 +147,8 @@ class Reconstructor(_BaseReconstructor):
         lr_R: float | None = None,
         lr_T: float | None = None,
         lr_D: float | None = None,
-        lr_decay: float = 0.1,
-        scheduler: Scheduler = "LambdaLR",
+        lr_decay: float = LR_DECAY,
+        scheduler: Scheduler = SCHEDULER,
         kmask: torch.Tensor | None = None,
         scale: torch.Tensor | None = None,
         fsc_ref: torch.Tensor | str | Path | None = None,

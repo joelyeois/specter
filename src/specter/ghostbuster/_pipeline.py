@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import mrcfile
 
+from .._defaults import LR_DECAY, SCHEDULER
 from ..io import read_mrc
 from ..progress import console
 
@@ -181,8 +182,8 @@ class Ghostbuster(_GhostbusterBase):
         lr_D: float | None = None,
         defocus_offset: float = 0.0,
         bfactor: float | None = None,
-        scheduler: Scheduler = "LambdaLR",
-        lr_decay: float = 0.1,
+        scheduler: Scheduler = SCHEDULER,
+        lr_decay: float = LR_DECAY,
         epochs: int = 5,
         batchsize: int = 3,
         init_volume: torch.Tensor | str | Path | None = None,

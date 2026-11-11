@@ -25,6 +25,7 @@ import torch
 
 from specter import logger
 
+from .._defaults import FFT_PAD_MARGIN
 from .. import rotations
 from .. import tilt as tilt_geometry
 from ..aberrations._functions import defocus_midplane_shift
@@ -379,7 +380,7 @@ class TiltSeries:
         deformation: Deformation = Deformation(),
         edge_margin: int = 8,
         pad_volume: bool = True,
-        fft_pad_margin: int = 32,
+        fft_pad_margin: int = FFT_PAD_MARGIN,
         absorption: torch.Tensor | None = None,
         seed: int | None = None,
         objective_aperture: float | None = None,

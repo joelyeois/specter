@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LRScheduler
 
+from .._defaults import LR_DECAY, SCHEDULER
 from .. import tilt as tilt_geometry
 from ..aberrations._functions import defocus_midplane_shift
 from ..arrays import center_crop
@@ -124,8 +125,8 @@ class TomogramReconstructor(_BaseReconstructor):
         use_fov_mask: bool = True,
         propagation: Propagation = Propagation(),
         optics: Optics = Optics(),
-        scheduler: Scheduler = "LambdaLR",
-        lr_decay: float = 0.1,
+        scheduler: Scheduler = SCHEDULER,
+        lr_decay: float = LR_DECAY,
         kmask: torch.Tensor | None = None,
         slice_batchsize: int = 1,
         checkpoint_chunks: int | None = None,

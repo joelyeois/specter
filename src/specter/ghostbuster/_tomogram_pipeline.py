@@ -5,6 +5,7 @@ a tilt series and its geometry to a trained `TomogramReconstructor`.
 
 from __future__ import annotations
 
+from .._defaults import LR_DECAY, SCHEDULER
 from ..io import read_mrc
 from ..progress import console
 
@@ -139,14 +140,14 @@ class TomogramGhostbuster(_GhostbusterBase):
         propagation: Propagation = Propagation(),
         optics: Optics = Optics(),
         use_fov_mask: bool = True,
-        scheduler: Scheduler = "LambdaLR",
+        scheduler: Scheduler = SCHEDULER,
         slice_batchsize: int = 1,
         num_workers: int = 0,
         precision: str = "16-mixed",
         run_dir: str | Path | None = None,
         image_units: ImageUnits = "counts",
         checkpoint_chunks: int | None = None,
-        lr_decay: float = 0.1,
+        lr_decay: float = LR_DECAY,
         kmask: torch.Tensor | None = None,
     ) -> None:
         images = self._load_tilt_series(tilt_series)

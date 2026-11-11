@@ -65,6 +65,19 @@ def electron_charge_volt_angstrom() -> float:
     return _sc.e / (4.0 * _sc.pi * _sc.epsilon_0) * 1.0e10
 
 
+def potential_prefactor() -> float:
+    """
+    The prefactor that turns an electron scattering factor into a potential.
+
+    Returns
+    -------
+    float
+        ``2 pi e a0`` in V·Å² (~47.8776), from `electron_charge_volt_angstrom`
+        and `bohr_radius`, multiplied in that order.
+    """
+    return 2 * torch.pi * electron_charge_volt_angstrom() * bohr_radius()
+
+
 @overload
 def energy_to_wavelength(voltage: float) -> float: ...
 @overload

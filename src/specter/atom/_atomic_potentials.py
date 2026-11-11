@@ -17,7 +17,7 @@ import torch
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from torch.special import modified_bessel_k0, modified_bessel_k1
 
-from ..constants import bohr_radius, electron_charge_volt_angstrom
+from ..constants import bohr_radius, electron_charge_volt_angstrom, potential_prefactor
 
 # A handful of bundled Shtyrov bonded-species entries (e.g. 'O(C, amide)',
 # 'H(N)') have a b_i = 0 term. In the b_i*exp(-b_i*k^2/4) Fourier-space
@@ -721,9 +721,7 @@ def shtyrov_atomic_potential_3d_by_species(
     potential : torch.Tensor
         Atomic potential in units of V, same shape as `r_xyz`.
     """
-    a0 = bohr_radius()  # [Å]
-    e = electron_charge_volt_angstrom()  # [V·Å]
-    c1 = 2 * torch.pi * e * a0
+    c1 = potential_prefactor()
 
     P = params[species].to(r_xyz.device)  # shape (5, 2)
     a = P[:, 0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
@@ -771,9 +769,7 @@ def peng_atomic_potential_3d(atomic_number: int, r_xyz: torch.Tensor) -> torch.T
     .. [2] Wojdyr, M. (2022). GEMMI: A library for structural biology. *Journal of
        Open Source Software*, 7(73), 4200. https://doi.org/10.21105/joss.04200
     """
-    a0 = bohr_radius()  # [Å]
-    e = electron_charge_volt_angstrom()  # [V·Å]
-    c1 = 2 * torch.pi * e * a0
+    c1 = potential_prefactor()
 
     coef = gemmi.Element(atomic_number).c4322
     a = torch.tensor(coef.a, dtype=torch.float32, device=r_xyz.device).view(5, 1, 1, 1)

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .._defaults import CC_MM, DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ._field import setting
 from ._paths import default_pdb_cache_dir
 
@@ -335,7 +336,7 @@ def convergence_angle_setting() -> Any:
 def cc_setting() -> Any:
     """The ``cc`` field."""
     return setting(
-        2.7,
+        CC_MM,
         help=(
             "Chromatic aberration coefficient in mm, for the temporal coherence "
             "loss from the beam's energy spread. Default 2.7, the Titan Krios "
@@ -349,7 +350,7 @@ def cc_setting() -> Any:
 def energy_spread_setting() -> Any:
     """The ``energy_spread`` field."""
     return setting(
-        0.7,
+        ENERGY_SPREAD_EV,
         help="FWHM of the beam energy spread in eV, used by the Cc envelope.",
         check="non_negative",
     )
@@ -358,7 +359,7 @@ def energy_spread_setting() -> Any:
 def deltaV_V_setting() -> Any:
     """The ``deltaV_V`` field."""
     return setting(
-        0.06e-6,
+        DELTA_V_V,
         help="Relative high-voltage instability, used by the Cc envelope.",
         check="non_negative",
     )
@@ -367,7 +368,7 @@ def deltaV_V_setting() -> Any:
 def deltaI_I_setting() -> Any:
     """The ``deltaI_I`` field."""
     return setting(
-        0.01e-6,
+        DELTA_I_I,
         help="Relative objective-lens current instability, used by the Cc envelope.",
         check="non_negative",
     )

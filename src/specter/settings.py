@@ -42,6 +42,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
+from specter._defaults import DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from specter.options import (
     AbsorptionModel,
     DeformationModel,
@@ -369,9 +370,9 @@ class Envelopes:
 
     convergence_angle: float | None = None
     cc: float | None = DEFAULT_CC_ANGSTROM
-    energy_spread: float = 0.7
-    deltaV_V: float = 0.06e-6
-    deltaI_I: float = 0.01e-6
+    energy_spread: float = ENERGY_SPREAD_EV
+    deltaV_V: float = DELTA_V_V
+    deltaI_I: float = DELTA_I_I
     dose_envelope: bool = False
     dose_envelope_target: DoseEnvelopeTarget = "transfer_function"
     temporal_coherence: TemporalCoherence = "integrated"

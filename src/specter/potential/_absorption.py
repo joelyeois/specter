@@ -319,6 +319,8 @@ References
 #: :data:`INELASTIC_MFP_PROTEIN_A` is derived for (Vulović et al., 2013).
 _PROTEIN_ATOM_FRACTIONS = {1: 0.492, 6: 0.313, 7: 0.094, 8: 0.101}
 _PROTEIN_DENSITY_G_CM3 = 1.35
+# Python floats, not `atom.ATOMIC_MASSES`: that table is float32, and its
+# values would move the derived mean free path in its last bits.
 _ATOMIC_MASS = {1: 1.008, 6: 12.011, 7: 14.007, 8: 15.999}
 
 #: Water geometry for the intramolecular interference terms, Angstrom.
@@ -412,6 +414,8 @@ _K_GRID = torch.linspace(1e-4, 40.0, 400_001, dtype=torch.float64)
 def _cross_section_prefactor(voltage_kv: float) -> float:
     # sigma turns V*A into radians; 2 pi a0 e (47.8776 V*A^2) turns f (A)
     # into the Fourier-space potential (V*A^3), as `PotentialBuilder` does.
+    # Multiplied in this order rather than through `potential_prefactor`,
+    # whose order differs from this one by one unit in the last place.
     c1 = 2.0 * math.pi * bohr_radius() * electron_charge_volt_angstrom()
     return (interaction_parameter(voltage_kv) * c1) ** 2
 

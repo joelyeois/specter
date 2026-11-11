@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from .._defaults import CC_MM, DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ..aberrations import FocalSpread
 from ..aberrations._functions import defocus_midplane_shift
 from ..constants import energy_to_wavelength
@@ -71,10 +72,10 @@ def simulate_frozen(
     klim: float | None = None,
     ews_curvature_sign: EwaldSphereSign = "negative",
     convergence_angle: float | None = None,
-    cc: float | None = 2.7,
-    energy_spread: float = 0.7,
-    deltaV_V: float = 0.06e-6,
-    deltaI_I: float = 0.01e-6,
+    cc: float | None = CC_MM,
+    energy_spread: float = ENERGY_SPREAD_EV,
+    deltaV_V: float = DELTA_V_V,
+    deltaI_I: float = DELTA_I_I,
     detector: str | None = None,
     noise: NoiseModel | None = "poisson",
     coincidence_radius: float = 0.0,

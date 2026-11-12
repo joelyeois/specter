@@ -94,6 +94,21 @@ def run_tilt_series(
         reuse one tracked tomogram build across several tiltseries runs in
         a different project).
     """
+    # Checked before a chained tomogram build, which can take many minutes,
+    # rather than after it; none of it reads the volume.
+    validate_config(config)
+    deformation = bundle_from_config(
+        Deformation,
+        config,
+        prefix="deformation_",
+        hole_offset=parse_scalar_or_range(config.deformation_hole_offset),
+    )
+    if config.deformation_picks_dir is not None and deformation.model is None:
+        raise ValueError(
+            "deformation_picks_dir is set but deformation_model is 'none': "
+            "there is no bend to move the picks by"
+        )
+
     if tomogram_config is not None:
         if config.volume_path:
             raise ValueError(
@@ -157,19 +172,6 @@ def run_tilt_series(
             "pre-built specimen volume -- build one first with `specter "
             "build tomogram`, or pass tomogram_config to build one as "
             "part of this call."
-        )
-
-    validate_config(config)
-    deformation = bundle_from_config(
-        Deformation,
-        config,
-        prefix="deformation_",
-        hole_offset=parse_scalar_or_range(config.deformation_hole_offset),
-    )
-    if config.deformation_picks_dir is not None and deformation.model is None:
-        raise ValueError(
-            "deformation_picks_dir is set but deformation_model is 'none': "
-            "there is no bend to move the picks by"
         )
 
     specter.set_verbosity(logging.INFO)

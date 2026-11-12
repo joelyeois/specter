@@ -409,6 +409,24 @@ def test_tomogram_output_path_tracked_with_pinned_job_id(tmp_path: Path) -> None
     )
 
 
+def test_run_tilt_series_rejects_a_bad_config_before_building_its_tomogram(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The series' own config is checked first, not after the chained
+    tomogram build has run for minutes."""
+    import specter.pipelines._tiltseries as tiltseries
+
+    def no_build(_config: object) -> None:
+        raise AssertionError("the tomogram was built before validation")
+
+    monkeypatch.setattr(tiltseries, "run_build_tomogram", no_build)
+    config = TiltSeriesConfig(
+        deformation_picks_dir=str(tmp_path), device="cpu", output_dir=str(tmp_path)
+    )
+    with pytest.raises(ValueError, match="deformation_picks_dir"):
+        run_tilt_series(config, tomogram_config=_minimal_tomogram_config())
+
+
 def test_run_tilt_series_chained_tomogram_config_creates_two_separate_jobs(
     tmp_path: Path,
 ) -> None:

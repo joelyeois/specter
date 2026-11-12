@@ -42,7 +42,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
-from specter._defaults import DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
+from specter._defaults import CC_MM, DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from specter.options import (
     AbsorptionModel,
     DeformationModel,
@@ -81,11 +81,6 @@ __all__ = [
 #: order its square (4% at this bound); measured domes over thin ice stay
 #: below 0.07.
 MAX_DEFORMATION_GRADIENT = 0.2
-
-#: Chromatic aberration coefficient of the Titan Krios objective lens, 2.7 mm,
-#: in Angstrom: the forward simulators' default (`Envelopes.cc`), so a
-#: simulated image carries the temporal-coherence loss every real one does.
-DEFAULT_CC_ANGSTROM = 2.7e7
 
 
 @dataclass(frozen=True)
@@ -325,10 +320,9 @@ class Envelopes:
         Beam convergence semi-angle in mrad, for the spatial-coherence (Cs)
         envelope. Default None, envelope off.
     cc : float, optional
-        Chromatic aberration coefficient in Angstrom, for the temporal
-        coherence loss from the beam's energy spread. Default
-        :data:`DEFAULT_CC_ANGSTROM` (2.7 mm, Titan Krios),
-        on, since every real image carries it: with it off, a 300 kV image at
+        Chromatic aberration coefficient in mm, for the temporal coherence
+        loss from the beam's energy spread, in the unit
+        `ExitWave.intensity` takes. Default 2.7 (Titan Krios), on, since every real image carries it: with it off, a 300 kV image at
         1 A/px has 15% too much power in the shell nearest Nyquist (8.7x at
         120 kV). An energy filter does not remove it, since the source's
         0.3-0.7 eV spread passes any slit. None or 0 disables it. The inverse
@@ -369,7 +363,7 @@ class Envelopes:
     """
 
     convergence_angle: float | None = None
-    cc: float | None = DEFAULT_CC_ANGSTROM
+    cc: float | None = CC_MM
     energy_spread: float = ENERGY_SPREAD_EV
     deltaV_V: float = DELTA_V_V
     deltaI_I: float = DELTA_I_I

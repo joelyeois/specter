@@ -3,13 +3,23 @@ field and its specimen generator divide them."""
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 
 import pytest
 import torch
 
-from specter.imaging import Field, Specimen
-from specter.settings import Crowding, Ice, Packing, Propagation, bundle_from_config
+from specter.config import ParticleStackConfig
+from specter.imaging import ExitWave, Field, Specimen
+from specter.pipelines._common import _Microscope
+from specter.settings import (
+    Crowding,
+    Envelopes,
+    Ice,
+    Packing,
+    Propagation,
+    bundle_from_config,
+)
 from specter.specimen import MicrographSpecimenGenerator
 
 
@@ -149,3 +159,16 @@ def test_a_verb_takes_its_settings_group_or_its_fields_never_both() -> None:
         specimen.crowd(Crowding(min_distance=4.0), max_distance_z=2.0)
     with pytest.raises(TypeError, match="not both"):
         specimen.plan(propagation=Propagation(), oversample=1)
+
+
+def test_envelopes_cc_is_in_the_unit_intensity_takes() -> None:
+    """`Envelopes.cc` is in mm, as `ExitWave.intensity(cc=)` and the configs
+    are, so it can be passed on as is. It used to hold Angstrom (2.7e7),
+    which `intensity` would have scaled by another 1e7."""
+    intensity_default = inspect.signature(ExitWave.intensity).parameters["cc"].default
+    assert (
+        Envelopes().cc == intensity_default == ParticleStackConfig(pdb_source="1abc").cc
+    )
+
+    microscope = _Microscope.from_config(ParticleStackConfig(pdb_source="1abc", cc=1.4))
+    assert microscope.envelopes.cc == 1.4

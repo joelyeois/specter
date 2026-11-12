@@ -37,21 +37,16 @@ class _Microscope:
     Attributes
     ----------
     envelopes : Envelopes
-        The coherence and dose-envelope settings. Its own ``cc`` is unset:
-        `Envelopes` holds Cc in Angstrom and the config in mm, so `cc` carries
-        the config's value to `intensity`, which takes mm.
+        The coherence and dose-envelope settings, Cc among them.
     camera : Camera
         The detector, its noise and pixel size.
     bfactor : float or None
         The envelope's B-factor, in A^2.
-    cc : float or None
-        Chromatic aberration in mm; None leaves the focal spread out.
     """
 
     envelopes: Envelopes
     camera: Camera
     bfactor: float | None
-    cc: float | None
 
     @classmethod
     def from_config(cls, config: Any, **camera: Any) -> _Microscope:
@@ -66,10 +61,9 @@ class _Microscope:
             `Camera` fields the config spells differently (``n_frames``).
         """
         return cls(
-            envelopes=bundle_from_config(Envelopes, config, cc=None),
+            envelopes=bundle_from_config(Envelopes, config),
             camera=bundle_from_config(Camera, config, **camera),
             bfactor=config.bfactor,
-            cc=config.cc or None,
         )
 
     @property
@@ -127,7 +121,7 @@ class _Microscope:
                 dose_envelope=exposure if self.damage_on_lens else None,
             )
             .intensity(
-                cc=self.cc,
+                cc=envelopes.cc or None,
                 energy_spread=envelopes.energy_spread,
                 deltaV_V=envelopes.deltaV_V,
                 deltaI_I=envelopes.deltaI_I,

@@ -120,7 +120,7 @@ def test_modular_pipeline_matches_image_generator():
         noise_model=None,
         oversample=s,
         focal_spread=FocalSpread.from_instrument(
-            env.cc,
+            env.cc * 1e7,  # mm -> A
             voltage * 1e3,
             env.energy_spread,
             env.deltaV_V,

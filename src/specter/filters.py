@@ -22,18 +22,21 @@ def butter(images: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
     ----------
     images : torch.Tensor or np.ndarray
         Can be a 2D single image (size, size) or a batch of 2D images (N, size, size).
+        A tensor may be on any device; it is filtered on the host.
 
     Returns
     -------
     filtered : torch.Tensor or np.ndarray
-        Butterworth filtered images.
+        Butterworth filtered images, a tensor on the input's device for a
+        tensor input.
     """
 
     istensor = False
     n = images.shape[-1]
     if torch.is_tensor(images):
         istensor = True
-        images = images.numpy()
+        device = images.device
+        images = images.detach().cpu().numpy()
 
     channel_axis = 0 if images.ndim == 3 else None
 
@@ -46,7 +49,7 @@ def butter(images: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
     )
 
     if istensor:
-        return torch.from_numpy(filtered)
+        return torch.from_numpy(filtered).to(device)
     else:
         return filtered
 

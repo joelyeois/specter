@@ -88,8 +88,10 @@ def fourier_crop(
     # FFT with DC at center
     images_f = fft2(images, shift=True)
 
-    # Center crop in Fourier space
-    start_idx = (H - output_size) // 2
+    # Center crop in Fourier space: DC sits at H // 2 and must land on
+    # output_size // 2, which (H - output_size) // 2 misses by one for an
+    # even box cropped to an odd one.
+    start_idx = H // 2 - output_size // 2
     end_idx = start_idx + output_size
     images_f_cropped = images_f[:, start_idx:end_idx, start_idx:end_idx]
 

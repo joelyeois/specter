@@ -4,6 +4,7 @@ import torch
 from specter.arrays import (
     rfft_frequency_squared,
     center_crop,
+    fourier_crop,
     radial_profile_2d,
     radial_profile_3d,
     soft_voxelize_coordinates,
@@ -187,6 +188,26 @@ def test_center_crop_keeps_the_fftshift_centre(length: int, size: int) -> None:
     crop = center_crop(x, size)
     assert crop.shape == (size, size)
     assert crop[size // 2, size // 2] == x[length // 2, length // 2]
+
+
+@pytest.mark.parametrize(("box", "out"), [(64, 32), (64, 33), (65, 32), (65, 33)])
+def test_fourier_crop_resamples_a_band_limited_cosine(box: int, out: int) -> None:
+    """A cosine below the new Nyquist comes back as the same cosine on the
+    coarse grid, about its ``out // 2`` origin, for every parity pair. An
+    even box cropped to an odd one used to shift the crop by one bin (error
+    up to 2 on this unit cosine)."""
+    pixel_size = 1.0
+    cycles = 3
+    j = torch.arange(box, dtype=torch.float64) - box // 2
+    image = torch.cos(2 * torch.pi * cycles * j / box).expand(box, box)
+
+    cropped, new_pixel_size = fourier_crop(image, pixel_size, pixel_size * box / out)
+
+    assert cropped.shape == (out, out)
+    assert new_pixel_size == pytest.approx(pixel_size * box / out)
+    k = torch.arange(out, dtype=torch.float64) - out // 2
+    expected = torch.cos(2 * torch.pi * cycles * k / out).expand(out, out)
+    torch.testing.assert_close(cropped, expected, atol=1e-9, rtol=0)
 
 
 @pytest.mark.parametrize("shape", [(8, 9), (7, 16, 9), (6, 6, 6)])

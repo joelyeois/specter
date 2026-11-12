@@ -442,3 +442,17 @@ def test_phase_shift_is_written_in_degrees_and_read_back(tmp_path) -> None:
     assert df["rlnPhaseShift"].to_numpy() == pytest.approx([0.0, 90.0, 180.0])
     back = extract_parameters_from_starfile(str(tmp_path / "p.star"))
     torch.testing.assert_close(back.ctf_params["phaseshift"], phase)
+
+
+def test_ctf_params_must_be_keyed_by_name(tmp_path) -> None:
+    """The positional (N, K) tensor form is gone: it wrote its defocus angle
+    unconverted into a column RELION reads in degrees, and nothing made one."""
+    with pytest.raises(TypeError, match="dict keyed by parameter name"):
+        create_particle_starfile(
+            torch.randn(2, 16, 16),
+            ctf_params=torch.zeros(2, 6),
+            dx=1.0,
+            voltage=300.0,
+            output_dir=str(tmp_path),
+        )
+    assert not list(tmp_path.iterdir())

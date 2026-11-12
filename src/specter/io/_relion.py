@@ -350,7 +350,7 @@ def create_particle_starfile(
     voltage: float | None = None,
     dx: float | None = None,
     filename: str = "particles",
-    ctf_params: torch.Tensor | dict[str, torch.Tensor] | None = None,
+    ctf_params: dict[str, torch.Tensor] | None = None,
     dose_per_angstrom: torch.Tensor | float | None = None,
     coincidence_radius: torch.Tensor | float | None = None,
     bfactor: torch.Tensor | float | None = None,
@@ -377,11 +377,11 @@ def create_particle_starfile(
         Pixel size in Å. Required.
     filename : str, optional
         Name of the output starfile and mrcfile (without extension). Default is "particles".
-    ctf_params : torch.Tensor or dict[str, torch.Tensor], optional
-        CTF parameters for each particle. Either a tensor of shape (N, K)
-        with columns [Cs (Å), dfu (Å), dfv (Å), dfang (rad), ..., phaseshift
-        (rad)], or a dict keyed by parameter name (e.g.
-        :attr:`specter.imaging.CTF.params`).
+    ctf_params : dict[str, torch.Tensor], optional
+        CTF parameters for each particle, keyed by name as
+        :attr:`specter.imaging.CTF.params` is: ``cs``, ``dfu``, ``dfv`` (Å),
+        ``dfang`` (degrees) and ``phaseshift`` (radians). Missing keys are
+        written as zero, and a missing ``dfv`` as ``dfu``.
     dose_per_angstrom : torch.Tensor or float, optional
         Total electron dose (fluence) per particle image in e⁻/Å². Saved as
         ``specterDosePerAngstrom``.
@@ -399,6 +399,12 @@ def create_particle_starfile(
     ``ctf.params``, ``exposure.dose``), so the STAR file cannot drift from
     what was simulated.
     """
+
+    if ctf_params is not None and not isinstance(ctf_params, dict):
+        raise TypeError(
+            "ctf_params must be a dict keyed by parameter name "
+            f"(e.g. CTF.params), not {type(ctf_params).__name__}"
+        )
 
     # Before the .mrcs is written, so a mismatch cannot leave a stack on
     # disk that no STAR file describes.
@@ -450,21 +456,14 @@ def create_particle_starfile(
         torch.zeros(n, 2) if translations is None else torch.as_tensor(translations)
     )
 
-    # support both dict and 2-D tensor for ctf_params (None means "all zeros")
-    if ctf_params is None or isinstance(ctf_params, dict):
-        zeros = torch.zeros(n)
-        ctf_params = ctf_params or {}
-        cs_angstrom = ctf_params.get("cs", zeros)
-        dfu = ctf_params.get("dfu", zeros)
-        dfv = ctf_params.get("dfv", dfu)
-        dfang = ctf_params.get("dfang", zeros)
-        pshift = ctf_params.get("phaseshift", zeros)
-    else:
-        cs_angstrom = ctf_params[:, 0]
-        dfu = ctf_params[:, 1]
-        dfv = ctf_params[:, 2]
-        dfang = ctf_params[:, 3]
-        pshift = ctf_params[:, 5]
+    # None means "all zeros"
+    zeros = torch.zeros(n)
+    ctf_params = ctf_params or {}
+    cs_angstrom = ctf_params.get("cs", zeros)
+    dfu = ctf_params.get("dfu", zeros)
+    dfv = ctf_params.get("dfv", dfu)
+    dfang = ctf_params.get("dfang", zeros)
+    pshift = ctf_params.get("phaseshift", zeros)
 
     # Broadcast to length n rather than written through as-is. A 0-dim tensor
     # reaches `starfile` as an object and is written as its repr --

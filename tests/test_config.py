@@ -261,6 +261,24 @@ def test_load_config_names_unknown_fields_and_renames(tmp_path):
         load_config(str(typo), TomogramConfig)
 
 
+def test_load_config_rejects_a_field_set_in_two_tables(tmp_path: Path) -> None:
+    """Tables flatten into one namespace, so a key set twice used to be
+    resolved silently by table order."""
+    from specter.config import load_config
+
+    twice = tmp_path / "twice.toml"
+    twice.write_text(
+        'pdb_source = "1abc"\n[imaging]\nvoltage = 300.0\n[advanced]\nvoltage = 200.0\n'
+    )
+    with pytest.raises(ValueError, match=r"'voltage' in \[imaging\], \[advanced\]"):
+        load_config(str(twice))
+
+    top = tmp_path / "top.toml"
+    top.write_text('pdb_source = "1abc"\nvoltage = 300.0\n[imaging]\nvoltage = 200.0\n')
+    with pytest.raises(ValueError, match="the top level"):
+        load_config(str(top))
+
+
 def test_renamed_specimen_chunk_size_says_what_to_write_instead(tmp_path):
     """`specimen_chunk_size` shipped uncommented in the canonical micrograph
     config, so every existing copy of it carries the old spelling. Without an

@@ -66,10 +66,22 @@ def load_config(
     with open(path, "rb") as f:
         raw = tomllib.load(f)
     flat: dict = {}
-    for value in raw.values():
-        if isinstance(value, dict):
-            flat.update(value)
-    flat.update({k: v for k, v in raw.items() if not isinstance(v, dict)})
+    where: dict[str, list[str]] = {}
+    for table, value in raw.items():
+        entries = value if isinstance(value, dict) else {table: value}
+        for key in entries:
+            where.setdefault(key, []).append(
+                f"[{table}]" if isinstance(value, dict) else "the top level"
+            )
+        flat.update(entries)
+    repeated = {key: places for key, places in where.items() if len(places) > 1}
+    if repeated:
+        # Tables are flattened into one namespace, so a key set in two of
+        # them would otherwise be resolved silently by table order.
+        detail = "; ".join(
+            f"{key!r} in {', '.join(places)}" for key, places in repeated.items()
+        )
+        raise ValueError(f"{path}: field(s) set more than once: {detail}.")
     unknown = sorted(set(flat) - {f.name for f in fields(config_cls)})
     if unknown:
         # Without this, a stale or mistyped table surfaces as a bare

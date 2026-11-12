@@ -81,6 +81,7 @@ def sample_surface_sites(
     projection_iterations: int = 8,
     phi_tolerance_angstrom: float = 1.0,
     seed: int | None = None,
+    bounds_xyz: tuple[torch.Tensor, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Sample well-spaced points on a membrane's mid-surface.
@@ -115,6 +116,11 @@ def sample_surface_sites(
         genuinely on the surface. Default 1.0.
     seed : int, optional
         Random seed. Default None.
+    bounds_xyz : tuple of torch.Tensor, optional
+        ``(lo, hi)`` corners, Å, of the box a site must lie in. The field's
+        working grid can extend past the volume the membrane is rendered
+        into, and a site outside it would place a protein the volume does
+        not hold. Default None: anywhere on the surface.
 
     Returns
     -------
@@ -157,7 +163,11 @@ def sample_surface_sites(
         )
         projected = _project_to_surface(field, candidates, projection_iterations)
         phi_residual = field.sample(projected).abs()
-        valid = (phi_residual < phi_tolerance_angstrom).cpu()
+        valid = phi_residual < phi_tolerance_angstrom
+        if bounds_xyz is not None:
+            lo, hi = (b.to(projected) for b in bounds_xyz)
+            valid &= ((projected >= lo) & (projected <= hi)).all(dim=-1)
+        valid = valid.cpu()
         if not bool(valid.any()):
             continue
         cand = projected.detach().cpu()[valid]

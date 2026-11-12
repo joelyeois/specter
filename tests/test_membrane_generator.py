@@ -462,3 +462,26 @@ def test_a_transmembrane_template_turns_by_its_recorded_rotation():
         assert float(direction @ (R @ z_axis)) > 0.8
         checked += 1
     assert checked
+
+
+def test_transmembrane_sites_stay_inside_a_clipped_membrane_box() -> None:
+    """The working grid of a membrane larger than its box reaches past the
+    rendered volume, and sites used to be drawn on that outside surface:
+    recorded as placements whose protein the volume does not hold."""
+    template = torch.ones(3, 3, 3)
+    gen = MembraneGenerator(
+        transmembrane_specs=[TransmembraneSpec("p", template=template, frequency=40)],
+        seed=0,
+        target_shape=(12, 12, 12),
+        **_SPHERE_KWARGS,
+    )
+    gen.generate()
+    assert gen.clipped_at_boundary
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        placements = gen.place_transmembrane(min_spacing_angstrom=10.0)
+
+    assert placements
+    lo, hi = gen._volume_bounds_xyz()
+    for placement in placements:
+        assert bool(((placement.center_xyz >= lo) & (placement.center_xyz <= hi)).all())

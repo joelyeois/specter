@@ -569,6 +569,7 @@ class MembraneGenerator:
             min_spacing_angstrom=min_spacing_angstrom,
             max_attempts=max_attempts,
             seed=None if self.seed is None else derive_seed(self.seed, *_SEED_SITES),
+            bounds_xyz=self._volume_bounds_xyz(),
         )
         n_found = sites_xyz.shape[0]
         if n_found < n_sites:
@@ -699,6 +700,24 @@ class MembraneGenerator:
 
         self.placements = placements
         return placements
+
+    def _volume_bounds_xyz(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Corners, Å, of the region whose points round to a voxel of `volume`.
+
+        Returns
+        -------
+        lo, hi : torch.Tensor
+            Shape ``(3,)``, xyz.
+        """
+        assert self._origin_xyz is not None
+        nz, ny, nx = self.target_shape
+        half = 0.5 * self.voxel_size
+        lo = self._origin_xyz.to(torch.float32)
+        hi = (
+            lo + (torch.tensor([nx, ny, nz], dtype=torch.float32) - 1) * self.voxel_size
+        )
+        return lo - half, hi + half
 
     def _build_template(
         self, spec: TransmembraneSpec, device: torch.device | None = None

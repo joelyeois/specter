@@ -8,12 +8,14 @@ voxel (see specter.specimen.tomogram for how region masks feed into this).
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 import torch
 from scipy import ndimage
 
-from specter.specimen.packing import pack_hard_spheres_3d
+from specter.specimen.packing import draw_species_pool, pack_hard_spheres_3d
 
 
 def _half_space_exclusion_field(
@@ -216,3 +218,20 @@ def test_sampling_mask_positions_land_in_the_canvas_voxels_they_were_drawn_from(
         f"render voxels {sorted(set(stamped.flatten().tolist()))} drawn from a "
         f"field voxel that pools render voxels {lo}..{hi}"
     )
+
+
+def test_draw_species_pool_warns_when_its_cap_cuts_the_pool_short() -> None:
+    """A target past the 1,000,000-candidate cap returns a short pool, and
+    says so; a reachable target draws to it without a warning."""
+    radii = torch.tensor([1.0])
+    ratios = torch.tensor([1.0])
+    sphere = 4.0 / 3.0 * torch.pi
+
+    with pytest.warns(UserWarning, match="cap of 1,000,000"):
+        drawn, _ = draw_species_pool(radii, ratios, 0.5, 4e6 * sphere, seed=0)
+    assert drawn.numel() == 1_000_000
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        drawn, _ = draw_species_pool(radii, ratios, 0.5, 2e3 * sphere, seed=0)
+    assert drawn.numel() == 1_000

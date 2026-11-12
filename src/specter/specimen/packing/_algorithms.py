@@ -50,6 +50,8 @@ References
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -179,6 +181,15 @@ def draw_species_pool(
         drawn.append(k)
         n_drawn += k.numel()
         accumulated = float(running[k.numel() - 1])
+
+    if accumulated < target_volume:
+        warnings.warn(
+            f"draw_species_pool stopped at its cap of {max_draws:,} candidates, "
+            f"with {accumulated / box_volume:.3g} of the requested "
+            f"{occupancy_fraction:.3g} occupancy drawn; the packed specimen "
+            "will be sparser than asked.",
+            stacklevel=2,
+        )
 
     species_idx = torch.cat(drawn) if drawn else torch.zeros(0, dtype=torch.long)
     radii = radii_host[species_idx].to(torch.float32)

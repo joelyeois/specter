@@ -14,6 +14,7 @@ import torch
 import torch.nn.functional as F
 
 from ..arrays import radial_profile_3d, soft_voxelize_coordinates
+from ..constants import molar_mass_of_water
 from ..fft import fft3
 from ..progress import ProgressManager
 from ._energy import (
@@ -34,7 +35,7 @@ from specter.options import IceOptimizer
 # Langevin anneal units: energies in eV, lengths in A, time in fs, mass in amu.
 _BOLTZMANN_EV_PER_K = 8.617333262e-5
 _EV_PER_AMU_A_TO_A_PER_FS2 = 9.648533212e-3
-_WATER_MASS_AMU = 18.015  # one ML-BOP site is one H2O molecule
+_WATER_MASS_AMU = molar_mass_of_water  # one ML-BOP site is one H2O molecule
 
 
 class _PlateauStop:

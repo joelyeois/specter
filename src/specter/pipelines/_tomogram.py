@@ -60,6 +60,8 @@ from specter.specimen._parallel_render import (
 )
 
 from specter.devices import parse_device, resolve_available_device
+from specter.random_seed import derive_seed
+from specter.specimen.tomogram import SEED_MEMBRANE_INSTANCES
 from specter.progress import console, section
 from ._common import (
     _draw_seed,
@@ -219,11 +221,10 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
         collide -- pick files in particular are named after the species,
         not ``config.filename`` (see `TomogramSpecimenGenerator.
         export_picks`), so a shared flat output_dir would silently
-        overwrite them across tomograms. If ``config.seed`` is set, each
-        tomogram also gets its own seed (``config.seed``, ``config.seed +
-        1``, ...) so runs are reproducible but distinct; if ``config.seed``
-        is ``None``, one is drawn from the global stream and printed, and
-        used the same way.
+        overwrite them across tomograms. Tomogram ``i`` is seeded with
+        ``derive_seed(config.seed, i)``, so runs are reproducible but
+        distinct; if ``config.seed`` is ``None``, one is drawn from the
+        global stream and printed, and used the same way.
     """
     # n_tomograms is a call argument rather than a config field, so
     # validate_config never sees it.
@@ -270,7 +271,7 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
                 ),
                 project=None,
                 job_id=None,
-                seed=None if config.seed is None else config.seed + i,
+                seed=None if config.seed is None else derive_seed(config.seed, i),
             )
             _run_single_tomogram(run_config)
 
@@ -424,7 +425,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         ]
 
     membrane_instances = []
-    for entry in config.membrane:
+    for entry_index, entry in enumerate(config.membrane):
         # dict(entry) copies the OUTER dict before .pop() -- config.membrane[i]
         # itself is never mutated, so this stays safe even when the same
         # TomogramConfig (and its membrane list) is reused, un-deep-copied,
@@ -459,16 +460,14 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         instance_kwargs.setdefault("parameterization", config.scattering_factors)
 
         for i in range(n_copies):
-            # Restarts from config.seed at i=0 for EVERY entry (not a
-            # running counter across entries) -- editing/adding another
-            # [[membrane]] entry then never perturbs an earlier entry's own
-            # instances' random realizations. The tradeoff (two entries at
-            # the same index CAN start from an identical seed if they also
-            # share kind and settings) only matters when seed is set at
-            # all -- the default (seed=None) draws every instance
-            # independently regardless, so this is purely an advanced-user,
-            # reproducibility-mode consideration.
-            instance_seed = None if config.seed is None else config.seed + i
+            # Keyed on (entry, copy) rather than drawn from a running
+            # stream, so editing one [[membrane]] entry never changes another
+            # entry's instances, and no two instances share a seed.
+            instance_seed = (
+                None
+                if config.seed is None
+                else derive_seed(config.seed, SEED_MEMBRANE_INSTANCES, entry_index, i)
+            )
             mgen = MembraneGenerator(
                 target_shape=target_shape,  # type: ignore[arg-type]
                 voxel_size=config.voxel_size,

@@ -214,8 +214,9 @@ class TomogramConfig:
     pdb_cache_dir: str = pdb_cache_dir_setting()
     seed: int | None = seed_setting(
         "specimen assembly: placement, orientations and membrane shapes",
-        "Tomogram i of --n_tomograms uses seed + i. Unset draws one and prints "
-        "it, so every run differs and any run can be repeated.",
+        "Each of --n_tomograms gets its own seed derived from this one. Unset "
+        "draws one and prints it, so every run differs and any run can be "
+        "repeated.",
     )
 
     # --- Membranes (optional) ---
@@ -228,9 +229,9 @@ class TomogramConfig:
     # "radius": [200.0, 300.0], "n_copies": 3}. The keys are passed to
     # specter.specimen.membrane.MembraneGenerator, except two:
     #   - "n_copies" (int, default 1): that many independent instances of
-    #     the template, seeded config.seed + i, restarting at i = 0 per
-    #     entry so that adding an entry never changes an earlier one's
-    #     instances. Positions come from collision-rejecting random
+    #     the template, each seeded from (config.seed, entry, copy), so
+    #     that editing an entry never changes another one's instances.
+    #     Positions come from collision-rejecting random
     #     placement; an instance that does not fit is dropped.
     #   - "target_shape" = [Z, Y, X] voxels. Default omitted: sized to the
     #     organelle that was drawn.

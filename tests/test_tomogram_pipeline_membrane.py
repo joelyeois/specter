@@ -160,20 +160,21 @@ def test_an_explicit_target_shape_turns_the_size_cap_off() -> None:
     assert generator.params["radius"] >= 200.0
 
 
-def test_n_copies_restarts_per_entry_not_running_across_entries():
-    config = TomogramConfig(
-        membrane=[
-            {"kind": "vesicle", "n_copies": 2},
-            {"kind": "tubules", "n_copies": 2},
-        ],
-        seed=5,
-        **_BASE_KWARGS,
-    )
-    gen = build_tomogram_generator(config)
-    seeds = [mi.generator.seed for mi in gen.membrane_instances]
-    # Second entry's seeds restart at config.seed, not continue from the
-    # first entry's last seed (which would give [5, 6, 7, 8]).
-    assert seeds == [5, 6, 5, 6]
+def test_membrane_instance_seeds_are_distinct_and_independent_per_entry():
+    def seeds(*entries: dict) -> list[int]:
+        config = TomogramConfig(membrane=list(entries), seed=5, **_BASE_KWARGS)
+        gen = build_tomogram_generator(config)
+        return [mi.generator.seed for mi in gen.membrane_instances]
+
+    vesicles = {"kind": "vesicle", "n_copies": 2}
+    tubules = {"kind": "tubules", "n_copies": 2}
+    base = seeds(vesicles, tubules)
+    # No two instances share a seed, within an entry or across entries.
+    assert len(set(base)) == 4
+    # An entry's instances do not depend on the entries after it, nor on how
+    # many copies another entry asks for.
+    assert seeds(vesicles)[:2] == base[:2]
+    assert seeds(vesicles, {**tubules, "n_copies": 3})[:4] == base
 
 
 def test_membrane_config_entry_dict_never_mutated():

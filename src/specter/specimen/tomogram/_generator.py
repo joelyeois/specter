@@ -108,9 +108,17 @@ from ._helpers import (
     _downsample_mask_maxpool,
     _insert_instance_labels,
     _insert_rotated_copies,
+    _stage_seed,
     _wants_atom_species,
+    SEED_BEAD_PACKING,
+    SEED_BEAD_RADII,
+    SEED_CARBON_FILM,
+    SEED_CARBON_HOLES,
+    SEED_FILLER_POOL,
+    SEED_PROTEIN_PACKING,
     resolve_accumulator_device,
 )
+from ...random_seed import derive_seed
 from ._specs import (
     BeadPlacement,
     MembraneInstance,
@@ -902,7 +910,7 @@ class TomogramSpecimenGenerator(
                 species_ratios,
                 self.occupancy_fraction,
                 region_volume_a3,
-                seed=self.seed,
+                seed=_stage_seed(self.seed, SEED_FILLER_POOL),
                 species_volumes=pool_volumes,
             )
 
@@ -986,10 +994,10 @@ class TomogramSpecimenGenerator(
         carbon_gen = CarbonFilmGenerator(
             voxel_size=voxel_size,
             parameterization=self.bulk_parameterization,
-            seed=self.seed,
+            seed=_stage_seed(self.seed, SEED_CARBON_FILM),
             device=volume.device,
         )
-        grid_rng = np.random.default_rng(self.seed)
+        grid_rng = np.random.default_rng(_stage_seed(self.seed, SEED_CARBON_HOLES))
         edge_fraction = carbon_film_spec.edge_fraction
         if isinstance(edge_fraction, tuple):
             edge_fraction = grid_rng.uniform(*edge_fraction)
@@ -1060,7 +1068,7 @@ class TomogramSpecimenGenerator(
         # Radii are drawn here, before packing, so each bead's own size is
         # what the collision test reserves room for.
         rng = torch.Generator().manual_seed(
-            0 if self.seed is None else int(self.seed) + 991
+            0 if self.seed is None else derive_seed(self.seed, SEED_BEAD_RADII)
         )
         radii = torch.cat(
             [
@@ -1080,7 +1088,7 @@ class TomogramSpecimenGenerator(
                 radii,
                 box,
                 gap=self.gap,
-                seed=self.seed,
+                seed=_stage_seed(self.seed, SEED_BEAD_PACKING),
                 device="cpu",  # see self.device's own docstring
                 exclusion_distance_field=exclusion_field,
                 field_voxel_size=field_voxel_size,
@@ -1300,7 +1308,7 @@ class TomogramSpecimenGenerator(
             pool_factor=factor,
             canvas_shape=canvas_shape,
             max_retries=self.packing_max_retries,
-            seed=self.seed,
+            seed=_stage_seed(self.seed, SEED_PROTEIN_PACKING),
             device=self.device,
             clip_axes=self.clip_axes,
         )

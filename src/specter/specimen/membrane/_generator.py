@@ -74,6 +74,14 @@ _MAX_COARSE_NODES = 24_000_000
 # How far the bilayer's potential reaches from the mid-surface, A; the
 # margin an auto-sized output box leaves around the organelle.
 _BILAYER_MARGIN = 45.0
+
+#: `derive_seed` keys of the transmembrane draws: site positions, each
+#: site's species, and each site's orientation (keyed further by site).
+#: Two-element, so none can equal the shape draws' ``(0,)`` and
+#: ``(1 + attempt,)``.
+_SEED_SITES = (0, 1)
+_SEED_SPECIES = (0, 2)
+_SEED_ORIENTATIONS = (0, 3)
 # Times the path-dependent randomness of a kind (undulation, a tubule's
 # walk) is redrawn when a draw cannot be regularised to a kink-free surface.
 _BUILD_ATTEMPTS = 4
@@ -560,7 +568,7 @@ class MembraneGenerator:
             n_sites=n_sites,
             min_spacing_angstrom=min_spacing_angstrom,
             max_attempts=max_attempts,
-            seed=self.seed,
+            seed=None if self.seed is None else derive_seed(self.seed, *_SEED_SITES),
         )
         n_found = sites_xyz.shape[0]
         if n_found < n_sites:
@@ -602,7 +610,7 @@ class MembraneGenerator:
         )
         chooser = torch.Generator(device="cpu")
         if self.seed is not None:
-            chooser.manual_seed(self.seed)
+            chooser.manual_seed(derive_seed(self.seed, *_SEED_SPECIES))
 
         # int16, not int32: these ids are LOCAL to this membrane (1..n_sites,
         # a few hundred at most), remapped onto the shared counter by the
@@ -623,7 +631,12 @@ class MembraneGenerator:
         )
         rotations = [
             orientation_for_normal(
-                normals_xyz[i], seed=None if self.seed is None else self.seed + i
+                normals_xyz[i],
+                seed=(
+                    None
+                    if self.seed is None
+                    else derive_seed(self.seed, *_SEED_ORIENTATIONS, i)
+                ),
             )
             for i in range(n_found)
         ]

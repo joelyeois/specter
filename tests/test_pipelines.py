@@ -836,3 +836,28 @@ def test_a_run_failing_in_generation_is_recorded_as_failed(
     )
     assert job["status"] == "failed"
     assert "generation failed" in job["error"]
+
+
+def test_seeded_tomograms_do_not_reuse_a_neighbouring_seed(tmp_path: Path) -> None:
+    """Tomogram 2 of a seed-7 run is not the seed-8 tomogram: each tomogram's
+    seed is derived from the run's, not offset from it."""
+    from specter.config import TomogramConfig
+
+    def bead_picks(name: str, seed: int, n_tomograms: int, sub: str = "") -> str:
+        run_build_tomogram(
+            TomogramConfig(
+                target_shape=[16, 48, 48],
+                voxel_size=10.0,
+                beads=[{"radius": 30.0, "n_copies": 3}],
+                device="cpu",
+                seed=seed,
+                output_dir=str(tmp_path / name),
+            ),
+            n_tomograms=n_tomograms,
+        )
+        (picks,) = (tmp_path / name / sub).glob("gold-bead*_point.ndjson")
+        return picks.read_text()
+
+    second_of_seven = bead_picks("seven", 7, 2, sub="0002")
+    assert second_of_seven != bead_picks("eight", 8, 1)
+    assert second_of_seven == bead_picks("seven_again", 7, 2, sub="0002")

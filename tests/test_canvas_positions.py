@@ -98,7 +98,7 @@ def test_tomogram_beads_render_at_their_picks():
         protein_specs=[],
         bead_specs=[TomogramBeadSpec(radius=20.0, count=4)],
         bead_roughness=0.0,
-        seed=2,
+        seed=0,  # places all four beads clear of each other
         progressbars=False,
     )
     volume = gen.generate()

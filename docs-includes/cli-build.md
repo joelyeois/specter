@@ -98,7 +98,7 @@ specter build tomogram [OPTIONS]
 | `--packing_max_retries` | `INTEGER` | `1500` | Trial positions per instance. Sets a packing stage's attempt ceiling; pairs with the packer's own stall_patience, which cuts that budget short once a species saturates. |
 | `--packing_voxel_size` | `FLOAT` | _none_ | Run protein collision on a coarser grid than the render, an integer multiple of voxel_size. Unset = automatic, which only coarsens once the packing grid would be too large to hold; ordinary boxes are unaffected. |
 | `--bead_roughness` | `TEXT` | `0.12` | How irregular each gold fiducial's boundary is, as an RMS fraction of its radius. One number, or a [low, high] pair drawn per bead so a population mixes near-round and misshapen particles. 0.0 gives clean spheres; 0.12-0.20 reads as an irregular particle. |
-| `--seed` | `INTEGER` | _none_ | RNG seed for specimen assembly: placement, orientations and membrane shapes. Tomogram i of --n_tomograms uses seed + i. Unset draws one and prints it, so every run differs and any run can be repeated. |
+| `--seed` | `INTEGER` | _none_ | RNG seed for specimen assembly: placement, orientations and membrane shapes. Each of --n_tomograms gets its own seed derived from this one. Unset draws one and prints it, so every run differs and any run can be repeated. |
 
 ## `specter build ice` { #specter-build-ice }
 

@@ -29,6 +29,8 @@ from ._helpers import (
     _mask_at_positions,
     _position_to_center_index,
     _snap_to_canvas_voxel,
+    _stage_seed,
+    SEED_MEMBRANE_PACKING,
 )
 from ._regions import classify_membrane_regions
 from ._specs import MembraneInstance
@@ -180,7 +182,7 @@ class _MembraneStageMixin:
                     radii,
                     box,
                     gap=self.gap,
-                    seed=self.seed,
+                    seed=_stage_seed(self.seed, SEED_MEMBRANE_PACKING),
                     device="cpu",  # see self.device's own docstring
                     clip_axes=self.clip_axes,
                     # A handful of large spheres, each alone in its radius

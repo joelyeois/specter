@@ -464,7 +464,7 @@ def test_transmembrane_picks_outside_the_box_are_dropped():
         transmembrane_specs=[
             TransmembraneSpec(pdb_source=str(_SMALL_FIXTURE), frequency=30)
         ],
-        seed=0,
+        seed=1,  # puts 6 of its 20 proteins outside the box
         **_MEMBRANE_KWARGS,
     )
     gen = TomogramSpecimenGenerator(
@@ -475,7 +475,7 @@ def test_transmembrane_picks_outside_the_box_are_dropped():
         occupancy_fraction=0.05,
         clip_axes=(True, True, True),
         pdb_cache_dir=str(Path(__file__).parent / "test_data"),
-        seed=0,
+        seed=1,
         progressbars=False,
     )
     with warnings.catch_warnings():

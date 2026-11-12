@@ -14,6 +14,27 @@ from ...arrays import insert_particles_into_micrograph
 from ...rotations import fold_subvoxel_offsets
 from ...rotations import rotate_volume
 from ..membrane import MembraneGenerator
+from ...random_seed import derive_seed
+
+
+#: `derive_seed` keys of a tomogram's random streams, one per stage, so that
+#: no two stages draw the same numbers from one seed.
+SEED_FILLER_POOL = 0
+SEED_PROTEIN_PACKING = 1
+SEED_CARBON_FILM = 2
+SEED_CARBON_HOLES = 3
+SEED_BEAD_PACKING = 4
+SEED_BEAD_RADII = 5
+SEED_MEMBRANE_PACKING = 6
+SEED_FILAMENTS = 7
+SEED_MICROTUBULES = 8
+#: Keyed further by ``(entry, copy)``, one stream per membrane instance.
+SEED_MEMBRANE_INSTANCES = 9
+
+
+def _stage_seed(seed: int | None, stage: int) -> int | None:
+    """The seed of one of a tomogram's stages, or None for an unseeded build."""
+    return None if seed is None else derive_seed(seed, stage)
 
 
 def _wants_atom_species(parameterization: str) -> bool:

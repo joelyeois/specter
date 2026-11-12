@@ -29,7 +29,13 @@ from ..filament._actin import extract_actin_subunit
 from ..filament._placement import subunit_centre_in_filament_frame
 from ..filament._tubulin import extract_mt_dimer
 from ..membrane._placement import align_principal_axis_to_z
-from ._helpers import _insert_rotated_copies, _mask_at_positions
+from ...random_seed import derive_seed
+from ._helpers import (
+    SEED_FILAMENTS,
+    SEED_MICROTUBULES,
+    _insert_rotated_copies,
+    _mask_at_positions,
+)
 
 if TYPE_CHECKING:
     from ...pdb import PDB
@@ -252,7 +258,7 @@ class _FilamentStageMixin:
 
         rng = torch.Generator()
         if self.seed is not None:
-            rng.manual_seed(self.seed)
+            rng.manual_seed(derive_seed(self.seed, SEED_FILAMENTS))
         instances = place_filaments(self.filament_specs, target_shape, voxel_size, rng)
         templates = self._filament_templates(instances, voxel_size, as_given=False)
         instances = self._drop_instances_in_carbon(
@@ -330,9 +336,7 @@ class _FilamentStageMixin:
         """
         rng = torch.Generator()
         if self.seed is not None:
-            # Offset from the filament seed so two species with the same
-            # spec don't land on identical paths.
-            rng.manual_seed(self.seed + 1)
+            rng.manual_seed(derive_seed(self.seed, SEED_MICROTUBULES))
         instances, tubes = place_microtubules(
             self.microtubule_specs,
             self.target_shape,

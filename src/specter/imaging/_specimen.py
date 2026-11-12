@@ -77,6 +77,7 @@ class Structure:
         pdb_cache_dir: str | None = None,
         readd_hydrogens: bool | str = "auto",
         monomer_library_path: str | None = None,
+        model: int | None = 0,
     ) -> Structure:
         """
         Read a model from an accession code or a local file.
@@ -84,6 +85,10 @@ class Structure:
         Shtyrov factors [1]_ are fitted per bonded species, so the model is
         typed from its bond topology only when they are asked for; the other
         parameterizations are per element.
+
+        Of a file that holds several models, such as an NMR ensemble, the
+        first is read; `model` picks another, and None reads them all (see
+        :class:`~specter.pdb.PDB`).
 
         References
         ----------
@@ -99,6 +104,7 @@ class Structure:
             compute_atom_species=scattering_factors == "shtyrov",
             readd_hydrogens=readd_hydrogens,
             monomer_library_path=monomer_library_path,
+            model=model,
         )
         return cls(pdb, scattering_factors)
 

@@ -723,3 +723,52 @@ def test_missing_path_still_reports_both_accepted_forms(tmp_path: Path) -> None:
     """A typo'd path must not be silently treated as an accession code."""
     with pytest.raises(ValueError, match="4-character PDB ID or a valid file path"):
         PDB(str(tmp_path / "does_not_exist.cif"), verbose=False)
+
+
+def _two_model_cif(path: Path, shift: float = 50.0) -> int:
+    """Write the fixture with a second, shifted copy as model 2; return the
+    atom count of one model."""
+    import gemmi
+
+    st = gemmi.read_structure(str(_FIXTURE))
+    st.remove_alternative_conformations()
+    second = st[0].clone()
+    for cra in second.all():
+        cra.atom.pos = gemmi.Position(
+            cra.atom.pos.x + shift, cra.atom.pos.y, cra.atom.pos.z
+        )
+    st.add_model(second)
+    st.renumber_models()
+    st.setup_entities()
+    st.make_mmcif_document().write_file(str(path))
+    return st[0].count_atom_sites()
+
+
+def test_a_multi_model_file_reads_its_first_model_unless_told_otherwise(
+    tmp_path: Path,
+) -> None:
+    """An NMR ensemble or legacy .pdb1 assembly used to be read as every
+    model superposed, while bonded typing read only the first."""
+    path = tmp_path / "two_models.cif"
+    n = _two_model_cif(path)
+    kwargs = dict(pdb_cache_dir=str(tmp_path / "cache"), origin=(0.0, 0.0, 0.0))
+
+    with pytest.warns(UserWarning, match="holds 2 models; reading model 0"):
+        first = PDB(str(path), **kwargs)
+    with pytest.warns(UserWarning, match="reading model 1"):
+        second = PDB(str(path), model=1, **kwargs)
+    every = PDB(str(path), model=None, **kwargs)
+
+    assert first.atomic_numbers.shape[0] == second.atomic_numbers.shape[0] == n
+    assert every.atomic_numbers.shape[0] == 2 * n
+    shift = (second.coordinates - first.coordinates).mean(dim=0)
+    torch.testing.assert_close(shift, torch.tensor([50.0, 0.0, 0.0]))
+
+    with pytest.raises(ValueError, match="out of range"):
+        PDB(str(path), model=2, **kwargs)
+    with pytest.raises(ValueError, match="needs a single model"):
+        PDB(str(path), model=None, compute_atom_species=True, **kwargs)
+    with pytest.warns(UserWarning, match="reading model 1"):
+        typed = PDB(str(path), model=1, compute_atom_species=True, **kwargs)
+    assert typed.atom_species is not None
+    assert len(typed.atom_species) == typed.atomic_numbers.shape[0]

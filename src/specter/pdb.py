@@ -17,7 +17,7 @@ import sys
 import tempfile
 import warnings
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import gemmi
 import numpy as np
@@ -132,7 +132,7 @@ def canonical_pdb_source(pdb_source: str) -> str:
 #: `get_atoms_and_coordinates` or `get_atom_species` -- and note the
 #: entry carries every field `PDB` reads off a structure, so adding one (as
 #: `b_factors` did at version 2) is itself a reason to raise it.
-_PARSED_CACHE_VERSION = 2
+_PARSED_CACHE_VERSION = 3
 
 
 def _parsed_cache_path(
@@ -141,6 +141,7 @@ def _parsed_cache_path(
     compute_atom_species: bool,
     readd_hydrogens: bool | str,
     monomer_library_path: str | None,
+    model: int | None = 0,
 ) -> str | None:
     """
     Where the parsed form of `filepath` would be cached, or None.
@@ -166,6 +167,8 @@ def _parsed_cache_path(
         Hydrogen handling (changes the atom list).
     monomer_library_path : str, optional
         Already-resolved library directory, or None.
+    model : int or None, optional
+        Which model is read (changes the atom list). Default 0.
 
     Returns
     -------
@@ -186,6 +189,7 @@ def _parsed_cache_path(
             str(bool(compute_atom_species)),
             str(readd_hydrogens),
             monomer_library_path or "",
+            str(model),
         ]
     )
     digest = hashlib.sha256(key.encode()).hexdigest()
@@ -346,6 +350,36 @@ def _atom_key(
     return (chain.name, residue.seqid.num or 0, residue.seqid.icode, atom.name)
 
 
+def _one_model(models: list[Any], model: int) -> Any:
+    """
+    The `model`-th of `models`, warning that the others are left out.
+
+    Parameters
+    ----------
+    models : list
+        A structure's models, in file order.
+    model : int
+        Index of the one to read.
+
+    Returns
+    -------
+    object
+        ``models[model]``.
+    """
+    if not -len(models) <= model < len(models):
+        raise ValueError(
+            f"model={model} is out of range: the structure holds {len(models)} model(s)"
+        )
+    if len(models) > 1:
+        warnings.warn(
+            f"The structure holds {len(models)} models; reading model {model} "
+            "only. Pass model=None to read every model (a legacy .pdb1 "
+            "assembly stores each copy as one), or model=<index> for another.",
+            stacklevel=3,
+        )
+    return models[model]
+
+
 class PDB:
     def __init__(
         self,
@@ -357,6 +391,7 @@ class PDB:
         compute_atom_species: bool = False,
         monomer_library_path: str | None = None,
         readd_hydrogens: bool | str = "auto",
+        model: int | None = 0,
     ) -> None:
         """
         Create a PDB object from either a PDB ID or a local file path.
@@ -424,6 +459,15 @@ class PDB:
             A partially hydrogenated structure is treated as carrying them, so
             ``"auto"`` keeps what is there rather than replacing the lot;
             pass ``True`` explicitly to complete it from ideal geometry.
+        model : int or None, optional
+            Index of the model to read from a file that holds several, such
+            as an NMR ensemble. Default 0, the first; a file with more than
+            one model then warns that the rest are ignored. ``None`` reads
+            every model, for a legacy-format assembly (``.pdb1``) that stores
+            each copy as its own model; bonded-species typing
+            (`compute_atom_species`) needs a single model and refuses it.
+            Assemblies downloaded by PDB ID are mmCIF and hold every copy in
+            one model.
 
         Attributes
         ----------
@@ -507,6 +551,7 @@ class PDB:
             compute_atom_species,
             readd_hydrogens,
             resolved_library,
+            model,
         )
         cached = _load_parsed_structure(parsed_path)
         if cached is not None:
@@ -529,6 +574,7 @@ class PDB:
                 readd_hydrogens=readd_hydrogens,
                 monomer_library_path=monomer_library_path,
                 verbose=verbose,
+                model=model,
             )
             _store_parsed_structure(
                 parsed_path,
@@ -556,6 +602,7 @@ class PDB:
         readd_hydrogens: bool | str,
         monomer_library_path: str | None,
         verbose: bool,
+        model: int | None = 0,
     ) -> None:
         """
         Populate `atomic_numbers`/`coordinates`/`atom_species`/`b_factors`
@@ -572,6 +619,7 @@ class PDB:
                 monomer_library_path,
                 verbose=verbose,
                 readd_hydrogens=readd_hydrogens,
+                model=model,
             )
             self.atom_species = species
             if used_library:
@@ -592,7 +640,9 @@ class PDB:
                 self.atomic_numbers,
                 self.coordinates,
                 self.b_factors,
-            ) = PDB.get_atoms_and_coordinates(self.structure, verbose=verbose)
+            ) = PDB.get_atoms_and_coordinates(
+                self.structure, verbose=verbose, model=model
+            )
 
         if compute_atom_species and not used_library:
             # Without a library the two parsers should still agree atom for
@@ -819,6 +869,7 @@ class PDB:
     def get_atoms_and_coordinates(
         structure: Structure | str,
         verbose: bool = True,
+        model: int | None = 0,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Extract atomic elements, coordinates and B-factors from PDB structure.
@@ -835,6 +886,10 @@ class PDB:
             loaded automatically.
         verbose : bool, optional
             Show the extraction progress bar. Default True.
+        model : int or None, optional
+            Index of the model to read. Default 0, the first, with a warning
+            when the structure holds more than one; None reads every model.
+            See :class:`PDB`.
 
         Returns
         -------
@@ -854,12 +909,18 @@ class PDB:
         if isinstance(structure, str):
             structure = PDB.get_pdb_structure(structure)
 
+        atoms = (
+            structure.get_atoms()
+            if model is None
+            else _one_model(list(structure), model).get_atoms()
+        )
+
         # Extract atomic data
         coords_list = []
         element_symbols = []
         b_factor_list = []
         for atom in track(
-            structure.get_atoms(),
+            atoms,
             description="Extracting atom coordinates and element",
             disable=not verbose,
         ):
@@ -881,6 +942,7 @@ class PDB:
         monomer_library_path: str | None = None,
         verbose: bool = True,
         readd_hydrogens: bool | str = "auto",
+        model: int | None = 0,
     ) -> tuple[list[int], list[list[float]], list[str | None], list[float], bool]:
         """
         Build the topology-completed model and type every atom in one pass.
@@ -923,6 +985,9 @@ class PDB:
             Whether to replace existing hydrogens with the monomer library's
             ideal geometry; ``"auto"`` (default) re-adds them only when the
             structure carries none. See :class:`PDB` for the full semantics.
+        model : int or None, optional
+            Index of the model to type. Default 0. Typing needs one model, so
+            None is refused for a file that holds several.
 
         Returns
         -------
@@ -958,7 +1023,7 @@ class PDB:
             )
             structure = PDB.get_pdb_structure(filepath)
             znum_t, pos_t, bfac_t = PDB.get_atoms_and_coordinates(
-                structure, verbose=False
+                structure, verbose=False, model=model
             )
             return (
                 znum_t.tolist(),
@@ -971,6 +1036,16 @@ class PDB:
         monlib_path = _resolve_monomer_library_path(monomer_library_path)
 
         st = gemmi.read_structure(filepath)
+        if model is None and len(st) > 1:
+            raise ValueError(
+                f"{filepath}: bonded-species typing needs a single model, and "
+                f"the file holds {len(st)}; pass model=<index>, or use "
+                "scattering_factors='kirkland'/'lobato' to read every model."
+            )
+        keep = _one_model(list(range(len(st))), 0 if model is None else model)
+        for index in reversed(range(len(st))):
+            if index != keep:
+                del st[index]
         st.setup_entities()
 
         if monlib_path:

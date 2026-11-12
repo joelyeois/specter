@@ -104,7 +104,8 @@ class NeighborListCache:
     evaluation recomputes the pair vectors from the CURRENT positions and the
     cached ``(i, j, cell shift)``, so distances stay differentiable with
     respect to the positions and pairs that have drifted past ``r_cut``
-    simply carry ``f_C = 0``.
+    simply carry ``f_C = 0``. A change of cutoff, cell or atom count also
+    forces a rebuild, so one cache may be shared between systems.
 
     Worth having wherever the same system is evaluated repeatedly at nearby
     positions: an L-BFGS line search evaluates the ice loss several times per
@@ -133,6 +134,8 @@ class NeighborListCache:
         self.rebuilds = 0
         self._table: torch.Tensor | None = None
         self._table_reference: torch.Tensor | None = None
+        self._pairs_key: tuple[float, torch.Tensor] | None = None
+        self._table_key: tuple[float, tuple[float, ...]] | None = None
 
     def pairs(
         self, positions: torch.Tensor, box_t: torch.Tensor, r_cut: float
@@ -159,7 +162,14 @@ class NeighborListCache:
             same units as `positions`, shape ``(n_pairs, 3)``.
         """
         pos = positions.detach()
-        if self.reference is not None and self.i is not None:
+        if (
+            self.reference is not None
+            and self.i is not None
+            and self._pairs_key is not None
+            and self.reference.shape == pos.shape
+            and self._pairs_key[0] == r_cut
+            and torch.equal(self._pairs_key[1], box_t)
+        ):
             moved = float((pos - self.reference).abs().max())
             if moved <= self.skin / 2:
                 assert self.j is not None and self.shift is not None
@@ -169,6 +179,7 @@ class NeighborListCache:
         self.i, self.j = i, j
         self.shift = S.to(pos.dtype) @ box_t
         self.reference = pos.clone()
+        self._pairs_key = (r_cut, box_t.detach().clone())
         self.rebuilds += 1
         return i, j, self.shift
 
@@ -200,12 +211,18 @@ class NeighborListCache:
             int32, shape ``(N, K)``, padded with -1.
         """
         pos = positions.detach()
-        if self._table is not None and self._table_reference is not None:
+        if (
+            self._table is not None
+            and self._table_reference is not None
+            and self._table_reference.shape == pos.shape
+            and self._table_key == (r_cut, tuple(box))
+        ):
             moved = float((pos - self._table_reference).abs().max())
             if moved <= self.skin / 2:
                 return self._table
         self._table = _mlbop_triton.neighbor_table(pos, box, r_cut + self.skin)
         self._table_reference = pos.clone()
+        self._table_key = (r_cut, tuple(box))
         self.rebuilds += 1
         return self._table
 

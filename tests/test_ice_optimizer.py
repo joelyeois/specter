@@ -175,6 +175,24 @@ def test_compute_energy_with_cache_matches_fresh_search_and_rebuilds_on_drift():
     assert torch.isfinite(e0["E_total"])
 
 
+def test_neighbor_cache_rebuilds_for_a_new_cell_or_system():
+    """A cache reused with another cell or atom count rebuilds rather than
+    returning the old pairs, whose periodic shifts belong to the old cell."""
+    model = MLBOP(device="cpu")
+    pos = _random_water(120, 14.0, seed=1)
+    cache = NeighborListCache(skin=1.0)
+    model.compute_energy(pos, box_size=14.0, pbc=True, neighbor_cache=cache)
+
+    cached = model.compute_energy(pos, box_size=13.0, pbc=True, neighbor_cache=cache)
+    fresh = model.compute_energy(pos, box_size=13.0, pbc=True)
+    assert cache.rebuilds == 2
+    torch.testing.assert_close(cached["E_total"], fresh["E_total"])
+
+    fewer = pos[:100]
+    model.compute_energy(fewer, box_size=13.0, pbc=True, neighbor_cache=cache)
+    assert cache.rebuilds == 3
+
+
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 @pytest.mark.parametrize(
     ("dtype", "compute_dtype"),

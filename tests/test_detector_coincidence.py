@@ -413,3 +413,27 @@ def test_camera_rejects_a_non_positive_detector_pixel() -> None:
 def test_unknown_aberration_model_is_rejected() -> None:
     with pytest.raises(ValueError, match="aberration_model"):
         Detector(pixel_size=1.0, aberration_model="nonlinar")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "preset",
+    [
+        "k3_300kv",
+        "k2_300kv",
+        "falcon4i_300kv",
+        "falcon4i_200kv",
+        "falcon3ec_300kv",
+        "perfect",
+    ],
+)
+def test_mtf_is_float32_and_one_curve_on_both_paths(preset: str) -> None:
+    """Every preset is float32, and a physical pixel that equals the image's
+    in all but rounding gives the preset's own MTF, corners included: both
+    paths continue the curve past Nyquist rather than one holding its last
+    value (which differed by up to 0.58 at the corners)."""
+    from specter.detectors import detector_mtf
+
+    native = detector_mtf(preset, 64, 1.0)
+    via_physical = detector_mtf(preset, 64, 1.0, physical_pixel_size=1.0 + 1e-9)
+    assert native.dtype == via_physical.dtype == torch.float32
+    assert float((native - via_physical).abs().max()) < 5e-3

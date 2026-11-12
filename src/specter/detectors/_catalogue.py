@@ -117,7 +117,9 @@ def _falcon4i_mtf(
     k = torch.fft.fftfreq(n, dx, device=device)
     kx, ky = torch.meshgrid(k, k, indexing="ij")
     k_rad = torch.sqrt(kx**2 + ky**2)
-    mtf = torch.from_numpy(interp(k_rad.cpu().numpy())).to(device).reshape(n, n)
+    # float32 like every other preset: scipy evaluates in float64.
+    mtf = torch.from_numpy(interp(k_rad.cpu().numpy())).float().to(device)
+    mtf = mtf.reshape(n, n)
 
     if return1d:
         # k is native/unshifted FFT order (DC at index 0), so the radial cut
@@ -625,9 +627,20 @@ def detector_mtf(
     if physical_pixel_size is None or physical_pixel_size == pixel_size:
         return _as_tensor(fn(n, pixel_size, device))
     # The curve on the physical pixel, finely sampled, then interpolated at the
-    # image's radial frequencies; past the physical Nyquist (an image finer
-    # than the detector) it holds its last value.
-    k_curve, mtf_curve = fn(2048, physical_pixel_size, "cpu", return1d=True)
+    # image's radial frequencies. Along an axis it reaches the physical
+    # Nyquist; the grid's diagonal carries it on to sqrt(2) x Nyquist, the
+    # corner frequencies the preset itself evaluates, so both paths follow
+    # one curve there. Past that (an image finer than the detector) it holds
+    # its last value.
+    m = 2048
+    k_curve, mtf_curve = fn(m, physical_pixel_size, "cpu", return1d=True)
+    k_axis = torch.fft.fftfreq(m, physical_pixel_size, dtype=torch.float64)
+    diagonal = torch.arange(m // 2)
+    k_diagonal = k_axis[diagonal] * math.sqrt(2.0)
+    mtf_diagonal = _as_tensor(fn(m, physical_pixel_size, "cpu"))[diagonal, diagonal]
+    beyond = k_diagonal > float(k_curve.max())
+    k_curve = torch.cat([k_curve.double(), k_diagonal[beyond]])
+    mtf_curve = torch.cat([mtf_curve.double(), mtf_diagonal[beyond].double()])
     k = torch.fft.fftfreq(n, pixel_size, dtype=torch.float64)
     k_rad = torch.sqrt(k[:, None] ** 2 + k[None, :] ** 2)
     mtf = np.interp(

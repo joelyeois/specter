@@ -46,7 +46,7 @@ from .. import nufft
 from ..fft import frequency_shells
 from ..symmetries import apply_symmetry
 from ._helpers import _apply_kmask_inplace
-from ._resolution import unfilter
+from ._resolution import spherical_mask, unfilter
 
 if TYPE_CHECKING:
     from ._reconstructor import Reconstructor
@@ -104,6 +104,12 @@ class ConvergedSolver:
         Seeds the probes and line-search subsets.
     label : str
         Prefixed to progress messages, e.g. the half-set's name.
+    probe_support : torch.Tensor, optional
+        Real-space weight ``(n, n, n)`` the curvature probes are drawn
+        inside. Default: the inscribed soft sphere (`spherical_mask`), the
+        region every pose of a real-space rotation keeps in the box. Pass a
+        forward model's own window when it applies one to the map, and ones
+        for the whole box.
 
     Notes
     -----
@@ -113,6 +119,15 @@ class ConvergedSolver:
     where one band average is too coarse a preconditioner, are measured one
     shell at a time on 2% of the particles; that measurement enters the
     preconditioner only, never the prior.
+
+    The probes are confined to `probe_support`. ``W`` is per unit norm, so a
+    probe with energy where the data cannot see it reads low by that energy's
+    share: a forward model that windows the map to its inscribed sphere
+    before rotating sees 41-46% of a whole-box probe (boxes of 300-560), and
+    a whole-box ``W`` made its prior 2.2-2.4x too weak, which overfitted
+    EMPIAR-12391 at 4-1.75 A (held-out +0.15 nats/particle against Rytov;
+    -0.86 with the prior corrected). Inside the support the probe sees what
+    the map can hold, for Fourier-sampled and real-space models alike.
     """
 
     def __init__(
@@ -124,6 +139,7 @@ class ConvergedSolver:
         line_search_fraction: float = 0.05,
         seed: int = 0,
         label: str = "",
+        probe_support: torch.Tensor | None = None,
     ) -> None:
         self.model = model.eval()
         self.images = images
@@ -142,6 +158,12 @@ class ConvergedSolver:
                 f"ssnr has {len(self.ssnr)} shells; a {self.n}^3 volume has {self.n // 2 + 1}"
             )
         self._kmask_half = model._kmask_half()
+        support = spherical_mask(self.n) if probe_support is None else probe_support
+        if tuple(support.shape) != (self.n,) * 3:
+            raise ValueError(
+                f"probe_support has shape {tuple(support.shape)}; the map is {self.n}^3"
+            )
+        self.probe_support = support.to(self.device, torch.float32)
 
     # ------------------------------------------------------------------
     # The forward model and the passes over particles
@@ -328,7 +350,7 @@ class ConvergedSolver:
             torch.randn(shape, device=self.device, generator=generator),
             torch.randn(shape, device=self.device, generator=generator),
         )
-        d = torch.fft.irfftn(noise * selection, s=(self.n,) * 3)
+        d = torch.fft.irfftn(noise * selection, s=(self.n,) * 3) * self.probe_support
         return d / d.norm()
 
     def _step_size(self, V: torch.Tensor, d: torch.Tensor) -> float:
@@ -388,6 +410,7 @@ class ConvergedSolver:
             selection = self.shell == s
             if s == 0:
                 d = torch.fft.irfftn(selection.to(torch.complex64), s=(self.n,) * 3)
+                d = d * self.probe_support
                 d = d / d.norm()
             else:
                 d = self._random_direction(selection, gen)

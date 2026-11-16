@@ -253,6 +253,42 @@ def test_rytov_solve_lowers_the_objective(symmetry: str | None) -> None:
     assert result.unfiltered.shape == (N, N, N)
 
 
+def test_curvature_probes_stay_inside_the_support() -> None:
+    """A forward model that windows the map before projecting it cannot see a
+    probe's energy outside the window, so whole-box probes read its curvature
+    low; probes drawn inside the window read what an unwindowed model does."""
+    model, images, truth = _problem("ctf")
+    r = torch.arange(N, dtype=torch.float32) - N // 2
+    radius = torch.sqrt(
+        r[:, None, None] ** 2 + r[None, :, None] ** 2 + r[None, None] ** 2
+    )
+    window = (radius <= N / 2 - 1).float()
+    ssnr = np.ones(N // 2 + 1)
+
+    def windowed(solver: ConvergedSolver) -> ConvergedSolver:
+        predict = solver._predict
+        solver._predict = lambda idx, V: predict(idx, V * window)  # type: ignore[method-assign]
+        return solver
+
+    V = _start(truth)
+    kw = {"n_bands": 2, "n_probes": 2, "n_probe_particles": 24, "low_shells": 1}
+    plain, _ = ConvergedSolver(
+        model, images, ssnr, probe_support=window
+    ).measure_curvature(V, **kw)
+    inside, _ = windowed(
+        ConvergedSolver(model, images, ssnr, probe_support=window)
+    ).measure_curvature(V, **kw)
+    box, _ = windowed(
+        ConvergedSolver(model, images, ssnr, probe_support=torch.ones(N, N, N))
+    ).measure_curvature(V, **kw)
+    np.testing.assert_allclose(inside, plain, rtol=1e-3)
+    assert box.sum() < 0.8 * plain.sum()
+    default = ConvergedSolver(model, images, ssnr)
+    assert torch.equal(default.probe_support.cpu(), spherical_mask(N))
+    with pytest.raises(ValueError, match="probe_support"):
+        ConvergedSolver(model, images, ssnr, probe_support=torch.ones(N, N, N - 1))
+
+
 def test_a_pass_that_runs_out_of_memory_is_redone_with_smaller_batches() -> None:
     """Another process can take GPU memory mid-solve: the pass is redone with
     half the batch, and its result does not depend on the batch size."""

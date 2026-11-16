@@ -308,7 +308,11 @@ def test_a_pass_that_runs_out_of_memory_is_redone_with_smaller_batches() -> None
     solver._gradient_pass = flaky  # type: ignore[method-assign]
     grad, _ = solver._gradient(V)
     assert solver.batchsize == 4
-    assert torch.allclose(grad, expected, rtol=1e-4, atol=1e-6)
+    # Batches sum in a different order: float32 rounding, ~1e-7 of the largest
+    # element, which an absolute tolerance has to scale with.
+    assert torch.allclose(
+        grad, expected, rtol=1e-4, atol=1e-6 * float(expected.abs().max())
+    )
 
 
 def test_mask_check_flags_a_mask_that_correlates_the_halves_by_itself() -> None:

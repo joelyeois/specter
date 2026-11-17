@@ -4,9 +4,13 @@ The particle chain (`specter.imaging`) against the generator it replaced.
 The references under ``tests/test_data/imaging_particles_*.pt`` are the
 outputs of the retired `ImageGenerator`/`ImageGeneratorFromCoordinates` on
 these exact inputs and seeds, written once while both existed. The chain was
-bit-identical to them then, so the exact comparisons here still hold it to
-the generator's draws and noise; the inexact ones are the two places the
-chain applies the same product in a different order.
+bit-identical to them then. The noisy cases are still compared exactly, which
+holds the chain to the generator's draws and noise. The noiseless ones are
+compared to float32 rounding (`ROUNDING`): their FFTs round differently on
+other platforms and devices (on Linux, CPU or A100, the references written on
+macOS differ by 1-3e-7 of the peak), so an exact match only held on the
+machine that wrote them. The two looser comparisons (`LOOSE`) are the places
+the chain applies the same product in a different order.
 
 The cases with random ice (``crowded_solvated_noisy``, ``specimen_damage``,
 ``material_absorption``, ``atoms``) were re-recorded from the chain on
@@ -37,6 +41,10 @@ NXY = 24
 PIXEL = 1.5
 VOLTAGE = 300.0
 DOSE = 30.0
+#: Relative tolerance for a noiseless reference: float32 rounding, with margin.
+ROUNDING = 2e-6
+#: Relative tolerance where the chain reorders the product (see the docstring).
+LOOSE = 1e-5
 
 
 def _template() -> torch.Tensor:
@@ -63,6 +71,25 @@ def _reference(name: str) -> torch.Tensor:
     return torch.load(REFERENCES / f"imaging_particles_{name}.pt", weights_only=True)
 
 
+def _assert_close(
+    got: torch.Tensor, want: torch.Tensor, rtol: float = ROUNDING
+) -> None:
+    """
+    Assert ``got`` matches a stored reference to ``rtol`` of its peak.
+
+    Parameters
+    ----------
+    got : torch.Tensor
+        The chain's output.
+    want : torch.Tensor
+        The stored reference.
+    rtol : float
+        Allowed difference, relative to each value and to the reference's peak.
+    """
+    assert got.shape == want.shape
+    assert torch.allclose(got, want, rtol=rtol, atol=rtol * float(want.abs().max()))
+
+
 def test_noiseless_images_match_image_generator() -> None:
     poses, ctf = _inputs()
     want = _reference("noiseless")
@@ -77,8 +104,7 @@ def test_noiseless_images_match_image_generator() -> None:
             scatter=dict(**RETIRED, pad_fft=True),
             camera=dict(noise=None),
         )
-    assert got.array.shape == want.shape
-    assert torch.equal(got.array, want)
+    _assert_close(got.array, want)
 
 
 def test_crowded_solvated_noisy_images_match_image_generator() -> None:
@@ -122,7 +148,7 @@ def test_specimen_damage_matches_image_generator() -> None:
             scatter=dict(**RETIRED, pad_fft=True),
             camera=dict(noise=None),
         )
-    assert torch.equal(got.array, want)
+    _assert_close(got.array, want)
 
 
 def test_a_slice_of_the_stack_draws_what_the_stack_drew() -> None:
@@ -204,14 +230,14 @@ def test_the_cc_envelope_matches_the_generator_s() -> None:
             coherence=dict(temporal_coherence="envelope"),
             camera=dict(noise=None),
         )
-    assert torch.allclose(got.array, want, rtol=1e-5, atol=1e-5 * float(want.max()))
+    _assert_close(got.array, want, LOOSE)
 
 
 def _compare(
     reference: str,
     recipe_kwargs: dict,
     *,
-    exact: bool = True,
+    rtol: float = ROUNDING,
     specimen: Specimen | None = None,
     batch_size: int = 2,
 ) -> None:
@@ -228,10 +254,7 @@ def _compare(
             batch_size=batch_size,
             **{"camera": dict(noise=None), "scatter": RETIRED, **recipe_kwargs},
         )
-    if exact:
-        assert torch.equal(got.array, want)
-    else:
-        assert torch.allclose(got.array, want, rtol=1e-5, atol=1e-5 * float(want.max()))
+    _assert_close(got.array, want, rtol)
 
 
 @pytest.mark.parametrize("scattering_model", ["rytov", "firstborn", "projection"])
@@ -243,8 +266,8 @@ def test_every_wave_model_matches_the_generator(scattering_model: str) -> None:
 
 
 def test_the_linear_model_matches_the_generator() -> None:
-    """Exact without a focal spread; with one, the envelope is applied to the
-    real contrast rather than inside the transfer function, the same product."""
+    """To rounding without a focal spread; with one, the envelope is applied to
+    the real contrast rather than inside the transfer function, the same product."""
     _compare(
         "linear_coherent",
         dict(
@@ -255,7 +278,7 @@ def test_the_linear_model_matches_the_generator() -> None:
     _compare(
         "linear_cc",
         dict(scatter=dict(**RETIRED, scattering_model="ctf", alpha=0.1)),
-        exact=False,
+        rtol=LOOSE,
     )
 
 

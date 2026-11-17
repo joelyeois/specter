@@ -85,9 +85,16 @@ def test_two_gpu_cli_preserves_uneven_diagnostic_stacks(tmp_path):
             str(tmp_path),
         ],
         capture_output=True,
-        text=True,
+        # The CLI prints rich's box-drawing characters; read them as UTF-8
+        # whatever the locale (a PBS job may run with none set, i.e. ASCII).
+        encoding="utf-8",
         timeout=120,
-        env={**os.environ, "OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4"},
+        env={
+            **os.environ,
+            "OMP_NUM_THREADS": "4",
+            "MKL_NUM_THREADS": "4",
+            "PYTHONIOENCODING": "utf-8",
+        },
     )
     assert result.returncode == 0, result.stdout + result.stderr
     files = list(tmp_path.glob("*.mrcs"))

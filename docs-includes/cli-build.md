@@ -34,6 +34,8 @@ specter build tomogram [OPTIONS]
 | --- | --- | --- | --- |
 | `--voxel_size` | `FLOAT` | `5.0` | Voxel size in Angstrom. |
 | `--filler_occupancy_fraction` | `FLOAT` | `0.5` | Target packing density for filler species, as a bare-sphere fraction of EACH REGION's own volume it's placed in (the whole box when [[membrane]] is empty -- 'cytosol' is then the whole box). Deliberately high by default -- RSA self-limits at its own physical jamming ceiling rather than erroring, so filler packs until it jams rather than needing this hand-tuned. Lower it for a sparser filler layer, or if a small region (e.g. a tight vesicle lumen) makes the implied candidate pool impractically large. |
+| `--max_tilt_angle` | `FLOAT` | _none_ | Largest tilt, in degrees, a tilt series of this tomogram will reach. Unset = the volume is exactly target_shape, and a tilted view mirrors its edges to fill what lies beyond them. Set = target_shape is the field of view and the volume is built wider across tilt_axis to hold everything a view at this tilt passes through, with each n_copies scaled by the added area; picks and label volumes cover the whole volume. A 300 x 1200 x 1200 field at 60 degrees becomes 300 x 1280 x 2936 about y. |
+| `--tilt_axis` | `x` \| `y` | `y` | Only used with max_tilt_angle: the axis the tilt series will tilt about, the same as its own tilt_axis. The volume is widened along the other axis. |
 
 **Filler tables**{ #specter-build-tomogram-filler-tables }
 

@@ -453,7 +453,7 @@ specter simulate tiltseries [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--micrograph_size` | `INTEGER` | _none_ | Output tilt-image size in pixels (square). Defaults to the XY dimension of the specimen volume. |
+| `--micrograph_size` | `INTEGER` | _none_ | Output tilt-image size in pixels (square). Defaults to the XY dimension of the specimen volume, or to the field of view of a tomogram built with max_tilt_angle. |
 | `--convergence_angle` | `FLOAT` | _none_ | Beam convergence semi-angle in mrad, for the Cs (spatial coherence) envelope. |
 | `--cc` | `FLOAT` | `2.7` | Chromatic aberration coefficient in mm, for the temporal coherence loss from the beam's energy spread. Default 2.7, the Titan Krios objective; 0 disables it. On by default since every real image carries it, filtered or not. |
 | `--energy_spread` | `FLOAT` | `0.7` | FWHM of the beam energy spread in eV, used by the Cc envelope. |

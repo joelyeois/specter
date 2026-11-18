@@ -170,6 +170,12 @@ class TomogramSpecimenGenerator(
     target_shape : tuple of int
         Shared tomogram canvas shape, `(Z, Y, X)` voxels -- every instance
         composites into this same grid.
+    field_of_view : tuple of int, optional
+        `(Y, X)` voxels of the centred part of the canvas that will be
+        imaged, when the canvas was built wider than it for a tilt series
+        (`specter.tilt.volume_shape_for_tilt`). The carbon film's
+        `edge_fraction` is a fraction of this field, and the film carries on
+        past it to the canvas' edge. Default: the whole canvas.
     voxel_size : float
         Shared voxel size, Å -- must match every instance's own
         `generator.voxel_size`.
@@ -453,6 +459,7 @@ class TomogramSpecimenGenerator(
         progressbars: bool = True,
         accumulator_device: str | torch.device | Literal["auto"] | None = None,
         retain_membrane_fields: bool = True,
+        field_of_view: tuple[int, int] | None = None,
     ):
         if (
             not protein_specs
@@ -479,6 +486,11 @@ class TomogramSpecimenGenerator(
                 )
         self.membrane_instances = membrane_instances
         self.target_shape = target_shape
+        self.field_of_view: tuple[int, int] = (
+            (target_shape[1], target_shape[2])
+            if field_of_view is None
+            else (int(field_of_view[0]), int(field_of_view[1]))
+        )
         self.voxel_size = voxel_size
         self.protein_specs = protein_specs
         self.filament_specs = filament_specs or []
@@ -1001,8 +1013,11 @@ class TomogramSpecimenGenerator(
         edge_fraction = carbon_film_spec.edge_fraction
         if isinstance(edge_fraction, tuple):
             edge_fraction = grid_rng.uniform(*edge_fraction)
+        # Solved on the field of view, whose centre is the canvas' own: the
+        # strip is `edge_fraction` of what is imaged, and on a canvas built
+        # wider than that the film continues to its edge.
         hole_center = edge_hole_center(
-            target_shape=target_shape,
+            target_shape=(target_shape[0], *self.field_of_view),
             voxel_size=voxel_size,
             hole_radius=carbon_film_spec.hole_radius,
             edge_fraction=edge_fraction,

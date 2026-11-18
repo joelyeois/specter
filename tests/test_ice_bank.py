@@ -204,6 +204,35 @@ def test_icebank_generate_big_ice_shape_and_finite(
     assert torch.isfinite(ice).all()
 
 
+def test_icebank_big_ice_fills_a_rectangular_canvas_at_the_bulk_density(
+    tmp_path,
+) -> None:
+    """
+    A canvas longer in y than in x is tiled over its own footprint: every
+    molecule is counted once, so the count is the bulk density times the
+    volume, and it is the same in both halves of the long axis.
+    """
+    _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
+    cache = IceBank(str(tmp_path), progressbars=False)
+
+    torch.manual_seed(3)
+    deltas = cache.generate_big_ice_deltas(n=40, ny=104, nz=24, dx=1.0)
+    assert deltas.shape == (1, 24, 104, 40)
+    expected = ndensity_of_amorphous_ice * 40 * 104 * 24
+    assert float(deltas.sum()) == pytest.approx(expected, rel=0.05)
+    halves = deltas[0].sum(dim=(0, 2)).reshape(2, 52).sum(dim=1)
+    assert float(halves[0] / halves[1]) == pytest.approx(1.0, abs=0.08)
+
+
+def test_blend_refuses_a_rectangular_volume_it_cannot_ice() -> None:
+    """Only the tiled bank sizes its canvas per axis."""
+    from specter.ice import RandomIcemaker, blend_ice_into_volume
+
+    maker = RandomIcemaker(n=16, dx=2.0, nz=8)
+    with pytest.raises(ValueError, match="square"):
+        blend_ice_into_volume(torch.zeros(1, 8, 24, 16), maker, 2.0)
+
+
 def test_icebank_generate_big_ice_deltas_noncubic_and_batched(tmp_path):
     _make_cache_config(tmp_path, "config_000.pt", n=32, dx=1.0)
     cache = IceBank(str(tmp_path), progressbars=False)
@@ -609,27 +638,30 @@ def test_ice_bank_crop_stays_on_bank_device():
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs a device for the host-canvas path"
 )
-def test_host_volume_blend_matches_whole_canvas_blend():
+@pytest.mark.parametrize("ny", [96, 160], ids=["square", "rectangular"])
+def test_host_volume_blend_matches_whole_canvas_blend(ny: int) -> None:
     """
     A host-resident volume blended slab by slab on the device equals the
     whole-canvas blend of the same draws, to float noise, including at the
-    z ends where the slab path wraps its context.
+    z ends where the slab path wraps its context. A volume longer in y than
+    in x, which a tomogram built for a tilt range is, takes both paths too.
     """
     dev = torch.device("cuda")
     n, nz, dx = 96, 70, 1.0
     bank = IceBank(device=dev, progressbars=False)
-    V0 = torch.zeros(1, nz, n, n)
+    V0 = torch.zeros(1, nz, ny, n)
     g = torch.Generator().manual_seed(1)
     for _ in range(8):
-        c = (torch.rand(3, generator=g) * torch.tensor([nz, n, n])).long()
+        c = (torch.rand(3, generator=g) * torch.tensor([nz, ny, n])).long()
         zs, ys, xs = [slice(max(0, int(ci) - 8), int(ci) + 8) for ci in c]
         V0[0, zs, ys, xs] += 10.0
 
     # Reference: the whole-canvas path, forced by putting V on the device.
     gen = torch.Generator().manual_seed(7)
     ice = bank.generate_big_ice(
-        n=n, dx=dx, nz=nz, batchsize=1, device=dev, generator=gen
+        n=n, dx=dx, nz=nz, batchsize=1, device=dev, generator=gen, ny=ny
     )
+    assert ice.shape == (1, nz, ny, n)
     ref = V0.to(dev) + ice * (1 - potential_occupancy(V0.to(dev), dx)).clamp(0, 1)
 
     # Slab path: V on the host, bank on the device, same draws, and a slab
@@ -646,7 +678,7 @@ def test_host_volume_blend_matches_whole_canvas_blend():
         return real(*a, **kw)
 
     bank.big_ice_positions = seeded_positions  # type: ignore[method-assign]
-    blend_mod._blend_ice_slabwise(new, bank, dx, slab_voxels=n * n * 16)
+    blend_mod._blend_ice_slabwise(new, bank, dx, slab_voxels=ny * n * 16)
     assert new.device.type == "cpu"
     diff = new.to(dev) - ref
     assert float(diff.abs().max()) < 1e-3 * float(ice.abs().max())

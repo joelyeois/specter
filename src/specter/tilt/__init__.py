@@ -23,16 +23,19 @@ from ._geometry import (
     apply_volume_cosine_taper,
     estimate_max_allowed_nxy,
     estimate_max_allowed_tilt_deg,
+    estimate_required_extent,
     estimate_required_nxy,
     infer_max_tilt_from_inputs,
     nz_tilt_for_pose,
     pad_volume_xy_for_tilt,
+    volume_shape_for_tilt,
 )
 
 __all__ = [
     "apply_volume_cosine_taper",
     "estimate_max_allowed_nxy",
     "estimate_max_allowed_tilt_deg",
+    "estimate_required_extent",
     "estimate_required_nxy",
     "infer_max_tilt_from_inputs",
     "nz_tilt_for_pose",
@@ -41,4 +44,5 @@ __all__ = [
     "read_aretomo3_global_shifts",
     "read_aretomo3_xf",
     "tilt_to_quaternions",
+    "volume_shape_for_tilt",
 ]

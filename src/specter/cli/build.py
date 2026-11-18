@@ -28,7 +28,7 @@ from ._click_options import (
 _TOMOGRAM_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Specimen",
-        ["voxel_size", "filler_occupancy_fraction"],
+        ["voxel_size", "filler_occupancy_fraction", "max_tilt_angle", "tilt_axis"],
     ),
     (
         "Filler tables",

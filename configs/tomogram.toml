@@ -8,6 +8,11 @@
 target_shape = [300, 1200, 1200]    # (Z, Y, X) voxels
 voxel_size = 5.0                    # A/voxel
 clip_axes = [true, true, true]      # (z, y, x) -- True lets instances poke past that wall
+# For a tilt series: build the volume wider than target_shape, which stays the
+# field of view, so tilts up to this angle image real specimen instead of a
+# mirror image of the volume's edges. Costs build time and memory.
+# max_tilt_angle = 60.0             # degrees
+# tilt_axis = "y"                    # the tilt series' own tilt_axis
 filler_occupancy_fraction = 1.0     # a ceiling, not a target: packing stops when it jams
 
 # Target species: exact-count, placed first, written to picks as ground truth.

@@ -4,7 +4,11 @@ from ._cytosolic_filler import (
     PEI2016_CROWDING_TABLE,
     build_filler_pool_specs,
 )
-from ._from_volume import load_specimen_volume
+from ._from_volume import (
+    field_of_view_label,
+    load_specimen_volume,
+    volume_field_of_view,
+)
 from ._grid import BeadSpec
 from ._carbon import CarbonFilmSpec
 from .filament import (
@@ -39,7 +43,9 @@ __all__ = [
     "PEI2016_CROWDING_TABLE",
     "CRYOETSIM_PARTICLE_TABLE",
     "build_filler_pool_specs",
+    "field_of_view_label",
     "load_specimen_volume",
+    "volume_field_of_view",
     "BeadSpec",
     "CarbonFilmSpec",
     "ORGANELLE_DEFAULTS",

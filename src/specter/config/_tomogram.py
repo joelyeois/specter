@@ -16,7 +16,7 @@ from ._field import help_of, setting
 from typing import Any, ClassVar, Literal
 
 from ._scalar_range import ScalarOrRange
-from specter.options import ScatteringFactors
+from specter.options import ScatteringFactors, TiltAxis
 
 
 @dataclass
@@ -207,6 +207,33 @@ class TomogramConfig:
             "(z, y, x) -- True on an axis lets a placed instance's "
             "body extend past that wall (truncated at render time) instead of "
             "being rejected outright. TOML-only (list[bool])."
+        ),
+    )
+    # Unset (default): the volume is exactly target_shape, and a tilt series
+    # of it mirrors its edges to fill what a tilted beam sees beyond them.
+    # Set: target_shape stays the field of view, and the volume is built
+    # wider around it (pipelines._tomogram.tilt_canvas_shape), so every tilt
+    # up to this angle images real specimen rather than a reflection.
+    max_tilt_angle: float | None = setting(
+        None,
+        help=(
+            "Largest tilt, in degrees, a tilt series of this tomogram will "
+            "reach. Unset = the volume is exactly target_shape, and a tilted "
+            "view mirrors its edges to fill what lies beyond them. Set = "
+            "target_shape is the field of view and the volume is built wider "
+            "across tilt_axis to hold everything a view at this tilt passes "
+            "through, with each n_copies scaled by the added area; picks and "
+            "label volumes cover the whole volume. A 300 x 1200 x 1200 field "
+            "at 60 degrees becomes 300 x 1280 x 2936 about y."
+        ),
+        range=(0.0, 89.0),
+    )
+    tilt_axis: TiltAxis = setting(
+        "y",
+        help=(
+            "Only used with max_tilt_angle: the axis the tilt series will "
+            "tilt about, the same as its own tilt_axis. The volume is "
+            "widened along the other axis."
         ),
     )
     # Relative to the current working directory, like any other CLI path

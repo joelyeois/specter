@@ -199,6 +199,12 @@ than the volume holds; the volume is reflect-padded to cover it, so at
 ±60° the film's edge appears together with its mirror image.
 ///
 
+A tomogram built with `max_tilt_angle` holds that extent itself and is not
+reflect-padded; see
+[Building for a tilt series](build-tomogram.md#building-for-a-tilt-series).
+Without `--micrograph_size`, the series then images the field of view
+recorded in the volume's header rather than the whole volume.
+
 `--tomogram_config` and `--volume_path`/`config.volume_path` are mutually
 exclusive; passing both raises an error rather than silently picking one.
 Species/membrane/filament choices still come from the tomogram TOML (edit

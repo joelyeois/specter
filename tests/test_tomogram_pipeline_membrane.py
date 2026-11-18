@@ -16,6 +16,8 @@ import torch
 
 from specter.config import TomogramConfig
 from specter.pipelines import build_tomogram_generator
+from specter.pipelines._tomogram import tomogram_volume_shape
+from specter.tilt import volume_shape_for_tilt
 from specter.specimen.filament import ACTIN_SPEC
 
 _SMALL_FIXTURE = Path(__file__).parent / "test_data" / "1mbo.cif"
@@ -381,3 +383,81 @@ def test_bulk_scattering_factors_reach_carbon_and_gold():
     gen = build_tomogram_generator(config)
     assert gen.parameterization == "shtyrov"
     assert gen.bulk_parameterization == "lobato"
+
+
+def test_max_tilt_angle_unset_builds_exactly_the_target_shape():
+    config = TomogramConfig(
+        beads=[{"radius": 80.0, "n_copies": 3}],
+        target_shape=[32, 48, 64],
+        voxel_size=8.0,
+    )
+    gen = build_tomogram_generator(config)
+    assert tuple(gen.target_shape) == (32, 48, 64)
+    assert gen.field_of_view == (48, 64)
+    assert gen.bead_specs[0].count == 3
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_max_tilt_angle_widens_the_volume_and_keeps_the_count_per_area(axis):
+    """`target_shape` stays the field of view; the volume around it is the
+    one a tilt series to that angle needs, and an exact count keeps its
+    number per unit area rather than being spread thin over the flanks."""
+    config = TomogramConfig(
+        targets=[{"pdb_source": "1mbo", "n_copies": 10}],
+        filler=[{"pdb_source": "1mbo"}],
+        beads=[{"radius": 80.0, "n_copies": 3}],
+        filaments=[dataclasses.asdict(ACTIN_SPEC) | {"n_copies": 2}],
+        target_shape=[32, 64, 64],
+        voxel_size=8.0,
+        max_tilt_angle=60.0,
+        tilt_axis=axis,
+    )
+    shape = tomogram_volume_shape(config)
+    assert shape == volume_shape_for_tilt((32, 64, 64), 60.0, axis)
+    scale = shape[1] * shape[2] / 64**2
+    assert scale > 2
+
+    gen = build_tomogram_generator(config)
+    assert tuple(gen.target_shape) == shape
+    assert gen.field_of_view == (64, 64)
+    assert gen.bead_specs[0].count == round(3 * scale)
+    assert gen.filament_specs[0].n_copies == round(2 * scale)
+    target, filler = gen.protein_specs
+    assert target.n_copies == round(10 * scale)
+    assert filler.n_copies is None
+
+
+@pytest.mark.parametrize("side", ["left", "top"])
+def test_the_carbon_edge_is_a_fraction_of_the_field_of_view(side):
+    """On a widened volume the film intrudes by `edge_fraction` of the field
+    of view, not of the volume, and carries on to the volume's own edge."""
+    from specter.specimen import CarbonFilmSpec, TomogramSpecimenGenerator
+
+    def film(shape, field_of_view):
+        gen = TomogramSpecimenGenerator(
+            membrane_instances=[],
+            target_shape=shape,
+            voxel_size=8.0,
+            protein_specs=[],
+            carbon_film_spec=CarbonFilmSpec(
+                hole_radius=4000.0, edge_fraction=0.25, edge_side=side
+            ),
+            field_of_view=field_of_view,
+            seed=0,
+        )
+        # Columns (or rows) the film reaches, along the axis it intrudes on.
+        return (gen.generate() > 0).any(dim=(0, 1) if side == "left" else (0, 2))
+
+    alone = film((16, 64, 64), None)
+    wide = film((16, 96, 128), (64, 64))
+    pad = (128 - 64) // 2 if side == "left" else (96 - 64) // 2
+    inside, low, high = wide[pad : pad + 64], wide[:pad], wide[pad + 64 :]
+    # "left" is the low-x edge, "top" the high-y one.
+    flank, far_flank = (low, high) if side == "left" else (high, low)
+    assert 0 < int(alone.sum()) < 32
+    # Inside the field of view the film reaches as far as it did without the
+    # flanks, to the voxel its rough edge is drawn to...
+    assert abs(int(inside.sum()) - int(alone.sum())) <= 2
+    # ...the flank on its side is film all the way out, and the other is bare.
+    assert flank.all()
+    assert not far_flank.any()

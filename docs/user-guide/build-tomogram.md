@@ -59,6 +59,8 @@ the slab at the bottom of the panel.
 ## What you'll usually tune
 
 - **Box size**: `target_shape` (Z, Y, X voxels) and `voxel_size` (Å/voxel).
+  `max_tilt_angle` widens the volume around that box for a tilt series; see
+  [Building for a tilt series](#building-for-a-tilt-series).
 - **Protein species**: `[[targets]]` (exact `n_copies` each, always
   exported to picks) and `[[filler]]`/`filler_from_pei2016`/
   `filler_from_cryoetsim` (packed around targets up to
@@ -92,6 +94,59 @@ the slab at the bottom of the panel.
 Everything else (picks/segmentation toggles, compute/scaling knobs, output
 naming) lives under its own panel in the
 [command reference](../api/cli/build.md#specter-build-tomogram).
+
+## Building for a tilt series
+
+A tilted view passes through more of the specimen than the untilted one. For
+a field of view of width $W$ and a slab of thickness $t$ tilted by $\theta$,
+the beam crosses a width
+
+$$
+W_\theta = \frac{W + t\,\sin\theta}{\cos\theta}
+$$
+
+across the tilt axis, and only $W$ along it. A volume that is exactly the
+field of view does not hold the extra material, and `specter simulate
+tiltseries` fills it by mirroring the volume at its edges. The mirrored
+flanks repeat whatever lies near the edge, which is most visible for a
+carbon film: its edge appears a second time at high tilt.
+
+`max_tilt_angle` builds the flanks instead. With it set, `target_shape` is
+the field of view and the saved volume is wider around it:
+
+| Axis | Volume size |
+| --- | --- |
+| Across `tilt_axis` | $W_\theta$ at `max_tilt_angle`, plus 8 voxels per side |
+| Along `tilt_axis` | $W$ plus 40 voxels per side, the margin the tilt series propagates in |
+| Z | unchanged |
+
+```bash
+specter build tomogram --config configs/tomogram.toml --max_tilt_angle 60 --tilt_axis y
+```
+
+A 300 × 1200 × 1200 field at 60° about `y` becomes a 300 × 1280 × 2936
+volume. The field of view is the centred crop of that volume, and its size
+is recorded in the MRC header, so `specter simulate tiltseries` images it at
+`target_shape` without `--micrograph_size` being given. `tilt_axis` must be
+the axis the series tilts about; a series chained through
+`--tomogram_config` sets it from its own `tilt_axis`.
+
+The following hold for a widened volume:
+
+- Each `n_copies` (targets, membranes, filaments, microtubules, beads) is
+  multiplied by the ratio of the volume's area to the field's, so the number
+  per unit area is the one the configuration describes. The filler is an
+  occupancy fraction and is unaffected.
+- The carbon film's `edge_fraction` is a fraction of the field of view, and
+  the film continues through the flank to the edge of the volume.
+- Picks and label volumes cover the whole volume, flanks included.
+- Build time and memory grow with the volume, a factor of 2.6 in the example
+  above.
+- A tilt series of the widened volume takes `ice_model = "gd"` or `"none"`.
+  `"random"` requires a volume that is square in XY and raises an error.
+
+`max_tilt_angle` is unset by default, and the volume is then exactly
+`target_shape`.
 
 ## Placement order & regions
 

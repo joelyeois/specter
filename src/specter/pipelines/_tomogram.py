@@ -42,6 +42,7 @@ from specter.specimen import (
     CRYOETSIM_PARTICLE_TABLE,
     PEI2016_CROWDING_TABLE,
     FilamentSpec,
+    field_of_view_label,
     MicrotubuleSpec,
     CarbonFilmSpec,
     MembraneGenerator,
@@ -63,6 +64,7 @@ from specter.devices import parse_device, resolve_available_device
 from specter.random_seed import derive_seed
 from specter.specimen.tomogram import SEED_MEMBRANE_INSTANCES
 from specter.progress import console, section
+from specter.tilt import volume_shape_for_tilt
 from ._common import (
     _draw_seed,
     _print_total_time,
@@ -134,6 +136,7 @@ def _write_volume_mrc(
     path: str,
     array: "np.ndarray",
     voxel_size: float,
+    label: str | None = None,
 ) -> None:
     """
     Write a volume to MRC without letting mrcfile reduce it whole.
@@ -158,6 +161,8 @@ def _write_volume_mrc(
         Volume to write, shape ``(Z, Y, X)``, already in its final dtype.
     voxel_size : float
         Isotropic voxel size in Angstrom, written to the header.
+    label : str, optional
+        A text label for the header, at most 80 characters.
     """
     import mrcfile
     import numpy as np
@@ -197,6 +202,8 @@ def _write_volume_mrc(
         mrc.header.dmean = np.float32(mean)
         mrc.header.rms = np.float32(np.sqrt(sq / total))
         mrc.voxel_size = voxel_size
+        if label is not None:
+            mrc.add_label(label)
 
 
 def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
@@ -276,13 +283,58 @@ def run_build_tomogram(config: TomogramConfig, n_tomograms: int = 1) -> None:
             _run_single_tomogram(run_config)
 
 
+def tomogram_volume_shape(config: TomogramConfig) -> tuple[int, int, int]:
+    """
+    The shape of the volume a config builds, ``(Z, Y, X)`` voxels.
+
+    `TomogramConfig.target_shape` itself unless `max_tilt_angle` is set, in
+    which case `target_shape` is the field of view and the volume is the
+    wider one a tilt series up to that angle images without reflecting
+    its edges (`specter.tilt.volume_shape_for_tilt`).
+
+    Parameters
+    ----------
+    config : TomogramConfig
+        The build configuration.
+
+    Returns
+    -------
+    tuple of int
+        The volume's shape, ``(Z, Y, X)`` voxels.
+    """
+    nz, ny, nx = (int(s) for s in config.target_shape)
+    if config.max_tilt_angle is None:
+        return nz, ny, nx
+    return volume_shape_for_tilt((nz, ny, nx), config.max_tilt_angle, config.tilt_axis)
+
+
+def _count_scale(config: TomogramConfig) -> float:
+    """Area of the built volume over the area of the field of view."""
+    _, ny, nx = tomogram_volume_shape(config)
+    return (ny * nx) / (int(config.target_shape[1]) * int(config.target_shape[2]))
+
+
+def _scaled_count(n_copies: int, scale: float) -> int:
+    """
+    A count given for the field of view, carried to the whole volume.
+
+    Keeps the number per unit area, so the field of view holds what it
+    would have held in a volume of its own size. A nonzero count stays
+    nonzero.
+    """
+    if scale == 1.0 or n_copies <= 0:
+        return n_copies
+    return max(1, round(n_copies * scale))
+
+
 def _protein_specs_from_dicts(
-    dicts: list[dict], *, default_ratio: float = 1.0
+    dicts: list[dict], *, default_ratio: float = 1.0, count_scale: float = 1.0
 ) -> list[TomogramProteinSpec]:
     """Convert `config.targets`/`config.filler`-style dicts into
     `TomogramProteinSpec`s. A dict with `n_copies` becomes an exact-count
     ("target") spec; one without becomes a ratio-weighted ("filler") spec
-    -- `location` is optional on either (default "cytosol")."""
+    -- `location` is optional on either (default "cytosol"). `count_scale`
+    multiplies every exact count (see `_scaled_count`)."""
     specs = []
     for d in dicts:
         n_copies = d.get("n_copies")
@@ -291,7 +343,11 @@ def _protein_specs_from_dicts(
                 pdb_source=d["pdb_source"],
                 location=d.get("location", "cytosol"),
                 ratio=float(d.get("ratio", default_ratio)),
-                n_copies=int(n_copies) if n_copies is not None else None,
+                n_copies=(
+                    _scaled_count(int(n_copies), count_scale)
+                    if n_copies is not None
+                    else None
+                ),
             )
         )
     return specs
@@ -341,9 +397,15 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         resolve_available_device(config.device)
     ).primary_and_pool()
 
+    # With max_tilt_angle set the volume is wider than the field of view
+    # the counts were written for; every exact count keeps its number per
+    # unit area. The filler is an occupancy fraction and needs nothing.
+    volume_shape = tomogram_volume_shape(config)
+    count_scale = _count_scale(config)
+
     protein_specs = _protein_specs_from_dicts(
-        config.targets
-    ) + _protein_specs_from_dicts(config.filler)
+        config.targets, count_scale=count_scale
+    ) + _protein_specs_from_dicts(config.filler, count_scale=count_scale)
     if config.filler_from_pei2016:
         # Ratio 1 per species unless abundance weighting is on. The ratios
         # are relative within the cytosol's ratio-mode pool, which also holds
@@ -389,6 +451,14 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
     if config.actin:
         filament_specs.append(ACTIN_SPEC)
     microtubule_specs = [MicrotubuleSpec(**d) for d in config.microtubules]
+    filament_specs = [
+        dataclasses.replace(s, n_copies=_scaled_count(s.n_copies, count_scale))
+        for s in filament_specs
+    ]
+    microtubule_specs = [
+        dataclasses.replace(s, n_copies=_scaled_count(s.n_copies, count_scale))
+        for s in microtubule_specs
+    ]
 
     # Pre-render every transmembrane species' template ONCE here, shared
     # across every [[membrane]] entry AND every one of its n_copies
@@ -432,7 +502,7 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
         # across multiple dataclasses.replace(...) calls in a --n_tomograms>1
         # run (see run_build_tomogram).
         instance_kwargs = dict(entry)
-        n_copies = int(instance_kwargs.pop("n_copies", 1))
+        n_copies = _scaled_count(int(instance_kwargs.pop("n_copies", 1)), count_scale)
 
         # None (not config.target_shape) by default -- MembraneGenerator
         # auto-sizes a small working grid from the organelle's own size when
@@ -489,14 +559,15 @@ def build_tomogram_generator(config: TomogramConfig) -> TomogramSpecimenGenerato
     bead_specs = [
         TomogramBeadSpec(
             radius=d["radius"],
-            count=int(d.get("n_copies", 1)),
+            count=_scaled_count(int(d.get("n_copies", 1)), count_scale),
         )
         for d in config.beads
     ]
 
     gen = TomogramSpecimenGenerator(
         membrane_instances=membrane_instances,
-        target_shape=tuple(config.target_shape),  # type: ignore[arg-type]
+        target_shape=volume_shape,
+        field_of_view=(int(config.target_shape[1]), int(config.target_shape[2])),
         voxel_size=config.voxel_size,
         protein_specs=protein_specs,
         filament_specs=filament_specs,
@@ -571,13 +642,20 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
     # just to confirm they're building the size they meant to. Doubles as
     # a sanity check: if this looks wrong, no need to wait out the rest
     # of the run to find out.
-    target_shape = tuple(config.target_shape)
+    target_shape = tomogram_volume_shape(config)
     size_angstrom = tuple(s * config.voxel_size for s in target_shape)
     console.print(
         f"[bold]Volume:[/bold] {target_shape} voxels (Z, Y, X) @ "
         f"{config.voxel_size:.2f} A/voxel = {size_angstrom[0]:.0f} x "
         f"{size_angstrom[1]:.0f} x {size_angstrom[2]:.0f} A"
     )
+    if config.max_tilt_angle is not None:
+        console.print(
+            f"[bold]Field of view:[/bold] {tuple(config.target_shape)} voxels, "
+            f"centred; the volume is wider for tilts up to "
+            f"{config.max_tilt_angle:g} degrees about {config.tilt_axis}, and "
+            f"every n_copies is scaled by {_count_scale(config):.2f}"
+        )
 
     gen = build_tomogram_generator(config)
     gen.retain_membrane_fields = False
@@ -636,6 +714,13 @@ def _run_single_tomogram(config: TomogramConfig) -> None:
         mrc_path,
         volume.cpu().numpy().astype("float32", copy=False),
         config.voxel_size,
+        # What `specter simulate tiltseries` sizes its images from, so the
+        # wider volume is imaged at the field of view it was built for.
+        label=(
+            None
+            if config.max_tilt_angle is None
+            else field_of_view_label(gen.field_of_view)
+        ),
     )
     console.print(f"  [green]✓[/green] {mrc_path}")
 

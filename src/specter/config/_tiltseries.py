@@ -97,7 +97,8 @@ class TiltSeriesConfig:
         None,
         help=(
             "Output tilt-image size in pixels (square). Defaults "
-            "to the XY dimension of the specimen volume."
+            "to the XY dimension of the specimen volume, or to the field "
+            "of view of a tomogram built with max_tilt_angle."
         ),
         check="positive",
     )

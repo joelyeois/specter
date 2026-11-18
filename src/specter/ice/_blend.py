@@ -374,8 +374,21 @@ def blend_ice_into_volume(
     torch.Tensor
         ``V`` with ice added at masked voxels; same shape/dtype/device.
         ``V`` itself when ``inplace``, a new tensor otherwise.
+
+    Raises
+    ------
+    ValueError
+        If ``V`` is not square in XY and the ice is not an `IceBank` filling
+        the box: a `RandomIcemaker` and an `IceProfile` are both built for a
+        square field.
     """
-    batchsize, nz, nxy, _ = V.shape
+    batchsize, nz, ny, nxy = V.shape
+    if ny != nxy and (profile is not None or not isinstance(icemaker, IceBank)):
+        raise ValueError(
+            f"a {ny} x {nxy} (Y, X) volume takes its ice from an IceBank filling "
+            "the box (ice_model='gd'); an IceProfile and RandomIcemaker need a "
+            "square one"
+        )
     if (
         isinstance(icemaker, IceBank)
         and V.device.type == "cpu"
@@ -427,6 +440,7 @@ def blend_ice_into_volume(
             batchsize=batchsize,
             relax_steps=relax_steps,
             device=V.device,
+            ny=ny,
         )
     else:
         ice = icemaker.generate_ice(batchsize=batchsize).to(V.device)
@@ -436,7 +450,7 @@ def blend_ice_into_volume(
         # Chunked in z so the (nz, nxy, nxy) window never exists in full
         # alongside the ice volume it multiplies -- at micrograph_size both are
         # gigabytes. The chunk holds ~64 MB of float32.
-        chunk = max(1, 2**24 // (nxy * nxy))
+        chunk = max(1, 2**24 // (ny * nxy))
         for start in range(0, nz, chunk):
             sl = slice(start, min(start + chunk, nz))
             ice[:, sl] *= profile.window(
@@ -455,7 +469,7 @@ def blend_ice_into_volume(
     # so a slab needs nothing but itself. (A rule relative to `V.max()`
     # would make the whole volume's contents an input to every voxel's ice.)
     out = V if inplace else V.clone()
-    chunk = max(1, 2**24 // (nxy * nxy))
+    chunk = max(1, 2**24 // (ny * nxy))
     blender = IceSlabBlender(
         voxel_size, full_potential=full_potential, sigma_angstrom=sigma_angstrom
     )
@@ -565,7 +579,7 @@ def _blend_ice_slabwise(
     Parameters
     ----------
     V : torch.Tensor
-        Shape ``(1, nz, n, n)``, on the host; modified in place.
+        Shape ``(1, nz, ny, n)``, on the host; modified in place.
     bank : IceBank
         On the compute device.
     voxel_size : float
@@ -588,7 +602,7 @@ def _blend_ice_slabwise(
         `V`.
     """
     assert V.shape[0] == 1
-    _, nz, n, _ = V.shape
+    _, nz, ny, n = V.shape
     device = bank.device
     dx = voxel_size
     kernel = bank._get_kernel(dx).to(device)
@@ -597,7 +611,7 @@ def _blend_ice_slabwise(
         dx, full_potential=full_potential, sigma_angstrom=sigma_angstrom
     )
     halo = max(kr, blender.halo) + 1
-    chunk = max(1, min(slab_voxels // (n * n), nz))
+    chunk = max(1, min(slab_voxels // (ny * n), nz))
 
     # Every molecule of the canvas, bucketed by slab and parked on the host:
     # a micrograph canvas holds ~3e8 of them (3 GB of float32), and a slab
@@ -606,7 +620,7 @@ def _blend_ice_slabwise(
     # for 3e8 on the host, against 37 s for a full sort of the z values),
     # and the exact z window is applied on the device per slab.
     pos = bank.big_ice_positions(
-        n, dx, nz, relax_steps=relax_steps, device=device, to_host=True
+        n, dx, nz, relax_steps=relax_steps, device=device, to_host=True, ny=ny
     )
     zv = pos[:, 2] / dx + nz // 2  # voxel z index, as the splat computes it
     n_buckets = -(-nz // chunk)
@@ -621,7 +635,7 @@ def _blend_ice_slabwise(
         lo, hi = z0 - halo, z1 + halo
         depth = hi - lo
         coords = _slab_atoms(pos, offsets, chunk, nz, dx, lo, hi, device)
-        deltas = torch.zeros(depth, n, n, device=device)
+        deltas = torch.zeros(depth, ny, n, device=device)
         # In atom chunks: the splat's per-corner index set is ~30 bytes per
         # molecule, and a 4096-pixel slab holds tens of millions of them.
         for a0 in range(0, len(coords), _SLAB_SPLAT_ATOMS):

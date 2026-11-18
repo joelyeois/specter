@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import starfile
+import specter.tilt
 import torch
 from cryosparc.dataset import Dataset
 
@@ -879,3 +880,51 @@ def test_seeded_tomograms_do_not_reuse_a_neighbouring_seed(tmp_path: Path) -> No
     second_of_seven = bead_picks("seven", 7, 2, sub="0002")
     assert second_of_seven != bead_picks("eight", 8, 1)
     assert second_of_seven == bead_picks("seven_again", 7, 2, sub="0002")
+
+
+def test_volume_field_of_view_round_trips_through_the_mrc_header(
+    tmp_path: Path,
+) -> None:
+    from specter.pipelines._tomogram import _write_volume_mrc
+    from specter.specimen import field_of_view_label, volume_field_of_view
+
+    array = np.zeros((4, 6, 10), dtype=np.float32)
+    plain, wide = str(tmp_path / "plain.mrc"), str(tmp_path / "wide.mrc")
+    _write_volume_mrc(plain, array, 4.0)
+    _write_volume_mrc(wide, array, 4.0, label=field_of_view_label((6, 8)))
+    assert volume_field_of_view(plain) is None
+    assert volume_field_of_view(wide) == (6, 8)
+    torch.save(torch.zeros(4, 6, 10), tmp_path / "volume.pt")
+    assert volume_field_of_view(str(tmp_path / "volume.pt")) is None
+
+
+def test_run_tilt_series_images_a_widened_tomogram_at_its_field_of_view(
+    tmp_path: Path,
+) -> None:
+    """A tomogram built with max_tilt_angle is wider than `target_shape`, and
+    a tilt series given no image size images the field of view it was built
+    around, about the series' own tilt axis."""
+    tomogram_config = _minimal_tomogram_config(
+        max_tilt_angle=30.0, tilt_axis="y", output_dir=str(tmp_path)
+    )
+    config = TiltSeriesConfig(
+        voxel_size=tomogram_config.voxel_size,
+        min_tilt_angle=-30,
+        max_tilt_angle=30,
+        n_tilts=3,
+        tilt_axis="x",
+        n_frames=1,
+        ice_model="none",
+        noise_model="none",
+        detector_model="none",
+        scattering_model="ctf",
+        device="cpu",
+        output_dir=str(tmp_path),
+    )
+    run_tilt_series(config, tomogram_config=tomogram_config)
+
+    with mrcfile.open(tmp_path / "tomogram.mrc", header_only=True) as mrc:
+        shape = (int(mrc.header.nz), int(mrc.header.ny), int(mrc.header.nx))
+    assert shape == specter.tilt.volume_shape_for_tilt((24, 48, 48), 30.0, "x")
+    with mrcfile.open(tmp_path / "tilt_series.mrcs", header_only=True) as mrc:
+        assert (int(mrc.header.ny), int(mrc.header.nx)) == (48, 48)

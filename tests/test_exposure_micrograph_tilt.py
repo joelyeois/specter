@@ -139,7 +139,7 @@ def fit(volume):
     """`volume` padded and tapered as a series of these tilts does it."""
     poses = Poses.tilt_series(ANGLES)
     fitted, _ = fit_volume_to_tilt(
-        volume, 32, poses.quaternions, 8, 2, 0, True, log=False
+        volume, 32, poses.quaternions, 8, 2, 0, True, log=False, canvas_nxy=96
     )
     return fitted
 

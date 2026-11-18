@@ -29,7 +29,7 @@ from specter.imaging import CTF, Exposure, Poses, Sample, TiltSeries
 from specter.imaging._stages import SEED_STAGE_SPECIMEN, read_dose_weights
 from specter.random_seed import derive_seed
 from specter.io import create_micrograph_starfile, write_mrc
-from specter.specimen import load_specimen_volume
+from specter.specimen import load_specimen_volume, volume_field_of_view
 
 from specter.devices import parse_device, resolve_available_device
 from specter.settings import (
@@ -160,6 +160,16 @@ def run_tilt_series(
                 tomogram_config, seed=derive_seed(seed, SEED_STAGE_SPECIMEN)
             )
 
+        # The series knows which axis it tilts about; a tomogram widened for
+        # a tilt range is widened for this one.
+        if (
+            tomogram_config.max_tilt_angle is not None
+            and tomogram_config.tilt_axis != config.tilt_axis
+        ):
+            tomogram_config = dataclasses.replace(
+                tomogram_config, tilt_axis=config.tilt_axis
+            )
+
         section("Building specimen volume (tomogram_config)")
         run_build_tomogram(tomogram_config)
         config = dataclasses.replace(
@@ -196,11 +206,19 @@ def run_tilt_series(
     # --- Preparing the series ---
     section("Preparing the tilt series")
     dx = config.voxel_size
-    micrograph_size = (
-        config.micrograph_size
-        if config.micrograph_size is not None
-        else int(volume.shape[-1])
-    )
+    # A tomogram built with max_tilt_angle is wider than what it is meant
+    # to be imaged at, and says so in its header.
+    field_of_view = volume_field_of_view(config.volume_path)
+    if config.micrograph_size is not None:
+        micrograph_size = config.micrograph_size
+    elif field_of_view is not None:
+        micrograph_size = field_of_view[-1]
+        console.print(
+            f"  Image size: {micrograph_size} px, the field of view the "
+            "volume was built around"
+        )
+    else:
+        micrograph_size = int(volume.shape[-1])
     angles = torch.linspace(
         config.min_tilt_angle, config.max_tilt_angle, config.n_tilts
     )

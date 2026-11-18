@@ -22,11 +22,18 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import roma
 import torch
 
 from specter.ice import RandomIcemaker
 from specter.imaging import CTF, Exposure, Poses, Sample
+from specter.imaging._tilt import fit_volume_to_tilt
 from specter.settings import Envelopes, Ice, Optics, Propagation
+from specter.tilt import (
+    estimate_required_extent,
+    estimate_required_nxy,
+    volume_shape_for_tilt,
+)
 
 REFERENCES = Path(__file__).parent / "test_data"
 
@@ -180,3 +187,90 @@ def test_material_absorption_and_aperture_match() -> None:
 def test_an_explicit_absorption_field_matches() -> None:
     absorption = _volume().clamp(min=0) * 0.05
     _compare("explicit_absorption", absorption=absorption)
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_a_tilt_range_widens_only_the_axis_across_the_tilt_axis(axis: str) -> None:
+    nz, frame, tilt = 16, 32, 60.0
+    quaternions = Poses.tilt_series([-tilt, 0.0, tilt], axis=axis).quaternions
+    across = estimate_required_nxy(frame, nz, tilt)
+    ny, nx = estimate_required_extent(frame, nz, roma.unitquat_to_rotmat(quaternions))
+    assert (ny, nx) == ((across, frame) if axis == "x" else (frame, across))
+
+    # Along the tilt axis the volume is filled to the canvas and its margins,
+    # across it to the full coverage; an axis already that wide is left alone.
+    volume = torch.rand(1, nz, 40, 40)
+    fitted, coverage = fit_volume_to_tilt(
+        volume, frame, quaternions, 8, 0, 0, True, log=False, canvas_nxy=48
+    )
+    wide, narrow = across + 16, 48 + 16
+    assert fitted.shape[-2:] == ((wide, narrow) if axis == "x" else (narrow, wide))
+    assert coverage.recommended_nxy_for_max_tilt == across
+    refitted, _ = fit_volume_to_tilt(
+        fitted, frame, quaternions, 8, 0, 0, True, log=False, canvas_nxy=48
+    )
+    assert refitted is fitted
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+@pytest.mark.parametrize("field", [(16, 32, 32), (15, 33, 33)])
+def test_a_volume_sized_for_a_tilt_range_needs_no_padding(
+    axis: str, field: tuple[int, int, int]
+) -> None:
+    nz, frame, tilt = field[0], field[1], 60.0
+    shape = volume_shape_for_tilt(field, tilt, axis)
+    # The field of view is the centred crop: each axis grows by an even count.
+    assert shape[0] == nz
+    assert all((n - frame) % 2 == 0 and n > frame for n in shape[1:])
+
+    quaternions = Poses.tilt_series([-tilt, 0.0, tilt], axis=axis).quaternions
+    volume = torch.rand(1, *shape)
+    fitted, _ = fit_volume_to_tilt(
+        volume, frame, quaternions, 8, 0, 0, True, log=False, canvas_nxy=frame + 64
+    )
+    assert fitted is volume
+
+    # One voxel narrower across the tilt axis and the range no longer fits.
+    narrower = volume[..., 1:-1, :] if axis == "x" else volume[..., 1:-1]
+    fitted, _ = fit_volume_to_tilt(
+        narrower, frame, quaternions, 8, 0, 0, True, log=False, canvas_nxy=frame + 64
+    )
+    assert fitted.shape != narrower.shape
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_a_volume_built_wide_across_the_tilt_axis_is_imaged_unpadded(
+    axis: str,
+) -> None:
+    # Along the tilt axis the volume spans the padded canvas and its edge
+    # margin. The reference holds the same material in a square box,
+    # zero-filled beyond that, so the two series sample identical potential.
+    nz, frame, wide, narrow = 12, 24, 120, 24 + 2 * 32 + 2 * 8
+    torch.manual_seed(4)
+    blobs = torch.nn.functional.avg_pool3d(
+        torch.rand(1, 1, nz + 2, wide + 2, narrow + 2), 3, stride=1
+    )[0]
+    pad = (wide - narrow) // 2
+    if axis == "y":
+        blobs = blobs.transpose(-1, -2)
+    square = torch.nn.functional.pad(
+        blobs, (pad, pad, 0, 0) if axis == "x" else (0, 0, pad, pad)
+    )
+
+    def waves(volume: torch.Tensor) -> tuple[torch.Tensor, tuple[int, ...]]:
+        series = Sample.from_volume(4.0 * volume, PIXEL).tilt_series(
+            Poses.tilt_series(ANGLES, axis=axis),
+            Exposure.tilt_series(3.0, N),
+            voltage=VOLTAGE,
+            micrograph_size=frame,
+            ice=Ice(model=None),
+            log=False,
+        )
+        with torch.no_grad():
+            array = torch.cat([series.scatter(i).array for i in range(N)])
+        return array, tuple(series.volume.shape)
+
+    got, shape = waves(blobs)
+    want, _ = waves(square)
+    assert shape == tuple(blobs.shape)
+    torch.testing.assert_close(got, want, rtol=0, atol=1e-4)

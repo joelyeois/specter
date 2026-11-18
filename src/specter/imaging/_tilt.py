@@ -93,6 +93,7 @@ def fit_volume_to_tilt(
     z_taper_width: int,
     pad_volume: bool,
     log: bool = True,
+    canvas_nxy: int | None = None,
 ) -> tuple[torch.Tensor, TiltCoverage]:
     """
     Size a volume for a tilt range: reflect-pad its XY to the coverage the
@@ -102,6 +103,34 @@ def fit_volume_to_tilt(
     pixels, so `edge_margin` is added before the taper, which is a separate,
     purely cosmetic apron. ``log=False`` repeats the padding silently, for a
     tilt's ice.
+
+    Each axis is sized on its own (`tilt.estimate_required_extent`). The
+    axis across the tilt axis takes the full coverage. The axis along it is
+    sampled no further than the propagation canvas, so it is padded to
+    `canvas_nxy` plus the same margins, and never past the other axis's
+    target. A volume already wide enough along an axis is left alone there,
+    so a volume built wide across the tilt axis is imaged without any
+    reflected material.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        ``(..., Z, Y, X)``.
+    desired_nxy : int
+        Size of the tilt images, in pixels.
+    quaternions : torch.Tensor
+        ``(n_tilts, 4)``, roma's convention.
+    edge_margin : int
+        Pixels added on each side of the geometric coverage.
+    taper_width, z_taper_width : int
+        Widths of the XY and Z cosine tapers, in voxels.
+    pad_volume : bool
+        Reflect-pad an axis that is too small.
+    log : bool, optional
+        Log the padding. Default True.
+    canvas_nxy : int, optional
+        Lateral size of the canvas the slices are sampled on. Default
+        `desired_nxy`.
 
     Returns
     -------
@@ -114,12 +143,21 @@ def fit_volume_to_tilt(
         angles=None, quaternions=quaternions
     )
     nz_input = int(volume.shape[-3])
-    available_nxy = int(min(volume.shape[-2], volume.shape[-1]))
-    required_nxy = tilt_geometry.estimate_required_nxy(
-        desired_nxy=desired_nxy, nz=nz_input, max_tilt_angle_deg=max_tilt
+    available = (int(volume.shape[-2]), int(volume.shape[-1]))
+    required = tilt_geometry.estimate_required_extent(
+        desired_nxy, nz_input, roma.unitquat_to_rotmat(quaternions)
     )
-    required_nxy_padded = required_nxy + 2 * int(edge_margin)
-    target_nxy = required_nxy_padded + 2 * taper_width
+    required_nxy = max(required)
+    apron = 2 * int(edge_margin) + 2 * taper_width
+    canvas = desired_nxy if canvas_nxy is None else canvas_nxy
+    target = (
+        min(required_nxy, max(required[0], canvas)) + apron,
+        min(required_nxy, max(required[1], canvas)) + apron,
+    )
+    # The scalar coverage is that of the axes the tilts widen, the narrower
+    # of them when both are; with no tilt, of the narrower axis.
+    tilted = [n for n, r in zip(available, required, strict=True) if r > desired_nxy]
+    available_nxy = min(tilted or available)
     coverage = TiltCoverage(
         max_tilt_angle_deg=float(max_tilt),
         recommended_nxy_for_max_tilt=required_nxy,
@@ -132,26 +170,28 @@ def fit_volume_to_tilt(
         ),
     )
 
-    if available_nxy < target_nxy:
+    if any(n < t for n, t in zip(available, target, strict=True)):
         if pad_volume:
-            volume = tilt_geometry.pad_volume_xy_for_tilt(
-                volume, target_nxy, available_nxy
-            )
+            volume = tilt_geometry.pad_volume_xy_for_tilt(volume, target)
             if log:
                 logger.info(
                     "Volume XY too small for requested tilt coverage"
                     + (" and taper" if taper_width > 0 else "")
-                    + f"; padded (reflect) from {available_nxy} to "
-                    f"{volume.shape[-1]} px in XY (micrograph_size={desired_nxy}, "
-                    f"max tilt {coverage.max_tilt_angle_deg:.2f} deg, required "
-                    f">={required_nxy} + edge_margin {edge_margin})."
+                    + f"; padded (reflect) from {available[0]} x {available[1]} "
+                    f"to {volume.shape[-2]} x {volume.shape[-1]} px in Y x X "
+                    f"(micrograph_size={desired_nxy}, max tilt "
+                    f"{coverage.max_tilt_angle_deg:.2f} deg, required "
+                    f">={required[0]} x {required[1]} + edge_margin {edge_margin}). "
+                    "The padding mirrors the volume's own edges; a tomogram "
+                    "built with max_tilt_angle set is wide enough to need none."
                 )
         elif log:
             logger.info(
                 "Input volume XY may be too small for the requested tilt "
                 f"coverage; proceeding anyway (pad_volume=False): volume "
-                f"{tuple(volume.shape)}, required >={required_nxy}, max "
-                f"allowed tilt ~{coverage.max_allowed_tilt_deg_for_volume:.2f} deg."
+                f"{tuple(volume.shape)}, required >={required[0]} x "
+                f"{required[1]} in Y x X, max allowed tilt "
+                f"~{coverage.max_allowed_tilt_deg_for_volume:.2f} deg."
             )
 
     if taper_width > 0 or z_taper_width > 0:
@@ -510,6 +550,8 @@ class TiltSeries:
         lift = 0
         drawn = False
 
+        canvas_nxy = micrograph_size + (2 * fft_pad_margin if p.pads(True) else 0)
+
         def fit(v: torch.Tensor, log: bool = log) -> torch.Tensor:
             nonlocal lift, drawn
             fitted, coverage = fit_volume_to_tilt(
@@ -521,6 +563,7 @@ class TiltSeries:
                 tilt.z_taper_width,
                 pad_volume,
                 log=log,
+                canvas_nxy=canvas_nxy,
             )
             self.coverage = coverage
             if not drawn:

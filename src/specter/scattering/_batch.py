@@ -13,13 +13,11 @@ import torch
 
 from ..constants import energy_to_wavelength, interaction_parameter
 from ..fft import fft2, ifft2
-from ..potential import apply_amplitude_contrast
 from ..progress import track
 from . import _kernels
 from ._kernels import (
     bandlimit_mask,
     fourier_crop_xy,
-    fourier_upsample_xy,
     oversampled_exp,
     frequency_grid,
     fresnel_propagator,
@@ -315,13 +313,11 @@ class Scattering(DeviceModule):
                 chunk = torch.complex(chunk, absorption_chunks[i].to(self.device))
             if reverse:
                 chunk = chunk.flip(1)
-            if not chunk.is_complex():
-                chunk = apply_amplitude_contrast(chunk, alpha=self.alpha)
             # Interpolate BEFORE the exponential: the nonlinearity is what
             # puts content above the volume's Nyquist, and the fine grid is
             # there to hold it. Linear in the (complex) potential, so it
-            # commutes with the amplitude-contrast factor above.
-            chunk = fourier_upsample_xy(chunk, self.oversample)
+            # commutes with the amplitude-contrast factor.
+            chunk = _kernels.fine_grid_potential(chunk, self.oversample, self.alpha)
             t_chunk = torch.exp(1j * self.sigma * self.pixel_size * chunk)
             if self.uniform_absorption:
                 # A constant imaginary potential factorises out of the

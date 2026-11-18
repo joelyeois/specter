@@ -7,6 +7,7 @@ from __future__ import annotations
 import torch
 
 from ..arrays._resample import fourier_crop_xy, fourier_upsample_xy
+from ..potential import apply_amplitude_contrast
 
 # Number of z-slices whose transmission functions are evaluated per batched
 # torch.exp call in Scattering.multislice. Purely a performance knob: output
@@ -28,6 +29,43 @@ _MULTISLICE_SLICE_CHUNK = 8
 #: unchunked -- a chunk that fits the L2 cache wins outright, since every
 #: pass here is memory-bound.
 _SLICE_SUM_CHUNK_ELEMENTS = 2**23
+
+
+def fine_grid_potential(v: torch.Tensor, factor: int, alpha: float) -> torch.Tensor:
+    """
+    Slices of potential on the multislice grid, amplitude contrast applied.
+
+    The interpolation is linear, so it commutes with the amplitude-contrast
+    factor ``1 + i alpha``. A real `v` is therefore interpolated first,
+    through its half spectrum, and takes the factor on the fine grid; a
+    complex (absorptive) `v` carries no factor and goes through the full
+    transform.
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Potential ``(..., Y, X)``, real or already complex (absorptive).
+    factor : int
+        The multislice ``oversample``.
+    alpha : float
+        Amplitude-contrast fraction; ignored for a complex `v`.
+
+    Returns
+    -------
+    torch.Tensor
+        ``(..., factor * Y, factor * X)``, complex unless `v` is real and
+        `alpha` is zero.
+
+    Notes
+    -----
+    The real transforms round differently for different batch sizes (MKL and
+    cuFFT both), by about 1e-6 of the exit wave. A stack is therefore
+    independent of its batching to float rounding, not bit for bit.
+    """
+    if v.is_complex():
+        return fourier_upsample_xy(v, factor)
+    fine = fourier_upsample_xy(v, factor, half_spectrum=True)
+    return apply_amplitude_contrast(fine, alpha=alpha)
 
 
 def frequency_grid(nxy: int, pixel_size: float) -> torch.Tensor:

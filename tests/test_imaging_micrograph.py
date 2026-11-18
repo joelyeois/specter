@@ -78,6 +78,23 @@ def _reference(name: str) -> object:
     return torch.load(REFERENCES / f"imaging_micrograph_{name}.pt", weights_only=True)
 
 
+def _assert_rounding(got: torch.Tensor, want: torch.Tensor, noise: str | None) -> None:
+    """
+    Assert a stored reference is reproduced to float rounding.
+
+    The reference was rendered with the full-spectrum resampler; the
+    half-spectrum one moves an exit wave by about 2e-6, which in a
+    Poisson-sampled image crosses a count boundary on a few pixels.
+    """
+    if noise is None or got.is_complex():
+        scale = float(want.abs().max())
+        torch.testing.assert_close(got, want, rtol=1e-5, atol=1e-5 * scale)
+        return
+    moved = got != want
+    assert moved.float().mean() < 2e-3
+    assert (got - want).abs().max() <= 1
+
+
 def _compare(
     reference: str,
     *,
@@ -125,12 +142,12 @@ def _compare(
     want = _reference(reference)
     assert isinstance(want, dict)
     if ice.model is None:
-        assert torch.equal(torch.cat(got), want["images"])
+        _assert_rounding(torch.cat(got), want["images"], noise)
     else:
         assert noise is None
         torch.testing.assert_close(torch.cat(got), want["images"], rtol=1e-5, atol=0)
     if keep_dry:
-        assert torch.equal(torch.cat(got_clean), want["clean"])
+        _assert_rounding(torch.cat(got_clean), want["clean"], None)
 
 
 def asdict_propagation(p: Propagation) -> dict:

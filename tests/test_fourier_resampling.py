@@ -81,3 +81,51 @@ def test_upsampling_is_linear_and_keeps_a_real_field_real(n: int, factor: int) -
     assert torch.allclose(combined, separate, atol=1e-12)
     imaginary = fourier_upsample_xy(x.to(torch.complex128), factor).imag
     assert float(imaginary.abs().max()) < 1e-12
+
+
+@pytest.mark.parametrize("n", [8, 9])
+@pytest.mark.parametrize("factor", [2, 3])
+def test_the_half_spectrum_path_is_the_same_interpolant(n: int, factor: int) -> None:
+    """A real field through ``rfft2`` gives the full transform's values and gradient."""
+    torch.manual_seed(0)
+    x = torch.randn(2, 3, n, n, dtype=torch.float64, requires_grad=True)
+    weight = torch.randn(2, 3, n * factor, n * factor, dtype=torch.float64)
+    full = fourier_upsample_xy(x, factor)
+    half = fourier_upsample_xy(x, factor, half_spectrum=True)
+    assert not half.is_complex()
+    torch.testing.assert_close(half, full, rtol=0, atol=1e-12)
+    (g_full,) = torch.autograd.grad((full * weight).sum(), x)
+    (g_half,) = torch.autograd.grad((half * weight).sum(), x)
+    torch.testing.assert_close(g_half, g_full, rtol=0, atol=1e-12)
+
+
+def test_the_half_spectrum_path_takes_an_expanded_batch() -> None:
+    """One slice expanded to a batch has stride 0, which MKL's real transform rejects."""
+    torch.manual_seed(0)
+    x = torch.randn(1, 3, 8, 8)
+    out = fourier_upsample_xy(x.expand(4, -1, -1, -1), 2, half_spectrum=True)
+    want = fourier_upsample_xy(x, 2, half_spectrum=True)
+    torch.testing.assert_close(out, want.expand(4, -1, -1, -1), rtol=0, atol=1e-6)
+
+
+def test_the_fine_grid_potential_commutes_with_amplitude_contrast() -> None:
+    """
+    `fine_grid_potential` interpolates a real potential through its half
+    spectrum before the amplitude-contrast factor: the same values as the
+    factor first and the full transform, to float rounding. A complex
+    potential goes through the full transform untouched.
+    """
+    from specter.potential import apply_amplitude_contrast
+    from specter.scattering._kernels import fine_grid_potential
+
+    torch.manual_seed(0)
+    v = torch.rand(2, 4, 16, 16)
+    want = fourier_upsample_xy(apply_amplitude_contrast(v, alpha=0.07), 2)
+    got = fine_grid_potential(v, 2, 0.07)
+    assert got.is_complex()
+    torch.testing.assert_close(got, want, rtol=0, atol=1e-5)
+    assert not fine_grid_potential(v, 2, 0.0).is_complex()
+    absorptive = torch.complex(v, 0.1 * v)
+    assert torch.equal(
+        fine_grid_potential(absorptive, 2, 0.07), fourier_upsample_xy(absorptive, 2)
+    )

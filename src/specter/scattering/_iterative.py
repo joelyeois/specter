@@ -22,6 +22,7 @@ from ..progress import track
 from ..rotations import VolumeRotator, build_affine_matrix
 from ._kernels import (
     bandlimit_mask,
+    fine_grid_potential,
     fourier_crop_xy,
     fourier_upsample_xy,
     oversampled_exp,
@@ -588,8 +589,9 @@ class IterativeScattering(DeviceModule):
                 "Multislice (Iterative)",
                 roi_size=roi_size,
             ):
-                slice_complex = apply_amplitude_contrast(slice_sample, alpha=self.alpha)
-                slice_complex = fourier_upsample_xy(slice_complex, self.oversample)
+                slice_complex = fine_grid_potential(
+                    slice_sample, self.oversample, self.alpha
+                )
                 t = torch.exp(1j * self.sigma * self.pixel_size * slice_complex)
                 exitwave = ifft2(fft2(t * exitwave) * Fk)
         else:
@@ -796,8 +798,7 @@ class IterativeScattering(DeviceModule):
                 dev,
                 roi_size=roi_size,
             )[:, 0]
-            sc = apply_amplitude_contrast(s, alpha=self.alpha)
-            sc = fourier_upsample_xy(sc, self.oversample)
+            sc = fine_grid_potential(s, self.oversample, self.alpha)
             t = torch.exp(1j * self.sigma * self.pixel_size * sc)
             exitwave = ifft2(fft2(t * exitwave) * Fk)
         return exitwave

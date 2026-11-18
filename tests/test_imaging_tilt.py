@@ -49,6 +49,23 @@ def _ctf() -> CTF:
     return CTF.from_values(torch.linspace(20000.0, 24000.0, N), cs=2.7)
 
 
+def _assert_rounding(got: torch.Tensor, want: torch.Tensor, noise: str | None) -> None:
+    """
+    Assert a stored reference is reproduced to float rounding.
+
+    The reference was rendered with the full-spectrum resampler; the
+    half-spectrum one moves an exit wave by about 2e-6, which in a
+    Poisson-sampled image crosses a count boundary on a few pixels.
+    """
+    if noise is None or got.is_complex():
+        scale = float(want.abs().max())
+        torch.testing.assert_close(got, want, rtol=1e-5, atol=1e-5 * scale)
+        return
+    moved = got != want
+    assert moved.float().mean() < 2e-3
+    assert (got - want).abs().max() <= 1
+
+
 def _compare(
     reference: str,
     *,
@@ -104,8 +121,8 @@ def _compare(
         return
     want = torch.load(path, weights_only=True)
     if exact:
-        assert torch.equal(waves_t, want["waves"])
-        assert torch.equal(got_t, want["images"])
+        _assert_rounding(waves_t, want["waves"], None)
+        _assert_rounding(got_t, want["images"], noise)
     else:
         assert noise is None
         torch.testing.assert_close(got_t, want["images"], rtol=1e-5, atol=0)

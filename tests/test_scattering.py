@@ -811,7 +811,10 @@ def test_multislice_supersample_matches_fine_grid_reference(factor, sign):
     )
     got = scat(V)
     assert got.shape == (2, n, n)
-    assert torch.equal(got, _supersampled_reference(V, factor, alpha=0.07, sign=sign))
+    # To float rounding: the chunked recursion resamples a real chunk through
+    # its half spectrum before the amplitude-contrast factor.
+    want = _supersampled_reference(V, factor, alpha=0.07, sign=sign)
+    torch.testing.assert_close(got, want, rtol=0, atol=1e-5)
     coarse = Scattering(
         n, 1.0, 300.0, alpha=0.07, ews_curvature_sign=sign, progressbars=False
     )(V)

@@ -352,7 +352,7 @@ def test_the_dry_specimen_is_the_generator_s_clean_reference() -> None:
         dry = specimen.dry().scatter(
             poses[:2], voltage=VOLTAGE, seed=7, pad_fft=True, **RETIRED
         )
-    assert torch.equal(dry.pixels(), _reference("dry_clean"))
+    _assert_close(dry.pixels(), _reference("dry_clean"), LOOSE)
 
 
 def _atoms() -> tuple[torch.Tensor, torch.Tensor]:

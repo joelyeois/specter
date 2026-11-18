@@ -903,8 +903,8 @@ def test_a_micrograph_batch_propagates_once(small_volume, ctf_params, monkeypatc
     """
     Every image of a micrograph batch sees one specimen at one pose, so the
     batch's exit waves are identical: the volume is propagated once, and each
-    image still gets its own CTF and noise -- bit-identical to propagating B
-    copies.
+    image still gets its own CTF and noise -- the same as propagating B
+    copies, to the rounding of a batched real transform.
     """
     B = 3
     torch.manual_seed(0)
@@ -932,7 +932,7 @@ def test_a_micrograph_batch_propagates_once(small_volume, ctf_params, monkeypatc
     )
     with torch.no_grad():
         copies = propagator(sample.volume.expand(B, -1, -1, -1), pose=0)
-    assert torch.equal(waves.array, copies)
+    torch.testing.assert_close(waves.array, copies, rtol=0, atol=1e-5)
 
     params = {k: v.expand(B).clone() for k, v in ctf_params.items()}
     params["dfu"] = params["dfu"] + 100.0 * torch.arange(B)

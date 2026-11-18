@@ -71,6 +71,11 @@ PadMode = Literal["constant", "reflect", "replicate", "circular"]
 #: Aberration image-formation model: ``|CTF(psi)|^2`` or the linearised CTF.
 AberrationModel = Literal["nonlinear", "linear"]
 
+#: Phase-plate model. ``"ideal"`` shifts every frequency but DC by the image's
+#: phase shift; ``"volta"`` passes frequencies below a Gaussian cut-on
+#: unshifted; ``"laser"`` is the laser phase plate's own profile (``lpp_params``).
+PhasePlate = Literal["ideal", "volta", "laser"]
+
 #: How the imaginary part of the potential is obtained. ``"alpha"`` scales the
 #: real potential by a fitted amplitude-contrast ratio; ``"inelastic_mfp"``
 #: derives it per material from a measured inelastic mean free path. See

@@ -49,11 +49,12 @@ import torch
 import torch.nn as nn
 
 from .._defaults import DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
+from ..aberrations import resolve_phase_plate
 from ..constants import energy_to_wavelength
 from ._parameters import CTFParameters
 from ._transfer import TransferFunction
 from ._units import zernike_rho_max
-from specter.options import AberrationModel
+from specter.options import AberrationModel, PhasePlate
 
 
 #: Keys `aberrations.Aberration` accepts that this adapter has no mapping for.
@@ -260,6 +261,14 @@ class LegacyAberrationAdapter(nn.Module):
         a single shared laser-instrument config, never per-particle. If
         set, overrides ``ctf_params["phaseshift"]`` on every call (see
         :func:`ctf_params_dict_to_parameters`).
+    phase_plate : {"ideal", "volta", "laser"}, optional
+        The phase-plate model, forwarded to :class:`TransferFunction`.
+        ``"laser"`` requires ``lpp_params`` and the other two refuse them.
+        None (default) infers ``"laser"`` from ``lpp_params`` and
+        ``"ideal"`` without them, as before the option existed.
+    phase_plate_cuton : float, optional
+        The Volta cut-on in 1/Å, ``"volta"`` only. None takes 0.005, the
+        default of Parakeet 0.4.7.
 
     References
     ----------
@@ -288,8 +297,13 @@ class LegacyAberrationAdapter(nn.Module):
         dose_weighted: bool = True,
         lpp_params: dict[str, float] | None = None,
         amplitude_contrast: float = 0.0,
+        phase_plate: PhasePlate | None = None,
+        phase_plate_cuton: float | None = None,
     ) -> None:
         super().__init__()
+        phase_plate, phase_plate_cuton = resolve_phase_plate(
+            phase_plate, phase_plate_cuton, lpp_params
+        )
         self.amplitude_contrast = amplitude_contrast
         self.pixel_size = pixel_size
         self.voltage = voltage
@@ -308,6 +322,8 @@ class LegacyAberrationAdapter(nn.Module):
             deltaI_I=deltaI_I,
             dose_envelope=dose_envelope,
             dose_weighted=dose_weighted,
+            phase_plate=phase_plate,
+            phase_plate_cuton=phase_plate_cuton,
         )
 
     def forward(

@@ -47,7 +47,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Microscope",
-        ["voltage", "dose", "cs", "alpha"],
+        ["voltage", "dose", "cs", "alpha", "phase_plate", "phase_plate_cuton"],
     ),
     (
         "Sampling",
@@ -155,7 +155,16 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
     ("Specimen", ["volume_path", "voxel_size"]),
     (
         "Microscope",
-        ["voltage", "dose_per_tilt", "n_frames", "cs", "alpha"],
+        [
+            "voltage",
+            "dose_per_tilt",
+            "n_frames",
+            "cs",
+            "alpha",
+            "phaseshift",
+            "phase_plate",
+            "phase_plate_cuton",
+        ],
     ),
     ("Defocus", ["defocus"]),
     (
@@ -249,7 +258,16 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Microscope",
-        ["voltage", "dose", "defocus", "cs", "alpha"],
+        [
+            "voltage",
+            "dose",
+            "defocus",
+            "cs",
+            "alpha",
+            "phaseshift",
+            "phase_plate",
+            "phase_plate_cuton",
+        ],
     ),
     (
         "Absorption",

@@ -17,8 +17,11 @@ References
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import torch
-from specter.options import AberrationModel, ScatteringModel
+from specter._defaults import VOLTA_CUTON
+from specter.options import AberrationModel, PhasePlate, ScatteringModel
 
 
 def cs(k: torch.Tensor, wavelength: float, cs: torch.Tensor) -> torch.Tensor:
@@ -220,6 +223,7 @@ def phaseshift(
     n_pixels: int,
     aberration_model: AberrationModel,
     alpha: torch.Tensor | None = None,
+    cuton: float | None = None,
 ) -> torch.Tensor:
     """
     Calculate phase shift contribution (e.g., from Volta phase plate),
@@ -245,6 +249,17 @@ def phaseshift(
         model (where amplitude contrast is instead baked into the exit
         wave upstream via ``potential.apply_amplitude_contrast``, so adding it
         again here would double-count it).
+    cuton : float, optional
+        Gaussian cut-on of the phase plate, in 1/Å. The plate shifts a
+        spatial frequency k by ``phaseshift * (1 - exp(-k^2 / (2 cuton^2)))``,
+        so frequencies well below ``cuton`` pass the plate with the
+        unscattered beam and carry no extra phase, as the finite charged
+        spot of a Volta phase plate does (Danev et al. 2014). This is the
+        model Parakeet uses (``phase_plate.radius``, default 0.005 1/Å).
+        None (default) shifts every frequency but DC by the full
+        ``phaseshift``, a cut-on of one Fourier pixel whose frequency
+        depends on the box size. The amplitude-contrast offset of the linear
+        model stays uniform.
 
     Returns
     -------
@@ -265,6 +280,8 @@ def phaseshift(
        London. B, Biological Sciences*, 261(837), 105–118.
        https://doi.org/10.1098/rstb.1971.0040
     """
+    if cuton is not None:
+        phaseshift = phaseshift * phase_plate_cuton_profile(k, cuton)
     if aberration_model == "linear" and alpha is not None:
         phaseshift = phaseshift - torch.acos(alpha)
     if aberration_model == "nonlinear":
@@ -272,6 +289,103 @@ def phaseshift(
         # phaseshift must be zero at DC for Fourier optics
         phaseshift[:, 0, 0] = 0
     return -phaseshift
+
+
+_PHASE_PLATES = ("ideal", "volta", "laser")
+
+
+def resolve_phase_plate(
+    phase_plate: PhasePlate | None,
+    cuton: float | None,
+    lpp_params: Mapping[str, float] | None,
+) -> tuple[PhasePlate, float | None]:
+    """
+    Check a phase-plate choice and return its mode and cut-on.
+
+    Parameters
+    ----------
+    phase_plate : {"ideal", "volta", "laser"} or None
+        The model. None infers it: ``"laser"`` when `lpp_params` is given,
+        otherwise ``"ideal"``, so callers that predate the option keep their
+        behaviour.
+    cuton : float or None
+        Gaussian cut-on in 1/Å, for ``"volta"`` only; None there takes
+        :data:`specter._defaults.VOLTA_CUTON` (0.005, Parakeet's default).
+    lpp_params : mapping or None
+        Laser-phase-plate settings, for ``"laser"`` only and required by it.
+
+    Returns
+    -------
+    phase_plate : {"ideal", "volta", "laser"}
+    cuton : float or None
+        The cut-on for ``"volta"``, None otherwise.
+
+    Raises
+    ------
+    ValueError
+        For an unknown mode, a cut-on outside ``"volta"`` or not positive,
+        ``lpp_params`` outside ``"laser"``, or ``"laser"`` without them.
+    """
+    if phase_plate is None:
+        phase_plate = "laser" if lpp_params is not None else "ideal"
+    if phase_plate not in _PHASE_PLATES:
+        raise ValueError(
+            f"phase_plate={phase_plate!r} must be one of {', '.join(_PHASE_PLATES)}"
+        )
+    if lpp_params is not None and phase_plate != "laser":
+        raise ValueError(
+            f"lpp_params configure the laser phase plate, not phase_plate={phase_plate!r}"
+        )
+    if phase_plate == "laser" and lpp_params is None:
+        raise ValueError("phase_plate='laser' needs lpp_params")
+    if phase_plate != "volta":
+        if cuton is not None:
+            raise ValueError(
+                f"phase_plate_cuton is the Volta plate's cut-on; it does not apply "
+                f"to phase_plate={phase_plate!r}"
+            )
+        return phase_plate, None
+    if cuton is None:
+        cuton = VOLTA_CUTON
+    if not cuton > 0:
+        raise ValueError(f"phase_plate_cuton={cuton!r} must be positive (1/Å)")
+    return phase_plate, float(cuton)
+
+
+def phase_plate_cuton_profile(k: torch.Tensor, cuton: float) -> torch.Tensor:
+    """
+    Fraction of a phase plate's shift each spatial frequency receives.
+
+    Parameters
+    ----------
+    k : torch.Tensor
+        Spatial-frequency magnitude, in 1/Å.
+    cuton : float
+        Gaussian cut-on, in 1/Å; must be positive.
+
+    Returns
+    -------
+    torch.Tensor
+        ``1 - exp(-k^2 / (2 cuton^2))``: 0 at DC, 1/2 at
+        ``k = cuton * sqrt(2 ln 2)``, and 1 well above the cut-on.
+
+    References
+    ----------
+    .. [1] Danev, R., Buijsse, B., Khoshouei, M., Plitzko, J. M., & Baumeister,
+       W. (2014). Volta potential phase plate for in-focus phase contrast
+       transmission electron microscopy. *Proceedings of the National Academy
+       of Sciences*, 111(44), 15635–15640.
+       https://doi.org/10.1073/pnas.1418377111
+    .. [2] Parkhurst, J. M., Dumoux, M., Basham, M., Clare, D., Siebert, C. A.,
+       Varslot, T., Kirkland, A., Naismith, J. H., & Evans, G. (2021).
+       Parakeet: a digital twin software pipeline to assess the impact of
+       experimental parameters on tomographic reconstructions for cryo-electron
+       tomography. *Open Biology*, 11(10), 210160.
+       https://doi.org/10.1098/rsob.210160
+    """
+    if not cuton > 0:
+        raise ValueError(f"phase-plate cut-on {cuton!r} must be positive (1/Å)")
+    return 1.0 - torch.exp(-(k**2) / (2.0 * cuton**2))
 
 
 def defocus_midplane_shift(nz: int, pixel_size: float) -> float:

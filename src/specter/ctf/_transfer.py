@@ -15,13 +15,19 @@ import torch
 import torch.nn as nn
 from torch_ctf import calc_LPP_ctf_2D, calculate_ctf_2d
 
-from ..aberrations import b_envelope, cc_envelope, cs_envelope, dose_envelope
+from ..aberrations import (
+    b_envelope,
+    cc_envelope,
+    cs_envelope,
+    dose_envelope,
+    resolve_phase_plate,
+)
 from ..arrays import kgrid_2d
 from .._defaults import DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ..constants import energy_to_wavelength
 from ..fft import fft2, ifft2
 from ._parameters import CTFParameters
-from specter.options import AberrationModel
+from specter.options import AberrationModel, PhasePlate
 
 
 class TransferFunction(nn.Module):
@@ -87,6 +93,19 @@ class TransferFunction(nn.Module):
         Whether the image stands for an exposure-filtered movie sum (True,
         default) or a plain sum of frames (False). See
         :func:`specter.aberrations.dose_envelope`.
+    phase_plate : {"ideal", "volta", "laser"}, optional
+        How ``ctf_params.phase_shift`` reaches each frequency. ``"ideal"``
+        shifts every frequency by the full amount, the nonlinear model's DC
+        pinned to 1. ``"volta"`` shifts frequency k by
+        ``phase_shift * (1 - exp(-k^2 / (2 r^2)))``, so frequencies below the
+        cut-on r travel with the unscattered beam (see
+        :func:`specter.aberrations.phase_plate_cuton_profile`). ``"laser"`` is
+        the laser phase plate of ``ctf_params.lpp_params``, which it requires.
+        None (default) is ``"laser"`` for parameters that carry
+        ``lpp_params`` and ``"ideal"`` otherwise.
+    phase_plate_cuton : float, optional
+        The Volta cut-on r in 1/Å, ``"volta"`` only. None takes 0.005, the
+        default of Parakeet 0.4.7.
 
     References
     ----------
@@ -111,10 +130,20 @@ class TransferFunction(nn.Module):
         deltaI_I: float = DELTA_I_I,
         dose_envelope: bool = False,
         dose_weighted: bool = True,
+        phase_plate: PhasePlate | None = None,
+        phase_plate_cuton: float | None = None,
     ) -> None:
         super().__init__()
         if aberration_model not in ("nonlinear", "linear"):
             raise ValueError(f"Unknown aberration_model: {aberration_model!r}")
+        # Checked here without the laser settings, which travel in
+        # CTFParameters and are matched against the mode on every call.
+        laser_stand_in: dict[str, float] | None = {} if phase_plate == "laser" else None
+        resolved, phase_plate_cuton = resolve_phase_plate(
+            phase_plate, phase_plate_cuton, laser_stand_in
+        )
+        self.phase_plate: PhasePlate | None = None if phase_plate is None else resolved
+        self.phase_plate_cuton = phase_plate_cuton
         self.n_pixels = n_pixels
         self.pixel_size = pixel_size
         self.aberration_model = aberration_model
@@ -189,6 +218,21 @@ class TransferFunction(nn.Module):
             (), dtype=transfer.dtype, device=transfer.device
         )
         return transfer
+
+    def _cuton_correction(self, kwargs: dict) -> torch.Tensor:
+        """Undo the phase plate's shift below its cut-on.
+
+        torch-ctf's phase is ``chi = aberration - deg2rad(phase_shift) - ...``
+        and its transfer function ``exp(-i chi)``, so the plate contributes
+        ``exp(+i deg2rad(phase_shift))`` at every frequency. Multiplying by
+        ``exp(-i deg2rad(phase_shift) exp(-k^2 / (2 r^2)))`` leaves
+        ``exp(+i deg2rad(phase_shift) (1 - exp(-k^2 / (2 r^2))))``.
+        """
+        assert self.phase_plate_cuton is not None
+        shift = torch.deg2rad(torch.as_tensor(kwargs["phase_shift"]))
+        shift = shift.to(device=self.k.device, dtype=self.k.dtype).reshape(-1, 1, 1)
+        low_pass = torch.exp(-self.k2 / (2.0 * self.phase_plate_cuton**2))
+        return torch.exp(-1j * shift * low_pass)
 
     def _call_calculate_ctf_2d(self, kwargs: dict) -> torch.Tensor:
         """calculate_ctf_2d(**kwargs, return_complex_ctf=True) -- or
@@ -304,7 +348,18 @@ class TransferFunction(nn.Module):
             self.pixel_size, (self.n_pixels, self.n_pixels), idx=idx
         )
         kwargs = self._resolve_amplitude_contrast(kwargs)
+        # Checked and built before torch-ctf runs: _call_calculate_ctf_2d pops
+        # lpp_params.
+        resolve_phase_plate(
+            self.phase_plate, self.phase_plate_cuton, kwargs.get("lpp_params")
+        )
+        cuton = (
+            None if self.phase_plate_cuton is None else self._cuton_correction(kwargs)
+        )
         transfer = self._call_calculate_ctf_2d(kwargs)
+
+        if cuton is not None:
+            transfer = transfer * cuton
 
         if self.aberration_model == "nonlinear":
             transfer = self._zero_dc_for_nonlinear(transfer)

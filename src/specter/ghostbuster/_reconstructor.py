@@ -430,6 +430,8 @@ class Reconstructor(_BaseReconstructor):
             bfactor=None if bfactor is None else bfactor[idx],
             backend=self.optics.aberration_backend,
             lpp_params=self.optics.lpp_params,
+            phase_plate=self.optics.phase_plate,
+            phase_plate_cuton=self.optics.phase_plate_cuton,
         )
         anisomag = None if self.anisomag is None else self.anisomag[idx]
         return (

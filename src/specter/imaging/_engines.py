@@ -13,7 +13,7 @@ import functools
 import torch
 
 from ..aberrations import Aberration
-from ..options import AberrationModel, EwaldSphereSign, ScatteringModel
+from ..options import AberrationModel, EwaldSphereSign, PhasePlate, ScatteringModel
 from ..scattering import Scattering
 
 __all__ = ["aberration_engine", "scattering_engine"]
@@ -65,13 +65,17 @@ def aberration_engine(
     backend: str,
     lpp_params: tuple[tuple[str, float], ...] | None,
     device: str,
+    phase_plate: PhasePlate | None = None,
+    phase_plate_cuton: float | None = None,
 ) -> torch.nn.Module:
     """
     The transfer-function engine on an ``n``-point grid of spacing `dx`.
 
     `alpha` reaches the linear model only, the one whose wave has no
-    absorptive part of its own. ``lpp_params`` is the phase plate's settings
-    as sorted ``(key, value)`` pairs, so it can be part of the cache key.
+    absorptive part of its own. ``lpp_params`` is the laser phase plate's
+    settings as sorted ``(key, value)`` pairs, so it can be part of the cache
+    key. ``phase_plate`` and ``phase_plate_cuton`` are as
+    :meth:`ExitWave.apply_ctf`; None infers the mode from ``lpp_params``.
     """
     linear = model == "linear"
     engine: torch.nn.Module
@@ -89,6 +93,8 @@ def aberration_engine(
             dose_weighted=dose_weighted,
             lpp_params=None if lpp_params is None else dict(lpp_params),
             amplitude_contrast=alpha if linear and alpha is not None else 0.0,
+            phase_plate=phase_plate,
+            phase_plate_cuton=phase_plate_cuton,
         )
     else:
         engine = Aberration(
@@ -101,6 +107,8 @@ def aberration_engine(
             convergence_angle=convergence_angle,
             dose_envelope=dose_envelope,
             dose_weighted=dose_weighted,
+            phase_plate="ideal" if phase_plate is None else phase_plate,
+            phase_plate_cuton=phase_plate_cuton,
             progressbars=False,
         )
     return engine.to(device)

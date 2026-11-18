@@ -15,11 +15,11 @@ import torch
 
 from .._defaults import CC_MM, DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ..aberrations import FocalSpread
-from ..aberrations import cc_envelope
+from ..aberrations import cc_envelope, resolve_phase_plate
 from ..constants import energy_to_wavelength
 from ..detectors import detector_mtf, dqe0_for_detector
 from ..detectors import Detector
-from ..options import AberrationModel, NoiseModel, TemporalCoherence
+from ..options import AberrationModel, NoiseModel, PhasePlate, TemporalCoherence
 from ..random_seed import derive_seeds
 from . import _stages as stages
 from ._data import CTF, Exposure, per_image
@@ -102,6 +102,8 @@ class ExitWave:
         dose_envelope: Exposure | None = None,
         backend: Literal["legacy", "torch_ctf"] = "legacy",
         lpp_params: dict[str, float] | None = None,
+        phase_plate: PhasePlate | None = None,
+        phase_plate_cuton: float | None = None,
     ) -> ExitWave:
         """
         Apply the objective lens's transfer function.
@@ -123,7 +125,20 @@ class ExitWave:
         backend : {"legacy", "torch_ctf"}, optional
             The transfer-function engine. Default "legacy".
         lpp_params : dict, optional
-            Laser phase plate settings; ``"torch_ctf"`` only.
+            Laser phase plate settings; ``phase_plate="laser"`` and
+            ``"torch_ctf"`` only.
+        phase_plate : {"ideal", "volta", "laser"}, optional
+            How each image's ``phaseshift`` reaches each frequency.
+            ``"ideal"`` shifts every frequency but DC by the full amount.
+            ``"volta"`` shifts frequency k by
+            ``phaseshift * (1 - exp(-k^2 / (2 r^2)))``, so frequencies below
+            the cut-on r pass with the unscattered beam, as through the
+            finite charged spot of a Volta plate. ``"laser"`` is the laser
+            phase plate of `lpp_params`. None (default) is ``"laser"`` when
+            `lpp_params` is given and ``"ideal"`` otherwise.
+        phase_plate_cuton : float, optional
+            The Volta cut-on r in 1/Å, ``"volta"`` only. None takes 0.005, the
+            default of Parakeet 0.4.7.
 
         Returns
         -------
@@ -137,6 +152,9 @@ class ExitWave:
                 "the exposure already acted on the specimen or its solvent; a "
                 "dose envelope on the transfer function would count it twice"
             )
+        phase_plate, phase_plate_cuton = resolve_phase_plate(
+            phase_plate, phase_plate_cuton, lpp_params
+        )
         n, device = len(self.ids), self.array.device
         if len(ctf) != n:
             raise ValueError(f"{len(ctf)} CTF entries for {n} images")
@@ -172,6 +190,8 @@ class ExitWave:
                 dose_weighted=weighted,
                 lpp_params=lpp_params,
                 amplitude_contrast=self.alpha if self.linear else 0.0,
+                phase_plate=phase_plate,
+                phase_plate_cuton=phase_plate_cuton,
             ).to(device)
         else:
             if lpp_params is not None and backend != "torch_ctf":
@@ -190,6 +210,8 @@ class ExitWave:
                 backend,
                 None if lpp_params is None else tuple(sorted(lpp_params.items())),
                 str(device),
+                phase_plate,
+                phase_plate_cuton,
             )
         wave = stages.aberrate(self.array, aberration, params, s, self.pad_nxy)
         return replace(

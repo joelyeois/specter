@@ -38,6 +38,8 @@ from ._common_fields import (
     inelastic_mfp_solvent_setting,
     inelastic_mfp_specimen_setting,
     objective_aperture_setting,
+    phase_plate_cuton_setting,
+    phase_plate_setting,
     job_id_setting,
     output_dir_setting,
     project_setting,
@@ -49,6 +51,7 @@ from typing import Literal
 from ._scalar_range import ScalarOrRange
 from specter.options import (
     AbsorptionModel,
+    PhasePlate,
     ConvBackend,
     DetectorModel,
     DoseEnvelopeTarget,
@@ -513,6 +516,8 @@ class ParticleStackConfig:
         ),
         check="ordered",
     )  # radians
+    phase_plate: PhasePlate = phase_plate_setting()
+    phase_plate_cuton: float | None = phase_plate_cuton_setting()  # 1/A
     tiltx: ScalarOrRange = setting(
         0.0,
         help=(

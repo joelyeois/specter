@@ -31,3 +31,8 @@ LR_DECAY: Final = 0.1
 
 #: Zero-filled margin on each side of a padded multislice canvas, pixels.
 FFT_PAD_MARGIN: Final = 32
+
+#: Gaussian cut-on of a Volta phase plate, in 1/Å: the default of Parakeet
+#: 0.4.7 (``parakeet/config.py`` ``PhasePlate.radius``, applied in
+#: ``parakeet/simulate/phase_plate.py``).
+VOLTA_CUTON: Final = 0.005

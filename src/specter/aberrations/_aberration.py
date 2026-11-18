@@ -16,7 +16,7 @@ from . import _functions as fn
 from .._defaults import DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from ..constants import energy_to_wavelength
 from ..fft import fft2, ifft2
-from specter.options import AberrationModel
+from specter.options import AberrationModel, PhasePlate
 
 # Keys read out of the per-batch `ctf_params` dict passed to `forward()` --
 # see `Aberration.transfer_function`. Never constructor arguments -- `bfactor`
@@ -112,6 +112,15 @@ class Aberration(DeviceModule):
         :meth:`forward` -- the same convenience and precedence offered by
         ``ExitWave.apply_ctf`` and ``Reconstructor``. None or 0.0
         means no envelope. Default None.
+    phase_plate : {"ideal", "volta"}, optional
+        How ``phaseshift`` reaches each frequency. ``"ideal"`` (default)
+        shifts every frequency but DC by the full amount. ``"volta"``
+        shifts frequency k by ``phaseshift * (1 - exp(-k^2 / (2 r^2)))``
+        (see :func:`specter.aberrations.phaseshift`). ``"laser"`` is
+        refused: only the torch-ctf backend models it.
+    phase_plate_cuton : float, optional
+        The Volta cut-on r in 1/Å, ``"volta"`` only. None takes 0.005, the
+        default of Parakeet 0.4.7.
 
     Notes
     -----
@@ -149,6 +158,8 @@ class Aberration(DeviceModule):
         dose_envelope: bool = False,
         dose_weighted: bool = True,
         bfactor: float | torch.Tensor | None = None,
+        phase_plate: PhasePlate = "ideal",
+        phase_plate_cuton: float | None = None,
         progressbars: bool = True,
         **kwargs: Any,
     ):
@@ -205,6 +216,14 @@ class Aberration(DeviceModule):
         self.deltaI_I = deltaI_I
         self.dose_envelope = dose_envelope
         self.dose_weighted = dose_weighted
+        if phase_plate == "laser":
+            raise ValueError(
+                "phase_plate='laser' needs aberration_backend='torch_ctf': "
+                "aberrations.Aberration has no laser-phase-plate model"
+            )
+        self.phase_plate, self.phase_plate_cuton = fn.resolve_phase_plate(
+            phase_plate, phase_plate_cuton, None
+        )
 
         if bfactor is None:
             self.bfactor: torch.Tensor | None = None
@@ -282,7 +301,12 @@ class Aberration(DeviceModule):
             phaseshift = ctf_params.get("phaseshift", self.zero).view(-1, 1, 1)
             alpha = torch.as_tensor(self.alpha) if needs_amp_contrast_offset else None
             chi = chi + fn.phaseshift(
-                phaseshift, self.k, self.n_pixels, self.aberration_model, alpha=alpha
+                phaseshift,
+                self.k,
+                self.n_pixels,
+                self.aberration_model,
+                alpha=alpha,
+                cuton=self.phase_plate_cuton,
             )
 
         # --- Beam tilt ---

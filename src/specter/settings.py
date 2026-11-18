@@ -51,6 +51,7 @@ from specter.options import (
     EwaldSphereSign,
     IceModel,
     NoiseModel,
+    PhasePlate,
     PoseMode,
     ScatteringFactors,
     ScatteringModel,
@@ -274,6 +275,18 @@ class Optics:
         Laser-phase-plate settings in :class:`specter.ctf.CTFParameters`
         native units. Requires ``aberration_backend="torch_ctf"``. Default
         None, no phase plate.
+    phase_plate : {"ideal", "volta", "laser"}, optional
+        How each image's phase shift reaches each frequency. ``"ideal"``
+        shifts every frequency but DC by the full amount. ``"volta"`` shifts
+        frequency k by ``phaseshift * (1 - exp(-k^2 / (2 r^2)))``, so
+        frequencies below the cut-on r travel with the unscattered beam, as
+        they do through the finite charged spot of a real Volta plate (either
+        backend). ``"laser"`` is the laser phase plate of ``lpp_params``,
+        which it requires. Default None: ``"laser"`` when ``lpp_params`` is
+        set, ``"ideal"`` otherwise.
+    phase_plate_cuton : float, optional
+        The Volta cut-on r in 1/Å, ``phase_plate="volta"`` only. None takes
+        0.005, the default of Parakeet 0.4.7.
     objective_aperture : float, optional
         Objective aperture semi-angle in milliradians (a 70 um aperture on a
         Krios is ~12 mrad). Electrons scattered elastically beyond it leave
@@ -290,8 +303,13 @@ class Optics:
     aberration_backend: AberrationBackend = "legacy"
     lpp_params: dict[str, float] | None = None
     objective_aperture: float | None = None
+    phase_plate: PhasePlate | None = None
+    phase_plate_cuton: float | None = None
 
     def __post_init__(self) -> None:
+        from .aberrations import resolve_phase_plate
+
+        resolve_phase_plate(self.phase_plate, self.phase_plate_cuton, self.lpp_params)
         if self.objective_aperture is not None and self.objective_aperture <= 0.0:
             raise ValueError(
                 f"objective_aperture={self.objective_aperture} must be positive "

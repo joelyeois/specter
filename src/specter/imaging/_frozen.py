@@ -20,7 +20,8 @@ from ..aberrations import defocus_midplane_shift
 from ..constants import energy_to_wavelength
 from ..detectors import detector_mtf, dqe0_for_detector
 from ..detectors import Detector
-from ..options import EwaldSphereSign, NoiseModel
+from ..aberrations import resolve_phase_plate
+from ..options import EwaldSphereSign, NoiseModel, PhasePlate
 from ..scattering import IterativeScattering
 from . import _stages as stages
 from ._data import CTF, per_image
@@ -73,6 +74,8 @@ def simulate_frozen(
     klim: float | None = None,
     ews_curvature_sign: EwaldSphereSign = "negative",
     convergence_angle: float | None = None,
+    phase_plate: PhasePlate = "ideal",
+    phase_plate_cuton: float | None = None,
     cc: float | None = CC_MM,
     energy_spread: float = ENERGY_SPREAD_EV,
     deltaV_V: float = DELTA_V_V,
@@ -109,8 +112,9 @@ def simulate_frozen(
         Frozen states per frame, and the dose received before the movie.
     pad_fft, oversample, klim, ews_curvature_sign
         As `Propagation`.
-    convergence_angle
-        As :meth:`~specter.imaging.ExitWave.apply_ctf`.
+    convergence_angle, phase_plate, phase_plate_cuton
+        As :meth:`~specter.imaging.ExitWave.apply_ctf`; the laser phase plate
+        is not available here.
     cc, energy_spread, deltaV_V, deltaI_I
         As :meth:`~specter.imaging.ExitWave.intensity`; the focal spread is
         summed over in every frame.
@@ -135,6 +139,9 @@ def simulate_frozen(
     """
     from ..inelastic import FrozenPlasmonForward
 
+    phase_plate, phase_plate_cuton = resolve_phase_plate(
+        phase_plate, phase_plate_cuton, None
+    )
     pad_nxy = padded_nxy(nxy, pad_fft)
     scattering = IterativeScattering(
         pad_nxy,
@@ -195,6 +202,8 @@ def simulate_frozen(
             "legacy",
             None,
             str(wave.device),
+            phase_plate,
+            phase_plate_cuton,
         )
         return stages.aberrate(wave, engine, params, oversample, pad_nxy)
 

@@ -218,6 +218,8 @@ def run_tilt_series(
         "cs": torch.tensor([cs_angstrom]),
         "dfu": torch.tensor([config.defocus]),
     }
+    if config.phaseshift:
+        ctf_params["phaseshift"] = torch.tensor([config.phaseshift])
 
     ice = bundle_from_config(
         Ice, config, prefix="ice_", parameterization=config.bulk_scattering_factors

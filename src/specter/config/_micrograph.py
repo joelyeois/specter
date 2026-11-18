@@ -39,6 +39,9 @@ from ._common_fields import (
     inelastic_mfp_specimen_setting,
     job_id_setting,
     objective_aperture_setting,
+    phase_plate_cuton_setting,
+    phase_plate_setting,
+    phaseshift_setting,
     output_dir_setting,
     project_setting,
     seed_setting,
@@ -49,6 +52,7 @@ from typing import Literal
 from ._scalar_range import ScalarOrRange
 from specter.options import (
     AbsorptionModel,
+    PhasePlate,
     DetectorModel,
     DoseEnvelopeTarget,
     IceModel,
@@ -149,6 +153,9 @@ class MicrographConfig:
     )
     cs: float = cs_setting()  # mm
     alpha: float = alpha_setting()  # unitless, amplitude contrast ratio
+    phaseshift: float = phaseshift_setting()  # radians
+    phase_plate: PhasePlate = phase_plate_setting()
+    phase_plate_cuton: float | None = phase_plate_cuton_setting()  # 1/A
     absorption_model: AbsorptionModel = absorption_model_setting()
     inelastic_mfp_solvent: float | None = inelastic_mfp_solvent_setting()  # Å
     inelastic_mfp_specimen: float | None = inelastic_mfp_specimen_setting()  # Å

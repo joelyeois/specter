@@ -181,6 +181,43 @@ def objective_aperture_setting() -> Any:
     )
 
 
+def phase_plate_setting() -> Any:
+    """The ``phase_plate`` field."""
+    return setting(
+        "ideal",
+        help=(
+            "How phaseshift reaches each spatial frequency. 'ideal' shifts every "
+            "frequency but DC by the full amount. 'volta' shifts frequency k by "
+            "phaseshift * (1 - exp(-k^2 / (2 r^2))), r = phase_plate_cuton, so "
+            "frequencies below the cut-on pass with the unscattered beam. 'laser' "
+            "needs laser-phase-plate settings, which only the Python API takes."
+        ),
+    )
+
+
+def phase_plate_cuton_setting() -> Any:
+    """The ``phase_plate_cuton`` field, in 1/Angstrom."""
+    return setting(
+        None,
+        help=(
+            "Gaussian cut-on r of the Volta phase plate, in 1/Angstrom, for "
+            "phase_plate='volta' only. Unset: 0.005, Parakeet 0.4.7's default."
+        ),
+        check="positive",
+    )
+
+
+def phaseshift_setting() -> Any:
+    """The ``phaseshift`` field of a micrograph or tilt series, in radians."""
+    return setting(
+        0.0,
+        help=(
+            "Phase-plate phase shift in radians (pi/2 for a Volta plate at its "
+            "working point), the same for every image."
+        ),
+    )
+
+
 def dose_envelope_target_setting(owner: str, note: str = "") -> Any:
     """
     The ``dose_envelope_target`` field.

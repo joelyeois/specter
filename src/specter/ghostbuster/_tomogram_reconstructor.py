@@ -467,6 +467,8 @@ class TomogramReconstructor(_BaseReconstructor):
             ctf,
             backend=self.optics.aberration_backend,
             lpp_params=self.optics.lpp_params,
+            phase_plate=self.optics.phase_plate,
+            phase_plate_cuton=self.optics.phase_plate_cuton,
         ).intensity(cc=None)
         field = center_crop(image.pixels()[0], self.nxy, dim=(-2, -1))
         return self.dose_per_pixel[tilt_idx] * field

@@ -88,6 +88,11 @@ _PATHS = [
     ),
     Case("cs_path", "/nonexistent/particles.cs", "missing CryoSPARC file"),
     Case("star_path", "/nonexistent/particles.star", "missing RELION file"),
+    Case(
+        "orientation_distribution_path",
+        "/nonexistent/poses.cs",
+        "missing orientations file",
+    ),
 ]
 
 _LITERALS = [

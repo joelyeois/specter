@@ -109,6 +109,124 @@ def random_rotation_matrix(
     return rotmats
 
 
+def resample_viewing_directions(
+    quaternions: torch.Tensor,
+    n: int,
+    *,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    """
+    Draw `n` orientations with the viewing directions of a set of poses.
+
+    A pose's viewing direction is the particle-frame axis that points along
+    the beam, the last column of its rotation matrix. Each draw takes the
+    viewing direction of one source pose, chosen uniformly with replacement,
+    and a uniformly random rotation about the beam: a specimen's preferred
+    orientations constrain which face lies along the beam and leave the
+    in-plane angle free. A source set with uniform orientations therefore
+    yields uniform orientations.
+
+    Parameters
+    ----------
+    quaternions : torch.Tensor
+        Source poses as unit quaternions, shape (m, 4), in roma's ``xyzw``
+        convention. They sample the viewing-direction distribution, so more
+        poses resolve it more finely.
+    n : int
+        Number of orientations to draw.
+    generator : torch.Generator, optional
+        Draw from this generator, on whatever device it lives, instead of the
+        global one.
+
+    Returns
+    -------
+    quats : torch.Tensor
+        Unit quaternions, shape (n, 4), ``xyzw``, on the CPU.
+    """
+    source = torch.as_tensor(quaternions, dtype=torch.float32).cpu()
+    if source.ndim != 2 or source.shape[-1] != 4 or len(source) == 0:
+        raise ValueError(
+            f"quaternions must have shape (m, 4) with m >= 1, not {tuple(source.shape)}"
+        )
+    source = source / source.norm(dim=-1, keepdim=True)
+    device = "cpu" if generator is None else generator.device
+    rows = torch.randint(len(source), (n,), generator=generator, device=device).cpu()
+    half = torch.pi * torch.rand(n, generator=generator, device=device).cpu()
+    zeros = torch.zeros(n)
+    # A rotation about z applied before the pose turns the image in its plane
+    # and leaves the last column of the pose's rotation matrix where it was.
+    spin = torch.stack([zeros, zeros, torch.sin(half), torch.cos(half)], dim=-1)
+    return roma.quat_product(source[rows], spin)
+
+
+def sample_viewing_direction_histogram(
+    histogram: torch.Tensor,
+    n: int,
+    *,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    """
+    Draw `n` orientations from a viewing-direction histogram.
+
+    The histogram is binned in the azimuth and elevation of the viewing
+    direction ``d``, the particle-frame axis that points along the beam
+    (the last column of the pose's rotation matrix): ``azimuth =
+    atan2(d_y, d_x)`` and ``elevation = asin(d_z)``. Each draw picks a bin
+    with probability proportional to its count, a direction uniform over
+    the part of the sphere the bin covers, and a uniform in-plane angle.
+    The axes are those of CryoSPARC's viewing direction distribution plot,
+    with the pose convention of its ``alignments3D/pose``.
+
+    Parameters
+    ----------
+    histogram : torch.Tensor
+        Non-negative particle counts, shape (n_elevation, n_azimuth). Row
+        ``i`` covers elevations from ``-pi/2 + i * pi / n_elevation`` and
+        column ``j`` azimuths from ``-pi + j * 2 * pi / n_azimuth``, in
+        equal steps. Counts are per bin, not per unit solid angle, so
+        uniform orientations give rows that scale with ``cos(elevation)``.
+    n : int
+        Number of orientations to draw.
+    generator : torch.Generator, optional
+        Draw from this generator, on whatever device it lives, instead of the
+        global one.
+
+    Returns
+    -------
+    quats : torch.Tensor
+        Unit quaternions, shape (n, 4), ``xyzw``, on the CPU.
+    """
+    counts = torch.as_tensor(histogram, dtype=torch.float64).cpu()
+    if counts.ndim != 2 or counts.numel() == 0:
+        raise ValueError(
+            "histogram must have shape (n_elevation, n_azimuth), "
+            f"not {tuple(counts.shape)}"
+        )
+    if not torch.isfinite(counts).all() or (counts < 0).any() or counts.sum() <= 0:
+        raise ValueError(
+            "histogram must hold finite, non-negative counts with a positive sum"
+        )
+    n_elevation, n_azimuth = counts.shape
+    device = "cpu" if generator is None else generator.device
+    bins = torch.multinomial(
+        counts.flatten().to(device), n, replacement=True, generator=generator
+    ).cpu()
+    u = torch.rand(n, 3, generator=generator, device=device).cpu().double()
+    row = torch.div(bins, n_azimuth, rounding_mode="floor")
+    column = bins % n_azimuth
+    azimuth = -torch.pi + (column + u[:, 0]) * (2 * torch.pi / n_azimuth)
+    # Uniform over the bin's area is uniform in sin(elevation).
+    edges = torch.sin(
+        -torch.pi / 2 + torch.arange(n_elevation + 1) * (torch.pi / n_elevation)
+    ).double()
+    sine = edges[row] + u[:, 1] * (edges[row + 1] - edges[row])
+    polar = torch.pi / 2 - torch.asin(sine.clamp(-1.0, 1.0))
+    # Rz(azimuth) Ry(polar) carries z onto the viewing direction, and the
+    # last angle spins about the beam.
+    angles = torch.stack([azimuth, polar, 2 * torch.pi * u[:, 2]], dim=-1)
+    return roma.euler_to_unitquat("ZYZ", angles.float())
+
+
 def _gaussian_unitquat(batchsize: int, generator: torch.Generator) -> torch.Tensor:
     """
     ``(batchsize, 4)`` uniform unit quaternions (xyzw) from `generator` alone.

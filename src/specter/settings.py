@@ -42,6 +42,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
+import torch
+
 from specter._defaults import CC_MM, DELTA_I_I, DELTA_V_V, ENERGY_SPREAD_EV
 from specter.options import (
     AbsorptionModel,
@@ -769,6 +771,12 @@ class Crowding:
     sigma_frac, peak_amplitude, baseline : float
         The shape of that bias, see
         :func:`specter.crowding.filter_by_z_density`.
+    orientations : torch.Tensor, optional
+        Source poses, unit quaternions of shape (m, 4) in roma's ``xyzw``
+        convention, such as :func:`specter.io.read_orientations` returns.
+        Each duplicate takes one's viewing direction and a random in-plane
+        angle, see :func:`specter.rotations.resample_viewing_directions`.
+        Default None: uniform orientations.
     """
 
     min_distance: float | None = None
@@ -782,6 +790,7 @@ class Crowding:
     sigma_frac: float = 0.05
     peak_amplitude: float = 1.0
     baseline: float = 0.1
+    orientations: torch.Tensor | None = dataclasses.field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if self.min_distance is not None and self.min_distance <= 0:

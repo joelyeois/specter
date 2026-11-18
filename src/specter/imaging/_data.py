@@ -160,6 +160,46 @@ class Poses:
         return cls(quaternions, shifts, torch.arange(n))
 
     @classmethod
+    def resample(
+        cls,
+        orientations: torch.Tensor | Poses,
+        n: int,
+        shift: float = 0.0,
+        *,
+        seed: int | None = None,
+    ) -> Poses:
+        """
+        `n` orientations with the viewing directions of existing poses.
+
+        Each draw takes one source pose's viewing direction and a uniformly
+        random in-plane angle, so the stack reproduces the source's
+        preferred orientations at any size; see
+        :func:`~specter.rotations.resample_viewing_directions`. The source
+        poses must be expressed in the frame of the structure being imaged.
+
+        Parameters
+        ----------
+        orientations : torch.Tensor or Poses
+            The source poses: unit quaternions of shape ``(m, 4)`` in roma's
+            convention, such as :func:`~specter.io.read_orientations`
+            returns, or a `Poses`.
+        n : int
+            Image count.
+        shift : float, optional
+            Largest in-plane shift along each axis, in Angstrom; each image
+            is shifted uniformly within ``[-shift, shift]``. Default 0.
+        seed : int, optional
+            Draw from this seed rather than the global generator, which is
+            left untouched. Default None.
+        """
+        if isinstance(orientations, Poses):
+            orientations = orientations.quaternions
+        with _drawn(seed, _SEED_POSES):
+            quaternions = rotations.resample_viewing_directions(orientations, n)
+            shifts = 2 * (torch.rand(n, 2) - 0.5) * shift
+        return cls(quaternions, shifts, torch.arange(n))
+
+    @classmethod
     def tilt_series(
         cls,
         angles: torch.Tensor | list[float],

@@ -718,6 +718,7 @@ class Specimen:
             sigma_frac=c.sigma_frac,
             peak_amplitude=c.peak_amplitude,
             baseline=c.baseline,
+            orientations=c.orientations,
         ).to(self.potential.device)
 
     def _solvent_exposure_filter(

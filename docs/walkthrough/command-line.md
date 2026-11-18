@@ -118,6 +118,7 @@ under in `configs/particle.toml`.
 | `.crowd(min_distance=)` | `crowd_min_distance` | `[advanced]` |
 | `.solvate(model=, thickness=)` | `ice_model`, `ice_thickness` | `[advanced]`, `[specimen]` |
 | `Poses.random(n, shift=)` | `n_particles`, `shift` | `[sampling]` |
+| `Poses.resample(read_orientations(path), n, shift=)` | `orientation_distribution_path` | `[sampling]` |
 | `.scatter(voltage=)` | `voltage` | `[microscope]` |
 | `.scatter(scattering_model=, alpha=)` | `scattering_model`, `alpha` | `[models]`, `[microscope]` |
 | `.scatter(oversample=, pad_fft=)` | `oversample`, `pad_fft` | `[advanced]` |

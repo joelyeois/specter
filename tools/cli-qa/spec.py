@@ -324,6 +324,12 @@ PARTICLES = CommandSpec(
         Flag("pdb_cache_dir", None, expect="skip", note="path handling, Phase 2"),
         Flag("cs_path", None, expect="skip", note="needs a .cs fixture, Phase 3"),
         Flag("star_path", None, expect="skip", note="needs a .star fixture, Phase 3"),
+        Flag(
+            "orientation_distribution_path",
+            None,
+            expect="skip",
+            note="needs a .cs/.star fixture; tests/test_orientation_resampling.py",
+        ),
     ],
 )
 
@@ -408,6 +414,12 @@ MICROGRAPH = CommandSpec(
         Flag("ice_model", "random"),
         Flag("ice_model", "none"),
         Flag("ice_thickness", "300.0"),
+        Flag(
+            "orientation_distribution_path",
+            None,
+            expect="skip",
+            note="needs a .cs/.star fixture; tests/test_orientation_resampling.py",
+        ),
         Flag("ice_profile", "wedge", context=["--ice_thickness_range", "200,700"]),
         # The context sets only the radius, which a flat profile ignores; a
         # context holding --ice_profile meniscus itself would make the flag's

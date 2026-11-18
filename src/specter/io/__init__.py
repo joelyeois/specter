@@ -12,6 +12,7 @@ from ._images import (
     read_particle_images,
     row_order_conflict,
 )
+from ._orientations import read_orientations
 from ._reorder import write_row_ordered_csfile
 from ._dose_weights import load_dose_weights
 from ._mrc import read_mrc, write_mrc
@@ -35,6 +36,7 @@ __all__ = [
     "ASSUMED_DATA_SIGN",
     "particle_image_refs",
     "read_particle_images",
+    "read_orientations",
     "row_order_conflict",
     "write_row_ordered_csfile",
     "create_micrograph_starfile",

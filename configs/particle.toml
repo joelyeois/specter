@@ -35,6 +35,9 @@ absorption_model = "alpha"         # alpha | inelastic_mfp -- inelastic_mfp deri
 defocus = [5000.0, 15000.0]    # Å; single value, or [low, high] to sample per particle
 shift = 2.0                    # Å
 n_particles = 20
+# orientation_distribution_path = "orientations.csv"  # preferred orientations: a histogram
+                                 # (elevation rows x azimuth columns; .npy/.csv/.txt), a
+                                 # CryoSPARC viewing-direction .bild, or a .cs/.star
 
 [models]
 scattering_model = "multislice"  # multislice | firstborn | projection | ctf

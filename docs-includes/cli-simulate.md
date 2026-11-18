@@ -32,8 +32,8 @@ specter simulate particles [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--cs_path` | `TEXT` | _none_ | Path to a CryoSPARC .cs file to drive generation from real pixel_size/voltage/alpha/poses/CTF instead of random sampling. |
-| `--star_path` | `TEXT` | _none_ | Path to a RELION .star file to drive generation from real pixel_size/voltage/alpha/poses/CTF instead of random sampling. Mutually exclusive with --cs_path. |
+| `--cs_path` | `TEXT` | _none_ | Path to a CryoSPARC .cs file to reproduce particle for particle: image i takes row i's pose and CTF, and pixel_size/voltage/alpha come from the file. To sample new particles with the file's viewing-direction distribution instead, use --orientation_distribution_path. |
+| `--star_path` | `TEXT` | _none_ | Path to a RELION .star file to reproduce particle for particle, as --cs_path does for a .cs file. Mutually exclusive with --cs_path. |
 
 **Specimen**{ #specter-simulate-particles-specimen }
 
@@ -61,6 +61,7 @@ specter simulate particles [OPTIONS]
 | `--defocus` | `TEXT` | `[5000.0, 15000.0]` | Defocus in Angstrom: a single value (e.g. 8000) for constant defocus, or 'low,high' (e.g. 5000,15000) to sample uniformly per particle (in a TOML config, write the range as [5000, 15000]). |
 | `--shift` | `FLOAT` | `2.0` | Max in-plane shift in Angstrom (uniform +/-shift). |
 | `--n_particles` | `INTEGER` | `20` | Number of particles to simulate. |
+| `--orientation_distribution_path` | `TEXT` | _none_ | A viewing-direction distribution to draw particle orientations from, in place of uniform ones, to reproduce preferred orientations. Either a histogram of particle counts over elevation (rows, -90 to 90 deg) and azimuth (columns, -180 to 180 deg) as a .npy/.csv/.txt table, or the viewing direction distribution .bild file a CryoSPARC refinement saves, neither of which needs a dataset; or a CryoSPARC .cs / RELION .star file, whose poses are used unbinned. Every particle is new: it draws a viewing direction and a random in-plane angle, and nothing else is read from the file. Crowding neighbours are drawn the same way. Not combined with --cs_path/--star_path, which replay a dataset. |
 
 **Absorption**{ #specter-simulate-particles-absorption }
 
@@ -191,6 +192,7 @@ specter simulate micrograph [OPTIONS]
 | `--pixel_size` | `FLOAT` | `1.0` | Pixel size in Angstrom. |
 | `--micrograph_size` | `INTEGER` | `4096` | Micrograph size in pixels (square). |
 | `--ice_thickness` | `FLOAT` | `500.0` | Ice thickness in Angstrom. 0 = minimum (particle box size). For ice_profile='wedge' without a range this is the thickness at the centre of the field; for 'meniscus' it is the thickness at the hole centre. |
+| `--orientation_distribution_path` | `TEXT` | _none_ | A viewing-direction distribution to draw particle orientations from, in place of uniform ones, to reproduce preferred orientations. Either a histogram of particle counts over elevation (rows, -90 to 90 deg) and azimuth (columns, -180 to 180 deg) as a .npy/.csv/.txt table, or the viewing direction distribution .bild file a CryoSPARC refinement saves, neither of which needs a dataset; or a CryoSPARC .cs / RELION .star file, whose poses are used unbinned. Every particle is new: it draws a viewing direction and a random in-plane angle, and nothing else is read from the file. |
 
 **Microscope**{ #specter-simulate-micrograph-microscope }
 

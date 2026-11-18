@@ -34,6 +34,8 @@ from ._random import (
     random_quaternion,
     random_rotation_matrix,
     random_rotation_matrix_from_generator,
+    resample_viewing_directions,
+    sample_viewing_direction_histogram,
 )
 from ._rotation import rotate_coordinates, rotation_aligning, translate_coordinates
 from ._volume import (
@@ -59,6 +61,8 @@ __all__ = [
     "random_quaternion",
     "random_rotation_matrix",
     "random_rotation_matrix_from_generator",
+    "resample_viewing_directions",
+    "sample_viewing_direction_histogram",
     "rotate_volume",
     "rotate_volume_fourier",
     "rotate_volume_exact",

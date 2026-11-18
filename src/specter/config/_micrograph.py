@@ -242,6 +242,22 @@ class MicrographConfig:
         ),
         check="non_negative",
     )  # Å, 0 = minimum (particle box size)
+    orientation_distribution_path: str | None = setting(
+        None,
+        help=(
+            "A viewing-direction distribution to draw particle orientations "
+            "from, in place of uniform ones, to reproduce preferred "
+            "orientations. Either a histogram of particle counts over "
+            "elevation (rows, -90 to 90 deg) and azimuth (columns, -180 to "
+            "180 deg) as a .npy/.csv/.txt table, or the viewing direction "
+            "distribution .bild file a CryoSPARC refinement saves, neither of "
+            "which needs a dataset; or a CryoSPARC .cs / RELION .star file, "
+            "whose poses are used unbinned. Every particle is new: it draws a viewing direction "
+            "and a random in-plane angle, and nothing else is read from the "
+            "file."
+        ),
+        check="existing_file",
+    )
     # --- Ice profile (specter.ice.IceProfile) ---
     # "flat" reproduces a bare `ice_thickness` slab exactly and is the default,
     # so none of the fields below do anything until `ice_profile` is changed.

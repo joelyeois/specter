@@ -43,13 +43,21 @@ References
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
+import roma
 import torch
 
 import torch.nn.functional as F
 
 from ...random_seed import derive_seed
-from ...rotations import build_affine_matrix, random_rotation_matrix, rotate_volume
+from ...rotations import (
+    build_affine_matrix,
+    random_rotation_matrix,
+    resample_viewing_directions,
+    rotate_volume,
+)
 
 # Above this allowed-fraction, draw centers uniformly from the whole grid
 # and let the occupancy test reject the rest, instead of enumerating the
@@ -240,6 +248,7 @@ def _rotation_cache(
     device: torch.device | str,
     seed: int | None,
     pool_factor: int = 1,
+    orientations: torch.Tensor | None = None,
 ) -> tuple[
     list[np.ndarray],
     list[tuple],
@@ -260,6 +269,9 @@ def _rotation_cache(
     grid would not survive being rendered at fine resolution. Rotating
     first keeps containment per orientation, which is what makes coarse
     packing exact rather than merely close.
+
+    With `orientations` (unit quaternions, shape (m, 4)) the cache is drawn
+    from those poses' viewing directions rather than uniformly.
 
     Also returns each orientation's shape and half-shape as plain Python
     ints, and whether its own center voxel is solid. Both exist purely to
@@ -311,7 +323,15 @@ def _rotation_cache(
         The rotation matrices, shape (n_orientations, 3, 3).
     """
     generator = None if seed is None else torch.Generator().manual_seed(seed)
-    R = random_rotation_matrix(n_orientations, generator=generator)
+    if orientations is None:
+        R = random_rotation_matrix(n_orientations, generator=generator)
+    else:
+        # The cache samples the source's viewing directions instead of SO(3).
+        R = roma.unitquat_to_rotmat(
+            resample_viewing_directions(
+                orientations, n_orientations, generator=generator
+            )
+        )
     if R.dim() == 2:
         R = R.unsqueeze(0)
     theta = build_affine_matrix(R.to(device))
@@ -517,6 +537,7 @@ def pack_shapes_3d(
     clip_axes: tuple[bool, bool, bool] = (False, False, False),
     pool_factor: int = 1,
     canvas_shape: tuple[int, int, int] | None = None,
+    species_orientations: Sequence[torch.Tensor | None] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Pack rigid molecular shapes into a voxel grid via Random Sequential
@@ -650,6 +671,13 @@ def pack_shapes_3d(
         pool_factor)``. Needed to place each copy on the render grid's own
         centre, which a coarse grid that overhangs the canvas does not
         share. Default None: ``grid_shape * pool_factor``.
+    species_orientations : sequence of torch.Tensor or None, optional
+        Per species, source poses (unit quaternions, shape (m, 4), roma
+        ``xyzw``) whose viewing directions its rotation cache is drawn
+        from, each with a uniform in-plane angle
+        (`~specter.rotations.resample_viewing_directions`); None for a
+        species with uniform orientations. Default None: every species
+        uniform.
 
     Returns
     -------
@@ -753,6 +781,7 @@ def pack_shapes_3d(
                 device,
                 None if seed is None else derive_seed(seed, int(s)),
                 pool_factor,
+                None if species_orientations is None else species_orientations[int(s)],
             )
         )
         R_np = R.cpu().numpy()

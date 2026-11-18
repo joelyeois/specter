@@ -12,6 +12,7 @@ import math
 from typing import TYPE_CHECKING, Literal
 
 from ._device_module import DeviceModule
+import roma
 import torch
 
 from .arrays import insert_particles_into_micrograph
@@ -446,6 +447,13 @@ class CrowdWithDuplicates(DeviceModule):
         a rough oversampling factor, not a target count (RSA saturates
         well before exhausting the pool at realistic density). Ignored for
         ``'poisson_disk'``, which has its own ``n_points``.
+    orientations : torch.Tensor, optional
+        Source poses as unit quaternions, shape (m, 4), roma ``xyzw``. Each
+        duplicate takes the viewing direction of one of them and a uniform
+        in-plane angle (`rotations.resample_viewing_directions`), which
+        reproduces a dataset's preferred orientations. The shape backend
+        draws its rotation cache the same way. Default None: uniform
+        orientations.
 
     Attributes
     ----------
@@ -501,6 +509,7 @@ class CrowdWithDuplicates(DeviceModule):
         packing_stall_patience: int = 5000,
         packing_seed: int | None = None,
         n_candidates: int | None = None,
+        orientations: torch.Tensor | None = None,
     ):
         super().__init__()
         if packing_backend == "shape" and atom_coordinates is None:
@@ -517,6 +526,7 @@ class CrowdWithDuplicates(DeviceModule):
         self.packing_stall_patience = packing_stall_patience
         self.packing_seed = packing_seed
         self.n_candidates = n_candidates
+        self.orientations = orientations
 
         self.register_buffer("V", V)
         self.dx = dx
@@ -702,6 +712,9 @@ class CrowdWithDuplicates(DeviceModule):
             stall_patience=self.packing_stall_patience,
             seed=self.packing_seed,
             device=str(self.device),
+            species_orientations=(
+                None if self.orientations is None else [self.orientations]
+            ),
         )
 
         if self.ice_profile is not None:
@@ -757,6 +770,10 @@ class CrowdWithDuplicates(DeviceModule):
         self.N = len(self.coords)
         if self.packing_backend == "shape":
             R = self._shape_rotations
+        elif self.orientations is not None:
+            R = roma.unitquat_to_rotmat(
+                rotations.resample_viewing_directions(self.orientations, self.N)
+            )
         else:
             R = rotations.random_rotation_matrix(self.N)
         # in case only one position was found, ensures R is (1,3,3)

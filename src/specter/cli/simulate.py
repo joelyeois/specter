@@ -70,7 +70,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Sampling",
-        ["defocus", "shift", "n_particles"],
+        ["defocus", "shift", "n_particles", "orientation_distribution_path"],
     ),
     ("Phase plate", _PHASE_PLATE_FIELDS),
     (
@@ -266,6 +266,7 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
             "pixel_size",
             "micrograph_size",
             "ice_thickness",
+            "orientation_distribution_path",
         ],
     ),
     (

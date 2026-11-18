@@ -147,6 +147,23 @@ thickness varies inside it. A hole centred on the field is symmetric and steps
 by nothing, and even the 4500 Å offset used above steps by only 128 Å, which is
 not measurable. Lateral variation on its own is harmless.
 
+## Preferred orientations
+
+`orientation_distribution_path` points at a viewing-direction distribution:
+a histogram table, a CryoSPARC viewing direction distribution `.bild` file,
+or a CryoSPARC `.cs` or RELION `.star` file from a 3D refinement. Every particle in the field then draws its viewing direction
+from that distribution and a uniformly random in-plane angle, in place of a
+uniform orientation. The field is untilted, so the
+beam direction is the ice normal and the file's distribution is the
+distribution of particle faces presented to the ice surfaces. The
+file formats and the limitations are those of the particle-stack
+command, see
+[Preferred orientations](particle-stack.md#preferred-orientations).
+
+The orientation of a particle does not depend on its depth. Combined with
+`water_air_interface`, particles concentrate at the two surfaces and all of
+them, at either surface or in the bulk, draw from the one distribution.
+
 ## Absorption, radiation damage and solvent motion
 
 The micrograph command models the same absorption and exposure physics as

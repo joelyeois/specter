@@ -11,6 +11,9 @@ n_pixels = 256
 pixel_size = 1.0              # Å
 micrograph_size = 4096        # pixels, square
 ice_thickness = 500.0         # Å, 0 = minimum (particle box size)
+# orientation_distribution_path = "orientations.csv"  # preferred orientations: a histogram
+                                 # (elevation rows x azimuth columns; .npy/.csv/.txt), a
+                                 # CryoSPARC viewing-direction .bild, or a .cs/.star
 
 [microscope]
 voltage = 300.0                # kV

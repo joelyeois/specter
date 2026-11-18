@@ -63,7 +63,8 @@ in a single image; each is low-pass filtered to 15 Å for display.
   own depth rather than the full box depth, so thicker ice adds water above
   and below the neighbour slab instead of more neighbours.
 - **Microscope**: `voltage`, `dose`, `cs`, `alpha` (amplitude contrast).
-- **Sampling**: `defocus`, `shift` (max in-plane shift), `n_particles`.
+- **Sampling**: `defocus`, `shift` (max in-plane shift), `n_particles`,
+  `orientation_distribution_path` (see [Preferred orientations](#preferred-orientations)).
 - **Models**: `scattering_model` (`multislice` is the accurate default;
   `firstborn`/`projection` trade accuracy for speed), `noise_model`,
   `detector_model` (`none` skips detector effects; `k3_300kv`/`k3_200kv`/
@@ -182,6 +183,83 @@ of particle indices in its own worker process and reassembles one shard at a
 time in particle order.
 See the [production comparison](../assets/particle-output-memory/README.md)
 for GPU/host memory, timings, and matched image/Fourier checks.
+
+## Preferred orientations
+
+Particle orientations are uniform over SO(3) by default.
+`orientation_distribution_path` replaces that with a viewing-direction
+distribution, where the viewing direction is the particle-frame axis that
+lies along the beam. Every simulated particle is new: it draws a viewing
+direction from the distribution and a uniformly random in-plane angle, while
+shifts, defocus and every other imaging parameter are still sampled from the
+config. No particle stack or dataset is required.
+
+```bash
+specter simulate particles \
+    --pdb_source 8b0x \
+    --orientation_distribution_path orientations.csv \
+    --n_particles 3000
+```
+
+The distribution is given in one of three forms, chosen by the file's
+extension:
+
+- **A histogram** (`.npy`, `.csv` or `.txt`): a table of particle counts
+  binned by the viewing direction `d`. Rows are equal steps of elevation,
+  `asin(d_z)`, from -90° to 90°, and columns are equal steps of azimuth,
+  `atan2(d_y, d_x)`, from -180° to 180°. Counts are per bin, so a uniform
+  distribution has rows proportional to the cosine of the elevation. Any
+  number of rows and columns is accepted. These are the axes of the viewing
+  direction distribution plot of a CryoSPARC refinement, so counts read off
+  that plot can be entered without a change of convention.
+- **A CryoSPARC `.bild` file**: the 3D drawing of the viewing direction
+  distribution that a CryoSPARC refinement saves beside its plot
+  (`J<n>_viewing_direction_distribution_iteration_<k>.bild`, downloadable
+  from the job's event log). Each arrow marks a populated direction, and its
+  length is proportional to the particle count there. Each draw is spread
+  over a cap about its arrow, of radius half the spacing between
+  neighbouring arrows.
+- **A refinement's particle file**: a CryoSPARC `.cs` file with an
+  `alignments3D/pose` column, or a RELION `.star` file with `rlnAngleRot`,
+  `rlnAngleTilt` and `rlnAnglePsi` columns. Each simulated particle takes
+  the viewing direction of one particle in the file, chosen uniformly with
+  replacement, so the distribution is used without binning. Nothing else is
+  read from the file.
+
+This differs from `cs_path` and `star_path`, which reproduce a dataset
+particle for particle:
+
+| Field | Taken from the file | Particle count |
+|---|---|---|
+| `cs_path`, `star_path` | Each particle's pose, shift and CTF, and the pixel size, voltage and amplitude contrast | The file's, capped by `n_particles` |
+| `orientation_distribution_path` | A viewing-direction distribution to sample | `n_particles` |
+
+The two cannot be combined, and the run prints which applies under
+"Sampling poses, defocus, and translations". `specter simulate micrograph`
+accepts `orientation_distribution_path` as well and applies it to every
+particle in the field of view.
+
+In Python, `read_orientations(path)` reads either form,
+`Poses.resample(orientations, n, shift=)` draws the poses, and
+`rotations.sample_viewing_direction_histogram(histogram, n)` draws from an
+in-memory table.
+
+### Limitations
+
+- The viewing directions are relative to the frame the distribution was
+  measured in, which for a refinement is its reference map. The structure
+  given as `pdb_source` must be in that frame, as it is when the model was
+  fitted into the map. Otherwise the preferred views fall on the wrong faces
+  of the particle.
+- A particle file gives the empirical distribution, so a file with few
+  particles yields few distinct viewing directions. No smoothing is applied.
+  A histogram is uniform within each bin, and a `.bild` file is uniform
+  within each arrow's cap.
+- A refinement's orientations include its own assignment errors and any
+  particle selection applied before it.
+- Crowding neighbours are drawn from the same distribution, independently
+  of the central particle. With `packing_backend = "shape"` they take one of
+  `n_orientations` cached draws.
 
 ## Example: matching EMPIAR-11377
 

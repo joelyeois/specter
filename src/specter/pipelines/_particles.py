@@ -29,6 +29,7 @@ from specter.io import (
     create_particle_starfile,
     extract_parameters_from_csfile,
     extract_parameters_from_starfile,
+    read_orientations,
 )
 from specter.memory import (
     available_memory_bytes,
@@ -181,6 +182,15 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
             "pass exactly one dataset to take poses/CTF from, or neither to "
             "sample them synthetically."
         )
+    if config.orientation_distribution_path is not None and (
+        config.cs_path is not None or config.star_path is not None
+    ):
+        raise ValueError(
+            "run_particle_stack: orientation_distribution_path can't be set "
+            "with cs_path or star_path. Those copy every particle's pose from "
+            "the dataset; orientation_distribution_path samples new poses "
+            "from a dataset's viewing directions."
+        )
 
     validate_config(config)
 
@@ -207,6 +217,19 @@ def run_particle_stack(config: ParticleStackConfig) -> None:
     n, quats, translations, ctf_params, anisomag = _sample_poses_and_ctf(
         config, dataset_particles, cs_angstrom
     )
+    dataset_path = config.cs_path or config.star_path
+    if dataset_path is not None:
+        console.print(
+            f"  Poses and CTF: copied particle for particle from {dataset_path}"
+        )
+    elif config.orientation_distribution_path is not None:
+        console.print(
+            "  Orientations: viewing directions resampled from "
+            f"{config.orientation_distribution_path}, random in-plane angle; "
+            "shifts and CTF sampled from the config"
+        )
+    else:
+        console.print("  Orientations: uniform; shifts and CTF sampled from the config")
     dose = sample_uniform(config.dose, n)
     coincidence_radius = sample_uniform(config.coincidence_radius, n)
     n_frames = _n_frames(config, dose)
@@ -306,6 +329,11 @@ class _ParticleRun:
                 prefix="crowd_",
                 min_distance=min_distance,
                 water_air_interface=config.water_air_interface,
+                orientations=(
+                    None
+                    if config.orientation_distribution_path is None
+                    else read_orientations(config.orientation_distribution_path)
+                ),
             )
             specimen = specimen.crowd(crowding, on_cpu=config.crowd_move_to_cpu)
         ice = bundle_from_config(
@@ -556,11 +584,16 @@ def _sample_poses_and_ctf(
     else:
         n = config.n_particles
 
-        # random_quaternion squeezes the batch axis at n == 1, returning (4,)
-        # rather than (1, 4) -- indexing that per-particle later yields a
-        # length-1 vector and roma rejects it. Same guard as CrowdingSimulator
-        # and TomogramSpecimenGenerator apply to random_rotation_matrix.
-        quats = rotations.random_quaternion(n).reshape(n, 4)
+        if config.orientation_distribution_path is not None:
+            quats = rotations.resample_viewing_directions(
+                read_orientations(config.orientation_distribution_path), n
+            )
+        else:
+            # random_quaternion squeezes the batch axis at n == 1, returning (4,)
+            # rather than (1, 4) -- indexing that per-particle later yields a
+            # length-1 vector and roma rejects it. Same guard as CrowdingSimulator
+            # and TomogramSpecimenGenerator apply to random_rotation_matrix.
+            quats = rotations.random_quaternion(n).reshape(n, 4)
 
         defocus_angstrom = sample_uniform(config.defocus, n)
         astigmatism_magnitude = sample_uniform(config.astigmatism, n)

@@ -26,7 +26,7 @@ from specter.ice import IceProfile, resolve_icemaker
 from specter.imaging import CTF, Exposure, Field, Structure
 from specter.imaging._data import sample_uniform
 from specter.imaging._stages import read_dose_weights
-from specter.io import create_micrograph_starfile, write_mrc
+from specter.io import create_micrograph_starfile, read_orientations, write_mrc
 from specter.devices import resolve_available_device
 from specter.settings import (
     Crowding,
@@ -196,6 +196,11 @@ def run_micrograph(config: MicrographConfig) -> None:
         icemaker = icemaker.to(device)
 
     section("Building the specimen")
+    if config.orientation_distribution_path is not None:
+        console.print(
+            "  Orientations: viewing directions resampled from "
+            f"{config.orientation_distribution_path}, random in-plane angle"
+        )
     field = Field(
         V,
         config.pixel_size,
@@ -212,6 +217,11 @@ def run_micrograph(config: MicrographConfig) -> None:
             sigma_frac=config.sigma_frac,
             peak_amplitude=config.peak_amplitude,
             baseline=config.baseline,
+            orientations=(
+                None
+                if config.orientation_distribution_path is None
+                else read_orientations(config.orientation_distribution_path)
+            ),
         ),
         packing=bundle_from_config(
             Packing,

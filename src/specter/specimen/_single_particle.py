@@ -252,6 +252,7 @@ class MicrographSpecimenGenerator(DeviceModule):
                 sigma_frac=crowding.sigma_frac,
                 peak_amplitude=crowding.peak_amplitude,
                 baseline=crowding.baseline,
+                orientations=crowding.orientations,
                 move_to_cpu=move_to_cpu,
                 ice_profile=self.ice_profile,
             )

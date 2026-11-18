@@ -159,6 +159,23 @@ class ParticleStackConfig:
     n_particles: int = setting(
         20, help="Number of particles to simulate.", check="positive"
     )
+    orientation_distribution_path: str | None = setting(
+        None,
+        help=(
+            "A viewing-direction distribution to draw particle orientations "
+            "from, in place of uniform ones, to reproduce preferred "
+            "orientations. Either a histogram of particle counts over "
+            "elevation (rows, -90 to 90 deg) and azimuth (columns, -180 to "
+            "180 deg) as a .npy/.csv/.txt table, or the viewing direction "
+            "distribution .bild file a CryoSPARC refinement saves, neither of "
+            "which needs a dataset; or a CryoSPARC .cs / RELION .star file, "
+            "whose poses are used unbinned. Every particle is new: it draws a viewing direction "
+            "and a random in-plane angle, and nothing else is read from the "
+            "file. Crowding neighbours are drawn the same way. Not "
+            "combined with --cs_path/--star_path, which replay a dataset."
+        ),
+        check="existing_file",
+    )
 
     # --- Models (basic) ---
     scattering_model: Literal["multislice", "firstborn", "projection", "ctf"] = (
@@ -232,17 +249,19 @@ class ParticleStackConfig:
     cs_path: str | None = setting(
         None,
         help=(
-            "Path to a CryoSPARC .cs file to drive generation from real "
-            "pixel_size/voltage/alpha/poses/CTF instead of random sampling."
+            "Path to a CryoSPARC .cs file to reproduce particle for particle: "
+            "image i takes row i's pose and CTF, and pixel_size/voltage/alpha "
+            "come from the file. To sample new particles with the file's "
+            "viewing-direction distribution instead, use "
+            "--orientation_distribution_path."
         ),
         check="existing_file",
     )
     star_path: str | None = setting(
         None,
         help=(
-            "Path to a RELION .star file to drive generation from real "
-            "pixel_size/voltage/alpha/poses/CTF instead of random sampling. Mutually "
-            "exclusive with --cs_path."
+            "Path to a RELION .star file to reproduce particle for particle, "
+            "as --cs_path does for a .cs file. Mutually exclusive with --cs_path."
         ),
         check="existing_file",
     )

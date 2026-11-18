@@ -42,6 +42,11 @@ dependencies = [
     "roma>=1.5.7",
     "scikit-image>=0.25.2",
     "scipy>=1.16.2",
+    # Triton (shipped with CUDA torch on Linux) imports setuptools when it
+    # compiles a kernel, but torch only lists setuptools for Python >= 3.12
+    # and uv venvs carry none. Without it the Triton ML-BOP ice kernels
+    # (ice/_mlbop_triton.py) fail to import and silently fall back to autograd.
+    "setuptools>=70; sys_platform == 'linux'",
     "starfile>=0.5.13",
     "torch>=2.5.0",
     # Upper bound is load-bearing, not caution: ctf/_legacy.py multiplies the

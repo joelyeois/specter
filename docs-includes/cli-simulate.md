@@ -63,6 +63,24 @@ specter simulate particles [OPTIONS]
 | `--n_particles` | `INTEGER` | `20` | Number of particles to simulate. |
 | `--orientation_distribution_path` | `TEXT` | _none_ | A viewing-direction distribution to draw particle orientations from, in place of uniform ones, to reproduce preferred orientations. Either a histogram of particle counts over elevation (rows, -90 to 90 deg) and azimuth (columns, -180 to 180 deg) as a .npy/.csv/.txt table, or the viewing direction distribution .bild file a CryoSPARC refinement saves, neither of which needs a dataset; or a CryoSPARC .cs / RELION .star file, whose poses are used unbinned. Every particle is new: it draws a viewing direction and a random in-plane angle, and nothing else is read from the file. Crowding neighbours are drawn the same way. Not combined with --cs_path/--star_path, which replay a dataset. |
 
+**Phase plate**{ #specter-simulate-particles-phase-plate }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--phase_plate` | `ideal` \| `volta` \| `laser` | `ideal` | How phase_shift_rad reaches each spatial frequency. 'ideal' shifts every frequency but DC by the full amount. 'volta' shifts frequency k by phase_shift_rad * (1 - exp(-k^2 / (2 r^2))), r = phase_plate_cuton, so frequencies below the cut-on pass with the unscattered beam. 'laser' is the laser phase plate of the lpp_* fields, which it requires along with aberration_backend='torch_ctf'. |
+| `--phase_plate_cuton` | `FLOAT` | _none_ | Gaussian cut-on r of the Volta phase plate, in 1/Angstrom, for phase_plate='volta' only. Unset: 0.005, Parakeet 0.4.7's default. |
+| `--aberration_backend` | `legacy` \| `torch_ctf` | `legacy` | Transfer-function engine. 'legacy' is specter's own; 'torch_ctf' is the torch-ctf engine, verified against it term by term and the only one with the laser phase plate. |
+| `--lpp_NA` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Numerical aperture of the laser focus. |
+| `--lpp_laser_wavelength_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Laser wavelength in Angstrom. |
+| `--lpp_focal_length_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Focal length of the objective lens in Angstrom. |
+| `--lpp_laser_xy_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): In-plane angle of the laser axis, in degrees. |
+| `--lpp_laser_xz_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Out-of-plane angle of the laser axis, in degrees. |
+| `--lpp_laser_long_offset_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Offset of the laser focus along its axis, in Angstrom. |
+| `--lpp_laser_trans_offset_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Offset of the laser focus across its axis, in Angstrom. |
+| `--lpp_laser_polarization_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Laser polarization angle, in degrees. |
+| `--lpp_peak_phase_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Peak phase shift of the laser standing wave, in degrees (nonzero). |
+| `--lpp_dual_laser` | `True` \| `False` | `False` | Laser phase plate (phase_plate='laser'): two crossed lasers. |
+
 **Absorption**{ #specter-simulate-particles-absorption }
 
 | Flag | Type | Default | Description |
@@ -154,7 +172,7 @@ specter simulate particles [OPTIONS]
 | `--seed` | `INTEGER` | _none_ | RNG seed for pose, CTF, dose, ice, crowding and noise sampling. Auto-generated and logged if unset. Each particle's crowding, ice and noise are drawn from a generator seeded by (seed, particle index), so the stack is the same for any batchsize and any number of devices. |
 | `--astigmatism` | `TEXT` | `0.0` | Astigmatism magnitude (dfu - dfv) in Angstrom: a single value for constant, or 'low,high' ([low, high] in TOML) to sample uniformly per particle. |
 | `--astigmatism_angle` | `TEXT` | `[0.0, 180.0]` | Astigmatism angle in degrees: a single value or 'low,high' ([low, high] in TOML) range. Irrelevant when astigmatism is 0. |
-| `--phaseshift` | `TEXT` | `0.0` | Phase shift in radians (e.g. from a Volta phase plate): a single value or 'low,high' ([low, high] in TOML) range. |
+| `--phase_shift_rad`, `--phaseshift` | `TEXT` | `0.0` | Phase-plate phase shift in radians, as CryoSPARC's ctf/phase_shift_rad: a single value or 'low,high' ([low, high] in TOML) range. 'phaseshift' is a deprecated alias. |
 | `--tiltx` | `TEXT` | `0.0` | Beam tilt (x) in radians: a single value or 'low,high' ([low, high] in TOML) range. |
 | `--tilty` | `TEXT` | `0.0` | Beam tilt (y) in radians: a single value or 'low,high' ([low, high] in TOML) range. |
 | `--trefoil1` | `TEXT` | `0.0` | First trefoil (3-fold astigmatism) component in Angstrom^3: a single value or 'low,high' ([low, high] in TOML) range. |
@@ -203,6 +221,25 @@ specter simulate micrograph [OPTIONS]
 | `--defocus` | `TEXT` | `[5000.0, 15000.0]` | Defocus in Angstrom: a single value (e.g. 8000) for constant defocus, or 'low,high' (e.g. 5000,15000) to sample uniformly per micrograph (in a TOML config, write the range as [5000, 15000]). |
 | `--cs` | `FLOAT` | `2.0` | Spherical aberration in mm (1-3 mm typical). |
 | `--alpha` | `FLOAT` | `0.1` | Amplitude contrast ratio. |
+
+**Phase plate**{ #specter-simulate-micrograph-phase-plate }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--phase_shift_rad`, `--phaseshift` | `FLOAT` | `0.0` | Phase-plate phase shift in radians, as CryoSPARC's ctf/phase_shift_rad (pi/2 for a Volta plate at its working point), the same for every image. 'phaseshift' is a deprecated alias. |
+| `--phase_plate` | `ideal` \| `volta` \| `laser` | `ideal` | How phase_shift_rad reaches each spatial frequency. 'ideal' shifts every frequency but DC by the full amount. 'volta' shifts frequency k by phase_shift_rad * (1 - exp(-k^2 / (2 r^2))), r = phase_plate_cuton, so frequencies below the cut-on pass with the unscattered beam. 'laser' is the laser phase plate of the lpp_* fields, which it requires along with aberration_backend='torch_ctf'. |
+| `--phase_plate_cuton` | `FLOAT` | _none_ | Gaussian cut-on r of the Volta phase plate, in 1/Angstrom, for phase_plate='volta' only. Unset: 0.005, Parakeet 0.4.7's default. |
+| `--aberration_backend` | `legacy` \| `torch_ctf` | `legacy` | Transfer-function engine. 'legacy' is specter's own; 'torch_ctf' is the torch-ctf engine, verified against it term by term and the only one with the laser phase plate. |
+| `--lpp_NA` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Numerical aperture of the laser focus. |
+| `--lpp_laser_wavelength_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Laser wavelength in Angstrom. |
+| `--lpp_focal_length_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Focal length of the objective lens in Angstrom. |
+| `--lpp_laser_xy_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): In-plane angle of the laser axis, in degrees. |
+| `--lpp_laser_xz_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Out-of-plane angle of the laser axis, in degrees. |
+| `--lpp_laser_long_offset_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Offset of the laser focus along its axis, in Angstrom. |
+| `--lpp_laser_trans_offset_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Offset of the laser focus across its axis, in Angstrom. |
+| `--lpp_laser_polarization_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Laser polarization angle, in degrees. |
+| `--lpp_peak_phase_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Peak phase shift of the laser standing wave, in degrees (nonzero). |
+| `--lpp_dual_laser` | `True` \| `False` | `False` | Laser phase plate (phase_plate='laser'): two crossed lasers. |
 
 **Absorption**{ #specter-simulate-micrograph-absorption }
 
@@ -332,6 +369,25 @@ specter simulate tiltseries [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--defocus` | `FLOAT` | `22000.0` | Defocus in Angstrom (positive = underfocus). |
+
+**Phase plate**{ #specter-simulate-tiltseries-phase-plate }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--phase_shift_rad`, `--phaseshift` | `FLOAT` | `0.0` | Phase-plate phase shift in radians, as CryoSPARC's ctf/phase_shift_rad (pi/2 for a Volta plate at its working point), the same for every image. 'phaseshift' is a deprecated alias. |
+| `--phase_plate` | `ideal` \| `volta` \| `laser` | `ideal` | How phase_shift_rad reaches each spatial frequency. 'ideal' shifts every frequency but DC by the full amount. 'volta' shifts frequency k by phase_shift_rad * (1 - exp(-k^2 / (2 r^2))), r = phase_plate_cuton, so frequencies below the cut-on pass with the unscattered beam. 'laser' is the laser phase plate of the lpp_* fields, which it requires along with aberration_backend='torch_ctf'. |
+| `--phase_plate_cuton` | `FLOAT` | _none_ | Gaussian cut-on r of the Volta phase plate, in 1/Angstrom, for phase_plate='volta' only. Unset: 0.005, Parakeet 0.4.7's default. |
+| `--aberration_backend` | `legacy` \| `torch_ctf` | `legacy` | Transfer-function engine. 'legacy' is specter's own; 'torch_ctf' is the torch-ctf engine, verified against it term by term and the only one with the laser phase plate. |
+| `--lpp_NA` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Numerical aperture of the laser focus. |
+| `--lpp_laser_wavelength_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Laser wavelength in Angstrom. |
+| `--lpp_focal_length_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Focal length of the objective lens in Angstrom. |
+| `--lpp_laser_xy_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): In-plane angle of the laser axis, in degrees. |
+| `--lpp_laser_xz_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Out-of-plane angle of the laser axis, in degrees. |
+| `--lpp_laser_long_offset_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Offset of the laser focus along its axis, in Angstrom. |
+| `--lpp_laser_trans_offset_angstrom` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Offset of the laser focus across its axis, in Angstrom. |
+| `--lpp_laser_polarization_angle_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Laser polarization angle, in degrees. |
+| `--lpp_peak_phase_deg` | `FLOAT` | _none_ | Laser phase plate (phase_plate='laser'): Peak phase shift of the laser standing wave, in degrees (nonzero). |
+| `--lpp_dual_laser` | `True` \| `False` | `False` | Laser phase plate (phase_plate='laser'): two crossed lasers. |
 
 **Tilt geometry**{ #specter-simulate-tiltseries-tilt-geometry }
 

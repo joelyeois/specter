@@ -239,6 +239,23 @@ class ReconstructionConfig:
         "16-mixed",
         help="Training precision: 16-mixed, bf16-mixed or 32. Forced to 32 on CPU.",
     )
+    # Gradient accumulation: the batch's particles go through the forward and
+    # backward this many at a time and the optimisers step once, which is the
+    # unsplit update to float rounding. Memory, not speed: a multislice
+    # gradient at a 300 box needs ~2 GB per particle. "auto" starts at the
+    # batch size and halves on an out-of-memory error; config-only, as the
+    # CLI flag takes an integer.
+    micro_batchsize: int | Literal["auto"] | None = setting(
+        None,
+        help=(
+            "Run each batch through the forward and backward this many "
+            "particles at a time, accumulating the gradient, and step once: "
+            "the same update in less device memory. Unset runs each batch in "
+            "one pass; 'auto' (TOML only) halves from the batch size on an "
+            "out-of-memory error."
+        ),
+        check="positive",
+    )
     num_workers: int = setting(
         0,
         help="Dataloader worker processes; 0 avoids multiprocessing for resident images.",

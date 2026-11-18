@@ -337,6 +337,19 @@ to `0`: the particle images are already resident in memory, so workers add
 process startup and interprocess transfers to each batch. You can still
 set it explicitly for a workload where workers help.
 
+`--micro_batchsize` bounds the device memory of one optimisation step
+without changing the step. Each batch is passed through the forward model
+and backpropagated that many particles at a time, every chunk's loss
+weighted by its share of the batch, and the optimisers step once on the
+accumulated gradient. The loss is a mean over particles, so the update
+equals that of the whole batch in one pass, to floating-point rounding;
+under several GPUs the gradients are averaged once, after the last chunk.
+A multislice gradient at a 300-pixel box needs about 2 GB of device memory
+per particle, so a batch of 256 does not fit in one pass on any current
+GPU. Unset, a batch runs in one pass. In a TOML config, `"auto"` starts at
+the batch size and halves the chunk whenever the device runs out of memory,
+redoing that step.
+
 Normalized particle stacks are converted to counts in bounded blocks,
 reusing their private storage. The conversion arithmetic and training
 precision are unchanged. See the [GPU comparison report](../assets/reconstruction-input-memory/report.md)

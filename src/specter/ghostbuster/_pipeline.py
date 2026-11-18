@@ -95,6 +95,10 @@ class Ghostbuster(_GhostbusterBase):
         Number of training epochs.
     batchsize : int
         Dataloader batch size.
+    micro_batchsize : int or "auto", optional
+        Particles per forward and backward pass within one optimiser step,
+        to fit a batch in less device memory with the same update; see
+        :class:`Reconstructor`. Default None (each batch in one pass).
     init_volume : torch.Tensor, str, Path, or None, optional
         Starting volume, in the reconstruction's units (volts), instead of
         zeros: a ``(N, N, N)`` tensor or a path to a .mrc file. A volume an
@@ -186,6 +190,7 @@ class Ghostbuster(_GhostbusterBase):
         lr_decay: float = LR_DECAY,
         epochs: int = 5,
         batchsize: int = 3,
+        micro_batchsize: int | Literal["auto"] | None = None,
         init_volume: torch.Tensor | str | Path | None = None,
         init_lowpass: float | None = None,
         propagation: Propagation = Propagation(scattering_model="rytov"),
@@ -277,6 +282,7 @@ class Ghostbuster(_GhostbusterBase):
         self.lr_decay = lr_decay
         self.epochs = epochs
         self.batchsize = batchsize
+        self.micro_batchsize = micro_batchsize
         if init_lowpass is not None and init_lowpass <= 0:
             raise ValueError(f"init_lowpass={init_lowpass} must be positive (Angstrom)")
         self.init_volume = init_volume
@@ -532,6 +538,7 @@ class Ghostbuster(_GhostbusterBase):
             symmetry=self.symmetry,
             symmetry_batchsize=self.symmetry_batchsize,
             symmetry_mode=self.symmetry_mode,
+            micro_batchsize=self.micro_batchsize,
             fsc_ref=self.fsc_ref,
             fsc_mask=self.fsc_mask,
             cryosparc_ref=self.cryosparc_ref,

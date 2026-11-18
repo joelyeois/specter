@@ -73,6 +73,7 @@ specter reconstruct particle [OPTIONS]
 | --- | --- | --- | --- |
 | `--device` | `TEXT` | `cuda` | cpu \| cuda \| cuda:N \| a bare GPU index \| a comma-separated list of GPU indices (0,1), which trains data-parallel across them, one process each, with gradients averaged every step. |
 | `--precision` | `TEXT` | `16-mixed` | Training precision: 16-mixed, bf16-mixed or 32. Forced to 32 on CPU. |
+| `--micro_batchsize` | `INTEGER` | _none_ | Run each batch through the forward and backward this many particles at a time, accumulating the gradient, and step once: the same update in less device memory. Unset runs each batch in one pass; 'auto' (TOML only) halves from the batch size on an out-of-memory error. |
 | `--num_workers` | `INTEGER` | `0` | Dataloader worker processes; 0 avoids multiprocessing for resident images. |
 
 **Output & job tracking**{ #specter-reconstruct-particle-output-job-tracking }

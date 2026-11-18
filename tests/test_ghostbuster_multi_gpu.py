@@ -13,6 +13,8 @@ than the volume V does.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -56,7 +58,9 @@ def _make_problem() -> dict:
     return dict(V0=V0, quats=quats, trans=trans, ctf=ctf, images=images)
 
 
-def _train(problem: dict, devices: list[int], batch_size: int) -> Reconstructor:
+def _train(
+    problem: dict, devices: list[int], batch_size: int, **kwargs: Any
+) -> Reconstructor:
     """Train a fresh model for one epoch on `devices`, in file order."""
     model = Reconstructor(
         problem["V0"].clone(),
@@ -75,6 +79,7 @@ def _train(problem: dict, devices: list[int], batch_size: int) -> Reconstructor:
             rotate_mode="real",
             ews_curvature_sign="negative",
         ),
+        **kwargs,
     )
     loader = DataLoader(
         TensorDataset(problem["images"], torch.arange(N_PARTICLES)),
@@ -103,6 +108,25 @@ def test_reconstructor_multi_gpu_matches_single_gpu() -> None:
         f"rotations mismatch between single- and multi-GPU: {rot_relerr}"
     )
     # The logged loss is the mean over ranks, which is the combined batch's.
+    torch.testing.assert_close(
+        torch.stack(multi.log_total_loss).cpu(),
+        torch.stack(single.log_total_loss).cpu(),
+        rtol=1e-4,
+        atol=0,
+    )
+
+
+def test_micro_batches_across_gpus_match_single_gpu() -> None:
+    """Each rank accumulates its chunks and the ranks average once, after the
+    last: the same step as one GPU taking the combined batch whole."""
+    problem = _make_problem()
+    single = _train(problem, [0], N_PARTICLES)
+    multi = _train(problem, [0, 1], N_PARTICLES // 2, micro_batchsize=1)
+    assert multi.global_step == single.global_step == 2
+    V_relerr = (single.V - multi.V).norm() / single.V.norm()
+    rot_relerr = (single.rotations - multi.rotations).norm() / single.rotations.norm()
+    assert V_relerr < 1e-3, f"V mismatch: {V_relerr}"
+    assert rot_relerr < 1e-3, f"rotations mismatch: {rot_relerr}"
     torch.testing.assert_close(
         torch.stack(multi.log_total_loss).cpu(),
         torch.stack(single.log_total_loss).cpu(),

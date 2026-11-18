@@ -144,12 +144,38 @@ class _BaseReconstructor(DeviceModule):
 
         The scaler is updated after each optimiser's step and ``global_step``
         advances once per optimiser, as under Lightning's manual optimisation.
+        `_zero_grad`, `_backward` and `_step` are its three parts, for a
+        caller that accumulates the gradient of several backwards first.
         """
+        self._zero_grad()
+        self._backward(loss)
+        self._step()
+
+    def _zero_grad(self) -> None:
+        """Zero the gradients of every optimiser's parameters."""
         state = self._training
-        assert state is not None, "_optimise runs inside `_training.fit`"
+        assert state is not None, "_zero_grad runs inside `_training.fit`"
         for opt in state.optimizers:
             opt.zero_grad()
+
+    def _backward(self, loss: torch.Tensor) -> None:
+        """
+        Add ``loss``'s gradient to the parameters' (scaled under ``"16-mixed"``).
+
+        Every backward of one step goes through the same scaler, whose scale
+        changes only in `_step`, so the accumulated gradient unscales as one.
+        """
+        state = self._training
+        assert state is not None, "_backward runs inside `_training.fit`"
         (state.scaler.scale(loss) if state.scaler is not None else loss).backward()
+
+    def _step(self) -> None:
+        """
+        Average the accumulated gradients across ranks, step every optimiser
+        (updating the scaler after each), then the schedulers.
+        """
+        state = self._training
+        assert state is not None, "_step runs inside `_training.fit`"
         if state.world_size > 1:
             for p in self.parameters():
                 if p.grad is not None:

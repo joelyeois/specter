@@ -56,6 +56,16 @@ if TYPE_CHECKING:
 ADJOINT_TOLERANCE = 1e-4
 
 
+def out_of_memory(error: BaseException) -> bool:
+    """Whether `error` is a device allocation failure, PyTorch's or cuFINUFFT's."""
+    if isinstance(error, torch.cuda.OutOfMemoryError):
+        return True
+    message = str(error)
+    return isinstance(error, RuntimeError) and (
+        "out of memory" in message or "non-uniform points" in message
+    )
+
+
 @dataclass
 class SolveResult:
     """
@@ -198,15 +208,6 @@ class ConvergedSolver:
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
 
-    def _out_of_memory(self, error: BaseException) -> bool:
-        """Whether `error` is a device allocation failure, PyTorch's or cuFINUFFT's."""
-        if isinstance(error, torch.cuda.OutOfMemoryError):
-            return True
-        message = str(error)
-        return isinstance(error, RuntimeError) and (
-            "out of memory" in message or "non-uniform points" in message
-        )
-
     def _retrying(self, run: Any) -> Any:
         """
         Run a pass over particles, halving the batch size on an out-of-memory error.
@@ -219,7 +220,7 @@ class ConvergedSolver:
             try:
                 return run()
             except (torch.cuda.OutOfMemoryError, RuntimeError) as error:
-                if not self._out_of_memory(error) or self.batchsize == 1:
+                if not out_of_memory(error) or self.batchsize == 1:
                     raise
                 self.batchsize = max(1, self.batchsize // 2)
                 logger.info(

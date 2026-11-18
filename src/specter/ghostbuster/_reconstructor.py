@@ -11,7 +11,7 @@ from specter import logger
 import os
 from pathlib import Path
 from dataclasses import asdict, replace
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.nn as nn
@@ -25,7 +25,7 @@ from ..imaging import CTF, Exposure, Poses, Specimen
 from ..fsc import MAP_TO_MODEL_FSC_THRESHOLD, FSCCurve, fsc_curve
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
-from ._converge import ADJOINT_TOLERANCE
+from ._converge import ADJOINT_TOLERANCE, out_of_memory
 from ._io import (
     save_fsc_figure,
     save_halfmap_fsc_figure,
@@ -112,6 +112,14 @@ class Reconstructor(_BaseReconstructor):
         `Envelopes` and `Camera` are deliberately not accepted: neither can
         be determined from a dataset, so their high-frequency loss is
         absorbed into the reconstructed volume rather than assumed.
+    micro_batchsize : int or "auto", optional
+        Particles per forward and backward pass within one optimiser step.
+        A batch larger than this is split into chunks whose gradients are
+        accumulated, each chunk's loss weighted by its share of the batch,
+        before the optimisers step once: the same update as the whole batch
+        in one pass, to float rounding, in the memory of one chunk. ``"auto"``
+        starts at the batch size and halves on a device out-of-memory error,
+        redoing the step. None (default) runs each batch in one pass.
     run_dir : str or Path, optional
         Directory to write per-epoch volumes, final volume, and metadata into.
         ``None`` disables all file output.
@@ -157,6 +165,7 @@ class Reconstructor(_BaseReconstructor):
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
         symmetry_mode: SymmetryMode = "exact",
+        micro_batchsize: int | Literal["auto"] | None = None,
         tag: str = "untagged",
         run_dir: str | Path | None = None,
         halfset_label: str | None = None,
@@ -205,6 +214,7 @@ class Reconstructor(_BaseReconstructor):
         self._final_metrics: dict[str, Any] | None = None
 
         self._setup_optimization_state(lr, lr_R, lr_T, lr_D, lr_decay, scheduler)
+        self._setup_micro_batchsize(micro_batchsize)
         self._setup_symmetry(symmetry, symmetry_batchsize, symmetry_mode)
         self.register_buffer("kmask", kmask)
         self._load_fsc_and_refs(fsc_ref, fsc_mask, cryosparc_ref)
@@ -262,6 +272,24 @@ class Reconstructor(_BaseReconstructor):
         self.lr_decay = lr_decay
         self.scheduler = scheduler
         self._init_loss_logs()
+
+    def _setup_micro_batchsize(
+        self, micro_batchsize: int | Literal["auto"] | None
+    ) -> None:
+        """Check and store the gradient-accumulation chunk size."""
+        if micro_batchsize is not None and micro_batchsize != "auto":
+            if (
+                not isinstance(micro_batchsize, int)
+                or isinstance(micro_batchsize, bool)
+                or micro_batchsize < 1
+            ):
+                raise ValueError(
+                    f"micro_batchsize={micro_batchsize!r} must be a positive "
+                    "integer, 'auto' or None."
+                )
+        self.micro_batchsize = micro_batchsize
+        #: The chunk size "auto" has settled on; None until its first step.
+        self._auto_micro_batchsize: int | None = None
 
     def _setup_symmetry(
         self,
@@ -523,22 +551,27 @@ class Reconstructor(_BaseReconstructor):
         worse (EMPIAR-10083: pooled held-out FRC 0.0389 against 0.0408 at
         8-4.5 A) although the reconstructed map came out the same.
 
-        Under multi-GPU, the *logged* loss is
-        gathered/averaged across ranks (see ``_gather_for_logging``) so it
-        reflects the true global-batch loss -- but the ``loss`` this method
-        returns (which feeds ``_optimise``) stays the local, per-rank
-        value throughout; ``_optimise`` averages the gradients across ranks.
+        The loss is a mean over particles and pixels, and the scale is fixed
+        per particle, so the loss of a batch is the mean of its chunks'
+        losses weighted by their sizes; `training_step` relies on that to
+        split a batch (``micro_batchsize``).
         """
         scale = self.scale[idx]  # (B,)
         level = self.dose_per_angstrom * self.voxel_size**2
         out = level + scale[:, None, None] * (out - level)
-        loss = mse_loss(out, images)
+        return mse_loss(out, images)
+
+    def _log_loss(self, loss: torch.Tensor) -> None:
+        """
+        Record a batch's loss, averaged across ranks under multi-GPU (see
+        ``_gather_for_logging``); the loss the gradient comes from stays the
+        local, per-rank value, since `_step` averages the gradients.
+        """
         # Kept on the device: a `.cpu()` here is a sync per step, and with
         # three of them the step ran 270 ms where the same work runs 160 ms
         # asynchronously. The lists are read once, when the epoch's metrics
         # are built.
         self.log_total_loss.append(self._gather_for_logging(loss).detach())
-        return loss
 
     def _common_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -565,15 +598,92 @@ class Reconstructor(_BaseReconstructor):
         -------
         torch.Tensor
             Scalar loss for the current batch.
+
+        Notes
+        -----
+        With ``micro_batchsize`` set, the batch is run in chunks of that
+        many particles, each backpropagated with its loss weighted by its
+        share of the batch, and the optimisers step once on the summed
+        gradient. The loss is a per-particle mean (see `_compute_loss`), so
+        the sum is the batch's loss and gradient. Under several GPUs the
+        gradients are averaged once, after the last chunk.
         """
-        loss, _, _ = self._common_step(batch, batch_idx)
-        # The NUFFT adjoints of the backward (surface sampling, anisomag warp)
-        # at the converged solver's tolerance: on EMPIAR-13202 100 kV the 3D
-        # spreading was 66% of an Adam step's GPU time at 1e-6, and 1e-4 made
-        # the step 1.4x faster.
-        with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
-            self._optimise(loss)
+        if self.micro_batchsize is None:
+            loss, _, _ = self._common_step(batch, batch_idx)
+            self._log_loss(loss)
+            # The NUFFT adjoints of the backward (surface sampling, anisomag
+            # warp) at the converged solver's tolerance: on EMPIAR-13202 100 kV
+            # the 3D spreading was 66% of an Adam step's GPU time at 1e-6, and
+            # 1e-4 made the step 1.4x faster.
+            with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
+                self._optimise(loss)
+            return loss
+        loss = self._accumulate_with_retry(batch, batch_idx)
+        self._log_loss(loss)
+        self._step()
         return loss
+
+    def _accumulate_with_retry(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
+        """
+        `_accumulate` the batch's gradient; under ``micro_batchsize="auto"``,
+        halve the chunk on an out-of-memory error and redo the batch.
+
+        The chunk size reached is kept for the steps that follow.
+        """
+        n = len(batch[1])
+        while True:
+            if self.micro_batchsize == "auto":
+                if self._auto_micro_batchsize is None:
+                    self._auto_micro_batchsize = n
+                size = min(self._auto_micro_batchsize, n)
+            else:
+                assert isinstance(self.micro_batchsize, int)
+                size = self.micro_batchsize
+            try:
+                return self._accumulate(batch, batch_idx, size)
+            except (torch.cuda.OutOfMemoryError, RuntimeError) as error:
+                if (
+                    self.micro_batchsize != "auto"
+                    or not out_of_memory(error)
+                    or size == 1
+                ):
+                    raise
+            # Outside the `except`, so the failed chunk's graph, which the
+            # traceback holds, is already released.
+            self._auto_micro_batchsize = max(1, size // 2)
+            logger.info(
+                f"Out of memory: micro_batchsize now {self._auto_micro_batchsize}"
+            )
+            # The NUFFT plans hold device buffers of their own.
+            nufft.clear_plan_cache()
+            if batch[0].is_cuda:
+                torch.cuda.empty_cache()
+
+    def _accumulate(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int, size: int
+    ) -> torch.Tensor:
+        """
+        Zero the gradients and accumulate the batch's in chunks of ``size``.
+
+        Returns
+        -------
+        torch.Tensor
+            The batch's loss, detached: the chunks' losses weighted by size.
+        """
+        images, idx = batch
+        n = len(idx)
+        self._zero_grad()
+        losses = []
+        for start in range(0, n, size):
+            chunk = (images[start : start + size], idx[start : start + size])
+            loss, _, _ = self._common_step(chunk, batch_idx)
+            weighted = loss * (len(chunk[1]) / n)
+            with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
+                self._backward(weighted)
+            losses.append(weighted.detach())
+        return torch.stack(losses).sum()
 
     def _metrics_path_suffix(self) -> str:
         """Filename suffix for saved volumes and figures, from the halfset label."""

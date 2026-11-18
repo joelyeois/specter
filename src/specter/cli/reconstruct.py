@@ -43,7 +43,7 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
     ),
     ("Symmetry", ["symmetry", "symmetry_mode", "symmetry_batchsize"]),
     ("Sanity check", ["test_run", "bin_factor"]),
-    ("Compute", ["device", "precision", "num_workers"]),
+    ("Compute", ["device", "precision", "micro_batchsize", "num_workers"]),
     ("Output & job tracking", ["output_dir", "project", "job_id"]),
     ("Reference maps", ["fsc_ref", "fsc_mask", "cryosparc_ref"]),
     (

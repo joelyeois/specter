@@ -33,7 +33,10 @@ from ._common_fields import (
     objective_aperture_setting,
     phase_plate_cuton_setting,
     phase_plate_setting,
-    phaseshift_setting,
+    aberration_backend_setting,
+    lpp_dual_laser_setting,
+    lpp_setting,
+    phase_shift_rad_setting,
     output_dir_setting,
     project_setting,
     seed_setting,
@@ -115,9 +118,28 @@ class TiltSeriesConfig:
     )  # movie frames per tilt
     cs: float = cs_setting()  # mm
     alpha: float = alpha_setting()  # unitless, amplitude contrast ratio
-    phaseshift: float = phaseshift_setting()  # radians
+    phase_shift_rad: float = phase_shift_rad_setting()  # radians
     phase_plate: PhasePlate = phase_plate_setting()
     phase_plate_cuton: float | None = phase_plate_cuton_setting()  # 1/A
+    aberration_backend: Literal["legacy", "torch_ctf"] = aberration_backend_setting()
+    lpp_NA: float | None = lpp_setting("NA")
+    lpp_laser_wavelength_angstrom: float | None = lpp_setting(
+        "laser_wavelength_angstrom"
+    )
+    lpp_focal_length_angstrom: float | None = lpp_setting("focal_length_angstrom")
+    lpp_laser_xy_angle_deg: float | None = lpp_setting("laser_xy_angle_deg")
+    lpp_laser_xz_angle_deg: float | None = lpp_setting("laser_xz_angle_deg")
+    lpp_laser_long_offset_angstrom: float | None = lpp_setting(
+        "laser_long_offset_angstrom"
+    )
+    lpp_laser_trans_offset_angstrom: float | None = lpp_setting(
+        "laser_trans_offset_angstrom"
+    )
+    lpp_laser_polarization_angle_deg: float | None = lpp_setting(
+        "laser_polarization_angle_deg"
+    )
+    lpp_peak_phase_deg: float | None = lpp_setting("peak_phase_deg")
+    lpp_dual_laser: bool = lpp_dual_laser_setting()
     absorption_model: AbsorptionModel = absorption_model_setting()
     inelastic_mfp_solvent: float | None = inelastic_mfp_solvent_setting()  # Å
     inelastic_mfp_specimen: float | None = inelastic_mfp_specimen_setting()  # Å

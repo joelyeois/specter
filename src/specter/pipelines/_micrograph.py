@@ -160,8 +160,8 @@ def run_micrograph(config: MicrographConfig) -> None:
         "cs": torch.tensor([cs_angstrom] * n),
         "dfu": defocus_angstrom,
     }
-    if config.phaseshift:
-        ctf_params["phaseshift"] = torch.full((n,), float(config.phaseshift))
+    if config.phase_shift_rad:
+        ctf_params["phaseshift"] = torch.full((n,), float(config.phase_shift_rad))
 
     # --- Ice ---
     # Built once, upfront, on the target device -- regenerate_specimen() draws

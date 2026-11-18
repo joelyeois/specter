@@ -18,6 +18,7 @@ from ._mrc import read_mrc, write_mrc
 from ._relion import (
     create_micrograph_starfile,
     create_particle_starfile,
+    read_micrograph_starfile,
     extract_parameters_from_starfile,
 )
 
@@ -38,5 +39,6 @@ __all__ = [
     "write_row_ordered_csfile",
     "create_micrograph_starfile",
     "create_particle_starfile",
+    "read_micrograph_starfile",
     "extract_parameters_from_starfile",
 ]

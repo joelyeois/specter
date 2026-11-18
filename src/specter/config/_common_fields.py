@@ -186,12 +186,63 @@ def phase_plate_setting() -> Any:
     return setting(
         "ideal",
         help=(
-            "How phaseshift reaches each spatial frequency. 'ideal' shifts every "
-            "frequency but DC by the full amount. 'volta' shifts frequency k by "
-            "phaseshift * (1 - exp(-k^2 / (2 r^2))), r = phase_plate_cuton, so "
-            "frequencies below the cut-on pass with the unscattered beam. 'laser' "
-            "needs laser-phase-plate settings, which only the Python API takes."
+            "How phase_shift_rad reaches each spatial frequency. 'ideal' shifts "
+            "every frequency but DC by the full amount. 'volta' shifts frequency k "
+            "by phase_shift_rad * (1 - exp(-k^2 / (2 r^2))), r = phase_plate_cuton, "
+            "so frequencies below the cut-on pass with the unscattered beam. "
+            "'laser' is the laser phase plate of the lpp_* fields, which it "
+            "requires along with aberration_backend='torch_ctf'."
         ),
+    )
+
+
+def aberration_backend_setting() -> Any:
+    """The ``aberration_backend`` field."""
+    return setting(
+        "legacy",
+        help=(
+            "Transfer-function engine. 'legacy' is specter's own; 'torch_ctf' is "
+            "the torch-ctf engine, verified against it term by term and the only "
+            "one with the laser phase plate."
+        ),
+    )
+
+
+#: The laser phase plate's settings, each a ``lpp_<key>`` config field whose
+#: key is the `lpp_params` key of :class:`specter.ctf.CTFParameters` (and of
+#: ``torch_ctf.calc_LPP_ctf_2D``), with its help text.
+LPP_FIELD_HELP: dict[str, str] = {
+    "NA": "Numerical aperture of the laser focus.",
+    "laser_wavelength_angstrom": "Laser wavelength in Angstrom.",
+    "focal_length_angstrom": "Focal length of the objective lens in Angstrom.",
+    "laser_xy_angle_deg": "In-plane angle of the laser axis, in degrees.",
+    "laser_xz_angle_deg": "Out-of-plane angle of the laser axis, in degrees.",
+    "laser_long_offset_angstrom": (
+        "Offset of the laser focus along its axis, in Angstrom."
+    ),
+    "laser_trans_offset_angstrom": (
+        "Offset of the laser focus across its axis, in Angstrom."
+    ),
+    "laser_polarization_angle_deg": "Laser polarization angle, in degrees.",
+    "peak_phase_deg": (
+        "Peak phase shift of the laser standing wave, in degrees (nonzero)."
+    ),
+}
+
+
+def lpp_setting(key: str) -> Any:
+    """The ``lpp_<key>`` field of the laser phase plate, unset by default."""
+    return setting(
+        None,
+        help=f"Laser phase plate (phase_plate='laser'): {LPP_FIELD_HELP[key]}",
+    )
+
+
+def lpp_dual_laser_setting() -> Any:
+    """The ``lpp_dual_laser`` field."""
+    return setting(
+        False,
+        help="Laser phase plate (phase_plate='laser'): two crossed lasers.",
     )
 
 
@@ -207,13 +258,14 @@ def phase_plate_cuton_setting() -> Any:
     )
 
 
-def phaseshift_setting() -> Any:
-    """The ``phaseshift`` field of a micrograph or tilt series, in radians."""
+def phase_shift_rad_setting() -> Any:
+    """The ``phase_shift_rad`` field of a micrograph or tilt series."""
     return setting(
         0.0,
         help=(
-            "Phase-plate phase shift in radians (pi/2 for a Volta plate at its "
-            "working point), the same for every image."
+            "Phase-plate phase shift in radians, as CryoSPARC's "
+            "ctf/phase_shift_rad (pi/2 for a Volta plate at its working point), "
+            "the same for every image. 'phaseshift' is a deprecated alias."
         ),
     )
 

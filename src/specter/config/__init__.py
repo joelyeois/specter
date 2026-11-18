@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ._ice import ICE_CACHE_HELP, IceCacheConfig
 from ._loader import (
+    DEPRECATED_CONFIG_ALIASES,
     RENAMED_CONFIG_KEYS,
     ConfigT,
     apply_overrides,
@@ -40,6 +41,7 @@ __all__ = [
     "PARTICLE_STACK_HELP",
     "PDB_CACHE_ENV_VAR",
     "RECONSTRUCTION_HELP",
+    "DEPRECATED_CONFIG_ALIASES",
     "RENAMED_CONFIG_KEYS",
     "REPO_ROOT",
     "PROJECT_MARKER",

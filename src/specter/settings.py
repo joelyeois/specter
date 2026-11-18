@@ -68,6 +68,7 @@ __all__ = [
     "Deformation",
     "Envelopes",
     "Ice",
+    "LaserPhasePlate",
     "Optics",
     "Packing",
     "Propagation",
@@ -320,6 +321,74 @@ class Optics:
                 "lpp_params requires aberration_backend='torch_ctf' -- "
                 "aberrations.Aberration has no laser-phase-plate model."
             )
+
+
+@dataclass(frozen=True)
+class LaserPhasePlate:
+    """
+    The laser phase plate's geometry, typed, as the ``lpp_params`` dict of
+    :class:`specter.ctf.CTFParameters` and ``torch_ctf.calc_LPP_ctf_2D``.
+
+    A config spells each field ``lpp_<name>`` (``lpp_NA``,
+    ``lpp_peak_phase_deg``, ...); :func:`bundle_from_config` with
+    ``prefix="lpp_"`` reads them. Every field but `dual_laser` is unset by
+    default, and either all are set or none is.
+
+    Parameters
+    ----------
+    NA : float, optional
+        Numerical aperture of the laser focus.
+    laser_wavelength_angstrom, focal_length_angstrom : float, optional
+        Laser wavelength and objective focal length, in Angstrom.
+    laser_xy_angle_deg, laser_xz_angle_deg : float, optional
+        In-plane and out-of-plane angles of the laser axis, in degrees.
+    laser_long_offset_angstrom, laser_trans_offset_angstrom : float, optional
+        Offsets of the laser focus along and across its axis, in Angstrom.
+    laser_polarization_angle_deg : float, optional
+        Polarization angle, in degrees.
+    peak_phase_deg : float, optional
+        Peak phase of the standing wave, in degrees; must be nonzero.
+    dual_laser : bool
+        Two crossed lasers. Default False.
+    """
+
+    NA: float | None = None
+    laser_wavelength_angstrom: float | None = None
+    focal_length_angstrom: float | None = None
+    laser_xy_angle_deg: float | None = None
+    laser_xz_angle_deg: float | None = None
+    laser_long_offset_angstrom: float | None = None
+    laser_trans_offset_angstrom: float | None = None
+    laser_polarization_angle_deg: float | None = None
+    peak_phase_deg: float | None = None
+    dual_laser: bool = False
+
+    def lpp_params(self) -> dict[str, float] | None:
+        """
+        The ``lpp_params`` dict, or None when no laser setting is given.
+
+        Raises
+        ------
+        ValueError
+            When only some of the settings are given.
+        """
+        values = {
+            f.name: getattr(self, f.name)
+            for f in dataclasses.fields(self)
+            if f.name != "dual_laser"
+        }
+        missing = sorted(k for k, v in values.items() if v is None)
+        if len(missing) == len(values):
+            return None
+        if missing:
+            raise ValueError(
+                "the laser phase plate needs every lpp_* setting; missing "
+                + ", ".join(f"lpp_{k}" for k in missing)
+            )
+        params: dict[str, float] = {k: float(v) for k, v in values.items()}
+        if self.dual_laser:
+            params["dual_laser"] = True
+        return params
 
 
 @dataclass(frozen=True)

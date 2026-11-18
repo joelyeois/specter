@@ -566,7 +566,7 @@ def _sample_poses_and_ctf(
         astigmatism_magnitude = sample_uniform(config.astigmatism, n)
         dfang = sample_uniform(config.astigmatism_angle, n)
         dfv = defocus_angstrom - astigmatism_magnitude
-        phaseshift = sample_uniform(config.phaseshift, n)
+        phaseshift = sample_uniform(config.phase_shift_rad, n)
         tiltx = sample_uniform(config.tiltx, n)
         tilty = sample_uniform(config.tilty, n)
         trefoil1 = sample_uniform(config.trefoil1, n)

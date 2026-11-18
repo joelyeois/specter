@@ -18,7 +18,12 @@ from typing import (
 
 import rich_click as click
 
-from specter.config import apply_overrides, load_config, validate_config
+from specter.config import (
+    DEPRECATED_CONFIG_ALIASES,
+    apply_overrides,
+    load_config,
+    validate_config,
+)
 from click.core import ParameterSource
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -161,7 +166,14 @@ def build_config_options(
         # lowercasing, so a mixed-case field (deltaV_V, deltaI_I) would come
         # back from `collect_overrides` as "deltav_v" and never match the
         # field it is meant to override.
-        options.append(click.RichOption([f"--{f.name}", f.name], **kwargs))
+        # A deprecated spelling (DEPRECATED_CONFIG_ALIASES) stays a working
+        # second flag for the same field.
+        aliases = [
+            f"--{old}"
+            for old, new in DEPRECATED_CONFIG_ALIASES.items()
+            if new == f.name
+        ]
+        options.append(click.RichOption([f"--{f.name}", *aliases, f.name], **kwargs))
 
     if field_groups is None:
         return options

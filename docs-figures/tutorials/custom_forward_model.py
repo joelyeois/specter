@@ -200,7 +200,7 @@ for cut_on in (1 / 30, 1 / 100):
 # The built-in term shifts every scattered beam: a plate with no hole.
 built_in = {
     k: v.to("cuda")
-    for k, v in CTF.from_values(defocus=0.0, phase_shift=90.0).params.items()
+    for k, v in CTF.from_values(defocus=0.0, phase_shift_rad=math.pi / 2).params.items()
 }
 for name in ("dfu", "dfv"):
     built_in[name] = built_in[name] - shift

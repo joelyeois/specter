@@ -20,9 +20,14 @@ from specter.config import (
     ensure_project_root,
     find_specter_project_root,
 )
-from specter.aberrations import resolve_phase_plate
-from specter.options import IceModel, PhasePlate
-from specter.settings import Camera, Envelopes, bundle_from_config
+from specter.options import IceModel
+from specter.settings import (
+    Camera,
+    Envelopes,
+    LaserPhasePlate,
+    Optics,
+    bundle_from_config,
+)
 
 if TYPE_CHECKING:
     from specter.imaging import CTF, ExitWave, Exposure, Image
@@ -43,16 +48,15 @@ class _Microscope:
         The detector, its noise and pixel size.
     bfactor : float or None
         The envelope's B-factor, in A^2.
-    phase_plate, phase_plate_cuton
-        The phase-plate model and the Volta cut-on in 1/A, resolved (see
-        `ExitWave.apply_ctf`).
+    optics : Optics
+        The transfer-function engine and the phase plate: ideal, Volta (with
+        its cut-on) or laser (with its settings), checked on construction.
     """
 
     envelopes: Envelopes
     camera: Camera
     bfactor: float | None
-    phase_plate: PhasePlate = "ideal"
-    phase_plate_cuton: float | None = None
+    optics: Optics = Optics()
 
     @classmethod
     def from_config(cls, config: Any, **camera: Any) -> _Microscope:
@@ -66,17 +70,19 @@ class _Microscope:
         **camera
             `Camera` fields the config spells differently (``n_frames``).
         """
-        phase_plate, cuton = resolve_phase_plate(
-            getattr(config, "phase_plate", "ideal"),
-            getattr(config, "phase_plate_cuton", None),
-            None,
+        optics = Optics(
+            aberration_backend=getattr(config, "aberration_backend", "legacy"),
+            lpp_params=bundle_from_config(
+                LaserPhasePlate, config, prefix="lpp_"
+            ).lpp_params(),
+            phase_plate=getattr(config, "phase_plate", "ideal"),
+            phase_plate_cuton=getattr(config, "phase_plate_cuton", None),
         )
         return cls(
             envelopes=bundle_from_config(Envelopes, config),
             camera=bundle_from_config(Camera, config, **camera),
             bfactor=config.bfactor,
-            phase_plate=phase_plate,
-            phase_plate_cuton=cuton,
+            optics=optics,
         )
 
     @property
@@ -125,15 +131,17 @@ class _Microscope:
         -------
         Image
         """
-        envelopes, camera = self.envelopes, self.camera
+        envelopes, camera, optics = self.envelopes, self.camera, self.optics
         return (
             waves.apply_ctf(
                 ctf,
                 bfactor=self.bfactor,
                 convergence_angle=envelopes.convergence_angle,
                 dose_envelope=exposure if self.damage_on_lens else None,
-                phase_plate=self.phase_plate,
-                phase_plate_cuton=self.phase_plate_cuton,
+                backend=optics.aberration_backend,
+                lpp_params=optics.lpp_params,
+                phase_plate=optics.phase_plate,
+                phase_plate_cuton=optics.phase_plate_cuton,
             )
             .intensity(
                 cc=envelopes.cc or None,

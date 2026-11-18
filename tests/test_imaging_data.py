@@ -25,11 +25,11 @@ def test_a_ctf_follows_its_defocus_onto_the_device():
     """
     defocus = torch.tensor([10000.0, 12000.0], device="cuda")
     ctf = CTF.from_values(
-        defocus, astigmatism=torch.tensor([100.0, 200.0]), phase_shift=90.0
+        defocus, astigmatism=torch.tensor([100.0, 200.0]), phase_shift_rad=1.5708
     )
     assert all(v.device.type == "cuda" for v in ctf.params.values())
     on_host = CTF.from_values(
-        defocus.cpu(), astigmatism=torch.tensor([100.0, 200.0]), phase_shift=90.0
+        defocus.cpu(), astigmatism=torch.tensor([100.0, 200.0]), phase_shift_rad=1.5708
     )
     for name, value in on_host.params.items():
         assert torch.equal(ctf.params[name].cpu(), value), name

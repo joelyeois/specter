@@ -151,7 +151,7 @@ water_air_interface = false
 # --- Aberrations (synthetic generation only; a .cs/.star file brings its own) ---
 astigmatism = 0.0                # Å, magnitude of dfu - dfv; single value or [low, high]
 astigmatism_angle = [0.0, 180.0] # degrees, dfang; irrelevant when astigmatism is 0
-phaseshift = 0.0                 # radians
+phase_shift_rad = 0.0                 # radians
 tiltx = 0.0                      # radians
 tilty = 0.0                      # radians
 trefoil1 = 0.0                   # Å^3, k^3 sin(3θ)

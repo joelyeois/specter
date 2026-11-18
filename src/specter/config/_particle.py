@@ -40,6 +40,9 @@ from ._common_fields import (
     objective_aperture_setting,
     phase_plate_cuton_setting,
     phase_plate_setting,
+    aberration_backend_setting,
+    lpp_dual_laser_setting,
+    lpp_setting,
     job_id_setting,
     output_dir_setting,
     project_setting,
@@ -508,16 +511,36 @@ class ParticleStackConfig:
         ),
         check="ordered",
     )  # degrees, dfang
-    phaseshift: ScalarOrRange = setting(
+    phase_shift_rad: ScalarOrRange = setting(
         0.0,
         help=(
-            "Phase shift in radians (e.g. from a Volta phase plate): a "
-            "single value or 'low,high' ([low, high] in TOML) range."
+            "Phase-plate phase shift in radians, as CryoSPARC's "
+            "ctf/phase_shift_rad: a single value or 'low,high' ([low, high] in "
+            "TOML) range. 'phaseshift' is a deprecated alias."
         ),
         check="ordered",
     )  # radians
     phase_plate: PhasePlate = phase_plate_setting()
     phase_plate_cuton: float | None = phase_plate_cuton_setting()  # 1/A
+    aberration_backend: Literal["legacy", "torch_ctf"] = aberration_backend_setting()
+    lpp_NA: float | None = lpp_setting("NA")
+    lpp_laser_wavelength_angstrom: float | None = lpp_setting(
+        "laser_wavelength_angstrom"
+    )
+    lpp_focal_length_angstrom: float | None = lpp_setting("focal_length_angstrom")
+    lpp_laser_xy_angle_deg: float | None = lpp_setting("laser_xy_angle_deg")
+    lpp_laser_xz_angle_deg: float | None = lpp_setting("laser_xz_angle_deg")
+    lpp_laser_long_offset_angstrom: float | None = lpp_setting(
+        "laser_long_offset_angstrom"
+    )
+    lpp_laser_trans_offset_angstrom: float | None = lpp_setting(
+        "laser_trans_offset_angstrom"
+    )
+    lpp_laser_polarization_angle_deg: float | None = lpp_setting(
+        "laser_polarization_angle_deg"
+    )
+    lpp_peak_phase_deg: float | None = lpp_setting("peak_phase_deg")
+    lpp_dual_laser: bool = lpp_dual_laser_setting()
     tiltx: ScalarOrRange = setting(
         0.0,
         help=(

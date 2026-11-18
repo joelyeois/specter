@@ -81,7 +81,7 @@ documents it field-by-field.
 ## Per-particle sampling ranges
 
 `dose`, `defocus`, `coincidence_radius`, `astigmatism`,
-`astigmatism_angle`, `phaseshift`, the beam tilts `tiltx`/`tilty`, and the
+`astigmatism_angle`, `phase_shift_rad`, the beam tilts `tiltx`/`tilty`, and the
 higher-order aberrations `trefoil1`/`trefoil2` and
 `tetrafoil1`-`tetrafoil4` each take either a single number (constant for
 every particle) or a `[low, high]` pair, sampled uniformly per particle:

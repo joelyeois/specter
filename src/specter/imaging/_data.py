@@ -12,6 +12,8 @@ them.
 from __future__ import annotations
 
 import contextlib
+import math
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, TypeVar
@@ -67,6 +69,32 @@ def sample_uniform(value: ScalarOrRange, n: int) -> torch.Tensor:
     """`n` draws from a scalar or a ``[low, high]`` range, uniform per image."""
     low, high = parse_scalar_or_range(value)
     return torch.rand(n) * (high - low) + low
+
+
+def _phase_shift_radians(radians: Any, degrees: Any) -> Any:
+    """
+    The phase shift in radians from `radians`, or from the deprecated
+    `degrees`; 0 when neither is given.
+
+    `degrees` may be a scalar, a ``[low, high]`` range (string or list) or a
+    tensor, and keeps that form.
+    """
+    if degrees is None:
+        return 0.0 if radians is None else radians
+    if radians is not None:
+        raise ValueError("give phase_shift_rad (radians) or phase_shift, not both")
+    warnings.warn(
+        "phase_shift in degrees is deprecated; pass phase_shift_rad in radians "
+        "(CryoSPARC's ctf/phase_shift_rad).",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    if isinstance(degrees, torch.Tensor):
+        return torch.deg2rad(degrees)
+    low, high = parse_scalar_or_range(degrees)
+    if low == high:
+        return math.radians(low)
+    return [math.radians(low), math.radians(high)]
 
 
 #: Keys for the seeds of the per-image draws made here, distinct from the
@@ -203,7 +231,8 @@ class CTF:
         astigmatism: float | torch.Tensor = 0.0,
         astigmatism_angle: float | torch.Tensor = 0.0,
         cs: float = 2.7,
-        phase_shift: float | torch.Tensor = 0.0,
+        phase_shift_rad: float | torch.Tensor | None = None,
+        phase_shift: float | torch.Tensor | None = None,
     ) -> CTF:
         """
         Build from readable units, one value or one per image for each term.
@@ -220,9 +249,14 @@ class CTF:
             Major-axis angle in degrees. Default 0.
         cs : float, optional
             Spherical aberration in millimetres. Default 2.7.
+        phase_shift_rad : float or torch.Tensor, optional
+            Phase-plate shift in radians, as CryoSPARC's
+            ``ctf/phase_shift_rad``. Default 0.
         phase_shift : float or torch.Tensor, optional
-            Phase-plate shift in degrees. Default 0.
+            Deprecated: the same shift in degrees. Emits a DeprecationWarning;
+            giving both raises.
         """
+        phase_shift_rad = _phase_shift_radians(phase_shift_rad, phase_shift)
         n = n if n is not None else torch.as_tensor(defocus).numel()
         # Every term on the defocus's device, so a CUDA defocus gives a CUDA
         # CTF rather than a mix the first subtraction refuses.
@@ -234,9 +268,7 @@ class CTF:
                 "dfu": dfu,
                 "dfv": dfu - per_image(astigmatism, n, "astigmatism", device),
                 "dfang": per_image(astigmatism_angle, n, "astigmatism_angle", device),
-                "phaseshift": torch.deg2rad(
-                    per_image(phase_shift, n, "phase_shift", device)
-                ),
+                "phaseshift": per_image(phase_shift_rad, n, "phase_shift_rad", device),
             }
         )
 
@@ -249,14 +281,17 @@ class CTF:
         astigmatism: ScalarOrRange = 0.0,
         astigmatism_angle: ScalarOrRange = 0.0,
         cs: float = 2.7,
-        phase_shift: ScalarOrRange = 0.0,
+        phase_shift_rad: ScalarOrRange | None = None,
+        phase_shift: ScalarOrRange | None = None,
         seed: int | None = None,
     ) -> CTF:
         """
         Draw `n` sets of terms, each a scalar or a ``[low, high]`` range
-        sampled uniformly per image; units as :meth:`from_values`. Draws from
-        `seed` when given, else from the global generator.
+        sampled uniformly per image; units as :meth:`from_values`, the phase
+        shift in radians (`phase_shift`, in degrees, is deprecated). Draws
+        from `seed` when given, else from the global generator.
         """
+        phase_shift_rad = _phase_shift_radians(phase_shift_rad, phase_shift)
         with _drawn(seed, _SEED_CTF):
             return cls.from_values(
                 sample_uniform(defocus, n),
@@ -264,7 +299,7 @@ class CTF:
                 astigmatism=sample_uniform(astigmatism, n),
                 astigmatism_angle=sample_uniform(astigmatism_angle, n),
                 cs=cs,
-                phase_shift=sample_uniform(phase_shift, n),
+                phase_shift_rad=sample_uniform(phase_shift_rad, n),
             )
 
     def __len__(self) -> int:

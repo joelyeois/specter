@@ -145,6 +145,26 @@ particle is visible without a phase plate, with weaker low-frequency contrast.
 All three are low-pass filtered to 5 Å and share one grey scale.
 ///
 
+The phase is given in radians, as `phase_shift_rad`, the quantity CryoSPARC
+stores as `ctf/phase_shift_rad`; RELION files carry it in degrees as
+`rlnPhaseShift`. How the shift reaches each frequency is the `phase_plate`
+argument of `apply_ctf`. The default, `"ideal"`, shifts every frequency
+except the zero frequency by the full phase. A Volta phase plate shifts the
+scattered wave only outside its charged spot, so frequencies below a cut-on
+travel with the unscattered beam (Danev et al. 2014). `"volta"` models this
+with a Gaussian cut-on of width \(r\) (`phase_plate_cuton`, in Å⁻¹):
+
+\[
+\phi(k) = \phi_0 \left(1 - e^{-k^2 / 2r^2}\right),
+\]
+
+with \(r = 0.005\) Å⁻¹ by default, the form and value used by Parakeet
+(Parkhurst et al. 2021). `"laser"` is the laser phase plate of Schwartz et
+al. (2019), with its geometry given as `lpp_params` and computed by the
+`"torch_ctf"` transfer-function engine. The three are configuration fields of
+the same names, with the laser geometry spelled `lpp_NA`, `lpp_peak_phase_deg`
+and so on.
+
 ## B-factor
 
 `apply_ctf(bfactor=...)` multiplies the transfer function by the Gaussian
@@ -282,6 +302,12 @@ assumed on this page with a real source's spread of energies and angles.
   amorphous ice and implications of beam-induced Brownian motion in single
   particle electron cryo-microscopy. *Ultramicroscopy*, 158, 26–32.
   [doi:10.1016/j.ultramic.2015.05.017](https://doi.org/10.1016/j.ultramic.2015.05.017)
+- Parkhurst, J. M., Dumoux, M., Basham, M., Clare, D., Siebert, C. A.,
+  Varslot, T., Kirkland, A., Naismith, J. H., & Evans, G. (2021). Parakeet: a
+  digital twin software pipeline to assess the impact of experimental
+  parameters on tomographic reconstructions for cryo-electron tomography.
+  *Open Biology*, 11(10), 210160.
+  [doi:10.1098/rsob.210160](https://doi.org/10.1098/rsob.210160)
 - Rohou, A., & Grigorieff, N. (2015). CTFFIND4: Fast and accurate defocus
   estimation from electron micrographs. *Journal of Structural Biology*,
   192(2), 216–221.
@@ -290,6 +316,10 @@ assumed on this page with a real source's spread of energies and angles.
   particle orientation, absolute hand, and contrast loss in single-particle
   electron cryomicroscopy. *Journal of Molecular Biology*, 333(4), 721–745.
   [doi:10.1016/j.jmb.2003.07.013](https://doi.org/10.1016/j.jmb.2003.07.013)
+- Schwartz, O., Axelrod, J. J., Campbell, S. L., Turnbaugh, C., Glaeser, R. M.,
+  & Müller, H. (2019). Laser phase plate for transmission electron
+  microscopy. *Nature Methods*, 16(10), 1016–1020.
+  [doi:10.1038/s41592-019-0552-2](https://doi.org/10.1038/s41592-019-0552-2)
 - Thon, F. (1966). Zur Defokussierungsabhängigkeit des Phasenkontrastes bei
   der elektronenmikroskopischen Abbildung. *Zeitschrift für Naturforschung
   A*, 21(4), 476–478.

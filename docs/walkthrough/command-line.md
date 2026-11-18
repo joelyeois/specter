@@ -123,8 +123,10 @@ under in `configs/particle.toml`.
 | `.scatter(oversample=, pad_fft=)` | `oversample`, `pad_fft` | `[advanced]` |
 | `CTF.sample(n, defocus=, cs=)` | `defocus`, `cs` | `[sampling]`, `[microscope]` |
 | `CTF.sample(..., astigmatism=, astigmatism_angle=)` | `astigmatism`, `astigmatism_angle` | `[advanced]` |
-| `CTF.sample(..., phase_shift=)` | `phaseshift` (radians, not degrees) | `[advanced]` |
+| `CTF.sample(..., phase_shift_rad=)` | `phase_shift_rad` (radians, as CryoSPARC) | `[advanced]` |
 | `.apply_ctf(bfactor=, convergence_angle=)` | `bfactor`, `convergence_angle` | `[advanced]` |
+| `.apply_ctf(phase_plate=, phase_plate_cuton=)` | `phase_plate`, `phase_plate_cuton` | `[microscope]` |
+| `.apply_ctf(backend=, lpp_params=)` | `aberration_backend`, `lpp_*` | `[microscope]` |
 | `.intensity(cc=, energy_spread=)` | `cc`, `energy_spread` | `[advanced]` |
 | `Exposure(dose=, n_frames=)` | `dose`, `n_frames` | `[microscope]`, `[advanced]` |
 | `.detect(detector=, noise=)` | `detector_model`, `noise_model` | `[models]` |

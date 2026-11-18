@@ -218,8 +218,8 @@ def run_tilt_series(
         "cs": torch.tensor([cs_angstrom]),
         "dfu": torch.tensor([config.defocus]),
     }
-    if config.phaseshift:
-        ctf_params["phaseshift"] = torch.tensor([config.phaseshift])
+    if config.phase_shift_rad:
+        ctf_params["phaseshift"] = torch.tensor([config.phase_shift_rad])
 
     ice = bundle_from_config(
         Ice, config, prefix="ice_", parameterization=config.bulk_scattering_factors
@@ -289,6 +289,10 @@ def run_tilt_series(
             "cs": torch.full((config.n_tilts,), cs_angstrom),
             "dfu": torch.full((config.n_tilts,), config.defocus),
         }
+        if "phaseshift" in ctf_params:
+            ctf_params_broadcast["phaseshift"] = ctf_params["phaseshift"].expand(
+                config.n_tilts
+            )
         create_micrograph_starfile(
             n=config.n_tilts,
             voltage=config.voltage,

@@ -6,6 +6,7 @@ Run with: uv run python docs-figures/walkthrough/ctf.py
 
 from __future__ import annotations
 
+import math
 import sys
 
 import matplotlib.pyplot as plt
@@ -156,7 +157,9 @@ save(fig, "ctf-astigmatism")
 transcript.start("phase-plate")
 # --8<-- [start:phase-plate]
 in_focus = waves.apply_ctf(CTF.from_values(0.0)).intensity(cc=None)
-phase_plate = waves.apply_ctf(CTF.from_values(0.0, phase_shift=90.0)).intensity(cc=None)
+phase_plate = waves.apply_ctf(
+    CTF.from_values(0.0, phase_shift_rad=math.pi / 2)
+).intensity(cc=None)
 # --8<-- [end:phase-plate]
 
 fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.6))

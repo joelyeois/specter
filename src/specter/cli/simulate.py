@@ -33,6 +33,25 @@ from ._click_options import (
 # being imaged, with `ice_thickness` among it as a property of the sample
 # rather than a tuning knob, and `noise_model` beside the other two model
 # choices.
+#: The phase plate's panel, the same in every command: its model, the Volta
+#: cut-on, and the laser plate's engine and settings (``lpp_*``, the keys of
+#: `specter.settings.LaserPhasePlate`).
+_PHASE_PLATE_FIELDS: list[str] = [
+    "phase_plate",
+    "phase_plate_cuton",
+    "aberration_backend",
+    "lpp_NA",
+    "lpp_laser_wavelength_angstrom",
+    "lpp_focal_length_angstrom",
+    "lpp_laser_xy_angle_deg",
+    "lpp_laser_xz_angle_deg",
+    "lpp_laser_long_offset_angstrom",
+    "lpp_laser_trans_offset_angstrom",
+    "lpp_laser_polarization_angle_deg",
+    "lpp_peak_phase_deg",
+    "lpp_dual_laser",
+]
+
 _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     # First, because it is the first question: unset, the run synthesizes its
     # own particles, and everything below applies as written. Given a file,
@@ -47,12 +66,13 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Microscope",
-        ["voltage", "dose", "cs", "alpha", "phase_plate", "phase_plate_cuton"],
+        ["voltage", "dose", "cs", "alpha"],
     ),
     (
         "Sampling",
         ["defocus", "shift", "n_particles"],
     ),
+    ("Phase plate", _PHASE_PLATE_FIELDS),
     (
         "Absorption",
         [
@@ -128,7 +148,7 @@ _PARTICLE_STACK_GROUPS: list[tuple[str, list[str]]] = [
             "seed",
             "astigmatism",
             "astigmatism_angle",
-            "phaseshift",
+            "phase_shift_rad",
             "tiltx",
             "tilty",
             "trefoil1",
@@ -155,18 +175,10 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
     ("Specimen", ["volume_path", "voxel_size"]),
     (
         "Microscope",
-        [
-            "voltage",
-            "dose_per_tilt",
-            "n_frames",
-            "cs",
-            "alpha",
-            "phaseshift",
-            "phase_plate",
-            "phase_plate_cuton",
-        ],
+        ["voltage", "dose_per_tilt", "n_frames", "cs", "alpha"],
     ),
     ("Defocus", ["defocus"]),
+    ("Phase plate", ["phase_shift_rad", *_PHASE_PLATE_FIELDS]),
     (
         "Tilt geometry",
         ["min_tilt_angle", "max_tilt_angle", "n_tilts", "tilt_axis"],
@@ -258,17 +270,9 @@ _MICROGRAPH_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Microscope",
-        [
-            "voltage",
-            "dose",
-            "defocus",
-            "cs",
-            "alpha",
-            "phaseshift",
-            "phase_plate",
-            "phase_plate_cuton",
-        ],
+        ["voltage", "dose", "defocus", "cs", "alpha"],
     ),
+    ("Phase plate", ["phase_shift_rad", *_PHASE_PLATE_FIELDS]),
     (
         "Absorption",
         [

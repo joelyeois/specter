@@ -582,6 +582,15 @@ def create_micrograph_starfile(
         "rlnDefocusV": dfv,
         "rlnDefocusAngle": dfang,
     }
+    if "phaseshift" in ctf_params:
+        # RELION's column is in degrees, as csparc2star writes CryoSPARC's
+        # ctf/phase_shift_rad; specter holds radians.
+        d["rlnPhaseShift"] = _scalar_col(
+            torch.rad2deg(
+                torch.as_tensor(ctf_params["phaseshift"], dtype=torch.float64)
+            ),
+            n,
+        )
 
     if dose_per_angstrom is not None:
         d["specterDosePerAngstrom"] = _scalar_col(dose_per_angstrom, n)
@@ -598,3 +607,43 @@ def create_micrograph_starfile(
     starfile.write(df, star_path, overwrite=True)
     _console.print(f"  [green]✓[/green] {star_path}")
     return star_path
+
+
+def read_micrograph_starfile(starfile_path: str) -> dict[str, torch.Tensor]:
+    """
+    Read the CTF terms of a micrograph or tilt-series STAR file.
+
+    The inverse of :func:`create_micrograph_starfile` for the transfer
+    function, in the ``ctf_params`` convention: ``cs``, ``dfu`` and ``dfv`` in
+    Å, ``dfang`` in degrees and ``phaseshift`` in radians, converted from
+    RELION's ``rlnPhaseShift`` in degrees. ``phaseshift`` is present only
+    when the file has that column.
+
+    Parameters
+    ----------
+    starfile_path : str
+        A STAR file with one row per micrograph or tilt.
+
+    Returns
+    -------
+    dict of str to torch.Tensor
+        One value per row for each term.
+    """
+    df = starfile.read(starfile_path)
+    if isinstance(df, dict):
+        df = next(iter(df.values()))
+
+    def col(name: str) -> torch.Tensor:
+        return torch.as_tensor(df[name].to_numpy(), dtype=torch.float32)
+
+    params = {
+        "cs": col("rlnSphericalAberration") * 1e7,
+        "dfu": col("rlnDefocusU"),
+        "dfv": col("rlnDefocusV") if "rlnDefocusV" in df else col("rlnDefocusU"),
+        "dfang": col("rlnDefocusAngle")
+        if "rlnDefocusAngle" in df
+        else torch.zeros(len(df)),
+    }
+    if "rlnPhaseShift" in df:
+        params["phaseshift"] = torch.deg2rad(col("rlnPhaseShift"))
+    return params

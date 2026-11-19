@@ -1,0 +1,12 @@
+  ✓ micrographs.star
+rlnMicrographName       1@micrographs.mrcs  2@micrographs.mrcs  3@micrographs.mrcs
+rlnVoltage                           300.0               300.0               300.0
+rlnSphericalAberration                 2.7                 2.7                 2.7
+rlnAmplitudeContrast                   0.0                 0.0                 0.0
+rlnImagePixelSize                      2.0                 2.0                 2.0
+rlnDefocusU                         8000.0             15000.0             25000.0
+rlnDefocusV                         8000.0             15000.0             25000.0
+rlnDefocusAngle                        0.0                 0.0                 0.0
+rlnPhaseShift                          0.0                 0.0                 0.0
+specterDosePerAngstrom                40.0                40.0                40.0
+stack (3, 512, 512), 2.0 Å per pixel

@@ -92,8 +92,10 @@ nav:
           - Building an ice library: tutorials/ice-library.md
           - Short recipes:
               - A potential from a PDB entry: tutorials/pdb-potential.md
+              - Single atoms in bright field: tutorials/single-atoms.md
               - Inspecting an exit wave: tutorials/exit-wave.md
               - The coincidence radius of a camera: tutorials/coincidence-radius.md
+              - Saving micrographs with a STAR file: tutorials/save-micrographs.md
               - A transfer function of your own: tutorials/custom-transfer-function.md
               - The four organelle kinds: tutorials/membrane-organelles.md
               - Composing a membrane from primitives: tutorials/membrane-primitives.md

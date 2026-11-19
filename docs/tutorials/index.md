@@ -85,6 +85,13 @@ or the geometry.
     `basic` · An atomic model rendered into a potential volume, plotted
     as a slice and two projections.
 
+-   [![Single atoms in bright field](../assets/images/tutorials/single_atoms-thumbnail.png)](single-atoms.md)
+
+    **[Single atoms in bright field](single-atoms.md)**
+
+    `specialized` · The projected potentials of five single atoms, and their
+    coherent bright-field image.
+
 -   [![Inspecting an exit wave](../assets/images/tutorials/exit_wave-thumbnail.png)](exit-wave.md)
 
     **[Inspecting an exit wave](exit-wave.md)**
@@ -98,6 +105,13 @@ or the geometry.
 
     `basic` · A camera's calibrated coincidence loss carried over to a
     simulation's pixel size and frames.
+
+-   [![Saving micrographs with a STAR file](../assets/images/tutorials/save_micrographs-thumbnail.png)](save-micrographs.md)
+
+    **[Saving micrographs with a STAR file](save-micrographs.md)**
+
+    `basic` · A stack of micrographs written as an MRC file, with the STAR
+    file that records each image's transfer function.
 
 -   [![A transfer function of your own](../assets/images/tutorials/custom_transfer-thumbnail.png)](custom-transfer-function.md)
 

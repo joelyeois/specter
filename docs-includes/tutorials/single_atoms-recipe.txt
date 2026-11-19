@@ -1,0 +1,7 @@
+wavelength 2.508 pm, sigma 0.7288 rad/(kV Å)
+aperture 10.36 mrad, resolution 2.42 Å
+ C: image intensity at the centre 0.947
+Si: image intensity at the centre 0.897
+Cu: image intensity at the centre 0.892
+Au: image intensity at the centre 0.803
+ U: image intensity at the centre 0.732

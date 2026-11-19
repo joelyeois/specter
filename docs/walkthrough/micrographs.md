@@ -200,6 +200,8 @@ effect.
 from a TOML config, and writes the stack with a RELION `.star` file; see
 [Generate a micrograph](../user-guide/micrograph.md) and
 [From Python to the command line](command-line.md).
+[Saving micrographs with a STAR file](../tutorials/save-micrographs.md)
+writes the same pair of files from Python.
 
 ## Next
 

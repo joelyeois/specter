@@ -354,7 +354,8 @@ derived for static atoms and the damped tail reaches further.
 SPECTER validates the atomic potential and imaging code against the
 worked examples in Kirkland (2010, Ch. 5), using the standard five-element test
 row (C, Si, Cu, Au, U). `docs-figures/atomic_potentials.py` runs the four
-steps:
+steps, and [Single atoms in bright field](../tutorials/single-atoms.md) gives
+the code of steps 3 and 4 as one block to copy:
 
 1. **3D atomic potential vs. radius** (Kirkland Fig. 5.4):
    `kirkland_atomic_potential_3d` evaluated on a radial grid.

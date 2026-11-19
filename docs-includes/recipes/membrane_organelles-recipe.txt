@@ -1,0 +1,4 @@
+vesicle: (74, 74, 74) voxels, radius 247, elongation 1.411, undulation 19, layers 1
+tubules: (96, 152, 152) voxels, radius 130.1, length 1694, branches 2
+cisterna: (64, 124, 124) voxels, diameter 907.3, lumen_width 149.4, fenestrations 0
+mitochondrion: (126, 238, 132) voxels, radius 500.2, length 1344, crista_spacing 265, membrane_gap 130

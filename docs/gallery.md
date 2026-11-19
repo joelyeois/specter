@@ -1,9 +1,32 @@
 # Example gallery
 
 Every worked example in these docs, by its figure. The
-[basic examples](basic-examples.md) are templates to copy, the
-[walkthrough](walkthrough/index.md) builds the forward model one stage at a
-time, and the [tutorials](tutorials/index.md) take it into advanced topics.
+[recipes](#recipes) are short: one task and one figure each, in a single
+block of code to copy and adapt. The [basic examples](basic-examples.md) are
+templates for whole workflows, the [walkthrough](walkthrough/index.md) builds
+the forward model one stage at a time, and the
+[tutorials](tutorials/index.md) take it into advanced topics.
+
+## Recipes
+
+A recipe tagged `basic` uses the high-level objects and their defaults. One
+tagged `specialized` reaches below them, into the engines or the geometry.
+
+<div class="grid cards" markdown>
+
+-   [![The four organelle kinds](assets/images/recipes/membrane_organelles-thumbnail.png)](recipes/membrane-organelles.md)
+
+    **[The four organelle kinds](recipes/membrane-organelles.md)**
+
+    `basic`
+
+-   [![Composing a membrane from primitives](assets/images/recipes/membrane_primitives-thumbnail.png)](recipes/membrane-primitives.md)
+
+    **[Composing a membrane from primitives](recipes/membrane-primitives.md)**
+
+    `specialized`
+
+</div>
 
 ## Basic examples
 

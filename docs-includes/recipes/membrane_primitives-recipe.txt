@@ -1,0 +1,3 @@
+raw union: reach 2 Å outside, 5 Å inside
+regularised: reach 40 Å outside, 58 Å inside
+rendered (200, 200, 260) voxels, peak 6.1 V

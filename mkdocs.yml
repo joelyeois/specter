@@ -104,7 +104,10 @@ nav:
               - Configure a run: user-guide/configuration.md
               - Manage jobs: user-guide/jobs.md
               - Manage the PDB cache: user-guide/cache.md
-      - Example gallery: gallery.md
+      - Example gallery:
+          - gallery.md
+          - The four organelle kinds: recipes/membrane-organelles.md
+          - Composing a membrane from primitives: recipes/membrane-primitives.md
   - Theory:
       - Overview: concepts/index.md
       - Pipeline overview: concepts/pipeline-overview.md

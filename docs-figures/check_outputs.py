@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SECTIONS = {
     "walkthrough": ROOT / "docs" / "walkthrough",
     "tutorials": ROOT / "docs" / "tutorials",
+    "recipes": ROOT / "docs" / "recipes",
     "cli_guides": ROOT / "docs" / "user-guide",
 }
 NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?(?:e[-+]?\d+)?(?![\w.])")

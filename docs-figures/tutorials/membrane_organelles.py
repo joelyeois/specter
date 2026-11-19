@@ -1,7 +1,7 @@
 """
-Figure and printed output for docs/recipes/membrane-organelles.md.
+Figure and printed output for docs/tutorials/membrane-organelles.md.
 
-Run with: uv run python docs-figures/recipes/membrane_organelles.py
+Run with: uv run python docs-figures/tutorials/membrane_organelles.py
 """
 
 from __future__ import annotations

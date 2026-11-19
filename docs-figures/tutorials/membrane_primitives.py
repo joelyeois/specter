@@ -1,7 +1,7 @@
 """
-Figure and printed output for docs/recipes/membrane-primitives.md.
+Figure and printed output for docs/tutorials/membrane-primitives.md.
 
-Run with: uv run python docs-figures/recipes/membrane_primitives.py
+Run with: uv run python docs-figures/tutorials/membrane_primitives.py
 """
 
 from __future__ import annotations

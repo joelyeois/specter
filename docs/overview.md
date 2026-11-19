@@ -100,7 +100,7 @@ a time and ends with [the command line](walkthrough/command-line.md).
 
     Advanced topics once the walkthrough is done: real datasets, cellular
     specimens, radiation damage, inelastic scattering, gradients, custom
-    forward models and ice libraries.
+    forward models and ice libraries, and short recipes to copy and adapt.
 
     [:octicons-arrow-right-24: Tutorials](tutorials/index.md)
 
@@ -110,12 +110,6 @@ a time and ends with [the command line](walkthrough/command-line.md).
     micrographs, tilt series, tomograms, matching, reconstruction and jobs.
 
     [:octicons-arrow-right-24: Command-line guides](user-guide/particle-stack.md)
-
--   :material-view-grid:{ .lg .middle } **Example gallery**
-
-    Short recipes to copy and adapt: one task and one figure each.
-
-    [:octicons-arrow-right-24: Gallery](gallery.md)
 
 -   :material-function-variant:{ .lg .middle } **Theory**
 

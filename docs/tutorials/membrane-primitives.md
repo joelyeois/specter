@@ -8,7 +8,7 @@ boundary of a solid, held as a signed distance \(\phi\) on a coarse grid.
 This recipe composes a budding vesicle from two balls and a tube,
 regularises it, and renders the bilayer around its surface.
 
-![The mid-surface of a budding vesicle before and after regularisation, beside the central slice of its rendered potential.](../assets/images/recipes/membrane_primitives.png){ width="900" style="display:block;margin:1.2em auto;" }
+![The mid-surface of a budding vesicle before and after regularisation, beside the central slice of its rendered potential.](../assets/images/tutorials/membrane_primitives.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Left: the surface \(\phi = 0\) on the central z-plane, for the raw union and
 after regularisation, which rounds the creases where the neck meets the two
@@ -16,11 +16,11 @@ balls. Right: the central slice of the potential rendered at 5 Å per voxel.
 ///
 
 ```python
---8<-- "docs-figures/recipes/membrane_primitives.py:recipe"
+--8<-- "docs-figures/tutorials/membrane_primitives.py:recipe"
 ```
 
 ```{ .text .output }
---8<-- "docs-includes/recipes/membrane_primitives-recipe.txt"
+--8<-- "docs-includes/tutorials/membrane_primitives-recipe.txt"
 ```
 
 The reach is the distance over which \(\phi\) stays an exact distance along

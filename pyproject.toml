@@ -195,5 +195,4 @@ ignore = ["B008", "B905"]
 # script's own plotting code imported the same module earlier.
 "docs-figures/walkthrough/*.py" = ["E402", "F811"]
 "docs-figures/tutorials/*.py" = ["E402", "F811"]
-"docs-figures/recipes/*.py" = ["E402", "F811"]
 "docs-figures/cli_guides/*.py" = ["E402", "F811"]

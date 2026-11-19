@@ -7,18 +7,18 @@ selects one of four presets, and a seed fixes everything random about the
 instance: the sizes it draws, the path of each tubule, and the surface
 relief.
 
-![A vesicle, a branched tubule, a cisterna and a mitochondrion, each as a central slice above its projection.](../assets/images/recipes/membrane_organelles.png){ width="900" style="display:block;margin:1.2em auto;" }
+![A vesicle, a branched tubule, a cisterna and a mitochondrion, each as a central slice above its projection.](../assets/images/tutorials/membrane_organelles.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 One instance of each kind at 12 Å per voxel: the central z-slice of the
 potential (top) and its projection along z (bottom).
 ///
 
 ```python
---8<-- "docs-figures/recipes/membrane_organelles.py:recipe"
+--8<-- "docs-figures/tutorials/membrane_organelles.py:recipe"
 ```
 
 ```{ .text .output }
---8<-- "docs-includes/recipes/membrane_organelles-recipe.txt"
+--8<-- "docs-includes/tutorials/membrane_organelles-recipe.txt"
 ```
 
 ## Variations
@@ -39,6 +39,6 @@ potential (top) and its projection along z (bottom).
 
 - [Composing a membrane from primitives](membrane-primitives.md): shapes the
   four kinds do not cover.
-- [Cellular specimens for cryo-ET](../tutorials/cellular-specimens.md):
+- [Cellular specimens for cryo-ET](cellular-specimens.md):
   organelles placed in a crowded tomogram, with proteins embedded in them.
 - [Membrane shape](../concepts/membrane-shape/index.md): the method.

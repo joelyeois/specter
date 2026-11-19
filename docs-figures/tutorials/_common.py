@@ -5,13 +5,22 @@ The walkthrough's (``docs-figures/walkthrough/_common.py``), reused as is but
 writing figures to docs/assets/images/tutorials/ and printed output to
 docs-includes/tutorials/. See that module for how a page quotes a script.
 
+A short recipe (docs/tutorials/index.md lists them apart) differs in one way:
+its page quotes the whole script body as a single block a reader can paste
+and run, so its plotting stays inside the quoted section, in plain
+matplotlib ending in ``plt.show()``.
+
 Run a tutorial with ``uv run python docs-figures/tutorials/<page>.py``.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import warnings
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 _path = Path(__file__).resolve().parents[1] / "walkthrough" / "_common.py"
 _spec = importlib.util.spec_from_file_location("_walkthrough_common", _path)
@@ -35,3 +44,18 @@ radial_average = _base.radial_average
 radial_power = _base.radial_power
 save = _base.save
 show_image = _base.show_image
+
+# A quoted recipe ends in plt.show(), which the Agg backend answers with a
+# warning; the figure is saved after the quoted section.
+warnings.filterwarnings("ignore", message=".*non-interactive.*")
+
+
+def thumbnail(image: np.ndarray, name: str, cmap: str = "gray_r") -> None:
+    """A recipe's square index card: one borderless panel, 1-99% stretch."""
+    lo, hi = np.percentile(image, [1, 99])
+    fig, ax = plt.subplots(figsize=(3, 3))
+    show_image(ax, image, cmap=cmap, vmin=lo, vmax=hi)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    fig.subplots_adjust(0, 0, 1, 1)
+    save(fig, f"{name}-thumbnail")

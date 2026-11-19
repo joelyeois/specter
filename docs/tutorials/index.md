@@ -7,6 +7,8 @@ figures, built from a script in
 that you can run yourself with `uv run python docs-figures/tutorials/<name>.py`.
 Read them in any order.
 
+## In depth
+
 <div class="grid cards" markdown>
 
 -   [![Simulating a real dataset](../assets/images/tutorials/real_dataset-thumbnail.png)](real-dataset.md)
@@ -57,6 +59,31 @@ Read them in any order.
 
     Optimise amorphous ice against its structure factor, and draw and tile
     crops of it at the voxel size you need.
+
+</div>
+
+## Short recipes
+
+A recipe is one task and one figure, in a single block of code to copy and
+adapt, plotting included. One tagged `basic` uses the high-level objects and
+their defaults. One tagged `specialized` reaches below them, into the engines
+or the geometry.
+
+<div class="grid cards" markdown>
+
+-   [![The four organelle kinds](../assets/images/tutorials/membrane_organelles-thumbnail.png)](membrane-organelles.md)
+
+    **[The four organelle kinds](membrane-organelles.md)**
+
+    `basic` · A vesicle, a branched tubule, a cisterna and a mitochondrion
+    from `MembraneGenerator`.
+
+-   [![Composing a membrane from primitives](../assets/images/tutorials/membrane_primitives-thumbnail.png)](membrane-primitives.md)
+
+    **[Composing a membrane from primitives](membrane-primitives.md)**
+
+    `specialized` · A budding vesicle from two balls and a tube, regularised
+    and rendered as a bilayer.
 
 </div>
 

@@ -89,6 +89,9 @@ nav:
           - Gradients through the forward model: tutorials/differentiable.md
           - Composing a forward model by hand: tutorials/custom-forward-model.md
           - Building an ice library: tutorials/ice-library.md
+          - Short recipes:
+              - The four organelle kinds: tutorials/membrane-organelles.md
+              - Composing a membrane from primitives: tutorials/membrane-primitives.md
       - Command-line guides:
           - Simulate:
               - Generate a particle stack: user-guide/particle-stack.md
@@ -104,10 +107,6 @@ nav:
               - Configure a run: user-guide/configuration.md
               - Manage jobs: user-guide/jobs.md
               - Manage the PDB cache: user-guide/cache.md
-      - Example gallery:
-          - gallery.md
-          - The four organelle kinds: recipes/membrane-organelles.md
-          - Composing a membrane from primitives: recipes/membrane-primitives.md
   - Theory:
       - Overview: concepts/index.md
       - Pipeline overview: concepts/pipeline-overview.md

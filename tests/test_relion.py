@@ -468,6 +468,30 @@ def test_read_mrc_warns_on_a_non_standard_axis_order(tmp_path) -> None:
         read_mrc(path)
 
 
+def test_read_mrc_warns_on_unequal_voxel_sizes(tmp_path) -> None:
+    """One voxel size is all `read_mrc` returns, so a volume sampled
+    differently along z would be used distorted; it says so. The z size of an
+    image stack is not a sampling interval and is not compared."""
+    import warnings
+
+    import mrcfile
+    import numpy as np
+
+    from specter.io import read_mrc, write_mrc
+
+    volume, stack = tmp_path / "v.mrc", tmp_path / "s.mrcs"
+    for path in (volume, stack):
+        write_mrc(path, np.ones((4, 6, 6)), 1.0)
+        with mrcfile.open(path, mode="r+") as mrc:
+            mrc.voxel_size = (1.0, 1.0, 2.0)
+    with pytest.warns(UserWarning, match=r"unequal voxel sizes.*\(1, 1, 2\)"):
+        _, voxel_size = read_mrc(volume)
+    assert voxel_size == pytest.approx(1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        read_mrc(stack)
+
+
 def test_phase_shift_is_written_in_degrees_and_read_back(tmp_path) -> None:
     """RELION's rlnPhaseShift is in degrees; specter carries radians. A
     nonzero shift is needed: zero reads the same in either unit."""

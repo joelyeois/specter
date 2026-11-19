@@ -82,6 +82,13 @@ def read_mrc(path: str | os.PathLike[str]) -> tuple[torch.Tensor, float]:
         The file's array, float32, on the host.
     voxel_size : float
         The header's x voxel size in Å.
+
+    Warns
+    -----
+    UserWarning
+        When the header declares a non-standard axis order, or voxel sizes
+        that differ between axes; the array is returned as stored in both
+        cases.
     """
     with mrcfile.open(os.fspath(path), permissive=True) as mrc:
         axes = tuple(int(mrc.header[k]) for k in ("mapc", "mapr", "maps"))
@@ -96,5 +103,20 @@ def read_mrc(path: str | os.PathLike[str]) -> tuple[torch.Tensor, float]:
                 "order first.",
                 stacklevel=2,
             )
+        size = mrc.voxel_size
+        # The z size of a stack of images means nothing, and programs write
+        # anything there; an axis the header leaves at zero is unset.
+        in_plane = mrc.data.ndim < 3 or mrc.is_image_stack()
+        sizes = [float(size.x), float(size.y)] + ([] if in_plane else [float(size.z)])
+        sizes = [s for s in sizes if s > 0]
+        if sizes and max(sizes) - min(sizes) > 1e-3 * max(sizes):
+            warnings.warn(
+                f"{os.fspath(path)}: the MRC header gives unequal voxel sizes "
+                f"(x, y, z) = ({size.x:g}, {size.y:g}, {size.z:g}) A. specter "
+                f"works on cubic voxels and takes the x size, {size.x:g} A, for "
+                "every axis, which distorts the object; resample the file to "
+                "cubic voxels first.",
+                stacklevel=2,
+            )
         data = torch.from_numpy(np.array(mrc.data, dtype=np.float32))
-        return data, float(mrc.voxel_size.x)
+        return data, float(size.x)

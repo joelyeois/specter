@@ -520,6 +520,9 @@ Every MRC file `specter` writes follows one header convention:
 On reading, `specter` takes the array as stored and the voxel size from the
 header. It ignores the origin, and warns when the header declares a
 non-standard axis order, because the array is not transposed to correct it.
+It also warns when the voxel sizes of a volume differ between axes: every
+grid in `specter` has cubic voxels, so the x size is taken for all three
+and such a file must be resampled first.
 
 ## Reproducibility
 

@@ -105,6 +105,18 @@ print(f"±60° about x samples {need_y} voxels along y of a {nz}-voxel slab")
 print(f"with margins {target[0]} x {target[1]} in Y x X; the volume is {ny} x {nx}")
 # --8<-- [end:fit]
 
+transcript.start("spline")
+# --8<-- [start:spline]
+from specter import rotations
+
+spline_margin = 8  # vacuum slices per face, for the coefficients to decay in
+
+volume = torch.nn.functional.pad(volume, (0, 0, 0, 0, spline_margin, spline_margin))
+rotations.cubic_bspline_coefficients_(volume)  # in place
+nz_fitted = volume.shape[-3]
+print(f"{nz} slices of specimen in {nz_fitted}, held as spline coefficients")
+# --8<-- [end:spline]
+
 transcript.start("engines")
 # --8<-- [start:engines]
 from specter.aberrations import Aberration, FocalSpread
@@ -126,6 +138,7 @@ scattering = IterativeScattering(
     roi_padding_mode="zeros",  # outside the volume is vacuum
     progressbars=False,
 ).to("cuda")
+scattering.interpolation = "cubic"  # the volume holds spline coefficients
 wide = scattering.output_nxy  # the canvas: n + 2 * margin pixels
 
 lens = Aberration(
@@ -149,7 +162,6 @@ print(f"canvas {wide} px, propagated on {wide * oversample}")
 
 transcript.start("tilt")
 # --8<-- [start:tilt]
-from specter import rotations
 from specter.aberrations import defocus_midplane_shift
 
 volume = volume.to("cuda")
@@ -171,7 +183,7 @@ def record(i):
     # The wave left the tilted column's exit face; the nominal defocus is
     # that of the specimen's midplane, half the tilted depth above it.
     depth = tilt.nz_tilt_for_pose(tuple(volume.shape), theta)
-    shift = defocus_midplane_shift(nz, px) - (depth - nz) * px / 2.0
+    shift = defocus_midplane_shift(nz_fitted, px) - (depth - nz_fitted) * px / 2.0
     params = {k: v.to("cuda") for k, v in ctf[i : i + 1].params.items()}
     params["dfu"] = params["dfu"] - shift
     params["dfv"] = params["dfv"] - shift

@@ -1,4 +1,4 @@
 by hand: (21, 256, 256); largest difference 0.0e+00
- +0°:  64 slices,  256 Å; defocus shift  -128 Å
-+30°: 408 slices, 1632 Å; defocus shift  -816 Å
-+60°: 642 slices, 2568 Å; defocus shift -1284 Å
+ +0°:  80 slices,  320 Å; defocus shift  -160 Å
++30°: 422 slices, 1688 Å; defocus shift  -844 Å
++60°: 650 slices, 2600 Å; defocus shift -1300 Å

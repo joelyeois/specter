@@ -87,6 +87,27 @@ that falls short. This volume was built 704 voxels wide, so nothing is padded
 and no reflected material enters an image; a volume built at the image's own
 width would be mirrored outwards at its edges.
 
+## Spline coefficients
+
+A tilted view samples its slices between the voxels of the volume. A tilt
+series interpolates there with a cubic B-spline, which reads the spline's
+coefficients in place of the voxel values:
+
+```python
+--8<-- "docs-figures/tutorials/tilt_series_engines.py:spline"
+```
+
+```{ .text .output }
+--8<-- "docs-includes/tutorials/tilt_series_engines-spline.txt"
+```
+
+The coefficients extend past a face the specimen reaches, as the ice does in
+z, and decay by 0.27 per voxel beyond it. Eight slices of vacuum above and
+below hold them; without the margin each face would gain 0.2 voxels of
+material. `cubic_bspline_coefficients_` then solves for the coefficients in
+place. `TiltSeries(interpolation="linear")` selects trilinear sampling, which
+needs neither step.
+
 ## The engines
 
 Four engines are built once and serve every tilt:
@@ -101,7 +122,8 @@ Four engines are built once and serve every tilt:
 
 `IterativeScattering` is the multislice engine for a volume too large to
 rotate whole: it samples the volume slice by slice along the tilted beam.
-Three of its settings differ from a particle's. `pad_fft=True` propagates on a
+Four of its settings differ from a particle's. `interpolation = "cubic"`
+reads the volume as the spline coefficients it now holds. `pad_fft=True` propagates on a
 canvas 32 pixels wider than the image on each side: a uniform slab at 60°
 images 16% off flat at the frame edge with no margin, and 0.3% off with this
 one.
@@ -126,13 +148,14 @@ detector:
 
 The defocus correction is the step with no counterpart in a particle stack.
 The engine propagates through the whole depth the tilted volume spans along
-the beam, which `tilt.nz_tilt_for_pose` returns: 64 slices untilted, and 642
-at 60°, where the 704-voxel width of the slab lies mostly along the beam. The
+the beam, which `tilt.nz_tilt_for_pose` returns: 80 slices untilted, the slab
+and its spline margin, and 650 at 60°, where the 704-voxel width of the slab
+lies mostly along the beam. The
 wave therefore leaves half that depth below the specimen's centre, while the
 nominal defocus is the centre's. The shift is minus that distance, and it is
 subtracted from the defocus before the lens acts
 ([The defocus reference plane](../concepts/conventions.md#the-defocus-reference-plane)).
-Omitting it at 60° would image the specimen 1284 Å further from focus than
+Omitting it at 60° would image the specimen 1300 Å further from focus than
 the transfer function says.
 
 ![The propagated depth and the defocus shift against tilt angle.](../assets/images/tutorials/tilt_series_engines-depth.png){ width="800" style="display:block;margin:1.2em auto;" }

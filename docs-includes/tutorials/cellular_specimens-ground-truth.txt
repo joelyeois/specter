@@ -1,23 +1,22 @@
 shell      3.6% of the volume
 lumen      0.8% of the volume
 cytosol   95.6% of the volume
-instance ids: 1765, membrane ids: 3
-1BXN-lumen-1.0_orientedpoint.ndjson              5 picks
-1BXR-cytosol-1.0_orientedpoint.ndjson          179 picks
+instance ids: 1860, membrane ids: 3
+1BXN-lumen-1.0_orientedpoint.ndjson              7 picks
+1BXR-cytosol-1.0_orientedpoint.ndjson          202 picks
 1C3W-transmembrane-1.0_orientedpoint.ndjson     60 picks
-1GYT-cytosol-1.0_orientedpoint.ndjson          207 picks
-1KP8-cytosol-1.0_orientedpoint.ndjson          200 picks
-1KYI-cytosol-1.0_orientedpoint.ndjson          209 picks
-1QO1-cytosol-1.0_orientedpoint.ndjson            2 picks
-1VPX-cytosol-1.0_orientedpoint.ndjson          158 picks
-1VRG-cytosol-1.0_orientedpoint.ndjson          197 picks
-1YG6-cytosol-1.0_orientedpoint.ndjson          147 picks
-2GHO-cytosol-1.0_orientedpoint.ndjson           15 picks
-2GLS-cytosol-1.0_orientedpoint.ndjson          134 picks
-3DY4-cytosol-1.0_orientedpoint.ndjson          212 picks
+1GYT-cytosol-1.0_orientedpoint.ndjson          193 picks
+1KP8-cytosol-1.0_orientedpoint.ndjson          211 picks
+1KYI-cytosol-1.0_orientedpoint.ndjson          203 picks
+1VPX-cytosol-1.0_orientedpoint.ndjson          191 picks
+1VRG-cytosol-1.0_orientedpoint.ndjson          233 picks
+1YG6-cytosol-1.0_orientedpoint.ndjson          163 picks
+2GHO-cytosol-1.0_orientedpoint.ndjson            8 picks
+2GLS-cytosol-1.0_orientedpoint.ndjson          173 picks
+3DY4-cytosol-1.0_orientedpoint.ndjson          176 picks
 3JAL-mtdimer-microtubule-1.0_path.ndjson         2 picks
 6QZP-cytosol-1.0_orientedpoint.ndjson           12 picks
-7BT7-filament-1.0_orientedpoint.ndjson         583 picks
+7BT7-filament-1.0_orientedpoint.ndjson         525 picks
 7BT7-filament-1.0_path.ndjson                    8 picks
 7VD8-cytosol-1.0_orientedpoint.ndjson           12 picks
 gold-bead-1.0_point.ndjson                       6 picks

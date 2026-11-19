@@ -1,0 +1,1 @@
+64 slices of specimen in 80, held as spline coefficients

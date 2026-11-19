@@ -46,6 +46,7 @@ specter reconstruct particle [OPTIONS]
 | `--batchsize` | `INTEGER` | `3` | Particles per optimisation step. |
 | `--solver` | `converged` \| `adam` | `converged` | converged (the default): after the Adam epochs, solve each half to the minimum of the image loss plus a Wiener prior from the Adam half-maps' FSC. adam: keep the Adam maps. Gold runs only. |
 | `--solver_iterations` | `INTEGER` | `4` | Conjugate-gradient iterations of the converged solve, per half. |
+| `--solver_batchsize` | `INTEGER` | `auto` | Particles per forward pass of the converged solve. 'auto' (the default; TOML only) predicts the largest batch that fits in device memory; an integer fixes it. The solution does not depend on it. |
 | `--lr` | `FLOAT` | `0.1` | Learning rate for the volume. Unset (None) freezes the volume, which is what refining poses alone means. |
 | `--scheduler` | `LambdaLR` \| `OneCycleLR` \| `CosineAnnealingWarmRestarts` \| `MultiplicativeLR` | `LambdaLR` | Learning-rate schedule for the volume optimiser. |
 | `--lr_decay` | `FLOAT` | `0.1` | Decay rate for the LambdaLR schedule: multiplier = 1 / (1 + lr_decay * sqrt(global_step)). Unused by other schedulers. |
@@ -73,7 +74,7 @@ specter reconstruct particle [OPTIONS]
 | --- | --- | --- | --- |
 | `--device` | `TEXT` | `cuda` | cpu \| cuda \| cuda:N \| a bare GPU index \| a comma-separated list of GPU indices (0,1), which trains data-parallel across them, one process each, with gradients averaged every step. |
 | `--precision` | `TEXT` | `16-mixed` | Training precision: 16-mixed, bf16-mixed or 32. Forced to 32 on CPU. |
-| `--micro_batchsize` | `INTEGER` | _none_ | Run each batch through the forward and backward this many particles at a time, accumulating the gradient, and step once: the same update in less device memory. Unset runs each batch in one pass; 'auto' (TOML only) halves from the batch size on an out-of-memory error. |
+| `--micro_batchsize` | `INTEGER` | _none_ | Run each batch through the forward and backward this many particles at a time, accumulating the gradient, and step once: the same update in less device memory. Unset runs each batch in one pass; 'auto' (TOML only) predicts the largest chunk that fits in device memory. |
 | `--num_workers` | `INTEGER` | `0` | Dataloader worker processes; 0 avoids multiprocessing for resident images. |
 
 **Output & job tracking**{ #specter-reconstruct-particle-output-job-tracking }

@@ -32,9 +32,10 @@ References
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import torch
@@ -46,6 +47,7 @@ from .. import nufft
 from ..fft import frequency_shells
 from ..symmetries import apply_symmetry
 from ._helpers import _apply_kmask_inplace
+from ._memory import BatchPrediction, predict_batchsize
 from ._resolution import spherical_mask, unfilter
 
 if TYPE_CHECKING:
@@ -55,6 +57,16 @@ if TYPE_CHECKING:
 #: gradient pass. See `specter.nufft.adjoint_tolerance`.
 ADJOINT_TOLERANCE = 1e-4
 
+#: Map-sized float32 tensors an iteration keeps alive through its line search
+#: beyond the map itself: this and the previous iteration's ``g``, ``z`` and
+#: ``d``, the move ``d_map``, and the prior weight and preconditioner (half
+#: spectra, one between them). The batch-size probe holds as many, since they
+#: do not exist yet when it runs.
+_HELD_VOLUMES = 8
+
+#: The ``"auto"`` batch size on the CPU, where there is no device to probe.
+_CPU_BATCHSIZE = 128
+
 
 def out_of_memory(error: BaseException) -> bool:
     """Whether `error` is a device allocation failure, PyTorch's or cuFINUFFT's."""
@@ -63,6 +75,23 @@ def out_of_memory(error: BaseException) -> bool:
     message = str(error)
     return isinstance(error, RuntimeError) and (
         "out of memory" in message or "non-uniform points" in message
+    )
+
+
+def _log_memory(device: torch.device, stage: str) -> None:
+    """
+    Log device memory at debug level: the driver's view and torch's.
+
+    ``torch.cuda.mem_get_info`` is the only one of the three that sees
+    cuFINUFFT's plans, which allocate outside torch's caching allocator.
+    """
+    if device.type != "cuda" or not logger.isEnabledFor(logging.DEBUG):
+        return
+    free, total = torch.cuda.mem_get_info(device)
+    logger.debug(
+        f"memory {stage}: device {(total - free) / 2**30:.2f}/{total / 2**30:.2f} GiB "
+        f"used, torch {torch.cuda.memory_allocated(device) / 2**30:.2f} GiB "
+        f"allocated, {torch.cuda.memory_reserved(device) / 2**30:.2f} GiB reserved"
     )
 
 
@@ -104,10 +133,12 @@ class ConvergedSolver:
     ssnr : numpy.ndarray
         Half-map SSNR per Fourier shell, ``n // 2 + 1`` values (see
         `ssnr_from_fsc`).
-    batchsize : int
-        Largest number of particles per forward pass. Halved until a pass
-        fits in device memory; the result does not depend on it, since
-        every iteration sums over every particle.
+    batchsize : int or "auto"
+        Particles per forward pass. ``"auto"`` (the default) predicts the
+        largest batch that fits in device memory from the measured peak of
+        an iteration's work at a few small batch sizes (`predict_batchsize`);
+        on the CPU it is 128. The result does not depend on it, since every
+        iteration sums over every particle.
     line_search_fraction : float
         Fraction of particles the step length is refined on.
     seed : int
@@ -145,7 +176,7 @@ class ConvergedSolver:
         model: Reconstructor,
         images: torch.Tensor,
         ssnr: np.ndarray,
-        batchsize: int = 128,
+        batchsize: int | Literal["auto"] = "auto",
         line_search_fraction: float = 0.05,
         seed: int = 0,
         label: str = "",
@@ -157,7 +188,18 @@ class ConvergedSolver:
         self.n_particles = len(images)
         self.n = int(model.V.shape[-1])
         self.level = float(model.dose_per_angstrom * model.voxel_size**2)
-        self.batchsize = batchsize
+        if batchsize != "auto" and (
+            not isinstance(batchsize, int)
+            or isinstance(batchsize, bool)
+            or batchsize < 1
+        ):
+            raise ValueError(
+                f"batchsize={batchsize!r} must be a positive integer or 'auto'"
+            )
+        self._requested_batchsize = batchsize
+        self.batchsize = self.n_particles if batchsize == "auto" else batchsize
+        #: The memory probe behind an ``"auto"`` batch size, once `solve` has run.
+        self.batch_prediction: BatchPrediction | None = None
         self.line_search_fraction = line_search_fraction
         self.seed = seed
         self._tag = f"converged solver{f' ({label})' if label else ''}"
@@ -190,21 +232,68 @@ class ConvergedSolver:
         )
 
     def _batches(self, idx: torch.Tensor) -> list[torch.Tensor]:
-        return list(idx.split(self.batchsize))
+        """
+        `idx` in the fewest batches of at most `batchsize`, equal to within one.
 
-    def _fit_batchsize(self, V: torch.Tensor) -> None:
-        """Halve the batch size until one gradient batch fits in memory."""
+        Not full batches and a short last one: the last batch's allocations
+        do not fit the blocks PyTorch's cache holds for the others, and a
+        line search of 150 particles at 59 (59, 59, 32) peaked 4.5 GiB, 12%,
+        above one of 59, which the batch-size probe measures. Three of 50
+        stay below it.
+        """
+        return list(idx.tensor_split(-(-len(idx) // self.batchsize)))
 
-        def probe() -> None:
-            idx = torch.arange(
-                min(self.batchsize, self.n_particles), device=self.device
-            )
-            X = V.detach().clone().requires_grad_(True)
-            with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
-                r = self._predict(idx, X) - self._batch_images(idx)
-                (0.5 * (r**2).sum()).backward()
+    def _choose_batchsize(self, V: torch.Tensor) -> None:
+        """
+        Predict the batch size from the memory a few small batches need.
 
-        self._retrying(probe)
+        The probe does a gradient pass, a curvature pass and a loss-change
+        pass, the work of an iteration, while holding the map-sized tensors
+        an iteration holds through its line search (`_HELD_VOLUMES`), so the
+        prediction covers the line search's peak and not only the gradient's.
+        """
+        if self._requested_batchsize != "auto":
+            return
+        if self.device.type != "cuda":
+            self.batchsize = min(_CPU_BATCHSIZE, self.n_particles)
+            return
+        gen = torch.Generator(device=self.device).manual_seed(self.seed)
+        d = torch.randn(V.shape, device=self.device, generator=gen)
+        d /= d.norm()
+        step = self._step_size(V, d)
+
+        def work(b: int) -> None:
+            self.batchsize = b
+            idx = torch.arange(b, device=self.device)
+            held = [torch.empty_like(V) for _ in range(_HELD_VOLUMES)]
+            grad, _ = self._gradient_pass(V, idx)
+            del grad
+            self._release()  # as `solve` does before its line search
+            self._curvature_pass(V, d, step, idx)
+            self._loss_changes_pass(V, d, [0.5 * step, step], idx)
+            del held
+
+        self.batch_prediction = predict_batchsize(
+            work, self.device, self.n_particles, label=self._tag
+        )
+        self.batchsize = self.batch_prediction.batchsize
+
+    def _release(self) -> None:
+        """
+        Free the NUFFT plans and PyTorch's cached blocks.
+
+        A plan is cached per batch size it meets (the anisomag warp pads a
+        batch, or each matrix group in it, to a power of two), so line-search
+        subsets that split differently every iteration kept adding plans,
+        and the line search's peak crept up from one iteration to the next
+        (42.0 to 42.4 GiB over four, with one anisomag matrix, 3000
+        particles at a 320 box). Released at the start of an iteration and
+        of its line search, the plans held are one pass's. PyTorch's cache,
+        emptied too, would otherwise keep what the last pass freed from
+        cuFINUFFT, which allocates from the driver: up to 40 GiB reserved
+        against 2 GiB allocated, measured between passes.
+        """
+        nufft.clear_plan_cache()
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
 
@@ -215,6 +304,10 @@ class ConvergedSolver:
         On a shared GPU another process can take memory mid-solve; the pass is
         redone from its start with smaller batches, which changes nothing but
         speed, since every pass sums over its particles regardless of batch.
+        This is a fallback, and catches PyTorch's allocation failures only:
+        when cuFINUFFT's own ``cudaMalloc`` fails, the CUDA context is left
+        unusable and the redone pass fails too (``cudaErrorInvalidValue``).
+        Keeping clear of that is `_choose_batchsize`'s job.
         """
         while True:
             try:
@@ -239,14 +332,17 @@ class ConvergedSolver:
         )
         return result
 
-    def _gradient_pass(self, V: torch.Tensor) -> tuple[torch.Tensor, float]:
+    def _gradient_pass(
+        self, V: torch.Tensor, idx: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, float]:
+        """Data-term gradient and loss over `idx`, every particle by default."""
+        if idx is None:
+            idx = torch.arange(self.n_particles, device=self.device)
         X = V.detach().clone().requires_grad_(True)
         total = torch.zeros((), device=self.device, dtype=torch.float64)
         with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
-            for idx in self._batches(
-                torch.arange(self.n_particles, device=self.device)
-            ):
-                r = self._predict(idx, X) - self._batch_images(idx)
+            for b in self._batches(idx):
+                r = self._predict(b, X) - self._batch_images(b)
                 loss = 0.5 * (r**2).sum()
                 loss.backward()
                 total += loss.detach().double()
@@ -448,7 +544,7 @@ class ConvergedSolver:
         # an Adam map's norm on EMPIAR-12391) changes 14% per application, the
         # whole map 2%, and the projected iteration walked uphill.
         V = self._project(V.to(self.device, torch.float32))  # the map for U = the start
-        self._fit_batchsize(V)
+        self._choose_batchsize(V)
 
         t0 = time.perf_counter()
         bands, low = self.measure_curvature(V)
@@ -481,7 +577,10 @@ class ConvergedSolver:
         z_prev: torch.Tensor | None = None
         for it in range(n_iter):
             t0 = time.perf_counter()
+            self._release()
+            _log_memory(self.device, f"iteration {it + 1} start")
             grad, data_loss = self._gradient(V)
+            _log_memory(self.device, f"iteration {it + 1} after gradient")
             lam_V = self._filter(V, lam)
             objective = data_loss + 0.5 * float((V * lam_V).sum())
             grad_V = grad + lam_V  # dObjective/dV
@@ -518,6 +617,8 @@ class ConvergedSolver:
                 self.line_search_fraction, 32, self.n_particles, cpu_gen
             )
             per_particle = self.n_particles / len(subset)
+            self._release()
+            _log_memory(self.device, f"iteration {it + 1} before line search")
             curvature = (
                 self._curvature(V, d_map, self._step_size(V, d_map), subset)
                 * per_particle
@@ -540,6 +641,7 @@ class ConvergedSolver:
                 denominator = data_curvature + d_lam_d
                 a_star = -slope / denominator if denominator > 0 else alpha
                 alpha = float(np.clip(a_star, 0.05 * alpha, 2.0 * alpha))
+            _log_memory(self.device, f"iteration {it + 1} after line search")
             V = V + alpha * d_map  # the map of U + alpha d, the map being linear in U
             del d_map
             d_prev, g_prev, z_prev = d, g, z
@@ -554,12 +656,19 @@ class ConvergedSolver:
             logger.info(
                 f"{self._tag}: iteration {it + 1}/{n_iter}, objective {objective:.6g}, {entry['seconds']:.0f} s"
             )
-            if self.device.type == "cuda":
-                torch.cuda.empty_cache()
 
+        prediction = self.batch_prediction
         info = dict(
             n_particles=self.n_particles,
             batchsize=self.batchsize,
+            batch_prediction=None
+            if prediction is None
+            else dict(
+                batchsize=prediction.batchsize,
+                fixed_gib=round(prediction.fixed / 2**30, 3),
+                per_particle_gib=round(prediction.per_particle / 2**30, 4),
+                free_gib=round(prediction.free / 2**30, 2),
+            ),
             curvature_seconds=round(t_curvature, 1),
             seconds=round(time.perf_counter() - t_start, 1),
             band_curvature=bands.tolist(),

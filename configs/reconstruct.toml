@@ -37,6 +37,8 @@ solver = "converged"   # gold runs: after the Adam epochs, solve each half to th
                        # of the loss plus a Wiener prior from the Adam halves' FSC;
                        # "adam" keeps the Adam maps
 solver_iterations = 4  # conjugate-gradient iterations per half, about an epoch each
+solver_batchsize = "auto"  # particles per pass of the converged solve; "auto" predicts
+                           # the largest that fits in device memory, an integer fixes it
 lr = 0.1               # volume learning rate; unset to freeze the volume
 scheduler = "LambdaLR"
 lr_decay = 0.1         # LambdaLR only: multiplier = 1 / (1 + lr_decay * sqrt(step))
@@ -61,7 +63,7 @@ bin_factor = 8
 device = "cuda"        # cpu | cuda | cuda:1 | 0,1 (trains data-parallel across both)
 precision = "16-mixed" # forced to 32 on CPU
 # micro_batchsize = 16  # particles per forward+backward within a batch; the same
-                        # update in less memory. "auto" halves on out-of-memory
+                        # update in less memory. "auto" predicts the largest that fits
 num_workers = 0       # images are already resident; worker processes add IPC overhead
 
 # Every run is numbered and tracked -- there is no untracked mode, the way

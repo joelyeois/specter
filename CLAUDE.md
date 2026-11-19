@@ -194,6 +194,7 @@ Alternative losses (`use_ncc`, `learn_noise_model`, `nps_weight`, `use_2d_mask`,
 
 - `finufft`/`cufinufft` back `nufft.py`; `cufinufft` is off on macOS, where `finufft` runs the same transform on the CPU, as it does when cuFINUFFT cannot load.
 - `vesin-torch` replaced the old ASE-based neighbour search for the MLBOP ice energy.
+- `nvidia-ml-py` (NVML) gives `ghostbuster/_memory.py` this process's own device memory, cuFINUFFT's allocations included, which neither PyTorch's statistics nor `mem_get_info` (shared with other jobs) isolate. Off on macOS; without it the batch probe falls back to device-wide use.
 - `cupy-cuda12x` is a core dependency on Linux/Windows (membrane distance transform), absent on macOS where scipy's CPU path takes over.
 - `connected-components-3d` (`cc3d`) is LGPL-3.0, used unmodified as a runtime dependency (3.7-5x faster than `scipy.ndimage.label` for the tomogram region labelling).
 - `ase` and `seaborn` are `dev`-group dependencies only. `plots.py` hardcodes seaborn's "deep" palette, but seaborn stays in the dev group for development plotting — do not remove it.

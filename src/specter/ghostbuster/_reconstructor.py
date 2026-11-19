@@ -26,6 +26,7 @@ from ..fsc import MAP_TO_MODEL_FSC_THRESHOLD, FSCCurve, fsc_curve
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
 from ._converge import ADJOINT_TOLERANCE, out_of_memory
+from ._memory import predict_batchsize
 from ._io import (
     save_fsc_figure,
     save_halfmap_fsc_figure,
@@ -118,8 +119,10 @@ class Reconstructor(_BaseReconstructor):
         accumulated, each chunk's loss weighted by its share of the batch,
         before the optimisers step once: the same update as the whole batch
         in one pass, to float rounding, in the memory of one chunk. ``"auto"``
-        starts at the batch size and halves on a device out-of-memory error,
-        redoing the step. None (default) runs each batch in one pass.
+        predicts the largest chunk that fits in device memory from probes of
+        small chunks on the first step (see
+        `specter.ghostbuster._memory.predict_batchsize`), and halves it on a
+        PyTorch out-of-memory error, redoing the step. None (default) runs each batch in one pass.
     run_dir : str or Path, optional
         Directory to write per-epoch volumes, final volume, and metadata into.
         ``None`` disables all file output.
@@ -628,15 +631,21 @@ class Reconstructor(_BaseReconstructor):
     ) -> torch.Tensor:
         """
         `_accumulate` the batch's gradient; under ``micro_batchsize="auto"``,
-        halve the chunk on an out-of-memory error and redo the batch.
+        predict the chunk on the first step (`_predict_micro_batchsize`), and
+        halve it on an out-of-memory error and redo the batch.
 
-        The chunk size reached is kept for the steps that follow.
+        The chunk size reached is kept for the steps that follow. The halving
+        is a fallback for PyTorch's allocation failures only: a failed
+        allocation inside cuFINUFFT leaves the CUDA context unusable, and the
+        redone batch fails too.
         """
         n = len(batch[1])
         while True:
             if self.micro_batchsize == "auto":
                 if self._auto_micro_batchsize is None:
-                    self._auto_micro_batchsize = n
+                    self._auto_micro_batchsize = self._predict_micro_batchsize(
+                        batch, batch_idx
+                    )
                 size = min(self._auto_micro_batchsize, n)
             else:
                 assert isinstance(self.micro_batchsize, int)
@@ -661,11 +670,36 @@ class Reconstructor(_BaseReconstructor):
             if batch[0].is_cuda:
                 torch.cuda.empty_cache()
 
+    def _predict_micro_batchsize(
+        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> int:
+        """
+        The chunk size that fits in device memory, from probes of small chunks.
+
+        The probe accumulates a chunk's gradient while holding two map-sized
+        tensors for AdamW's moments, which its first step creates. On the CPU
+        the whole batch.
+        """
+        images, idx = batch
+        n = len(idx)
+        if not self.V.is_cuda:
+            return n
+        held = 2 if self.lr is not None else 0
+
+        def work(b: int) -> None:
+            moments = [torch.empty_like(self.V) for _ in range(held)]
+            self._accumulate((images[:b], idx[:b]), batch_idx, b)
+            del moments
+
+        return predict_batchsize(
+            work, self.V.device, n, label="micro_batchsize"
+        ).batchsize
+
     def _accumulate(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int, size: int
     ) -> torch.Tensor:
         """
-        Zero the gradients and accumulate the batch's in chunks of ``size``.
+        Zero the gradients and accumulate the batch's in chunks of at most ``size``.
 
         Returns
         -------
@@ -676,8 +710,11 @@ class Reconstructor(_BaseReconstructor):
         n = len(idx)
         self._zero_grad()
         losses = []
-        for start in range(0, n, size):
-            chunk = (images[start : start + size], idx[start : start + size])
+        # Chunks equal to within one rather than full ones and a short last
+        # one, whose allocations do not fit the blocks PyTorch's cache holds
+        # for the others (see `ConvergedSolver._batches`).
+        k = -(-n // size)
+        for chunk in zip(images.tensor_split(k), idx.tensor_split(k), strict=True):
             loss, _, _ = self._common_step(chunk, batch_idx)
             weighted = loss * (len(chunk[1]) / n)
             with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):

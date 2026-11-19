@@ -76,6 +76,7 @@ _NON_GHOSTBUSTER_FIELDS = frozenset(
         "device",
         "solver",
         "solver_iterations",
+        "solver_batchsize",
         "project",
         "job_id",
         "output_dir",
@@ -625,6 +626,7 @@ def _run_converged_halfset(
         model,
         images,
         np.asarray(ssnr),
+        batchsize=config.solver_batchsize,
         seed=0 if h == "A" else 1,
         label=h,
     )

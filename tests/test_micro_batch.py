@@ -212,3 +212,21 @@ def test_split_step_matches_under_16_mixed() -> None:
     for name in ("rotations", "translations", "defocus_offset"):
         a, b = getattr(split, name).detach(), getattr(whole, name).detach()
         torch.testing.assert_close(a, b, rtol=1e-4, atol=1e-5, msg=name)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+@pytest.mark.parametrize(("free", "chunk"), [(1.0, 1), (1e15, N_PARTICLES)])
+def test_auto_predicts_the_chunk_from_the_free_memory(
+    free: float, chunk: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a device, "auto" probes a chunk of one and of two particles and
+    takes the largest predicted to fit: one when almost nothing is free, the
+    whole batch when plenty is. Either way the step is the unsplit one."""
+    from specter.ghostbuster import _memory
+
+    problem = _problem(torch.float32)
+    whole = _train(problem, device=0)
+    monkeypatch.setattr(_memory, "_free_bytes", lambda device: free)
+    split = _train(problem, device=0, micro_batchsize="auto")
+    assert split._auto_micro_batchsize == chunk
+    torch.testing.assert_close(split.V, whole.V, rtol=1e-4, atol=1e-6)

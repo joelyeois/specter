@@ -33,6 +33,10 @@ dependencies = [
     "matplotlib>=3.10.6",
     "mrcfile>=1.5.4",
     "numpy>=2.3.3",
+    # NVML's per-process device memory (specter.ghostbuster._memory): the
+    # only view of this process's cuFINUFFT allocations that another job on
+    # the same GPU does not move. Pure Python over the driver's libnvidia-ml.
+    "nvidia-ml-py>=12.0; sys_platform != 'darwin'",
     "pandas>=2.3.3",
     "plotly>=6.3.1",
     "psutil>=5.9",
@@ -113,6 +117,7 @@ module = [
     "finufft.*",
     "ipywidgets.*",
     "mrcfile.*",
+    "pynvml.*",
     "pandas.*",
     "psutil.*",
     "requests.*",

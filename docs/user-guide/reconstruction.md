@@ -213,6 +213,30 @@ sixteen iterations, to $1 - \mathrm{FSC} \le 3 \times 10^{-6}$ in every band.
 An iteration costs about one Adam epoch. `--solver adam` keeps the Adam maps
 as the result.
 
+`solver_batchsize` sets how many particles pass through the forward model
+at once. It changes speed and device memory, not the solution, since every
+iteration sums over all particles. The default, `"auto"`, predicts the
+largest batch that fits before the solve begins. It runs one gradient pass
+and the line search's two passes on a single batch, while holding as many
+map-sized arrays as an iteration holds, and measures the peak device memory.
+Probes at one and two particles give a first estimate, and a third probe at
+a quarter of that estimate gives the line $m(b) = m_0 + m_1 b$ through the
+peaks at two particles and at the third probe, which is solved for the
+largest $b$ with $m(b) \le 0.85\,F$, where $F$ is the free device memory.
+Memory does not grow linearly from the first particle to the second, so the
+line is drawn through the larger batches. Every pass is split into batches
+equal to within one particle, since a short last batch fragments PyTorch's
+memory cache and raises the peak above what the probe measured. The peak is read
+from the driver for this process (NVML), because cuFINUFFT, which evaluates
+the anisotropic-magnification warp, the exact rotation and the exact
+point-group average, allocates outside PyTorch, where PyTorch's own memory
+statistics do not see it. An integer fixes the batch. The prediction is made
+in advance because an allocation that fails inside cuFINUFFT leaves the
+CUDA context unusable, so the batch cannot be found by halving it after an
+out-of-memory error. Halving remains as a fallback for errors raised by
+PyTorch's allocator, which it can recover from. The batch reached and the
+fit are recorded in `job.json`.
+
 ### Sharing a reference between halves
 
 `--fsc_ref` and `--cryosparc_ref` log a map-to-model FSC against a known
@@ -346,9 +370,10 @@ equals that of the whole batch in one pass, to floating-point rounding;
 under several GPUs the gradients are averaged once, after the last chunk.
 A multislice gradient at a 300-pixel box needs about 2 GB of device memory
 per particle, so a batch of 256 does not fit in one pass on any current
-GPU. Unset, a batch runs in one pass. In a TOML config, `"auto"` starts at
-the batch size and halves the chunk whenever the device runs out of memory,
-redoing that step.
+GPU. Unset, a batch runs in one pass. In a TOML config, `"auto"` predicts
+the chunk on the first step from the measured peak device memory of small
+chunks, in the way `solver_batchsize` does, and halves it if
+PyTorch then runs out of memory, redoing that step.
 
 Normalized particle stacks are converted to counts in bounded blocks,
 reusing their private storage. The conversion arithmetic and training

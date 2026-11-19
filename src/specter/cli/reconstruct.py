@@ -34,6 +34,7 @@ _RECONSTRUCT_PARTICLE_GROUPS: list[tuple[str, list[str]]] = [
             "batchsize",
             "solver",
             "solver_iterations",
+            "solver_batchsize",
             "lr",
             "scheduler",
             "lr_decay",

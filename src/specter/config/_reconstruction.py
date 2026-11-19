@@ -140,6 +140,23 @@ class ReconstructionConfig:
         help="Conjugate-gradient iterations of the converged solve, per half.",
         check="positive",
     )
+    # Particles per forward pass of the converged solve; the solution does not
+    # depend on it. "auto" predicts the largest batch that fits in device
+    # memory from probes of a few small batches, before the first pass:
+    # cuFINUFFT allocates outside PyTorch, and a failed allocation there
+    # leaves the CUDA context unusable, so the batch cannot be found by
+    # halving after an out-of-memory error. Config-only, as the CLI flag
+    # takes an integer.
+    solver_batchsize: int | Literal["auto"] = setting(
+        "auto",
+        help=(
+            "Particles per forward pass of the converged solve. 'auto' (the "
+            "default; TOML only) predicts the largest batch that fits in "
+            "device memory; an integer fixes it. The solution does not depend "
+            "on it."
+        ),
+        check="positive",
+    )
     # Volume learning rate. None freezes the volume, which is what refining
     # poses alone means.
     lr: float | None = setting(
@@ -242,17 +259,18 @@ class ReconstructionConfig:
     # Gradient accumulation: the batch's particles go through the forward and
     # backward this many at a time and the optimisers step once, which is the
     # unsplit update to float rounding. Memory, not speed: a multislice
-    # gradient at a 300 box needs ~2 GB per particle. "auto" starts at the
-    # batch size and halves on an out-of-memory error; config-only, as the
-    # CLI flag takes an integer.
+    # gradient at a 300 box needs ~2 GB per particle. "auto" predicts the
+    # chunk from probes of a few small chunks on the first step, and halves
+    # on a PyTorch out-of-memory error; config-only, as the CLI flag takes an
+    # integer.
     micro_batchsize: int | Literal["auto"] | None = setting(
         None,
         help=(
             "Run each batch through the forward and backward this many "
             "particles at a time, accumulating the gradient, and step once: "
             "the same update in less device memory. Unset runs each batch in "
-            "one pass; 'auto' (TOML only) halves from the batch size on an "
-            "out-of-memory error."
+            "one pass; 'auto' (TOML only) predicts the largest chunk that "
+            "fits in device memory."
         ),
         check="positive",
     )

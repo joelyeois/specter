@@ -44,7 +44,7 @@ of the command's `--help`, ending in `[advanced]`: what a first run has
 to decide is above that table, and what has a default that is usually
 right is below it. Copies you edit are free to depart from that.
 
-Seven commands each have their own config dataclass, and all but
+Eight commands each have their own config dataclass, and all but
 `specter match particles` ship a canonical TOML:
 
 | Command | Config dataclass | Example TOML |
@@ -54,6 +54,7 @@ Seven commands each have their own config dataclass, and all but
 | `specter simulate tiltseries` | `TiltSeriesConfig` | `configs/tiltseries.toml` |
 | `specter build tomogram` | `TomogramConfig` | `configs/tomogram.toml` |
 | `specter build ice` | `IceCacheConfig` | `configs/ice.toml` |
+| `specter build potential` | `PotentialConfig` | `configs/potential.toml` |
 | `specter reconstruct particle` | `ReconstructionConfig` | `configs/reconstruct.toml` |
 | `specter match particles` | `MatchConfig` | none |
 

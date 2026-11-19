@@ -6,8 +6,10 @@ import rich_click as click
 
 from specter.config import (
     ICE_CACHE_HELP,
+    POTENTIAL_HELP,
     TOMOGRAM_HELP,
     IceCacheConfig,
+    PotentialConfig,
     TomogramConfig,
 )
 
@@ -89,6 +91,15 @@ _ICE_GROUPS: list[tuple[str, list[str]]] = [
     ("Output", ["output_dir", "overwrite", "diagnostics"]),
 ]
 
+_POTENTIAL_GROUPS: list[tuple[str, list[str]]] = [
+    ("Structure", ["pdb_source", "assembly"]),
+    ("Grid", ["voxel_size", "box"]),
+    ("Potential", ["scattering_factors", "use_deposited_bfactors"]),
+    ("Compute", ["device"]),
+    ("Output & job tracking", ["output_dir", "filename", "project", "job_id"]),
+    ("Advanced", ["pdb_cache_dir", "readd_hydrogens", "monomer_library_path"]),
+]
+
 
 def _tomogram_callback(
     config: str | None, n_tomograms: int, **_overrides_raw: object
@@ -121,6 +132,13 @@ def _ice_callback(config: str | None, **_overrides_raw: object) -> None:
     from specter.pipelines import run_build_ice_cache
 
     run_build_ice_cache(load_cli_config(IceCacheConfig, config))
+
+
+def _potential_callback(config: str | None, **_overrides_raw: object) -> None:
+    """Handle `specter build potential`."""
+    from specter.pipelines import run_build_potential
+
+    run_build_potential(load_cli_config(PotentialConfig, config))
 
 
 def build_build_group() -> click.RichGroup:
@@ -187,6 +205,24 @@ def build_build_group() -> click.RichGroup:
             "the result. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- "
             "every flag below is optional and, if given, overrides one field of "
             "it.",
+        )
+    )
+    group.add_command(
+        build_config_command(
+            "potential",
+            PotentialConfig,
+            POTENTIAL_HELP,
+            _POTENTIAL_GROUPS,
+            _potential_callback,
+            help="Render the electrostatic potential of one atomic model "
+            "(--pdb_source, an accession code or a local .cif/.pdb) and save it "
+            "as .mrc, in volts, with the voxel size in the header: the model "
+            "alone, in vacuum, centred in a cubic box that is sized from the "
+            "structure unless --box is given. Use it as a reference map, a "
+            "template or an initial model. A TOML config (--config) is loaded "
+            "first when given, otherwise every setting takes its built-in "
+            "default -- every flag below is optional except --pdb_source and, "
+            "if given, overrides one field of it.",
         )
     )
     return group

@@ -23,6 +23,7 @@ from specter.config import (
     IceCacheConfig,
     MicrographConfig,
     ParticleStackConfig,
+    PotentialConfig,
     ReconstructionConfig,
     TiltSeriesConfig,
     TomogramConfig,
@@ -34,6 +35,7 @@ CONFIG_COMMANDS = [
     ("simulate", "tiltseries"),
     ("build", "tomogram"),
     ("build", "ice"),
+    ("build", "potential"),
     ("reconstruct", "particle"),
 ]
 
@@ -62,6 +64,7 @@ def test_config_option_has_no_path_default(path: tuple[str, ...]) -> None:
         TiltSeriesConfig,
         TomogramConfig,
         IceCacheConfig,
+        PotentialConfig,
         ReconstructionConfig,
     ],
     ids=lambda c: c.__name__,

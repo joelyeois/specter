@@ -29,6 +29,8 @@ above, at the chosen voxel size.
 
 - **Save the map.** `specter.io.write_mrc("6bdf.mrc", potential, voxel_size)`
   writes the volume with its voxel size in the header.
+  `specter build potential --pdb_source 6bdf` does the whole recipe from the
+  command line; see [Render a potential map](../user-guide/potential-map.md).
 - **Choose the scattering factors.** `Structure.from_pdb("6bdf",
   scattering_factors="kirkland")` replaces the default, which is fitted per bonded
   species (Shtyrov et al. 2026).

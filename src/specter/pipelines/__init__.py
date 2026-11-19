@@ -2,6 +2,7 @@ from ._ice import run_build_ice_cache
 from ._match import run_match
 from ._micrograph import run_micrograph
 from ._particles import run_particle_stack
+from ._potential import run_build_potential
 from ._reconstruct import run_reconstruction
 from ._tiltseries import run_tilt_series
 from ._tomogram import (
@@ -12,6 +13,7 @@ from ._tomogram import (
 
 __all__ = [
     "run_build_ice_cache",
+    "run_build_potential",
     "run_match",
     "run_micrograph",
     "run_particle_stack",

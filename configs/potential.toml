@@ -1,0 +1,39 @@
+# Canonical default config for `specter build potential`.
+# Any field can be overridden on the command line, e.g.:
+#   specter build potential --config configs/potential.toml --pdb_source 7a4m
+
+# Full field docs: docs/user-guide/potential-map.md.
+
+# The map is the model alone, in vacuum, in volts, centred in a cubic box. It
+# is what `specter simulate particles` builds before imaging, written out as a
+# reference map, a template or an initial model.
+
+[structure]
+pdb_source = "6bdf"    # a PDB accession code, or a path to a local .cif/.pdb
+assembly = true        # the biological assembly rather than the deposited chains
+
+[grid]
+voxel_size = 1.0       # A/voxel
+# box = 256            # voxels per side. Unset takes the smallest even box that
+                       # holds the structure in any orientation about its centre;
+                       # a smaller one clips the model, with a warning.
+
+[potential]
+scattering_factors = "shtyrov"    # shtyrov | kirkland | lobato. Shtyrov is fitted per
+                                  # bonded species and wants a Monomer Library (see
+                                  # monomer_library_path) to type every atom.
+use_deposited_bfactors = false    # damp each atom by its deposited B-factor (shtyrov only)
+
+[compute]
+device = "cuda"    # cpu | cuda | cuda:0 -- falls back to cpu without a GPU
+
+[output]
+output_dir = "potentials"
+# filename = "6bdf"    # without .mrc; unset names the map after the structure
+# project = "my_project"    # number and track the run: <output_dir>/<project>/potentials/J001/
+# job_id = "J001"
+
+[advanced]
+# pdb_cache_dir = "~/.cache/specter/pdb"
+readd_hydrogens = "auto"    # auto | true | false -- needs a Monomer Library to act
+# monomer_library_path = "/path/to/monomers"    # unset falls back to $CLIBD_MON

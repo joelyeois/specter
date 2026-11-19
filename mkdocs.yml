@@ -109,6 +109,7 @@ nav:
           - Build:
               - Build a tomogram specimen: user-guide/build-tomogram.md
               - Using the ice cache: user-guide/ice-cache.md
+              - Render a potential map: user-guide/potential-map.md
           - Reconstruct:
               - Reconstruct a volume: user-guide/reconstruction.md
           - Manage runs:

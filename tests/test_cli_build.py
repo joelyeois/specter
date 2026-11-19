@@ -493,3 +493,71 @@ def test_cli_build_ice_shards_across_devices(tmp_path: Path) -> None:
     result = _run_ice_cli(tmp_path, "--n_configs", "4", "--device", "cpu,cpu")
     assert result.returncode == 0, result.stderr
     assert len(list(tmp_path.glob("*.pt"))) == 4
+
+
+def test_cli_build_potential_sizes_the_box_from_the_structure(tmp_path: Path) -> None:
+    """With --box unset the map holds the whole model: a box twice as large
+    integrates to the same potential, which a clipped map would not."""
+    result = _invoke_cli(
+        "build",
+        "potential",
+        "--pdb_source",
+        str(_SMALL_FIXTURE),
+        "--voxel_size",
+        "2.0",
+        "--scattering_factors",
+        "kirkland",
+        "--output_dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stderr
+    with mrcfile.open(tmp_path / "1mbo.mrc") as mrc:
+        auto = mrc.data.copy()
+        assert float(mrc.voxel_size.x) == pytest.approx(2.0)
+    box = auto.shape[0]
+    assert auto.shape == (box, box, box) and box % 2 == 0
+
+    result = _invoke_cli(
+        "build",
+        "potential",
+        "--pdb_source",
+        str(_SMALL_FIXTURE),
+        "--voxel_size",
+        "2.0",
+        "--scattering_factors",
+        "kirkland",
+        "--box",
+        str(2 * box),
+        "--filename",
+        "roomy",
+        "--output_dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stderr
+    with mrcfile.open(tmp_path / "roomy.mrc") as mrc:
+        roomy = mrc.data.copy()
+    assert auto.sum() == pytest.approx(roomy.sum(), rel=1e-4)
+    # Centred the same way in both: the small map is the large one's middle.
+    lo = box // 2
+    np.testing.assert_allclose(
+        roomy[lo : lo + box, lo : lo + box, lo : lo + box], auto, atol=1e-3
+    )
+
+
+def test_build_potential_warns_when_the_box_clips_the_structure(tmp_path: Path) -> None:
+    """A box smaller than the model silently drops atoms in the renderer, and
+    the result still looks like a map, so the pipeline has to say so."""
+    from specter.config import PotentialConfig
+    from specter.pipelines import run_build_potential
+
+    config = PotentialConfig(
+        pdb_source=str(_SMALL_FIXTURE),
+        voxel_size=2.0,
+        box=16,
+        scattering_factors="kirkland",
+        device="cpu",
+        output_dir=str(tmp_path),
+    )
+    with pytest.warns(UserWarning, match="Leave box unset"):
+        run_build_potential(config)
+    assert (tmp_path / "1mbo.mrc").exists()

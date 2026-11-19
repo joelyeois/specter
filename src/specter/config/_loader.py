@@ -12,6 +12,7 @@ from ._ice import IceCacheConfig
 from ._match import MatchConfig
 from ._micrograph import MicrographConfig
 from ._particle import ParticleStackConfig
+from ._potential import PotentialConfig
 from ._reconstruction import ReconstructionConfig
 from ._tiltseries import TiltSeriesConfig
 from ._tomogram import TomogramConfig
@@ -59,6 +60,7 @@ ConfigT = TypeVar(
     TiltSeriesConfig,
     TomogramConfig,
     IceCacheConfig,
+    PotentialConfig,
     ReconstructionConfig,
     MatchConfig,
 )
@@ -82,13 +84,13 @@ def load_config(
         group fields for readability; all tables are flattened into one
         namespace before validation. List-of-tables fields (e.g.
         `[[protein_specs]]`) are passed through as `list[dict]`.
-    config_cls : type[ParticleStackConfig] | type[MicrographConfig] | type[TiltSeriesConfig] | type[TomogramConfig] | type[IceCacheConfig] | type[ReconstructionConfig]
+    config_cls : type[ParticleStackConfig] | type[MicrographConfig] | type[TiltSeriesConfig] | type[TomogramConfig] | type[IceCacheConfig] | type[PotentialConfig] | type[ReconstructionConfig]
         Dataclass to populate from the TOML fields. Defaults to
         `ParticleStackConfig` for backward compatibility.
 
     Returns
     -------
-    ParticleStackConfig | MicrographConfig | TiltSeriesConfig | TomogramConfig | IceCacheConfig | ReconstructionConfig
+    ParticleStackConfig | MicrographConfig | TiltSeriesConfig | TomogramConfig | IceCacheConfig | PotentialConfig | ReconstructionConfig
         Config with unset fields filled from `config_cls` defaults.
     """
     with open(path, "rb") as f:

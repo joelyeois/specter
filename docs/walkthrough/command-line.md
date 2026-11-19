@@ -226,6 +226,7 @@ an output folder:
 | `specter simulate tiltseries` | A tilt series of a specimen volume | [Generate a tilt series](../user-guide/tilt-series.md) |
 | `specter build tomogram` | A cryo-ET specimen volume with membranes, filaments, packed proteins, beads and carbon | [Build a tomogram specimen](../user-guide/build-tomogram.md) |
 | `specter build ice` | A replacement ice library at a pixel size the bundled one does not cover | [Using the ice cache](../user-guide/ice-cache.md) |
+| `specter build potential` | The potential map of one atomic model, as `.mrc` | [Render a potential map](../user-guide/potential-map.md) |
 | `specter reconstruct particle` | A gold-standard reconstruction from real images; also `specter ghostbuster particle` | [Reconstruct a volume](../user-guide/reconstruction.md) |
 | `specter match particles` | A config whose simulations match a real particle set | [Match an experimental dataset](../user-guide/dataset-twin.md) |
 | `specter convert cs2star` | A CryoSPARC `.cs` file as a RELION `.star` file | [specter convert](../api/cli/convert.md) |

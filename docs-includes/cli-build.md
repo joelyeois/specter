@@ -12,6 +12,7 @@ specter build [OPTIONS] COMMAND [ARGS]...
 | --- | --- |
 | [`tomogram`](#specter-build-tomogram) | Build a specimen tomogram from any combination of: one or more composited organic membranes (--config's TOML [[membrane]] entries, each an organelle kind), filament species scattered through it... |
 | [`ice`](#specter-build-ice) | Generate a library of amorphous-ice configurations for `IceBank` to draw from, as an alternative to the one bundled with specter. |
+| [`potential`](#specter-build-potential) | Render the electrostatic potential of one atomic model (--pdb_source, an accession code or a local .cif/.pdb) and save it as .mrc, in volts, with the voxel size in the header: the model alone, in... |
 
 ## `specter build tomogram` { #specter-build-tomogram }
 
@@ -146,3 +147,61 @@ specter build ice [OPTIONS]
 | `--output_dir` | `TEXT` | `ice` | Directory to write config_NNN.pt files and manifest.json to. Point a simulation config's ice_cache_dir at it to use the result. Never the bundled ice_data/ice_cache, which ships with the repository. |
 | `--overwrite` | `True` \| `False` | `False` | Regenerate configurations already present in output_dir instead of skipping them. Skipping is what lets an interrupted run resume where it left off. |
 | `--diagnostics` | `True` \| `False` | `False` | Save energy and S(k) diagnostic figures for the finished library to output_dir. |
+
+## `specter build potential` { #specter-build-potential }
+
+Render the electrostatic potential of one atomic model (--pdb_source, an accession code or a local .cif/.pdb) and save it as .mrc, in volts, with the voxel size in the header: the model alone, in vacuum, centred in a cubic box that is sized from the structure unless --box is given. Use it as a reference map, a template or an initial model. A TOML config (--config) is loaded first when given, otherwise every setting takes its built-in default -- every flag below is optional except --pdb_source and, if given, overrides one field of it.
+
+```text
+specter build potential [OPTIONS]
+```
+
+**Config**{ #specter-build-potential-config }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--config` | `TEXT` | _none_ | TOML config file, loaded before any flag below is applied. Optional: without it every setting takes its built-in default, so only settings that have none must be passed as flags. Worked examples: https://github.com/joelyeois/specter/tree/main/configs |
+
+**Structure**{ #specter-build-potential-structure }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--pdb_source` | `TEXT` | _none_ | Path to a local .cif/.pdb file, or a 4-character PDB accession code to fetch and cache. A local file is read where it lies and never copied into the cache; an existing file wins over a same-named accession code. |
+| `--assembly` | `True` \| `False` | `True` | Fetch the biological assembly. |
+
+**Grid**{ #specter-build-potential-grid }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--voxel_size` | `FLOAT` | `1.0` | Voxel size in Angstrom. |
+| `--box` | `INTEGER` | _none_ | Voxels along each side of the cubic box. Unset takes the smallest even box that holds the structure in any orientation about its centre, atomic tails included. A box smaller than the structure clips it, with a warning. |
+
+**Potential**{ #specter-build-potential-potential }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--scattering_factors` | `kirkland` \| `lobato` \| `shtyrov` | `shtyrov` | Atomic scattering-factor parameterization used to build the structure's scattering potential. |
+| `--use_deposited_bfactors` | `True` \| `False` | `False` | Damp each atom by the B-factor its structure deposits, instead of rendering the model statically. A deposited column is refinement output rather than a measured displacement, and cryo-EM entries often carry a constant or zero one. Requires scattering_factors='shtyrov'. |
+
+**Compute**{ #specter-build-potential-compute }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--device` | `TEXT` | `cuda` | cpu \| cuda \| cuda:0 \| a bare GPU index. The render is a loop of small operations per atom, about an order of magnitude faster on a GPU. Falls back to cpu when no GPU is available. |
+
+**Output & job tracking**{ #specter-build-potential-output-job-tracking }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--output_dir` | `TEXT` | _none_ | Directory to save the .mrc file when untracked. Setting --project or --job_id instead makes this the root of the numbered job tree, so tracking organises output within the folder you chose rather than moving it elsewhere. Unset defaults to potentials/ untracked, and to the project root found by walking up from cwd for an existing .specter marker when tracked. |
+| `--filename` | `TEXT` | _none_ | Output filename, without the .mrc extension. Unset names the map after the structure: 6bdf.mrc for the accession code 6bdf or for a local 6bdf.cif. |
+| `--project` | `TEXT` | _none_ | Optional: number and track this run through specter.jobs. Not required for tracking -- job_id alone also triggers it. The run lands in &lt;output_dir&gt;/[&lt;project&gt;/]potentials/J00N/ with a job.json recording every parameter, the git commit and the run's status. |
+| `--job_id` | `TEXT` | _none_ | Pin the job directory (e.g. J001) rather than auto-assigning the next one: resumes into it if it exists, creates it otherwise. |
+
+**Advanced**{ #specter-build-potential-advanced }
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--pdb_cache_dir` | `TEXT` | `$SPECTER_PDB_CACHE, else ~/.cache/specter/pdb` | Where downloaded PDB/mmCIF structures are cached. An input cache shared by every run, not an output location -- job tracking does not redirect it. |
+| `--readd_hydrogens` | `True` \| `False` | `auto` | Whether to replace a structure's own hydrogens with the monomer library's ideal geometry: 'auto' (default) keeps hydrogens the file already carries and adds them only when it has none, true always re-adds, false never adds hydrogen density (they still inform atom typing). Only meaningful when a monomer library is available. |
+| `--monomer_library_path` | `TEXT` | _none_ | Path to a Monomer Library (https://github.com/MonomerLibrary/monomers), which completes a structure's bond topology and hydrogens so Shtyrov species resolve. Unset falls back to $CLIBD_MON. Without one, around 44% of a hydrogen-free protein falls back to per-element Peng factors. |

@@ -13,6 +13,7 @@ from ._loader import (
 from ._match import MATCH_HELP, MatchConfig
 from ._micrograph import MICROGRAPH_HELP, MicrographConfig
 from ._particle import PARTICLE_STACK_HELP, ParticleStackConfig
+from ._potential import POTENTIAL_HELP, PotentialConfig
 from ._paths import (
     PDB_CACHE_ENV_VAR,
     REPO_ROOT,
@@ -40,6 +41,7 @@ __all__ = [
     "MICROGRAPH_HELP",
     "PARTICLE_STACK_HELP",
     "PDB_CACHE_ENV_VAR",
+    "POTENTIAL_HELP",
     "RECONSTRUCTION_HELP",
     "DEPRECATED_CONFIG_ALIASES",
     "RENAMED_CONFIG_KEYS",
@@ -51,6 +53,7 @@ __all__ = [
     "IceCacheConfig",
     "MicrographConfig",
     "ParticleStackConfig",
+    "PotentialConfig",
     "ReconstructionConfig",
     "ScalarOrRange",
     "TiltSeriesConfig",

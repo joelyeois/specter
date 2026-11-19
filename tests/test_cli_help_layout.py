@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from specter.cli._click_options import build_config_options
-from specter.cli.build import _ICE_GROUPS, _TOMOGRAM_GROUPS
+from specter.cli.build import _ICE_GROUPS, _POTENTIAL_GROUPS, _TOMOGRAM_GROUPS
 from specter.cli.match import _MATCH_PARTICLE_GROUPS
 from specter.cli.reconstruct import _RECONSTRUCT_PARTICLE_GROUPS
 from specter.cli.simulate import (
@@ -26,6 +26,7 @@ from specter.config import (
     MatchConfig,
     MicrographConfig,
     ParticleStackConfig,
+    PotentialConfig,
     ReconstructionConfig,
     TiltSeriesConfig,
     TomogramConfig,
@@ -40,6 +41,7 @@ GROUPED_CONFIGS = [
     (TiltSeriesConfig, _TILT_SERIES_GROUPS),
     (TomogramConfig, _TOMOGRAM_GROUPS),
     (IceCacheConfig, _ICE_GROUPS),
+    (PotentialConfig, _POTENTIAL_GROUPS),
     (ReconstructionConfig, _RECONSTRUCT_PARTICLE_GROUPS),
     (MatchConfig, _MATCH_PARTICLE_GROUPS),
 ]

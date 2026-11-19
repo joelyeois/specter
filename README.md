@@ -183,6 +183,7 @@ Python examples, from short recipes to full workflows.
 | `specter build ice` | A replacement `IceBank` library at a pixel size the bundled cache doesn't cover. |
 | `specter reconstruct particle` (alias: `specter ghostbuster particle`) | Reconstruct a 3D map from a particle stack. Pose, translation, and defocus refinement are off by default and not yet validated. |
 | `specter match particles` | Derive a `matched.toml` for `specter simulate particles` from a real particle set, with a report of how close the match is. |
+| `specter align symmetry/volumes` | Align a map to the axes of its point-group symmetry, or to another map, by one rotation and one shift. |
 | `specter convert cs2star` | Convert a CryoSPARC particle `.cs` file to a RELION `.star` file, pointing at the same image stacks. |
 | `specter jobs list/show/diff` | Inspect and compare parameters and provenance across past runs. |
 | `specter cache dir/info/clean` | Locate, inspect, or clear the cache of downloaded PDB/mmCIF structures. |

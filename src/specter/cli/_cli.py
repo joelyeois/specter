@@ -8,6 +8,7 @@ from specter.jobs._cli import build_jobs_group
 from specter.progress import tqdm_warnings
 
 from ._click_options import CONTEXT_SETTINGS
+from .align import build_align_group
 from .build import build_build_group
 from .cache import build_cache_group
 from .convert import build_convert_group
@@ -30,6 +31,7 @@ cli.add_command(build_reconstruct_group())
 # rather than a `ghostbuster` console script of its own.
 cli.add_command(build_reconstruct_group(name="ghostbuster"))
 cli.add_command(build_match_group())
+cli.add_command(build_align_group())
 cli.add_command(build_jobs_group())
 cli.add_command(build_cache_group())
 cli.add_command(build_convert_group())

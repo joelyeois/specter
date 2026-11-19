@@ -33,6 +33,7 @@ mode, so no separate `uv pip install -e .` step is needed.
         │ --help  -h  Show this message and exit.                                      │
         ╰──────────────────────────────────────────────────────────────────────────────╯
         ╭─ Commands ───────────────────────────────────────────────────────────────────╮
+        │ align        Align a map to its symmetry axes, or to another map.            │
         │ build        Build specimen volumes and reusable assets                      │
         │ cache        Inspect and clear the cache of downloaded PDB/mmCIF structures. │
         │ convert      Convert particle metadata between CryoSPARC and RELION.         │

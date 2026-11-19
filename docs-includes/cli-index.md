@@ -14,6 +14,9 @@
 | [`specter reconstruct particle`](reconstruct.md#specter-reconstruct-particle) | Reconstruct a 3D volume from an experimental single-particle stack, by fitting the same physics-based forward model `specter simulate particles` generates with. |
 | [`specter match`](match.md#specter-match) | Derive simulation settings that match an experimental dataset |
 | [`specter match particles`](match.md#specter-match-particles) | Derive a simulation config that matches a real particle set. |
+| [`specter align`](align.md#specter-align) | Align a map to its symmetry axes, or to another map. |
+| [`specter align symmetry`](align.md#specter-align-symmetry) | Align a map to the axes of its point-group symmetry. |
+| [`specter align volumes`](align.md#specter-align-volumes) | Align one map to another by a rotation and a shift. |
 | [`specter jobs`](jobs.md#specter-jobs) | Inspect and compare tracked SPECTER jobs. |
 | [`specter jobs list`](jobs.md#specter-jobs-list) | List all jobs. |
 | [`specter jobs show`](jobs.md#specter-jobs-show) | Show full details for a job. |

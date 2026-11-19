@@ -5,7 +5,8 @@
 applies the flags you passed on top of it, and calls into `specter.pipelines`;
 for these commands the flags and the config fields are the same set of
 settings under two spellings, so anything in the reference can be written
-either way. The utility groups `jobs`, `cache` and `convert` take no config:
+either way. The utility groups `align`, `jobs`, `cache` and `convert` take no
+config: `align` brings a map onto its symmetry axes or onto another map,
 `jobs` reads the records that tracked runs have already written, `cache`
 inspects and clears the PDB download cache, and `convert` rewrites particle
 metadata between CryoSPARC and RELION formats. [Configure a run](../../user-guide/configuration.md) covers

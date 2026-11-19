@@ -112,6 +112,7 @@ nav:
               - Render a potential map: user-guide/potential-map.md
           - Reconstruct:
               - Reconstruct a volume: user-guide/reconstruction.md
+              - Align maps: user-guide/align-maps.md
           - Manage runs:
               - Configure a run: user-guide/configuration.md
               - Manage jobs: user-guide/jobs.md
@@ -156,6 +157,7 @@ nav:
           - specter build: api/cli/build.md
           - specter reconstruct: api/cli/reconstruct.md
           - specter match: api/cli/match.md
+          - specter align: api/cli/align.md
           - specter convert: api/cli/convert.md
           - specter jobs: api/cli/jobs.md
           - specter cache: api/cli/cache.md
@@ -163,6 +165,7 @@ nav:
           - Overview: api/index.md
           - specter: api/specter.md
           - specter.aberrations: api/aberrations.md
+          - specter.alignment: api/alignment.md
           - specter.atom: api/atom.md
           - specter.ctf: api/ctf.md
           - specter.ghostbuster: api/ghostbuster.md

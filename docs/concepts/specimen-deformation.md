@@ -118,15 +118,25 @@ f\,\mathbf{u}(\mathbf{X})\), found by fixed-point iteration to
 \(\det(\mathbf{I} + f\,\nabla\mathbf{u})\), evaluated in closed form, so
 that the deformation conserves the integrated potential. Both happen
 inside the interpolation each tilt already performs to sample its
-rotated slices, so the bend adds no interpolation of its own; an
-untilted view is resampled too, rather than read directly from the
-volume.
+rotated slices, so the bend adds no second interpolation; an untilted
+view is resampled too, rather than read directly from the volume. The
+bent sample points fall between voxels along all three axes, which
+costs fine detail (see Limitations).
 
 The bend lifts material by up to its height, so the volume gains that
 much vacuum above and below its faces. The defocus is referred to the
 midplane, which the padding leaves in place, so the vacuum does not
 change the image. A multislice tilt costs about 1.3 to 1.6 times as
 much as a rigid one.
+
+![Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.](../assets/images/specimen-deformation-tilts.png){ width="900" style="display:block;margin:1.2em auto;" }
+///caption
+Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.
+///
+
+At 0° the two layers move apart along the slope by 5.6 Å, the faces'
+opposite in-plane slide. Away from 0° the lift \(w\) appears across the
+tilt axis as \(w \sin\theta\): up to 83 Å at 60°.
 
 ## Rigid particles
 
@@ -164,14 +174,15 @@ labelled along its whole length, bends with the film. From Python,
 `RigidBodies.from_labels(labels, voxel_size)` builds the index and
 `TiltSeries(..., rigid_bodies=...)` applies it.
 
-![Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.](../assets/images/specimen-deformation-tilts.png){ width="900" style="display:block;margin:1.2em auto;" }
+![A particle 360 Å across, 300 Å above the midplane at the apex of a dome, imaged at 0° through the field alone and as a rigid body. Circles mark where the beads of an unstrained particle project.](../assets/images/specimen-deformation-rigid.png){ width="760" style="display:block;margin:1.2em auto;" }
 ///caption
-Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.
+A particle 360 Å across, 300 Å above the midplane at the apex of a dome, imaged at 0° through the field alone and as a rigid body. Circles mark where the beads of an unstrained particle project.
 ///
 
-At 0° the two layers move apart along the slope by 5.6 Å, the faces'
-opposite in-plane slide. Away from 0° the lift \(w\) appears across the
-tilt axis as \(w \sin\theta\): up to 83 Å at 60°.
+At the apex the film neither slopes nor turns the particle, and the
+bending strain alone dilates it, by 4.3 % at this height, which moves
+its outermost beads 7.2 Å from their rigid positions. Carried as a
+rigid body they stay within 0.1 Å.
 
 ## Ground truth
 
@@ -211,6 +222,12 @@ From Python, `TiltSeries.displaced(points, i)` and
 - A rigid particle and the film around it overlap or part by up to the
   strain times the particle's radius at its boundary; the blend there
   does not conserve the integrated potential exactly.
+- Trilinear interpolation attenuates detail near the voxel Nyquist
+  frequency, and more so through a bend, whose sample points fall between
+  voxels along every axis. At a period of 2.5 voxels a tilted view of an
+  unbent specimen keeps 0.72 of the power of one rendered at half the
+  voxel size, and a bent one 0.48. A specimen whose finest detail of
+  interest is close to its voxel size should be rendered on a finer grid.
 - `TomogramReconstructor` assumes a rigid specimen.
 
 ## References

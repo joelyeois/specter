@@ -23,7 +23,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from specter.imaging import Exposure, Poses, Sample
-from specter.imaging._deformation import burst_fraction, deflection_field
+from specter.imaging._deformation import (
+    RigidBodies,
+    burst_fraction,
+    deflection_field,
+)
 from specter.settings import Deformation, Propagation
 
 OUT_DIR = "docs/assets/images"
@@ -232,7 +236,91 @@ def tilts() -> None:
     plt.close(fig)
 
 
+R_PIX, R_NXY, R_NZ = 4.0, 128, 250
+R_HEIGHT, R_RADIUS, R_PITCH = 300.0, 180.0, 60.0
+
+
+def _particle() -> tuple[torch.Tensor, np.ndarray, np.ndarray]:
+    """A ball of beads on a cubic lattice, 300 A above the midplane, and its label."""
+    axes = [(torch.arange(n) - n // 2) * R_PIX for n in (R_NZ, R_NXY, R_NXY)]
+    z, y, x = torch.meshgrid(*axes, indexing="ij")
+    volume = torch.zeros(R_NZ, R_NXY, R_NXY)
+    nodes = np.arange(-3, 4) * R_PITCH
+    columns = []
+    for cx in nodes:
+        for cy in nodes:
+            for cz in nodes:
+                if cx**2 + cy**2 + cz**2 > R_RADIUS**2:
+                    continue
+                r2 = (x - cx) ** 2 + (y - cy) ** 2 + (z - R_HEIGHT - cz) ** 2
+                volume += torch.exp(-r2 / (2 * 7.0**2))
+            if cx**2 + cy**2 <= R_RADIUS**2:
+                columns.append((cx, cy))
+    ball = x**2 + y**2 + (z - R_HEIGHT) ** 2 <= (R_RADIUS + 20.0) ** 2
+    return volume[None], ball.numpy().astype(np.int32), np.array(columns)
+
+
+def rigid() -> None:
+    """One particle at a dome's apex, strained with the film and carried rigidly."""
+    volume, labels, columns = _particle()
+    dome = Deformation(model="dome", height=23.0, hole_radius=800.0, burst_dose=1e-3)
+    images = []
+    for bodies in (None, RigidBodies.from_labels(labels, R_PIX)):
+        series = Sample.from_volume(volume, R_PIX).tilt_series(
+            Poses.tilt_series([0.0]),
+            Exposure.tilt_series(3.0, 1),
+            voltage=300.0,
+            micrograph_size=R_NXY,
+            deformation=dome,
+            rigid_bodies=bodies,
+            pad_volume=False,
+            log=False,
+            propagation=Propagation(
+                scattering_model="projection", alpha=0.0, oversample=1, pad_fft=False
+            ),
+        )
+        images.append(torch.angle(series.scatter(0).pixels()[0]).double())
+    extent = np.array([-R_NXY / 2, R_NXY / 2, R_NXY / 2, -R_NXY / 2]) * R_PIX / 10
+    fig, axs = plt.subplots(1, 2, figsize=(10.4, 5.2))
+    titles = ("strained with the film", "carried as a rigid body")
+    for ax, image, title in zip(axs, images, titles, strict=True):
+        ax.imshow(image.numpy(), cmap="gray_r", extent=extent)
+        ax.scatter(
+            columns[:, 0] / 10,
+            columns[:, 1] / 10,
+            s=260,
+            facecolors="none",
+            edgecolors=ACCENT,
+            linewidths=1.2,
+        )
+        moved = []
+        for cx, cy in columns:
+            px, py = (
+                int(round(cx / R_PIX)) + R_NXY // 2,
+                int(round(cy / R_PIX)) + R_NXY // 2,
+            )
+            window = image[py - 6 : py + 7, px - 6 : px + 7].clamp(min=0)
+            yy, xx = torch.meshgrid(
+                torch.arange(py - 6, py + 7),
+                torch.arange(px - 6, px + 7),
+                indexing="ij",
+            )
+            mx = float((window * xx).sum() / window.sum()) - R_NXY // 2
+            my = float((window * yy).sum() / window.sum()) - R_NXY // 2
+            moved.append(math.hypot(mx * R_PIX - cx, my * R_PIX - cy))
+        ax.set_title(f"{title}: beads off by up to {max(moved):.1f} Å")
+        ax.set_xlim(-23, 23)
+        ax.set_ylim(23, -23)
+        ax.set_xlabel("x (nm)")
+        ax.set_ylabel("y (nm)")
+        print(f"{title}: max {max(moved):.2f} A, median {np.median(moved):.2f} A")
+    fig.tight_layout()
+    fig.savefig(f"{OUT_DIR}/specimen-deformation-rigid.png", dpi=130)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     shapes()
     burst()
     tilts()
+    rigid()

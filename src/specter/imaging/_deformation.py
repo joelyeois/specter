@@ -492,7 +492,7 @@ class RigidBodies:
         self.origin = origin
         self.centres = centres.to(torch.float64)
         self.shape = shape
-        self._placed: dict[torch.device, torch.Tensor] = {index.device: index}
+        self._placed: dict[torch.device, tuple[torch.Tensor, torch.Tensor]] = {}
 
     def __len__(self) -> int:
         return len(self.centres) - 1
@@ -559,9 +559,16 @@ class RigidBodies:
             (nz, ny, nx),
         )
 
-    def _index_on(self, device: torch.device) -> torch.Tensor:
+    def _index_on(self, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+        """The index on `device`, and which of its cells touch a body."""
         if device not in self._placed:
-            self._placed[device] = self.index.to(device)
+            index = self.index.to(device)
+            node = index != 0
+            # A cell is the eight nodes around a point; most hold only film.
+            cell = node[:-1] | node[1:]
+            cell = cell[:, :-1] | cell[:, 1:]
+            cell = cell[:, :, :-1] | cell[:, :, 1:]
+            self._placed[device] = (index, cell)
         return self._placed[device]
 
     def membership(self, points: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -583,12 +590,15 @@ class RigidBodies:
             nodes around the point: 1 inside it, falling to 0 across one
             cell at its surface.
         """
-        index = self._index_on(points.device)
+        index, cell = self._index_on(points.device)
         nz, ny, nx = index.shape
+        body = torch.zeros(len(points), dtype=torch.long, device=points.device)
+        fraction = torch.zeros(len(points), dtype=points.dtype, device=points.device)
+        if min(nz, ny, nx) < 2:
+            return body, fraction
         origin = torch.tensor(self.origin, dtype=points.dtype, device=points.device)
         g = (points - origin) / self.spacing
         low = g.floor()
-        fx, fy, fz = (g - low).unbind(-1)
         ix, iy, iz = low.long().unbind(-1)
         inside = (
             (ix >= 0)
@@ -599,6 +609,10 @@ class RigidBodies:
             & (iz < nz - 1)
         )
         ix, iy, iz = ix.clamp(0, nx - 2), iy.clamp(0, ny - 2), iz.clamp(0, nz - 2)
+        # Only the points whose cell touches a body need its eight nodes.
+        near = (inside & cell[iz, iy, ix]).nonzero().squeeze(-1)
+        ix, iy, iz = ix[near], iy[near], iz[near]
+        fx, fy, fz = (g[near] - low[near]).unbind(-1)
         corners = torch.stack(
             [
                 index[iz + dz, iy + dy, ix + dx]
@@ -617,10 +631,10 @@ class RigidBodies:
             ],
             dim=-1,
         )
-        body = corners.amax(dim=-1)
-        fraction = (weights * (corners == body[:, None])).sum(dim=-1)
-        body = body.long() * inside
-        return body, fraction * (body > 0)
+        held = corners.amax(dim=-1)
+        body[near] = held.long()
+        fraction[near] = (weights * (corners == held[:, None])).sum(dim=-1)
+        return body, fraction
 
 
 def _carry(

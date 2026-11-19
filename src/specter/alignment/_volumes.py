@@ -12,9 +12,9 @@ import torch
 from specter import logger
 
 from ._apply import apply_alignment
-from ._band import Band, noise_power, shells, spectrum_of
+from ._band import Band, noise_power, shells, spectrum_of, widest_band
 from ._frames import frame_distance, so3_grid
-from ._ladder import SIGNIFICANT, Alignment, Pose, refine_in_doubling_bands
+from ._ladder import SIGNIFICANT, Alignment, Pose, refine_while_shells_agree
 from ._symmetry import COARSE_RADIUS, N_CANDIDATES, N_POINTS, N_REFINE, POINT_BUDGET
 
 _TWO_PI = 2.0 * math.pi
@@ -160,12 +160,14 @@ def align_volumes(
     two volumes' shell-normalised intensities, which no shift of either
     changes, on a super-Fibonacci grid of rotations [2]_. The best
     orientations each get a shift from a grid search on the complex
-    transforms. Rotation and shift are then refined together by BFGS with
-    analytic gradients, maximising the correlation of the whitened
-    transforms in bands that double from 8 Fourier voxels to `max_radius`,
-    moving on only while a shell not yet used shows correlation. Every step
-    works on band-limited copies of the volumes in a small box, so the cost
-    depends weakly on their size.
+    transforms, in a band of 8 Fourier voxels. Each is refined there,
+    rotation and shift together, by BFGS with analytic gradients, maximising
+    the correlation of the whitened transforms, and then tested on the
+    shells beyond that band, which the search has not used. The run of
+    shells in which the volumes still correlate sets the band of the next
+    refinement, up to `max_radius`, and the test is repeated until the run
+    stops growing. Every step works on band-limited copies of the volumes in
+    a small box, so the cost depends weakly on their size.
 
     Parameters
     ----------
@@ -176,7 +178,10 @@ def align_volumes(
         Real volume of the same shape and voxel size, which stays in place.
     max_radius : float, optional
         Highest band limit used, in Fourier voxels (cycles per box). Default
-        ``N / 4``, half the Nyquist frequency.
+        71, or the Nyquist frequency of a volume too small to reach it: the
+        widest band whose every independent frequency the refinement scores.
+        The band reached is lower when the volumes stop correlating before
+        it.
     max_shift : float, optional
         Largest shift along each axis that the search covers, in voxels.
         Default ``N / 2``. Shifts longer than ``N / 2`` in total are covered
@@ -211,9 +216,9 @@ def align_volumes(
 
     On five rendered assemblies (270 to 378 voxels at 0.75 A) moved to random
     poses, the pose onto the unmoved map is recovered to 1e-4 degrees and
-    1e-4 voxel without noise, and to 0.03 degrees and 0.02 voxel with
+    1e-4 voxel without noise, and to 0.012 degrees and 0.01 voxel with
     independent white noise of ten times the signal variance in both maps,
-    in 2 to 9 s on one GPU.
+    in 2 to 8 s on one GPU.
 
     References
     ----------
@@ -234,7 +239,7 @@ def align_volumes(
             f"{tuple(volume.shape)}; resample one onto the other's grid first"
         )
     dev = volume.device
-    max_radius = n_full / 4 if max_radius is None else max_radius
+    max_radius = widest_band(n_full) if max_radius is None else max_radius
     max_shift = n_full / 2 if max_shift is None else max_shift
     eye = torch.eye(3, dtype=torch.float64, device=dev)[None]
 
@@ -252,15 +257,24 @@ def align_volumes(
     floor = noise_power(spectrum, n_full)
     floor_ref = noise_power(spectrum_ref, n_full)
 
+    bands: dict[float, tuple[Band, Band]] = {}
+
+    def bands_at(radius: float) -> tuple[Band, Band]:
+        if radius not in bands:
+            bands[radius] = (
+                Band(spectrum, n_full, radius, floor),
+                Band(spectrum_ref, n_full, radius, floor_ref),
+            )
+        return bands[radius]
+
     def stage(radius: float) -> _Stage:
-        band = Band(spectrum, n_full, radius, floor)
-        return _stage(band, Band(spectrum_ref, n_full, radius, floor_ref), N_POINTS)
+        return _stage(*bands_at(radius), N_POINTS)
 
     # 1. Rotation, from the intensities.
     coarse = stage(min(COARSE_RADIUS, max_radius))
     step = 1.0 / coarse.radius  # half an intensity speckle at the band edge
     grid = so3_grid(step).to(dev)
-    reference_band = Band(spectrum_ref, n_full, coarse.radius, floor_ref)
+    reference_band = bands_at(min(COARSE_RADIUS, max_radius))[1]
     scores = _intensity_score(coarse.band, reference_band, grid, coarse.pts)
     picked: list[int] = []
     for i in scores.argsort(descending=True)[: 50 * N_CANDIDATES].tolist():
@@ -290,8 +304,8 @@ def align_volumes(
         tick() - t0,
     )
 
-    # 3. Refinement in doubling bands.
-    best, radius = refine_in_doubling_bands(
+    # 3. Refinement out to where the two volumes stop correlating.
+    best, radius = refine_while_shells_agree(
         poses[:N_REFINE],
         coarse,
         stage=stage,

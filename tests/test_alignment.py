@@ -21,7 +21,9 @@ from specter.alignment import (
     align_volumes,
     apply_alignment,
 )
+from specter.alignment._band import widest_band
 from specter.alignment._frames import frame_distance, frame_group
+from specter.alignment._ladder import _reach
 from specter.symmetries import get_rotation_matrices, symmetrize_exact
 
 N = 64
@@ -241,6 +243,29 @@ def test_volumes_buried_in_noise_are_reported_as_unreliable() -> None:
     with pytest.warns(UserWarning, match="do not correlate beyond the band"):
         result = align_volumes(volume, reference, resample=False)
     assert not result.reliable
+
+
+def test_the_band_reached_follows_the_signal() -> None:
+    """A clean pair is refined to the widest band, a noisy one to where it fades."""
+    rotation, centre = _pose(16, 6.0)
+    volume, reference = _blobs(N, "C1", rotation, centre), _blobs(N, "C1")
+    clean = align_volumes(volume, reference, resample=False)
+    noisy = align_volumes(
+        _noisy(volume, 0.1, 1), _noisy(reference, 0.1, 2), resample=False
+    )
+    capped = align_volumes(volume, reference, max_radius=12.0, resample=False)
+    assert clean.radius == widest_band(N)
+    assert 8.0 < noisy.radius < clean.radius
+    assert capped.radius == 12.0
+
+
+def test_reach_is_the_unbroken_run_of_agreeing_windows() -> None:
+    z = torch.zeros(60, dtype=torch.float64)
+    z[:30] = 2.0  # 2 sigma a shell: 5.7 sigma over a window of eight
+    z[50:] = 9.0  # agreement past a gap is not reached
+    assert _reach(z, 8.0) == 32  # the window 25..32 still sums to 3.5 sigma
+    assert _reach(torch.zeros(60, dtype=torch.float64), 8.0) == 8
+    assert _reach(z[:20], 8.0) == 19  # the last window is cut by the band
 
 
 def test_align_volumes_rejects_mismatched_grids() -> None:

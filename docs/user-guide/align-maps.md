@@ -71,8 +71,8 @@ deviations of what noise alone would give. A value below 4 is reported with
 a `!` in place of the `✓`, and the pose should not be trusted.
 
 The last figure is the band limit the refinement reached, in Fourier
-voxels. The search starts from 8 Fourier voxels and doubles the band while
-the added shells still agree, up to half the Nyquist frequency.
+voxels. The search starts from 8 Fourier voxels and widens the band to the
+last resolution shell that still agrees, up to 71 Fourier voxels.
 
 ## Method
 
@@ -82,9 +82,17 @@ between symmetry copies or between two maps, isolates the rotation, as in
 the rotation function of Rossmann & Blow (1962). The comparison runs over a
 uniform grid of orientations (Alexa 2022) in a band of 8 Fourier voxels,
 where an exhaustive search is cheap. The shift for each of the best
-orientations follows from the phases. The leading candidates are then
-refined, rotation and shift together, by a gradient-based optimiser in
-bands of doubling radius.
+orientations follows from the phases. The leading candidates are refined
+in that band, rotation and shift together, by a gradient-based optimiser.
+
+A pose that is correct to the precision of the 8-voxel band keeps the
+compared transforms in phase far beyond it. Each refined candidate is
+therefore tested on the resolution shells outside the band, which the
+search has not used, and the run of shells that still agree sets the band
+of the next refinement. The test is repeated until that run stops growing.
+The band is limited to 71 Fourier voxels, the widest whose every
+independent Fourier coefficient the refinement scores; on noisy maps a
+wider band scored at as many coefficients did not improve the pose.
 
 The output is resampled by an exact rotation, in which nothing is
 interpolated, so the aligned map loses no resolution.
@@ -101,6 +109,10 @@ interpolated, so the aligned map loses no resolution.
   well below 1.
 - A map of a symmetric specimen aligned to another has several equivalent
   poses, and any one of them may be returned.
+- A map whose symmetry is approximate has no single aligned frame. The pose
+  that best superposes its copies depends on the resolution band they are
+  compared in, by a few hundredths of a degree for copies that correlate to
+  0.7.
 
 ## References
 

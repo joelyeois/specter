@@ -13,9 +13,9 @@ from specter import logger
 
 from ..symmetries import get_rotation_matrices
 from ._apply import apply_alignment
-from ._band import Band, noise_power, shells, spectrum_of
+from ._band import Band, noise_power, shells, spectrum_of, widest_band
 from ._frames import axis_grid, frame_distance, frame_group, nearest_frame, so3_grid
-from ._ladder import SIGNIFICANT, Alignment, Pose, refine_in_doubling_bands
+from ._ladder import SIGNIFICANT, Alignment, Pose, refine_while_shells_agree
 
 _TWO_PI = 2.0 * math.pi
 #: Band limit of the grid searches, in Fourier voxels. It sets the rotation
@@ -24,8 +24,9 @@ COARSE_RADIUS = 8.0
 #: Orientations given a centre search, and the number of those refined.
 N_CANDIDATES = 8
 N_REFINE = 3
-#: Largest number of half-band frequencies a refinement scores.
-N_POINTS = 200_000
+#: Largest number of half-band frequencies a refinement scores: every one of
+#: the widest band built by default.
+N_POINTS = 800_000
 #: Transform samples evaluated per call in the grid searches.
 POINT_BUDGET = 4_000_000
 
@@ -178,11 +179,14 @@ def align_to_symmetry(
     on a super-Fibonacci grid of rotations [2]_ reduced to the frames the
     group does not make equivalent (axis directions alone for a cyclic
     group). The best orientations each get a centre from a grid search on the
-    complex transform. Rotation and centre are then refined together by BFGS
-    with analytic gradients, in bands that double from 8 Fourier voxels to
-    `max_radius`, moving on only while a shell not yet used shows agreement.
-    Every step works on a band-limited copy of the volume in a small box, so
-    the cost depends weakly on the size of the volume.
+    complex transform, in a band of 8 Fourier voxels. Each is refined there,
+    rotation and centre together, by BFGS with analytic gradients, and then
+    tested on the shells beyond that band, which the search has not used.
+    The run of shells in which the symmetry copies still agree sets the band
+    of the next refinement, up to `max_radius`, and the test is repeated
+    until the run stops growing. Every step works on a band-limited copy of
+    the volume in a small box, so the cost depends weakly on the size of the
+    volume.
 
     Of the equivalent aligned frames, the one that turns the volume least is
     returned. For a cyclic group that fixes neither the spin about the axis
@@ -197,7 +201,10 @@ def align_to_symmetry(
         Point-group symbol: ``"Cn"``, ``"Dn"``, ``"T"``, ``"O"`` or ``"I"``.
     max_radius : float, optional
         Highest band limit used, in Fourier voxels (cycles per box). Default
-        ``N / 4``, half the Nyquist frequency.
+        71, or the Nyquist frequency of a volume too small to reach it: the
+        widest band whose every independent frequency the refinement scores.
+        The band reached is lower when the symmetry copies stop agreeing
+        before it.
     max_shift : float, optional
         Largest distance of the symmetry centre from the central voxel along
         each axis that the centre search covers, in voxels. Default ``N / 4``.
@@ -225,10 +232,16 @@ def align_to_symmetry(
 
     Notes
     -----
-    On five rendered assemblies (C3, D4, D7, T, O; 270 to 378 voxels at
-    0.75 A) at random poses the pose is recovered to 0.004 degrees and 0.002
-    voxel without noise and to 0.033 degrees and 0.018 voxel with white noise
-    of ten times the volume's variance, in 1 to 4 s on one GPU.
+    On four rendered assemblies of exact symmetry (C3, D4, T, O; 270 to 360
+    voxels at 0.75 A) at random poses the pose is recovered to 0.001 degrees
+    and 0.001 voxel without noise and to 0.013 degrees and 0.006 voxel with
+    white noise of ten times the volume's variance, in 1 to 3 s on one GPU.
+
+    A volume whose symmetry is approximate has no single aligned frame: the
+    pose that best superposes its copies depends on the band they are
+    compared in. For a rendered D7 assembly whose copies correlate to 0.7,
+    the frames found in bands of 71 and 94 Fourier voxels differ by 0.03
+    degrees and 0.016 voxel.
 
     References
     ----------
@@ -250,7 +263,7 @@ def align_to_symmetry(
         raise ValueError(f"{sym} has no symmetry axis to align to")
     frames = frame_group(sym)
     frames = None if frames is None else frames.to(dev)
-    max_radius = n_full / 4 if max_radius is None else max_radius
+    max_radius = widest_band(n_full) if max_radius is None else max_radius
     max_shift = n_full / 4 if max_shift is None else max_shift
 
     def tick() -> float:
@@ -304,12 +317,19 @@ def align_to_symmetry(
         tick() - t0,
     )
 
-    # 3. Refinement in doubling bands.
+    # 3. Refinement out to where the symmetry copies stop agreeing.
+    bands: dict[float, Band] = {}
+
+    def band_at(radius: float) -> Band:
+        if radius not in bands:
+            bands[radius] = Band(spectrum, n_full, radius, floor)
+        return bands[radius]
+
     def stage(radius: float) -> _Stage:
-        b = Band(spectrum, n_full, radius, floor)
+        b = band_at(radius)
         return _Stage(b, b.points(max(64, min(b.lattice.shape[0], N_POINTS) // order)))
 
-    best, radius = refine_in_doubling_bands(
+    best, radius = refine_while_shells_agree(
         poses[:N_REFINE],
         _Stage(band, pts),
         stage=stage,

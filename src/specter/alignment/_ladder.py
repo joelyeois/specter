@@ -1,4 +1,4 @@
-"""Joint refinement of a rotation and a centre in bands of doubling radius."""
+"""Joint refinement of a rotation and a centre out to the band the data support."""
 
 from __future__ import annotations
 
@@ -13,13 +13,17 @@ from scipy.optimize import minimize
 
 from specter import logger
 
+from ._band import widest_band
 from ._frames import rotvec_to_rotmat
 
 #: A second orientation scoring this fraction of the best stays in the race
 #: for one more band.
 _RIVAL = 0.8
-#: Agreement, in standard deviations, a shell needs for the refinement to
-#: move on to it.
+#: Shells tested together. One shell of a noisy map seldom shows agreement
+#: on its own; the sum over a window does.
+_WINDOW = 8
+#: Combined agreement, in standard deviations, a window of shells needs for
+#: the refinement to take it in.
 _SHELL_SIGMA = 3.0
 #: `Alignment.significance` above which an alignment is `reliable`.
 SIGNIFICANT = 4.0
@@ -55,8 +59,8 @@ class Alignment:
         whitened transform or between the two whitened volumes: 1 for exact
         agreement and 0 for none. Noise lowers it.
     significance : float
-        Agreement in shells the search had not used when it chose the
-        orientation, in standard deviations of that agreement for noise. It
+        Agreement in the first shells beyond the band the search chose the
+        orientation in, in standard deviations of that agreement for noise. It
         tests the pose against noise only: a clean volume of another
         symmetry aligns to its best partial match with a high significance
         and a low `score`. NaN when the volume is too small to have such
@@ -155,7 +159,34 @@ def refine(
     return Pose(float(-res.fun), r, c, pose.significance)
 
 
-def refine_in_doubling_bands(
+def _reach(z: torch.Tensor, radius: float) -> int:
+    """
+    Highest shell up to which a pose is supported beyond a band limit.
+
+    Parameters
+    ----------
+    z : torch.Tensor
+        Agreement in each integer shell, in standard deviations.
+    radius : float
+        Band limit the pose was refined in.
+
+    Returns
+    -------
+    int
+        Last shell of the unbroken run of windows of `_WINDOW` shells, from
+        the first shell beyond `radius`, whose combined agreement exceeds
+        `_SHELL_SIGMA`. ``int(radius)`` when the first window already fails.
+    """
+    reach = int(radius)
+    while reach + 1 < z.numel():
+        window = z[reach + 1 : reach + 1 + _WINDOW]
+        if float(window.sum()) <= _SHELL_SIGMA * window.numel() ** 0.5:
+            break
+        reach += window.numel()
+    return reach
+
+
+def refine_while_shells_agree(
     poses: list[Pose],
     coarse: S,
     *,
@@ -167,14 +198,18 @@ def refine_in_doubling_bands(
     name: str,
 ) -> tuple[Pose, float]:
     """
-    Refine candidate poses up a ladder of bands and return the best.
+    Refine candidate poses out to the band limit the data support.
 
-    Every candidate is refined in the coarse band. The band limit then
-    doubles until `max_radius`, and before each step the candidates are
-    tested on the shells the step adds: one that shows no agreement there is
-    dropped, and the ladder ends when none does. Candidates scoring within
-    reach of the best are carried along, since a coarse band cannot always
-    tell the true pose from a near miss.
+    Every candidate is refined in the coarse band and then tested on the
+    shells beyond it, none of which the search has used. A pose that is
+    right to within the coarse band's precision keeps its copies in phase
+    far beyond that band, so the run of shells that still agree marks both
+    the band the pose can be refined in directly and the band in which
+    there is anything to refine against. The candidates are refined in that
+    band and tested again, until the run stops growing. A candidate whose
+    first window of shells shows no agreement is dropped; candidates scoring
+    within reach of the best are carried along, since a coarse band cannot
+    always tell the true pose from a near miss.
 
     Parameters
     ----------
@@ -203,7 +238,8 @@ def refine_in_doubling_bands(
     -------
     Pose
         The best pose. Its `significance` is the agreement over the first
-        band the ladder added, measured before any refinement used it.
+        window of shells beyond the coarse band, measured before any
+        refinement used them.
     float
         The band limit reached.
     """
@@ -246,35 +282,50 @@ def refine_in_doubling_bands(
     poses = climb(poses, coarse, False)
     radius = coarse.radius
     report(radius, t0)
+    # A band limit at or below the coarse one leaves nothing to climb to, but
+    # the first window beyond it still serves to test the pose. The shells
+    # are tested in a band scored in full: a wider one is scored at a sample
+    # of its frequencies, few of which fall in the inner shells.
+    full = widest_band(coarse.n_full)
+    look = stage(min(max(max_radius, radius + _WINDOW), max(full, radius + _WINDOW)))
+    limit = max_radius if max_radius > look.radius else min(max_radius, look.radius)
+    current, polished = coarse, False
     first = True
-    while first or radius < max_radius:
+    while True:
         t0 = tick()
-        target = min(2 * radius, max_radius)
-        climbing = target > radius
-        # Without a band to climb to, the next one still serves to test the
-        # pose on shells the search has not seen.
-        current = stage(target if climbing else 2 * radius)
-        if current.radius <= radius:
-            break
-        confirmed = []
+        confirmed, target = [], radius
         for p in poses:
-            z = shell_z(current, p.rot, p.centre)[int(radius) + 1 :]
+            z = shell_z(look, p.rot, p.centre)
             if first:
-                p.significance = float(z.sum() / z.numel() ** 0.5)
-            if bool((z > _SHELL_SIGMA).any()):
+                held_out = z[int(radius) + 1 : int(radius) + 1 + _WINDOW]
+                p.significance = float(held_out.sum() / held_out.numel() ** 0.5)
+            reach = _reach(z, radius)
+            if reach > radius:
                 confirmed.append(p)
+                target = max(target, float(reach))
         first = False
         if not confirmed:
             logger.info("%s: no agreement beyond radius %.0f", name, radius)
             break
         poses = confirmed
-        if not climbing:
+        target = min(target, limit)
+        if target <= radius:
             break
-        last = target >= max_radius or current.radius < target
+        current = stage(target)
+        if current.radius <= radius:
+            break
+        if current.radius >= look.radius and limit > look.radius:
+            look = stage(limit)
+            limit = look.radius
+        polished = current.radius >= limit
         rivals = [p for p in poses if p.score >= _RIVAL * poses[0].score]
-        poses = climb(rivals, current, last)
+        poses = climb(rivals, current, polished)
         radius = current.radius
         report(radius, t0)
-        if last:
+        if polished:
             break
+    if not polished and current is not coarse:
+        t0 = tick()
+        poses = climb(poses[:1], current, True)
+        report(radius, t0)
     return poses[0], radius

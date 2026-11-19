@@ -16,6 +16,12 @@ _EDGE = 8.0
 #: Lowest shell scored, in Fourier voxels. Below it there are too few
 #: independent points for a shell statistic.
 _MIN_RADIUS = 1.5
+#: Largest box of a band-limited copy unless a wider band is asked for. Its
+#: band of 71 Fourier voxels holds 750,000 independent frequencies, all of
+#: which a refinement scores. On noisy maps a wider band scored at as many
+#: frequencies gave no better pose, and one scored at all of its own took
+#: three times as long for the same pose error.
+_MAX_BOX = 160
 
 
 class _Sample(torch.autograd.Function):
@@ -223,6 +229,26 @@ class Band:
         """
         shell = shells(pts)
         return (self.signal[shell] / self.shell_power[shell]).sqrt()
+
+
+def widest_band(n_full: int) -> float:
+    """
+    Highest band limit a `Band` is built for unless one is asked for.
+
+    Parameters
+    ----------
+    n_full : int
+        Box size of the map.
+
+    Returns
+    -------
+    float
+        The band limit, in Fourier voxels, whose copy with its cosine edge
+        fills a box of `_MAX_BOX` voxels, or the highest the map's Nyquist
+        frequency allows if that is lower.
+    """
+    nyquist = (n_full - 1) // 2 if n_full % 2 else n_full // 2
+    return min(_MAX_BOX // 2 - _EDGE, nyquist) - 1.0
 
 
 def shells(pts: torch.Tensor) -> torch.Tensor:

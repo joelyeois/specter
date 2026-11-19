@@ -18,6 +18,7 @@ from ..arrays import (
 from ..cpu_threads import limited_cpu_threads
 from ..progress import track
 from ._energy import LDA_ENERGY_PER_ATOM_EV, MLBOP
+from ._helpers import GridSize, grid_yx
 from ._kernels import ice_potential_from_deltas
 
 if TYPE_CHECKING:
@@ -260,18 +261,17 @@ class _IceTiling:
 
     def _tile_grid(
         self,
-        n: int,
+        n: GridSize,
         dx: float,
         nz: int | None,
         tile_extent: float | None,
-        ny: int | None = None,
     ) -> tuple[float, tuple[int, int, int], tuple[float, float, float]]:
         """
         Set the requested box on ``self`` and size the tile grid covering it.
 
         Parameters
         ----------
-        n, dx, nz, ny
+        n, dx, nz
             As for :meth:`generate_big_ice_deltas`.
         tile_extent : float or None
             Tile side in Å; None means the smallest cached config's box.
@@ -284,9 +284,10 @@ class _IceTiling:
         box : tuple of float
             The requested box in Å, ``(x, y, z)``.
         """
-        nz = nz if nz is not None else n
-        self.n, self.dx, self.nz = n, dx, nz
-        box = (n * dx, (n if ny is None else ny) * dx, nz * dx)
+        ny, nx = grid_yx(n)
+        nz = nz if nz is not None else nx
+        self.n, self.dx, self.nz = nx, dx, nz
+        box = (nx * dx, ny * dx, nz * dx)
         self.box_x, self.box_y, self.box_z = box
         if tile_extent is None:
             tile_extent = min(c["box_L"] for c in self._configs)
@@ -299,7 +300,7 @@ class _IceTiling:
 
     def big_ice_positions(
         self,
-        n: int,
+        n: GridSize,
         dx: float,
         nz: int | None = None,
         tile_extent: float | None = None,
@@ -310,7 +311,6 @@ class _IceTiling:
         device: torch.device | str | None = None,
         generator: torch.Generator | None = None,
         to_host: bool = False,
-        ny: int | None = None,
     ) -> torch.Tensor:
         """
         The molecules of a tiled canvas, without voxelising them.
@@ -324,7 +324,7 @@ class _IceTiling:
 
         Parameters
         ----------
-        n, dx, nz, tile_extent, seam_margin, relax_steps, relax_lr, mlbop_target, device, generator, ny
+        n, dx, nz, tile_extent, seam_margin, relax_steps, relax_lr, mlbop_target, device, generator
             As for :meth:`generate_big_ice_deltas`.
         to_host : bool, optional
             Collect the tiles on the host as they are drawn and return the
@@ -340,7 +340,7 @@ class _IceTiling:
         """
         if device is None:
             device = self.device
-        tile_extent, grid, box = self._tile_grid(n, dx, nz, tile_extent, ny)
+        tile_extent, grid, box = self._tile_grid(n, dx, nz, tile_extent)
         halo_margin = 2.0 * MLBOP().r_cut if relax_steps > 0 else 0.0
         positions, mobile_mask, halo_mask, assembled_box = self._place_tiles(
             grid,
@@ -379,7 +379,7 @@ class _IceTiling:
 
     def generate_big_ice_deltas(
         self,
-        n: int,
+        n: GridSize,
         dx: float,
         nz: int | None = None,
         batchsize: int = 1,
@@ -390,7 +390,6 @@ class _IceTiling:
         mlbop_target: float | None = LDA_ENERGY_PER_ATOM_EV,
         device: torch.device | str | None = None,
         generator: torch.Generator | None = None,
-        ny: int | None = None,
     ) -> torch.Tensor:
         """
         Build a volume larger than any single cached config by tiling
@@ -404,12 +403,13 @@ class _IceTiling:
 
         Parameters
         ----------
-        n : int
-            Number of voxels along x, and along y unless `ny` is given.
+        n : int or sequence of int
+            Number of voxels along x and y, or ``(ny, nx)`` for a canvas
+            that is not square.
         dx : float
             Voxel size in Å.
         nz : int, optional
-            Number of voxels along z. Defaults to ``n``.
+            Number of voxels along z. Defaults to the number along x.
         batchsize : int, optional
             Number of independent volumes. Each draws a fresh tiling and
             relaxation. Default is 1.
@@ -442,27 +442,24 @@ class _IceTiling:
             numbers made where the generator lives. A CPU generator and a
             CUDA one seeded alike draw differently (different engines).
             Default is the global RNG.
-        ny : int, optional
-            Number of voxels along y, for a canvas that is not square.
-            Defaults to ``n``.
 
         Returns
         -------
         icedeltas : torch.Tensor
-            Soft-voxelized ice position volumes, shape (batchsize, nz, ny, n).
+            Soft-voxelized ice position volumes, shape (batchsize, nz, ny, nx).
         """
         if device is None:
             device = self.device
-        tile_extent, _grid, _box = self._tile_grid(n, dx, nz, tile_extent, ny)
-        nz = nz if nz is not None else n
-        ny = ny if ny is not None else n
+        tile_extent, _grid, _box = self._tile_grid(n, dx, nz, tile_extent)
+        ny, nx = grid_yx(n)
+        nz = nz if nz is not None else nx
 
         # The whole batch is allocated up front and splatted into item by
         # item: a per-item list stacked at the end would hold the batch twice
         # at the moment of the stack. The molecules of one item are drawn in
         # full first (a tenth of the canvas's bytes) and splatted in chunks,
         # the same two steps the host-volume blend takes.
-        batch_vox = torch.zeros(batchsize, nz, ny, n, device=device)
+        batch_vox = torch.zeros(batchsize, nz, ny, nx, device=device)
         for b in track(
             range(batchsize),
             description="Generating tiled ice volumes",
@@ -480,7 +477,6 @@ class _IceTiling:
                 mlbop_target=mlbop_target,
                 device=device,
                 generator=generator,
-                ny=ny,
             )
             self.positions = positions
             # periodic=True: see generate_ice_deltas -- the outer-boundary
@@ -498,7 +494,7 @@ class _IceTiling:
 
     def generate_big_ice(
         self,
-        n: int,
+        n: GridSize,
         dx: float,
         nz: int | None = None,
         batchsize: int = 1,
@@ -509,7 +505,6 @@ class _IceTiling:
         mlbop_target: float | None = LDA_ENERGY_PER_ATOM_EV,
         device: torch.device | str | None = None,
         generator: torch.Generator | None = None,
-        ny: int | None = None,
     ) -> torch.Tensor:
         """
         Build a volume larger than any single cached config (see
@@ -521,7 +516,7 @@ class _IceTiling:
         Returns
         -------
         icecubes : torch.Tensor
-            Convolved ice potential volumes, shape (batchsize, nz, ny, n).
+            Convolved ice potential volumes, shape (batchsize, nz, ny, nx).
 
         Notes
         -----
@@ -542,7 +537,6 @@ class _IceTiling:
             mlbop_target=mlbop_target,
             device=device,
             generator=generator,
-            ny=ny,
         )
         assert self.current_icedeltas is not None
         kernel = self._get_kernel(dx)

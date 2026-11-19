@@ -5,6 +5,9 @@ and a few array utilities.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+import numpy as np
 import torch
 
 # The water constants live in `specter.constants`, which `potential` imports
@@ -15,6 +18,39 @@ from ..constants import (  # noqa: F401
     molar_mass_of_water,
     ndensity_of_amorphous_ice,
 )
+
+
+GridSize = int | Sequence[int] | np.ndarray | torch.Tensor
+"""An XY grid size: one number for a square grid, or ``(ny, nx)``."""
+
+
+def grid_yx(n: GridSize) -> tuple[int, int]:
+    """
+    Read an XY grid size given as one number or as a pair.
+
+    Parameters
+    ----------
+    n : int or sequence of int
+        Voxels along both axes, or ``(ny, nx)`` as a tuple, list, array or
+        tensor.
+
+    Returns
+    -------
+    tuple of int
+        ``(ny, nx)``.
+
+    Raises
+    ------
+    ValueError
+        If `n` is not one or two whole numbers.
+    """
+    values = np.asarray(n.cpu() if isinstance(n, torch.Tensor) else n).reshape(-1)
+    if values.size not in (1, 2) or not np.all(values == np.floor(values)):
+        raise ValueError(
+            f"a grid size is one whole number or a (ny, nx) pair, got {n!r}"
+        )
+    ny, nx = (int(values[0]), int(values[-1]))
+    return ny, nx
 
 
 def rfftn(array: torch.Tensor) -> torch.Tensor:

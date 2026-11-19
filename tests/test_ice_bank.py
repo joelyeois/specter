@@ -3,6 +3,7 @@ Tests for IceBank.
 """
 
 import pytest
+import numpy as np
 import torch
 
 from specter.arrays import soft_voxelize_coordinates
@@ -216,7 +217,7 @@ def test_icebank_big_ice_fills_a_rectangular_canvas_at_the_bulk_density(
     cache = IceBank(str(tmp_path), progressbars=False)
 
     torch.manual_seed(3)
-    deltas = cache.generate_big_ice_deltas(n=40, ny=104, nz=24, dx=1.0)
+    deltas = cache.generate_big_ice_deltas(n=(104, 40), nz=24, dx=1.0)
     assert deltas.shape == (1, 24, 104, 40)
     expected = ndensity_of_amorphous_ice * 40 * 104 * 24
     assert float(deltas.sum()) == pytest.approx(expected, rel=0.05)
@@ -224,12 +225,52 @@ def test_icebank_big_ice_fills_a_rectangular_canvas_at_the_bulk_density(
     assert float(halves[0] / halves[1]) == pytest.approx(1.0, abs=0.08)
 
 
-def test_blend_refuses_a_rectangular_volume_it_cannot_ice() -> None:
-    """Only the tiled bank sizes its canvas per axis."""
+def test_random_ice_fills_a_rectangular_volume_at_the_bulk_density() -> None:
+    """
+    A `RandomIcemaker` given a ``(ny, nx)`` grid draws the bulk density over the
+    whole box, and blends into an empty volume of that shape.
+    """
+    from specter.ice import RandomIcemaker, blend_ice_into_volume, resolve_icemaker
+
+    maker = resolve_icemaker("random", 2.0, nxy=(40, 16), nz=8, progressbars=False)
+    assert isinstance(maker, RandomIcemaker)
+    torch.manual_seed(0)
+    deltas = maker.generate_ice_deltas()
+    assert deltas.shape == (1, 8, 40, 16)
+    expected = ndensity_of_amorphous_ice * (16 * 40 * 8) * 2.0**3
+    assert float(deltas.sum()) == pytest.approx(expected, rel=0.01)
+    halves = deltas[0].sum(dim=(0, 2)).reshape(2, 20).sum(dim=1)
+    assert float(halves[0] / halves[1]) == pytest.approx(1.0, abs=0.1)
+
+    iced = blend_ice_into_volume(torch.zeros(1, 8, 40, 16), maker, 2.0)
+    assert iced.shape == (1, 8, 40, 16)
+    assert float(iced.mean()) > 0
+
+
+@pytest.mark.parametrize(
+    "size",
+    [(40, 16), [40, 16], np.array([40, 16]), torch.tensor([40, 16])],
+    ids=["tuple", "list", "array", "tensor"],
+)
+def test_a_grid_size_is_read_from_any_pair(size) -> None:
+    """A (ny, nx) pair is taken in whatever container holds it, and one
+    number, a NumPy integer included, is a square grid."""
+    from specter.ice._helpers import grid_yx
+
+    assert grid_yx(size) == (40, 16)
+    assert grid_yx(np.int64(16)) == (16, 16)
+    with pytest.raises(ValueError, match="grid size"):
+        grid_yx((8, 40, 16))
+    with pytest.raises(ValueError, match="grid size"):
+        grid_yx(16.5)  # type: ignore[arg-type]
+
+
+def test_blend_refuses_a_random_icemaker_built_for_another_grid() -> None:
+    """Random ice is drawn on the maker's own grid, which must be the volume's."""
     from specter.ice import RandomIcemaker, blend_ice_into_volume
 
     maker = RandomIcemaker(n=16, dx=2.0, nz=8)
-    with pytest.raises(ValueError, match="square"):
+    with pytest.raises(ValueError, match="built for"):
         blend_ice_into_volume(torch.zeros(1, 8, 24, 16), maker, 2.0)
 
 
@@ -659,7 +700,7 @@ def test_host_volume_blend_matches_whole_canvas_blend(ny: int) -> None:
     # Reference: the whole-canvas path, forced by putting V on the device.
     gen = torch.Generator().manual_seed(7)
     ice = bank.generate_big_ice(
-        n=n, dx=dx, nz=nz, batchsize=1, device=dev, generator=gen, ny=ny
+        n=(ny, n), dx=dx, nz=nz, batchsize=1, device=dev, generator=gen
     )
     assert ice.shape == (1, nz, ny, n)
     ref = V0.to(dev) + ice * (1 - potential_occupancy(V0.to(dev), dx)).clamp(0, 1)

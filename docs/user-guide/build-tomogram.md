@@ -142,8 +142,6 @@ The following hold for a widened volume:
 - Picks and label volumes cover the whole volume, flanks included.
 - Build time and memory grow with the volume, a factor of 2.6 in the example
   above.
-- A tilt series of the widened volume takes `ice_model = "gd"` or `"none"`.
-  `"random"` requires a volume that is square in XY and raises an error.
 
 `max_tilt_angle` is unset by default, and the volume is then exactly
 `target_shape`.

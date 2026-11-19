@@ -11,7 +11,7 @@ import torch
 
 from ..arrays import soft_voxelize_coordinates
 from ._energy import mlbop_energy_summary
-from ._helpers import ndensity_of_amorphous_ice
+from ._helpers import GridSize, grid_yx, ndensity_of_amorphous_ice
 from ._kernels import build_water_kernel, ice_potential_from_deltas
 from specter.options import IceModel, ScatteringFactors
 
@@ -29,17 +29,18 @@ class RandomIcemaker(DeviceModule):
     1. :meth:`init_random` — draw ``n_ice_molecules`` uniform positions in
        ``[-box/2, box/2]`` Å.  Stored as ``self.positions`` with columns
        ``(x, y, z)``.
-    2. :meth:`voxelize` — trilinear-splat positions onto ``(nz, n, n)``
+    2. :meth:`voxelize` — trilinear-splat positions onto ``(nz, ny, n)``
        via :func:`~specter.arrays.soft_voxelize_coordinates`.
 
     Parameters
     ----------
     dx : float
         Pixel size in Å.
-    n : int
-        Number of pixels in xy-axis. Assumes a square field-of-view.
+    n : int or sequence of int
+        Number of pixels along x and y, or ``(ny, nx)`` for a field that is
+        not square.
     nz : int, optional
-        Number of pixels along z. If None, defaults to ``n``.
+        Number of pixels along z. If None, defaults to the number along x.
     parameterization : str, optional
         Atomic scattering-factor parameterization for the ice kernel:
         ``'kirkland'``, ``'lobato'``, or ``'shtyrov'``. Default
@@ -57,7 +58,7 @@ class RandomIcemaker(DeviceModule):
     def __init__(
         self,
         dx: float,
-        n: int,
+        n: GridSize,
         nz: int | None = None,
         parameterization: ScatteringFactors = "kirkland",
         progressbars: bool = True,
@@ -65,16 +66,16 @@ class RandomIcemaker(DeviceModule):
         super().__init__()
 
         self.dx = dx
-        self.n = n
-        self.nz = n if nz is None else nz
+        self.ny, self.n = grid_yx(n)
+        self.nz = self.n if nz is None else nz
         self.parameterization = parameterization
 
-        self.box_x: float = n * dx
-        self.box_y: float = n * dx
+        self.box_x: float = self.n * dx
+        self.box_y: float = self.ny * dx
         self.box_z: float = self.nz * dx
 
         self.dv = dx**3
-        self.nv = n**2 * self.nz
+        self.nv = self.n * self.ny * self.nz
         self.total_volume = self.nv * self.dv
         self.n_ice_molecules = int(ndensity_of_amorphous_ice * self.total_volume)
         self.register_buffer(
@@ -111,7 +112,7 @@ class RandomIcemaker(DeviceModule):
 
     def voxelize(self) -> torch.Tensor:
         """
-        Soft-voxelize ``self.positions`` onto the ``(nz, n, n)`` grid.
+        Soft-voxelize ``self.positions`` onto the ``(nz, ny, n)`` grid.
 
         Uses trilinear splatting via
         :func:`~specter.arrays.soft_voxelize_coordinates` with periodic
@@ -120,12 +121,12 @@ class RandomIcemaker(DeviceModule):
         Returns
         -------
         grid : torch.Tensor
-            Soft-voxelized density, shape ``(nz, n, n)``.
+            Soft-voxelized density, shape ``(nz, ny, n)``.
         """
         assert self.positions is not None, "No positions — call init_random() first"
         return soft_voxelize_coordinates(
             self.positions.cpu(),
-            grid_shape=(self.nz, self.n, self.n),
+            grid_shape=(self.nz, self.ny, self.n),
             voxel_size=self.dx,
             periodic=True,
         )
@@ -150,7 +151,8 @@ class RandomIcemaker(DeviceModule):
         Returns
         -------
         icedeltas : torch.Tensor
-            Soft-voxelized ice position volumes, shape ``(batchsize, nz, n, n)``.
+            Soft-voxelized ice position volumes, shape
+            ``(batchsize, nz, ny, n)``.
         """
         results = []
         for _ in range(batchsize):
@@ -182,7 +184,8 @@ class RandomIcemaker(DeviceModule):
         Returns
         -------
         icecubes : torch.Tensor
-            Generated ice potential volumes. Shape ``(batchsize, nz, n, n)``.
+            Generated ice potential volumes. Shape
+            ``(batchsize, nz, ny, n)``.
         """
         if device is None:
             device = self.device

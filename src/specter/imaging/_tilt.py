@@ -470,7 +470,7 @@ class TiltSeries:
         volume_icemaker = resolve_icemaker(
             ice.model,
             voxel_size,
-            nxy=volume.shape[-1],
+            nxy=(volume.shape[-2], volume.shape[-1]),
             nz=volume.shape[-3],
             ice_cache_dir=ice.cache_dir,
             icemaker=icemaker,

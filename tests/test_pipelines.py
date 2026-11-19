@@ -903,7 +903,8 @@ def test_run_tilt_series_images_a_widened_tomogram_at_its_field_of_view(
 ) -> None:
     """A tomogram built with max_tilt_angle is wider than `target_shape`, and
     a tilt series given no image size images the field of view it was built
-    around, about the series' own tilt axis."""
+    around, about the series' own tilt axis. Random ice fills the
+    rectangular volume."""
     tomogram_config = _minimal_tomogram_config(
         max_tilt_angle=30.0, tilt_axis="y", output_dir=str(tmp_path)
     )
@@ -914,7 +915,7 @@ def test_run_tilt_series_images_a_widened_tomogram_at_its_field_of_view(
         n_tilts=3,
         tilt_axis="x",
         n_frames=1,
-        ice_model="none",
+        ice_model="random",
         noise_model="none",
         detector_model="none",
         scattering_model="ctf",

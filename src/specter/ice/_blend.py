@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 from ..arrays import soft_voxelize_coordinates_into
 from ..fft import spatial_convolve3d_same
 from ._bank import IceBank
+from ._helpers import GridSize
 from ._tiling import _SLAB_SPLAT_ATOMS
 from ._random import RandomIcemaker
 from specter.options import IceModel, ScatteringFactors
@@ -232,7 +233,7 @@ class IceSlabBlender:
 def resolve_icemaker(
     ice_model: IceModel | None,
     voxel_size: float,
-    nxy: int,
+    nxy: GridSize,
     nz: int,
     ice_cache_dir: str | None = None,
     icemaker: "IceBank | RandomIcemaker | None" = None,
@@ -254,8 +255,9 @@ def resolve_icemaker(
         ``'none'`` or ``None`` (no ice). Ignored when ``icemaker`` is given.
     voxel_size : float
         Voxel size in Å, used to construct a fresh ``RandomIcemaker``.
-    nxy : int
-        XY size in voxels, used to construct a fresh ``RandomIcemaker``.
+    nxy : int or sequence of int
+        XY size in voxels, or ``(ny, nx)`` for a volume that is not square,
+        used to construct a fresh ``RandomIcemaker``.
     nz : int
         Z size in voxels, used to construct a fresh ``RandomIcemaker``.
     ice_cache_dir : str, optional
@@ -378,16 +380,24 @@ def blend_ice_into_volume(
     Raises
     ------
     ValueError
-        If ``V`` is not square in XY and the ice is not an `IceBank` filling
-        the box: a `RandomIcemaker` and an `IceProfile` are both built for a
-        square field.
+        If ``V`` is not square in XY and an `IceProfile` is given, which is
+        built for a square field, or if a `RandomIcemaker` was built for a
+        grid other than ``V``'s.
     """
     batchsize, nz, ny, nxy = V.shape
-    if ny != nxy and (profile is not None or not isinstance(icemaker, IceBank)):
+    if ny != nxy and profile is not None:
         raise ValueError(
-            f"a {ny} x {nxy} (Y, X) volume takes its ice from an IceBank filling "
-            "the box (ice_model='gd'); an IceProfile and RandomIcemaker need a "
-            "square one"
+            f"a {ny} x {nxy} (Y, X) volume takes ice that fills its box; an "
+            "IceProfile needs a square one"
+        )
+    if isinstance(icemaker, RandomIcemaker) and (
+        icemaker.nz,
+        icemaker.ny,
+        icemaker.n,
+    ) != (nz, ny, nxy):
+        raise ValueError(
+            f"the RandomIcemaker was built for a {icemaker.nz} x {icemaker.ny} x "
+            f"{icemaker.n} (Z, Y, X) grid, and the volume is {nz} x {ny} x {nxy}"
         )
     if (
         isinstance(icemaker, IceBank)
@@ -434,13 +444,12 @@ def blend_ice_into_volume(
         # fit there (`MicrographSpecimenGenerator`'s `move_to_cpu`), building
         # the ice on the GPU anyway defeats that and OOMs.
         ice = icemaker.generate_big_ice(
-            n=nxy,
+            n=(ny, nxy),
             dx=voxel_size,
             nz=nz,
             batchsize=batchsize,
             relax_steps=relax_steps,
             device=V.device,
-            ny=ny,
         )
     else:
         ice = icemaker.generate_ice(batchsize=batchsize).to(V.device)
@@ -620,7 +629,7 @@ def _blend_ice_slabwise(
     # for 3e8 on the host, against 37 s for a full sort of the z values),
     # and the exact z window is applied on the device per slab.
     pos = bank.big_ice_positions(
-        n, dx, nz, relax_steps=relax_steps, device=device, to_host=True, ny=ny
+        (ny, n), dx, nz, relax_steps=relax_steps, device=device, to_host=True
     )
     zv = pos[:, 2] / dx + nz // 2  # voxel z index, as the splat computes it
     n_buckets = -(-nz // chunk)

@@ -208,7 +208,12 @@ def test_shtyrov_3d_renders_on_a_builder_moved_to_the_gpu():
     host = pb(coords, method="3d")
     gpu = pb.to("cuda")(coords.to("cuda"), method="3d")
     assert gpu.device.type == "cuda"
-    torch.testing.assert_close(gpu.cpu(), host, rtol=1e-4, atol=1e-5)
+    # The kernels' float32 sums round differently on each device; on a V100 the
+    # tail differs from the host by up to ~1.6e-7 of the peak, so the absolute
+    # tolerance scales with the peak rather than being a fixed 1e-5 V.
+    torch.testing.assert_close(
+        gpu.cpu(), host, rtol=1e-4, atol=1e-6 * float(host.abs().max())
+    )
 
 
 def test_shtyrov_species_potential_matches_analytic_closed_form():

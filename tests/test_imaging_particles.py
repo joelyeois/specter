@@ -5,11 +5,11 @@ The references under ``tests/test_data/imaging_particles_*.pt`` are the
 outputs of the retired `ImageGenerator`/`ImageGeneratorFromCoordinates` on
 these exact inputs and seeds, written once while both existed. The chain was
 bit-identical to them then. The noisy cases are still compared exactly, which
-holds the chain to the generator's draws and noise. The noiseless ones are
-compared to float32 rounding (`ROUNDING`): their FFTs round differently on
-other platforms and devices (on Linux, CPU or A100, the references written on
-macOS differ by 1-3e-7 of the peak), so an exact match only held on the
-machine that wrote them. The two looser comparisons (`LOOSE`) are the places
+holds the chain to the generator's draws and noise. The noiseless ones,
+including the dry exit wave, are compared to float32 rounding (`ROUNDING`):
+their FFTs round differently on other platforms and devices (on Linux CPU, an
+A100 or a V100, the references written on macOS differ by 1-3e-7 of the peak),
+so an exact match only held on the machine that wrote them. The two looser comparisons (`LOOSE`) are the places
 the chain applies the same product in a different order.
 
 The cases with random ice (``crowded_solvated_noisy``, ``specimen_damage``,
@@ -352,7 +352,7 @@ def test_the_dry_specimen_is_the_generator_s_clean_reference() -> None:
         dry = specimen.dry().scatter(
             poses[:2], voltage=VOLTAGE, seed=7, pad_fft=True, **RETIRED
         )
-    assert torch.equal(dry.pixels(), _reference("dry_clean"))
+    _assert_close(dry.pixels(), _reference("dry_clean"))
 
 
 def _atoms() -> tuple[torch.Tensor, torch.Tensor]:

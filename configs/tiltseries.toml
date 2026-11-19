@@ -25,6 +25,25 @@ alpha = 0.1                        # unitless, amplitude contrast ratio
 [defocus]
 defocus = 22000.0                  # Å (positive = underfocus)
 
+[phase_plate]
+# Every key here is optional, and the table is empty as shipped: no plate.
+# phase_shift_rad = 1.5708       # radians (pi/2), the same for every image; default 0
+# phase_plate = "volta"            # ideal | volta | laser -- how phase_shift_rad reaches each
+                                   # frequency; default "ideal" shifts all but DC in full
+# phase_plate_cuton = 0.005        # 1/Å, volta only: frequencies below it pass unshifted
+# aberration_backend = "torch_ctf" # legacy | torch_ctf; the laser plate needs torch_ctf
+# The laser phase plate, phase_plate = "laser":
+# lpp_NA = 0.1                               # numerical aperture of the laser focus
+# lpp_laser_wavelength_angstrom = 10640.0    # Å (1064 nm)
+# lpp_focal_length_angstrom = 2e7            # Å, objective focal length (2 mm)
+# lpp_laser_xy_angle_deg = 0.0               # degrees, in-plane angle of the laser axis
+# lpp_laser_xz_angle_deg = 0.0               # degrees, out-of-plane angle of the laser axis
+# lpp_laser_long_offset_angstrom = 0.0       # Å, focus offset along the laser axis
+# lpp_laser_trans_offset_angstrom = 0.0      # Å, focus offset across the laser axis
+# lpp_laser_polarization_angle_deg = 0.0     # degrees
+# lpp_peak_phase_deg = 90.0                  # degrees, peak phase of the standing wave
+# lpp_dual_laser = false                     # two crossed lasers
+
 [tilt_geometry]
 min_tilt_angle = -45.0             # degrees
 max_tilt_angle = 45.0              # degrees

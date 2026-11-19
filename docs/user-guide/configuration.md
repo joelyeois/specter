@@ -31,8 +31,8 @@ by name rather than ignored.
 A config file is a flat set of fields, grouped into tables for
 readability only. `specter simulate particles`, for instance, reads a
 `ParticleStackConfig`, whose fields sit in `configs/particle.toml` under
-`[data]`, `[specimen]`, `[microscope]`, `[absorption]`, `[sampling]`,
-`[models]`, `[postprocessing]`, `[compute]`, `[output]`, `[job]`, and
+`[data]`, `[specimen]`, `[microscope]`, `[phase_plate]`, `[absorption]`,
+`[sampling]`, `[models]`, `[postprocessing]`, `[compute]`, `[output]`, `[job]`, and
 `[advanced]`. The table names carry no meaning for the loader: it
 flattens every table into one namespace before validating the fields, so `[specimen]`'s `pdb_source`
 and `[microscope]`'s `voltage` end up as siblings on the same dataclass.

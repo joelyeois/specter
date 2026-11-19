@@ -113,7 +113,7 @@ a time and ends with [the command line](walkthrough/command-line.md).
 
 -   :material-view-grid:{ .lg .middle } **Example gallery**
 
-    Every example in these docs at a glance, by its figure.
+    Short recipes to copy and adapt: one task and one figure each.
 
     [:octicons-arrow-right-24: Gallery](gallery.md)
 

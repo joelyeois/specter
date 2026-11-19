@@ -408,6 +408,7 @@ specter simulate tiltseries [OPTIONS]
 | `--deformation_hole_offset` | `TEXT` | `0.0` | deformation_model='dome' only: the hole's centre relative to the volume's centre as 'x,y' in Angstrom ([x, y] in TOML). A tilt series images a patch of a hole, so this decides whether it sees the dome's crown, its flank or its rim. |
 | `--deformation_correlation_length` | `FLOAT` | `10000.0` | deformation_model='random' only: length over which the deflection decorrelates, in Angstrom. Default 1 um, within the 0.33-2.9 um fitted to beam-induced motion (Zivanov et al. 2019). |
 | `--deformation_burst_dose` | `FLOAT` | `2.0` | Exposure in e-/Angstrom^2 over which the bend develops: the deflection at accumulated exposure D is height * (1 - exp(-D / burst_dose)). |
+| `--deformation_labels` | `TEXT` | _none_ | Instance-label volume (.mrc) on the specimen volume's grid, 0 for background. Each labelled object no wider than 1000 Angstrom is displaced and turned by the bend as a rigid body rather than strained with the film around it. Default: the `_protein_labels.mrc` that `specter build tomogram` writes beside the volume, when it is there; without one the whole specimen follows the film. |
 | `--deformation_picks_dir` | `TEXT` | _none_ | Directory of copick .ndjson picks for the specimen, e.g. `specter build tomogram`'s output directory. Each pick file is written again per tilt with the positions and orientations the bend gave its particles at that tilt. |
 
 **Absorption**{ #specter-simulate-tiltseries-absorption }

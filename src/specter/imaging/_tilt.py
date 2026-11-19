@@ -41,6 +41,7 @@ from . import _stages as stages
 from ._data import Exposure, Poses, settings_group
 from ._deformation import (
     Deflection,
+    RigidBodies,
     burst_fraction,
     deflection_field,
     displace,
@@ -358,6 +359,11 @@ class TiltSeries:
         half its dose. The bend is centred on the volume's rotation centre,
         its midplane the volume's middle z slice, and the volume gains its
         height in vacuum above and below. Default: rigid.
+    rigid_bodies : RigidBodies, optional
+        The parts of the specimen the bend displaces and turns without
+        straining, labelled on `volume`'s grid
+        (:meth:`RigidBodies.from_labels`); everything else follows the
+        film. Default: the whole specimen follows the film.
     edge_margin : int, optional
         Pixels added on each side of the geometric coverage. Default 8.
     pad_volume : bool, optional
@@ -418,6 +424,7 @@ class TiltSeries:
         damaged: bool = False,
         tilt: TiltGeometry = TiltGeometry(),
         deformation: Deformation = Deformation(),
+        rigid_bodies: RigidBodies | None = None,
         edge_margin: int = 8,
         pad_volume: bool = True,
         fft_pad_margin: int = FFT_PAD_MARGIN,
@@ -459,6 +466,12 @@ class TiltSeries:
         self.propagation = p
         self.damaged = damaged
         self.deformation = deformation
+        if rigid_bodies is not None and rigid_bodies.shape != volume.shape[-3:]:
+            raise ValueError(
+                f"rigid_bodies were labelled on a {rigid_bodies.shape} volume, "
+                f"but the specimen is {tuple(volume.shape[-3:])}"
+            )
+        self.rigid_bodies = rigid_bodies
         n_tilts = len(poses)
         self.doses = exposure.doses(n_tilts)
         self.pre_exposure = (
@@ -798,7 +811,11 @@ class TiltSeries:
         if self.deflection is None:
             return points
         return displace(
-            self.deflection, self.bend_fraction(i), points, self._half_depth
+            self.deflection,
+            self.bend_fraction(i),
+            points,
+            self._half_depth,
+            self.rigid_bodies,
         )
 
     def rotation(self, points: torch.Tensor, i: int) -> torch.Tensor:
@@ -823,7 +840,9 @@ class TiltSeries:
         if self.deflection is None:
             eye = torch.eye(3, dtype=points.dtype, device=points.device)
             return eye.expand(*points.shape[:-1], 3, 3)
-        return material_rotation(self.deflection, self.bend_fraction(i), points)
+        return material_rotation(
+            self.deflection, self.bend_fraction(i), points, self.rigid_bodies
+        )
 
     # ------------------------------------------------------------------ #
     # Scattering                                                           #
@@ -873,7 +892,11 @@ class TiltSeries:
             self.voxel_size,
         )
         self.scattering.warp = specimen_warp(
-            self.deflection, self.bend_fraction(i), self.voxel_size, self._half_depth
+            self.deflection,
+            self.bend_fraction(i),
+            self.voxel_size,
+            self._half_depth,
+            self.rigid_bodies,
         )
         if self.absorption is None:
             wave = self.scattering(volume, theta, slice_batchsize=slice_batchsize)

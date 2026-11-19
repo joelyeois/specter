@@ -235,6 +235,17 @@ class TiltSeriesConfig:
         ),
         check="positive",
     )  # e⁻/Å²
+    deformation_labels: str | None = setting(
+        None,
+        help=(
+            "Instance-label volume (.mrc) on the specimen volume's grid, 0 for "
+            "background. Each labelled object no wider than 1000 Angstrom is "
+            "displaced and turned by the bend as a rigid body rather than "
+            "strained with the film around it. Default: the `_protein_labels.mrc` "
+            "that `specter build tomogram` writes beside the volume, when it is "
+            "there; without one the whole specimen follows the film."
+        ),
+    )
     deformation_picks_dir: str | None = setting(
         None,
         help=(

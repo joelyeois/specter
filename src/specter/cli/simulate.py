@@ -192,6 +192,7 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
             "deformation_hole_offset",
             "deformation_correlation_length",
             "deformation_burst_dose",
+            "deformation_labels",
             "deformation_picks_dir",
         ],
     ),

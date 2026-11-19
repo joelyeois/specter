@@ -34,6 +34,7 @@ from ._field import Field, Sample
 from ._frozen import simulate_frozen
 from ._recipes import simulate_particles
 from ._specimen import Specimen, Structure
+from ._deformation import RigidBodies
 from ._tilt import TiltSeries
 from ._waves import ExitWave, Image
 
@@ -44,6 +45,7 @@ __all__ = [
     "Field",
     "Image",
     "Poses",
+    "RigidBodies",
     "Sample",
     "Specimen",
     "Structure",

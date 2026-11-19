@@ -26,6 +26,18 @@ bending strain at the faces, `Deflection.max_gradient`.
 The kinematics are linear in that gradient, which leaves an error of order
 its square: a material line normal to the film keeps its length to first
 order only. `settings.MAX_DEFORMATION_GRADIENT` bounds it.
+
+The field describes the film. A macromolecule embedded in it does not strain
+with the ice around it: it is carried along, displaced and turned as a rigid
+body. `RigidBodies` names the voxels of each such body, and inside one the
+sample point reads the volume through the rigid motion the field has at the
+body's centre ``c``,
+
+    X = c + R(c)^T (s - c - u(c)),
+
+with ``R`` the `material_rotation` and unit weight. Without it every voxel
+follows the continuous field, which strains a body by its height above the
+midplane times the film's curvature.
 """
 
 from __future__ import annotations
@@ -33,6 +45,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
+import numpy as np
 import torch
 
 from ..settings import MAX_DEFORMATION_GRADIENT, Deformation
@@ -41,6 +54,7 @@ __all__ = [
     "Deflection",
     "DomeDeflection",
     "RandomDeflection",
+    "RigidBodies",
     "Warp",
     "burst_fraction",
     "deflection_field",
@@ -72,6 +86,19 @@ _MAX_NODES = 513
 
 #: Largest dense table a random deflection is read from, per axis.
 _MAX_DENSE_NODES = 2049
+
+#: Spacing in Angstrom of the grid a specimen's rigid bodies are indexed on.
+#: A body's rigid motion gives way to the film's field across one cell of it.
+_BODY_INDEX_SPACING = 8.0
+
+#: Largest half-extent, in Angstrom along any axis, of a body that moves
+#: rigidly. A longer labelled object (a microtubule carries one label along
+#: its whole length) bends with the film: a rigid motion would part from the
+#: field around it by half the curvature times the square of that length.
+_MAX_RIGID_HALF_EXTENT = 500.0
+
+#: Sample points whose bodies are looked up together.
+_BODY_CHUNK = 1 << 22
 
 
 def burst_fraction(dose: float, burst_dose: float) -> float:
@@ -431,6 +458,191 @@ def deflection_field(
     )
 
 
+class RigidBodies:
+    """
+    The parts of a specimen that move rigidly when it bends.
+
+    Parameters
+    ----------
+    index : torch.Tensor
+        ``(nz, ny, nx)`` integers on a grid of `spacing`: the row of
+        `centres` of the body a node lies in, 0 for the film.
+    spacing : float
+        Node spacing in Angstrom.
+    origin : tuple of float
+        Position of node ``(0, 0, 0)``, ``(x, y, z)`` in Angstrom from the
+        volume's centre.
+    centres : torch.Tensor
+        ``(N + 1, 3)`` body centres, ``(x, y, z)`` in Angstrom from the
+        volume's centre; row 0 is unused.
+    shape : tuple of int
+        ``(nz, ny, nx)`` of the specimen volume the bodies were labelled on.
+    """
+
+    def __init__(
+        self,
+        index: torch.Tensor,
+        spacing: float,
+        origin: tuple[float, float, float],
+        centres: torch.Tensor,
+        shape: tuple[int, int, int],
+    ) -> None:
+        self.index = index
+        self.spacing = spacing
+        self.origin = origin
+        self.centres = centres.to(torch.float64)
+        self.shape = shape
+        self._placed: dict[torch.device, torch.Tensor] = {index.device: index}
+
+    def __len__(self) -> int:
+        return len(self.centres) - 1
+
+    @classmethod
+    def from_labels(cls, labels: np.ndarray, voxel_size: float) -> RigidBodies:
+        """
+        The bodies of an instance-label volume.
+
+        Parameters
+        ----------
+        labels : numpy.ndarray
+            ``(nz, ny, nx)`` instance ids on the specimen volume's grid, 0
+            for background, such as the ``_protein_labels.mrc`` that
+            `specter build tomogram` writes. A memory-mapped array is read
+            once, at the index spacing.
+        voxel_size : float
+            Of the label volume, in Angstrom.
+
+        Returns
+        -------
+        RigidBodies
+            One body per label no wider than the rigid limit, centred on
+            the label's centroid.
+        """
+        from scipy import ndimage
+
+        nz, ny, nx = (int(n) for n in labels.shape[-3:])
+        labels = labels.reshape(nz, ny, nx)
+        step = max(1, round(_BODY_INDEX_SPACING / voxel_size))
+        coarse = np.ascontiguousarray(labels[::step, ::step, ::step]).astype(np.int32)
+        spacing = step * voxel_size
+        origin = (
+            -(nx // 2) * voxel_size,
+            -(ny // 2) * voxel_size,
+            -(nz // 2) * voxel_size,
+        )
+
+        peak = int(coarse.max(initial=0))
+        boxes = ndimage.find_objects(coarse, max_label=peak)
+        rigid = np.zeros(peak + 1, dtype=bool)
+        for label, box in enumerate(boxes, start=1):
+            if box is not None:
+                extent = max(s.stop - s.start for s in box) * spacing / 2.0
+                rigid[label] = extent <= _MAX_RIGID_HALF_EXTENT
+        # Renumbered 1..N in label order, the film and every long object 0.
+        rows = np.where(rigid, np.cumsum(rigid), 0).astype(np.int32)
+        coarse = rows[coarse]
+        n = int(rows.max(initial=0))
+
+        at = np.flatnonzero(coarse)
+        row = coarse.ravel()[at]
+        count = np.bincount(row, minlength=n + 1).clip(min=1)
+        centres = np.zeros((n + 1, 3))
+        for axis, k in enumerate(np.unravel_index(at, coarse.shape)[::-1]):
+            mean = np.bincount(row, weights=k, minlength=n + 1) / count
+            centres[:, axis] = origin[axis] + mean * spacing
+        dtype = torch.int16 if n <= torch.iinfo(torch.int16).max else torch.int32
+        return cls(
+            torch.from_numpy(coarse).to(dtype),
+            spacing,
+            origin,
+            torch.from_numpy(centres),
+            (nz, ny, nx),
+        )
+
+    def _index_on(self, device: torch.device) -> torch.Tensor:
+        if device not in self._placed:
+            self._placed[device] = self.index.to(device)
+        return self._placed[device]
+
+    def membership(self, points: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        The body each point lies in, and how far inside it.
+
+        Parameters
+        ----------
+        points : torch.Tensor
+            ``(M, 3)`` positions in the undeformed specimen, ``(x, y, z)`` in
+            Angstrom from the volume's centre.
+
+        Returns
+        -------
+        body : torch.Tensor
+            ``(M,)`` rows of `centres`, 0 for a point in the film.
+        fraction : torch.Tensor
+            ``(M,)`` trilinear weight of that body among the eight index
+            nodes around the point: 1 inside it, falling to 0 across one
+            cell at its surface.
+        """
+        index = self._index_on(points.device)
+        nz, ny, nx = index.shape
+        origin = torch.tensor(self.origin, dtype=points.dtype, device=points.device)
+        g = (points - origin) / self.spacing
+        low = g.floor()
+        fx, fy, fz = (g - low).unbind(-1)
+        ix, iy, iz = low.long().unbind(-1)
+        inside = (
+            (ix >= 0)
+            & (ix < nx - 1)
+            & (iy >= 0)
+            & (iy < ny - 1)
+            & (iz >= 0)
+            & (iz < nz - 1)
+        )
+        ix, iy, iz = ix.clamp(0, nx - 2), iy.clamp(0, ny - 2), iz.clamp(0, nz - 2)
+        corners = torch.stack(
+            [
+                index[iz + dz, iy + dy, ix + dx]
+                for dz in (0, 1)
+                for dy in (0, 1)
+                for dx in (0, 1)
+            ],
+            dim=-1,
+        )
+        weights = torch.stack(
+            [
+                (fz if dz else 1 - fz) * (fy if dy else 1 - fy) * (fx if dx else 1 - fx)
+                for dz in (0, 1)
+                for dy in (0, 1)
+                for dx in (0, 1)
+            ],
+            dim=-1,
+        )
+        body = corners.amax(dim=-1)
+        fraction = (weights * (corners == body[:, None])).sum(dim=-1)
+        body = body.long() * inside
+        return body, fraction * (body > 0)
+
+
+def _carry(
+    points: torch.Tensor, bodies: RigidBodies | None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Which points ride on a rigid body, and the centre of each one's body.
+
+    Returns the mask over `points`' leading shape, and for the points it
+    selects their bodies' centres and the offsets from them.
+    """
+    flat = points.reshape(-1, 3)
+    if bodies is None or len(bodies) == 0:
+        none = torch.zeros(len(flat), dtype=torch.bool, device=points.device)
+        return none.reshape(points.shape[:-1]), flat[:0], flat[:0]
+    body, inside = bodies.membership(flat)
+    # A point is carried by the body that holds most of its cell.
+    on = inside > 0.5
+    centre = bodies.centres.to(flat)[body[on]]
+    return on.reshape(points.shape[:-1]), centre, flat[on] - centre
+
+
 def _iterations(lipschitz: float, displacement: float) -> int:
     """Fixed-point steps contracting `displacement` voxels to the tolerance."""
     if displacement <= _PULL_BACK_TOLERANCE or lipschitz <= 0.0:
@@ -440,7 +652,11 @@ def _iterations(lipschitz: float, displacement: float) -> int:
 
 
 def displace(
-    deflection: Deflection, fraction: float, points: torch.Tensor, half_depth: float
+    deflection: Deflection,
+    fraction: float,
+    points: torch.Tensor,
+    half_depth: float,
+    bodies: RigidBodies | None = None,
 ) -> torch.Tensor:
     """
     Where the bend carries specimen points: the forward map ``X + u(X)``.
@@ -456,20 +672,35 @@ def displace(
         ``z`` from its midplane.
     half_depth : float
         Half the volume's depth in Angstrom, past which the lever is held.
+    bodies : RigidBodies, optional
+        The specimen's rigid bodies. A point inside one moves with its
+        body: ``c + u(c) + R(c) (X - c)`` for the body's centre ``c``.
 
     Returns
     -------
     torch.Tensor
         The displaced points, shaped and in units like `points`.
     """
-    x, y, z = points.unbind(-1)
-    w, w_x, w_y = deflection(x, y)
-    lever = fraction * z.clamp(-half_depth, half_depth)
-    return torch.stack([x - lever * w_x, y - lever * w_y, z + fraction * w], dim=-1)
+
+    def field(p: torch.Tensor) -> torch.Tensor:
+        x, y, z = p.unbind(-1)
+        w, w_x, w_y = deflection(x, y)
+        lever = fraction * z.clamp(-half_depth, half_depth)
+        return torch.stack([x - lever * w_x, y - lever * w_y, z + fraction * w], dim=-1)
+
+    moved = field(points)
+    on, centre, offset = _carry(points, bodies)
+    if on.any():
+        turn = material_rotation(deflection, fraction, centre)
+        moved[on] = field(centre) + (turn @ offset[..., None])[..., 0]
+    return moved
 
 
 def material_rotation(
-    deflection: Deflection, fraction: float, points: torch.Tensor
+    deflection: Deflection,
+    fraction: float,
+    points: torch.Tensor,
+    bodies: RigidBodies | None = None,
 ) -> torch.Tensor:
     """
     How the bend turns the material at specimen points.
@@ -487,6 +718,9 @@ def material_rotation(
         The fraction of it reached.
     points : torch.Tensor
         ``(..., 3)`` positions in the undeformed specimen, in Angstrom.
+    bodies : RigidBodies, optional
+        The specimen's rigid bodies. A point inside one turns with its
+        body, by the rotation at the body's centre.
 
     Returns
     -------
@@ -495,6 +729,11 @@ def material_rotation(
     """
     import roma
 
+    if bodies is not None:
+        on, centre, _ = _carry(points, bodies)
+        if on.any():
+            points = points.clone()
+            points[on] = centre
     x, y, _ = points.unbind(-1)
     _, w_x, w_y = deflection(x, y)
     rotvec = fraction * torch.stack([w_y, -w_x, torch.zeros_like(w_x)], dim=-1)
@@ -506,6 +745,7 @@ def specimen_warp(
     fraction: float,
     voxel_size: float,
     half_depth: float,
+    bodies: RigidBodies | None = None,
 ) -> Warp | None:
     """
     The map a tilt samples its volume through, at a fraction of the bend.
@@ -522,6 +762,9 @@ def specimen_warp(
     half_depth : float
         Half the volume's depth in Angstrom: the height of its faces above
         the midplane, where the field stops growing with ``z``.
+    bodies : RigidBodies, optional
+        The parts of the specimen that move rigidly; everything else, and
+        everything without them, follows the field.
 
     Returns
     -------
@@ -530,6 +773,12 @@ def specimen_warp(
     """
     if deflection is None or fraction == 0.0:
         return None
+    if bodies is not None and len(bodies) == 0:
+        bodies = None
+    if bodies is not None:
+        # Each body's rigid motion: where its centre goes, and its turn.
+        landed = displace(deflection, fraction, bodies.centres, half_depth)
+        turned = material_rotation(deflection, fraction, bodies.centres)
     # The map's Lipschitz constant and largest displacement scale with the
     # deflection, so a bend still growing needs fewer steps.
     steps = _iterations(
@@ -564,7 +813,22 @@ def specimen_warp(
         det = a * b - (lever * w_xy) ** 2
         within = (z.abs() <= half_depth).to(z.dtype)
         det = det + within * (a * w_y**2 + b * w_x**2 + 2.0 * lever * w_xy * w_x * w_y)
-        source = torch.stack([x, y, z], dim=-1) / voxel_size
-        return source, 1.0 / det
+        source = torch.stack([x, y, z], dim=-1)
+        weight = 1.0 / det
+        if bodies is not None:
+            sample = points * voxel_size
+            flat, flat_weight = source.view(-1, 3), weight.view(-1)
+            centre, to, turn = (t.to(flat) for t in (bodies.centres, landed, turned))
+            for chunk in torch.arange(len(flat), device=flat.device).split(_BODY_CHUNK):
+                # The body is the one the film's own pull-back lands in.
+                body, inside = bodies.membership(flat[chunk])
+                on = inside > 0
+                at, k, inside = chunk[on], body[on], inside[on]
+                offset = sample.reshape(-1, 3)[at] - to[k]
+                # R^T offset.
+                rigid = centre[k] + torch.einsum("mji,mj->mi", turn[k], offset)
+                flat[at] += inside[:, None] * (rigid - flat[at])
+                flat_weight[at] += inside * (1.0 - flat_weight[at])
+        return source / voxel_size, weight
 
     return warp

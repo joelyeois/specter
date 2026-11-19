@@ -706,6 +706,69 @@ def test_run_micrograph_writes_clean_exit_waves_without_ice(tmp_path: Path) -> N
         assert np.array_equal(wave, clean)
 
 
+def test_run_tilt_series_moves_labelled_particles_rigidly(tmp_path: Path) -> None:
+    """
+    The label volume `specter build tomogram` writes beside a specimen is
+    picked up by a deformed series: the pick of a labelled particle is
+    written where the rigid motion at the particle's centre carries it,
+    which is not where the film's own field would.
+    """
+    import json
+
+    from scipy.spatial.transform import Rotation
+
+    nz, n, dx = 16, 48, 8.0
+    height, radius = 20.0, 400.0
+    torch.save(torch.rand(nz, n, n) * 0.01, tmp_path / "volume.pt")
+    labels = np.zeros((nz, n, n), dtype=np.uint16)
+    labels[4:8, 26:32, 30:36] = 3
+    with mrcfile.new(tmp_path / "volume_protein_labels.mrc") as m:
+        m.set_data(labels)
+    origin = np.array([n // 2, n // 2, nz // 2]) * dx
+    centre = (np.array([32.5, 28.5, 5.5]) - np.array([n // 2, n // 2, nz // 2])) * dx
+    at = centre + np.array([16.0, -8.0, 8.0])
+    picks = tmp_path / "picks"
+    picks.mkdir()
+    row = {"type": "orientedPoint", "location": dict(zip("xyz", at + origin))}
+    (picks / "thing-1.0_orientedPoint.ndjson").write_text(json.dumps(row) + "\n")
+    config = TiltSeriesConfig(
+        volume_path=str(tmp_path / "volume.pt"),
+        voxel_size=dx,
+        n_tilts=3,
+        dose_per_tilt=1.0,
+        ice_model="none",
+        noise_model="none",
+        scattering_model="projection",
+        deformation_model="dome",
+        deformation_height=height,
+        deformation_hole_radius=radius,
+        deformation_burst_dose=1e-3,
+        deformation_picks_dir=str(picks),
+        seed=0,
+        device="cpu",
+        output_dir=str(tmp_path / "out"),
+        filename="ts",
+    )
+    run_tilt_series(config)
+    out = tmp_path / "out"
+    assert json.loads((out / "ts_deformation.json").read_text())["rigid_bodies"] == 1
+
+    def carried(p: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        q = 1.0 - (p[0] ** 2 + p[1] ** 2) / radius**2
+        w = height * q * q
+        w_x, w_y = (-4 * height * q * p[:2]) / radius**2
+        moved = np.array([p[0] - p[2] * w_x, p[1] - p[2] * w_y, p[2] + w])
+        return moved, Rotation.from_rotvec([w_y, -w_x, 0.0]).as_matrix()
+
+    landed, turn = carried(centre)
+    moved = json.loads(
+        (out / "ts_picks" / "tilt_000" / "thing-1.0_orientedPoint.ndjson").read_text()
+    )
+    got = np.array([moved["location"][k] for k in "xyz"]) - origin
+    np.testing.assert_allclose(got, landed + turn @ (at - centre), atol=1e-6)
+    assert np.abs(got - carried(at)[0]).max() > 0.05
+
+
 def test_run_tilt_series_writes_the_bend_each_tilt_imaged(tmp_path: Path) -> None:
     """
     A deformed series writes its full deflection, the fraction of it each

@@ -25,7 +25,7 @@ from specter.config import (
     validate_config,
 )
 from specter.config import parse_scalar_or_range
-from specter.imaging import CTF, Exposure, Poses, Sample, TiltSeries
+from specter.imaging import CTF, Exposure, Poses, RigidBodies, Sample, TiltSeries
 from specter.imaging._stages import SEED_STAGE_SPECIMEN, read_dose_weights
 from specter.random_seed import derive_seed
 from specter.io import create_micrograph_starfile, write_mrc
@@ -108,6 +108,16 @@ def run_tilt_series(
             "deformation_picks_dir is set but deformation_model is 'none': "
             "there is no bend to move the picks by"
         )
+    if config.deformation_labels is not None:
+        if deformation.model is None:
+            raise ValueError(
+                "deformation_labels is set but deformation_model is 'none': "
+                "there is no bend to move the labelled objects by"
+            )
+        if not os.path.isfile(config.deformation_labels):
+            raise FileNotFoundError(
+                f"deformation_labels={config.deformation_labels!r} does not exist"
+            )
 
     if tomogram_config is not None:
         if config.volume_path:
@@ -252,6 +262,9 @@ def run_tilt_series(
         weights_max_frequency=weights_max_frequency,
     )
     tilt = bundle_from_config(TiltGeometry, config)
+    rigid_bodies = None
+    if deformation.model is not None:
+        rigid_bodies = _load_rigid_bodies(config, tuple(volume.shape[-3:]))
     series = Sample.from_volume(volume, dx).tilt_series(
         Poses.tilt_series(angles, axis=tilt.tilt_axis),
         exposure,
@@ -261,6 +274,7 @@ def run_tilt_series(
         damaged=microscope.damages_specimen,
         tilt=tilt,
         deformation=deformation,
+        rigid_bodies=rigid_bodies,
         seed=run_seed,
         objective_aperture=config.objective_aperture,
         propagation=bundle_from_config(Propagation, config, alpha=alpha),
@@ -350,6 +364,37 @@ def run_tilt_series(
     _print_total_time(t_start)
 
 
+def _load_rigid_bodies(
+    config: TiltSeriesConfig, shape: tuple[int, ...]
+) -> RigidBodies | None:
+    """
+    The specimen's rigid bodies: from ``deformation_labels``, or from the
+    ``_protein_labels.mrc`` `specter build tomogram` wrote beside the volume.
+    None when there is neither, and the whole specimen follows the film.
+    """
+    import mrcfile
+
+    path = config.deformation_labels
+    if path is None:
+        beside = os.path.splitext(config.volume_path)[0] + "_protein_labels.mrc"
+        if not os.path.isfile(beside):
+            console.print(
+                "  No label volume beside the specimen: every voxel follows "
+                "the bend, particles included (deformation_labels)"
+            )
+            return None
+        path = beside
+    with mrcfile.mmap(path, permissive=True) as mrc:
+        if mrc.data.shape != shape:
+            raise ValueError(
+                f"label volume {path!r} is {mrc.data.shape}, but the specimen "
+                f"volume is {shape}"
+            )
+        bodies = RigidBodies.from_labels(mrc.data, config.voxel_size)
+    console.print(f"  Rigid bodies: {len(bodies):,} labelled objects from {path}")
+    return bodies
+
+
 def _save_deformation_truth(
     series: TiltSeries,
     shape: tuple[int, ...],
@@ -394,13 +439,15 @@ def _save_deformation_truth(
         "voxel_size": dx,
         "origin_voxel_zyx": [nz // 2, ny // 2, nx // 2],
         "half_depth": nz * dx / 2.0,
+        "rigid_bodies": 0 if series.rigid_bodies is None else len(series.rigid_bodies),
         "deflection_map": os.path.basename(map_path),
         "kinematics": (
             "A specimen point (x, y, z), in Angstrom from origin_voxel_zyx with "
             "z from the midplane, is imaged by tilt i at (x - f_i z' dw/dx, "
             "y - f_i z' dw/dy, z + f_i w), w(x, y) the deflection map and z' = "
             "z clamped to +-half_depth; its material is turned about x by "
-            "f_i dw/dy and about y by -f_i dw/dx."
+            "f_i dw/dy and about y by -f_i dw/dx. A point of a rigid body is "
+            "carried by that motion evaluated at the body's centre."
         ),
         "tilts": [
             {

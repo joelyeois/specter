@@ -40,6 +40,9 @@ deformation_model = "none"         # none | dome | random -- beam-induced bendin
 # deformation_hole_offset = [-4000.0, 0.0] # Å, dome only: hole centre from the volume's centre
 # deformation_correlation_length = 10000.0 # Å, random only
 # deformation_burst_dose = 2.0     # e⁻/Å² over which the bend develops
+# deformation_labels = "tomograms/tomogram_protein_labels.mrc"  # instance labels: each
+                                   # labelled object moves rigidly. Default: the
+                                   # _protein_labels.mrc beside volume_path, if present
 # deformation_picks_dir = "tomograms"      # copick .ndjson picks to move per tilt
 
 [absorption]

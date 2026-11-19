@@ -128,6 +128,42 @@ midplane, which the padding leaves in place, so the vacuum does not
 change the image. A multislice tilt costs about 1.3 to 1.6 times as
 much as a rigid one.
 
+## Rigid particles
+
+The field \(\mathbf{u}\) describes the film. A macromolecule embedded in
+it is far stiffer than vitreous ice and does not take up the film's
+strain: it is carried and turned as a whole. Material sampled through the
+field alone is instead sheared by \(\nabla\mathbf{u}\), which for a
+particle of radius \(r\) displaces its periphery by up to
+\(r\,|\nabla\mathbf{u}|\) relative to a rigid copy.
+
+When the specimen comes with an instance-label volume, each labelled
+object is therefore moved as a rigid body. Its centre \(\mathbf{c}\), the
+centroid of its label, follows the field, and the rest of it follows the
+rotation \(\mathbf{R}(\mathbf{c})\) there, so that a sample point inside
+the object reads the undeformed volume at
+
+\[
+\mathbf{X} = \mathbf{c} + \mathbf{R}(\mathbf{c})^{\mathsf T}
+\bigl(\mathbf{s} - \mathbf{c} - f\,\mathbf{u}(\mathbf{c})\bigr)
+\]
+
+with unit weight, a rigid motion having unit Jacobian. The label volume
+is indexed at 8 Å spacing and membership is interpolated between its
+nodes, which blends the rigid map into the film's over the width of one
+node at each object's boundary. Picks inside a labelled object are
+displaced and turned by the same rigid motion, so the ground truth and
+the images agree.
+
+`specter build tomogram` writes the label volume
+(`<filename>_protein_labels.mrc`) by default, and
+`specter simulate tiltseries` reads the one beside its specimen volume
+unless `deformation_labels` names another. An object whose label extends
+more than 500 Å from its centre along any axis, such as a microtubule
+labelled along its whole length, bends with the film. From Python,
+`RigidBodies.from_labels(labels, voxel_size)` builds the index and
+`TiltSeries(..., rigid_bodies=...)` applies it.
+
 ![Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.](../assets/images/specimen-deformation-tilts.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.
@@ -169,6 +205,12 @@ From Python, `TiltSeries.displaced(points, i)` and
 - No out-of-plane deformation of a lamella during a tilt series has been
   measured, so the random model's amplitude for one is a choice rather
   than a calibrated value.
+- Without a label volume the whole specimen follows the film, particles
+  included. A specimen loaded from a bare density map therefore has its
+  particles strained by the bend.
+- A rigid particle and the film around it overlap or part by up to the
+  strain times the particle's radius at its boundary; the blend there
+  does not conserve the integrated potential exactly.
 - `TomogramReconstructor` assumes a rigid specimen.
 
 ## References

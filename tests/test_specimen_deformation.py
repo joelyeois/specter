@@ -18,9 +18,11 @@ import torch
 from specter.imaging import CTF, Exposure, Poses, Sample
 from specter.imaging._deformation import (
     RandomDeflection,
+    RigidBodies,
     burst_fraction,
     deflection_field,
     displace,
+    material_rotation,
     specimen_warp,
 )
 from specter.settings import Deformation, Propagation
@@ -40,7 +42,9 @@ def _bead(centre: tuple[float, float, float], sigma: float = 1.5) -> torch.Tenso
 
 
 def _images(
-    volume: torch.Tensor, deformation: Deformation = Deformation()
+    volume: torch.Tensor,
+    deformation: Deformation = Deformation(),
+    rigid_bodies: RigidBodies | None = None,
 ) -> list[torch.Tensor]:
     """Each tilt's projected phase, which is linear in the bead's potential."""
     series = Sample.from_volume(volume, PIXEL).tilt_series(
@@ -49,6 +53,7 @@ def _images(
         voltage=300.0,
         micrograph_size=NXY,
         deformation=deformation,
+        rigid_bodies=rigid_bodies,
         # Reflect-padding would mirror a copy of the bead in from the edge.
         pad_volume=False,
         log=False,
@@ -376,3 +381,115 @@ def test_a_series_refuses_a_random_bend_too_steep_for_its_depth():
             log=False,
             seed=0,
         )
+
+
+# A film curved enough to strain a particle visibly on this grid: the face
+# strain is 0.07 and the slope 0.10, together inside the kinematics' limit.
+_CURVED = Deformation(model="dome", height=100.0, hole_radius=1500.0, burst_dose=1e-3)
+# Below the midplane, so that the lifted particle stays inside the volume the
+# reference is rendered in.
+_BODY_CENTRE = (150.0, -80.0, -100.0)
+
+
+def _body() -> RigidBodies:
+    """The label of a particle 250 A in radius, off the midplane."""
+    axes = [(torch.arange(n) - n // 2) * PIXEL for n in (NZ, NXY, NXY)]
+    z, y, x = torch.meshgrid(*axes, indexing="ij")
+    r = torch.stack([x, y, z], dim=-1) - torch.tensor(_BODY_CENTRE)
+    labels = (r.norm(dim=-1) <= 250.0).to(torch.int32) * 4
+    return RigidBodies.from_labels(labels.numpy(), PIXEL)
+
+
+@pytest.mark.parametrize("offset", [(150.0, 0.0, 40.0), (-60.0, 130.0, -30.0)])
+def test_a_labelled_particle_moves_without_straining(
+    offset: tuple[float, float, float],
+):
+    """
+    Off the midplane of a curved film, the field stretches whatever follows
+    it. A bead of a labelled particle is instead imaged where the rigid
+    motion at the particle's centre puts it, at every tilt; the same bead
+    left to the field lands elsewhere.
+    """
+    bodies = _body()
+    # The label's centroid; the label is clipped by the volume's faces.
+    centre = bodies.centres[1]
+    start = torch.tensor(_BODY_CENTRE, dtype=torch.float64) + torch.tensor(
+        offset, dtype=torch.float64
+    )
+    volume = _bead(tuple(start.tolist()))
+
+    field = deflection_field(_CURVED, 1000.0, PIXEL)
+    assert field is not None
+    landed = displace(field, 1.0, centre, NZ * PIXEL / 2)
+    turn = material_rotation(field, 1.0, centre)
+    moved = landed + turn @ (start - centre)
+    reference = _images(_bead(tuple(moved.tolist())))
+
+    rigid = _images(volume, _CURVED, bodies)
+    strained = _images(volume, _CURVED)
+    for angle, r, ref in zip(ANGLES, rigid, reference, strict=True):
+        assert torch.allclose(_centroid(r), _centroid(ref), atol=0.005), angle
+        # A rigid motion has unit Jacobian: the projected potential is kept.
+        assert float(r.sum()) == pytest.approx(float(ref.sum()), rel=1e-2), angle
+    apart = max(
+        float((_centroid(s) - _centroid(ref)).norm())
+        for s, ref in zip(strained, reference, strict=True)
+    )
+    assert apart > 0.15
+
+
+def test_points_of_a_rigid_body_keep_their_distances():
+    """
+    `displace` and `material_rotation` carry a point of a body by the motion
+    at the body's centre, so the truth a series reports for a pick is the
+    pose its particle was imaged in, and the sampling map inverts it.
+    """
+    bodies = _body()
+    field = deflection_field(_CURVED, 1000.0, PIXEL)
+    assert field is not None
+    half_depth = NZ * PIXEL / 2
+    centre = bodies.centres[1]
+    points = torch.tensor(_BODY_CENTRE, dtype=torch.float64) + torch.tensor(
+        [[90.0, 10.0, -20.0], [-70.0, 60.0, 30.0], [20.0, -90.0, 40.0]],
+        dtype=torch.float64,
+    )
+    apart = torch.cdist(points, points)
+
+    carried = displace(field, 1.0, points, half_depth, bodies)
+    strained = displace(field, 1.0, points, half_depth)
+    assert torch.allclose(torch.cdist(carried, carried), apart, atol=1e-9)
+    assert float((torch.cdist(strained, strained) - apart).abs().max()) > 1.0
+
+    turn = material_rotation(field, 1.0, points, bodies)
+    assert torch.equal(turn[0], turn[1])
+    assert torch.allclose(turn[0], material_rotation(field, 1.0, centre))
+
+    warp = specimen_warp(field, 1.0, PIXEL, half_depth, bodies)
+    assert warp is not None
+    source, weight = warp(carried / PIXEL)
+    assert torch.allclose(source * PIXEL, points, atol=1e-6)
+    assert torch.allclose(weight, torch.ones_like(weight))
+
+
+def test_a_long_labelled_object_bends_with_the_film():
+    """
+    One label along a whole microtubule cannot move rigidly: over its length
+    the film curves away from any single rigid motion. Labels wider than the
+    rigid limit are left to the field, and the rest are numbered in order.
+    """
+    labels = torch.zeros(8, 16, 160, dtype=torch.int32)
+    labels[3:5, 6:9, 10:150] = 2  # 1400 A long
+    labels[2:6, 2:6, 20:24] = 5
+    labels[4:6, 10:14, 100:104] = 9
+    bodies = RigidBodies.from_labels(labels.numpy(), PIXEL)
+    assert len(bodies) == 2
+    assert int(bodies.index[3, 7, 80]) == 0
+    assert int(bodies.index[3, 3, 21]) == 1 and int(bodies.index[5, 11, 101]) == 2
+    expected = (torch.tensor([21.5, 3.5, 3.5]) - torch.tensor([80, 8, 4])) * PIXEL
+    assert torch.allclose(bodies.centres[1], expected.double())
+
+
+def test_a_series_refuses_bodies_labelled_on_another_grid():
+    bodies = _body()
+    with pytest.raises(ValueError, match="rigid_bodies were labelled"):
+        _images(torch.zeros(1, NZ, NXY + 2, NXY + 2), _CURVED, bodies)

@@ -33,6 +33,7 @@ def _write_source(tmp_path: Path, blob_idx: np.ndarray) -> tuple[Path, np.ndarra
     (job / "restack").mkdir(parents=True, exist_ok=True)
     with mrcfile.new(str(job / "restack" / "batch_0.mrc"), overwrite=True) as mrc:
         mrc.set_data(images)
+        mrc.voxel_size = 0.83
 
     dataset = Dataset(
         allocate={
@@ -101,6 +102,10 @@ def test_stack_out_writes_a_stack_in_the_row_order_instead(
     written = np.load(out / "p.cs")
     with mrcfile.open(str(out / "p.mrcs")) as mrc:
         exported = np.asarray(mrc.data, dtype=np.float32)
+        # The copy is an image stack at the source's pixel size, not an
+        # untagged array a reader takes for a 1 A volume.
+        assert mrc.is_image_stack()
+        assert float(mrc.voxel_size.x) == pytest.approx(0.83)
     assert np.array_equal(exported, images[ROTATION])
     assert np.array_equal(written["blob/idx"], np.arange(N))
     assert set(written["blob/path"].tolist()) == {b"p.mrcs"}

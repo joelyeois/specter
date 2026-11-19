@@ -424,7 +424,7 @@ def _save_deformation_truth(
     gy, gx = torch.meshgrid(y, x, indexing="ij")
     w = deflection(gx, gy)[0]
     map_path = os.path.join(output_dir, config.filename + "_deflection.mrc")
-    write_mrc(map_path, w[None], dx)
+    write_mrc(map_path, w[None], dx, stack=True)
     console.print(f"  [green]✓[/green] {map_path}")
 
     d = series.deformation

@@ -500,6 +500,27 @@ the STAR file as `rlnImagePixelSize` and in the MRC header as `voxel_size`.
 Tomogram volumes, which `specter build tomogram` writes, have no
 accompanying STAR file and carry `voxel_size` in the MRC header alone.
 
+Every MRC file `specter` writes follows one header convention:
+
+- The axis order is the standard one (`mapc`, `mapr`, `maps` = 1, 2, 3), so
+  the array on disk is `(Z, Y, X)` for a volume and `(N, Y, X)` for a stack.
+- A stack of images is marked as one (space group 0, one section per cell)
+  and a volume as a volume (space group 1). A `.mrcs` file is always a stack.
+  A stack of a single image is the exception and is left unmarked, because
+  the format cannot distinguish it from a lone 2-D image and readers would
+  drop its leading axis.
+- The voxel or pixel size is recorded in Å and is the same along every axis.
+- The origin is zero. The frame of a file is its own box, whose centre is
+  voxel \(\lfloor n/2 \rfloor\) on each axis (see
+  [Canvas coordinates](#canvas-coordinates)). A potential map, a
+  reconstruction of particles simulated from it, and a map that CryoSPARC or
+  RELION wrote at the same box and voxel size therefore overlay in a viewer
+  without a translation.
+
+On reading, `specter` takes the array as stored and the voxel size from the
+header. It ignores the origin, and warns when the header declares a
+non-standard axis order, because the array is not transposed to correct it.
+
 ## Reproducibility
 
 `specter.seed(n)` seeds Python's `random`, NumPy, and PyTorch on CPU and

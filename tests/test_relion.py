@@ -417,6 +417,57 @@ def test_mrc_round_trip_keeps_values_and_voxel_size(tmp_path) -> None:
     assert read_mrc(tmp_path / "a.mrcs")[0].shape == (2, 4, 4)
 
 
+def test_write_mrc_tags_stacks_and_volumes_and_leaves_the_origin_zero(
+    tmp_path,
+) -> None:
+    """A viewer goes by the header to tell five images from a five-section
+    volume: `.mrcs` (or `stack=True`) is an image stack, anything else a
+    volume, and the pixel size is the same in both. The origin stays zero."""
+    import mrcfile
+    import numpy as np
+
+    from specter.io import write_mrc
+
+    data = np.ones((5, 8, 8))
+    write_mrc(tmp_path / "s.mrcs", data, 1.5)
+    write_mrc(tmp_path / "v.mrc", data, 1.5)
+    write_mrc(tmp_path / "forced.mrc", data, 1.5, stack=True)
+    for name, is_stack in (("s.mrcs", True), ("v.mrc", False), ("forced.mrc", True)):
+        with mrcfile.open(tmp_path / name) as mrc:
+            assert mrc.is_image_stack() == is_stack
+            assert mrc.is_volume() != is_stack
+            assert float(mrc.voxel_size.x) == pytest.approx(1.5)
+            assert float(mrc.voxel_size.y) == pytest.approx(1.5)
+            assert tuple(mrc.header.origin.tolist()) == (0.0, 0.0, 0.0)
+            assert (int(mrc.header.mapc), int(mrc.header.mapr)) == (1, 2)
+
+    # One image cannot be marked as a stack without losing its leading axis.
+    write_mrc(tmp_path / "one.mrcs", data[:1], 1.5)
+    with mrcfile.open(tmp_path / "one.mrcs") as mrc:
+        assert mrc.data.shape == (1, 8, 8)
+
+
+def test_read_mrc_warns_on_a_non_standard_axis_order(tmp_path) -> None:
+    """`read_mrc` returns the array as stored, so a file whose header says the
+    axes are permuted would be used transposed; it says so instead."""
+    import warnings
+
+    import mrcfile
+    import numpy as np
+
+    from specter.io import read_mrc, write_mrc
+
+    path = tmp_path / "permuted.mrc"
+    write_mrc(path, np.ones((4, 5, 6)), 1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        read_mrc(path)
+    with mrcfile.open(path, mode="r+") as mrc:
+        mrc.header.mapc, mrc.header.mapr, mrc.header.maps = 3, 2, 1
+    with pytest.warns(UserWarning, match=r"axis order.*\(3, 2, 1\)"):
+        read_mrc(path)
+
+
 def test_phase_shift_is_written_in_degrees_and_read_back(tmp_path) -> None:
     """RELION's rlnPhaseShift is in degrees; specter carries radians. A
     nonzero shift is needed: zero reads the same in either unit."""

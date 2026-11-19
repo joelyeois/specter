@@ -428,7 +428,7 @@ class Image:
         """Write the stack as an MRC file."""
         from ..io import write_mrc
 
-        write_mrc(path, self.array, self.pixel_size)
+        write_mrc(path, self.array, self.pixel_size, stack=True)
 
     @staticmethod
     def cat(images: list[Image]) -> Image:

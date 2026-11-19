@@ -173,6 +173,8 @@ def _write_reordered_stack(
 ) -> None:
     """Write the images ``refs`` names into one stack, in that order."""
     box = read([refs[0]]).shape[-1]  # type: ignore[operator]
+    with mrcfile.open(refs[0][0], permissive=True, header_only=True) as source:
+        pixel_size = float(source.voxel_size.x)
     stack_out.parent.mkdir(parents=True, exist_ok=True)
     with mrcfile.new_mmap(
         str(stack_out), shape=(len(refs), box, box), mrc_mode=2, overwrite=True
@@ -180,6 +182,11 @@ def _write_reordered_stack(
         for lo in range(0, len(refs), _CHUNK):
             chunk = refs[lo : lo + _CHUNK]
             mrc.data[lo : lo + len(chunk)] = read(chunk).numpy()  # type: ignore[operator]
+        if len(refs) > 1:  # as `write_mrc`: one image reads back 2-D if tagged
+            mrc.set_image_stack()
+        # The source stacks' own; a header that records none is left as it is.
+        if pixel_size > 0:
+            mrc.voxel_size = pixel_size
 
 
 def _set_addresses(

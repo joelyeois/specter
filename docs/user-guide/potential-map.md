@@ -80,8 +80,10 @@ requires `scattering_factors = "shtyrov"`.
 ## Limitations
 
 - The map is centred on the model, not placed in the coordinate frame of the
-  deposited file, and the header origin is zero. It does not overlay the
-  deposited coordinates in a viewer without a translation.
+  deposited file, and the header origin is zero, as in every file `specter`
+  writes (see [Files and output](../concepts/conventions.md#files-and-output)).
+  It does not overlay the deposited coordinates in a viewer without a
+  translation.
 - The map is the model in vacuum. It contains no solvent, no envelope and no
   imaging effects; [Generate a particle stack](particle-stack.md) covers those.
 - Of a file that holds several models, such as an NMR ensemble, only the

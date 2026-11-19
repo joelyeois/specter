@@ -166,8 +166,9 @@ Simulation is driven by the `specter` command (`specter simulate particles`,
 and reconstruction by `specter reconstruct particle`, also spelled
 `specter ghostbuster particle`. `specter match particles` derives a
 simulation config from a real particle set, and `specter convert cs2star`
-converts CryoSPARC particle metadata to RELION. Interactive notebooks are in
-`demo-notebooks/`.
+converts CryoSPARC particle metadata to RELION. The
+[tutorials](https://joelyeois.github.io/specter/tutorials/) give copy-and-paste
+Python examples, from short recipes to full workflows.
 
 ---
 
@@ -216,7 +217,7 @@ src/specter/        # main package: physics simulator + Ghostbuster reconstructi
   ice/               # amorphous ice generation and the IceBank library
   cli/               # the `specter` command
   pipelines/         # end-to-end functions behind each CLI subcommand
-demo-notebooks/      # interactive, always-working usage examples
+docs-figures/        # the runnable scripts behind every docs figure and code example
 configs/             # worked example TOML configs (not shipped in the wheel)
 docs/                # Concepts, user guide, and API reference (published to GitHub Pages)
 tests/               # pytest suite

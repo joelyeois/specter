@@ -1,0 +1,8 @@
+discocyte: 1 surface(s), reach 38 Å
+stomatocyte: 1 surface(s), reach 70 Å
+budding_vesicle: 1 surface(s), reach 32 Å
+pearled_tubule: 1 surface(s), reach 32 Å
+tubule_network: 1 surface(s), reach 32 Å
+cisterna_stack: 5 surface(s), reach 42 Å
+multilamellar_vesicle: 4 surface(s), reach 35 Å
+plasma_membrane: 1 surface(s), reach 28 Å

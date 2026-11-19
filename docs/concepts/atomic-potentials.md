@@ -17,8 +17,7 @@ examples in Kirkland's *Advanced Computing in Electron Microscopy*
     Walks through `specter.atom` and
     `specter.potential`. Figures are produced by
     `docs-figures/atomic_potentials.py`, which calls the same public
-    functions as the real code path and mirrors
-    `compare-atomic-potentials-with-kirkland.ipynb`.
+    functions as the real code path.
 
 ## Parameterizing an atom's scattering factor
 
@@ -354,9 +353,8 @@ derived for static atoms and the damped tail reaches further.
 
 SPECTER validates the atomic potential and imaging code against the
 worked examples in Kirkland (2010, Ch. 5), using the standard five-element test
-row (C, Si, Cu, Au, U).
-`demo-notebooks/compare-atomic-potentials-with-kirkland.ipynb` walks
-through the same four steps as `docs-figures/atomic_potentials.py`:
+row (C, Si, Cu, Au, U). `docs-figures/atomic_potentials.py` runs the four
+steps:
 
 1. **3D atomic potential vs. radius** (Kirkland Fig. 5.4):
    `kirkland_atomic_potential_3d` evaluated on a radial grid.

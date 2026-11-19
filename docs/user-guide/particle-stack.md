@@ -406,9 +406,9 @@ CLI calls. Build a `ParticleStackConfig` directly in Python (or load one
 with `specter.config.load_config`) instead of going through the command
 line. For composing the forward model's individual modules by hand (e.g. to
 swap in a custom aberration model), see
-[`demo-notebooks/create_particle_stack_modular/`](https://github.com/joelyeois/specter/tree/main/demo-notebooks/create_particle_stack_modular).
-For the plain end-to-end notebook version of this page, see
-[`demo-notebooks/create_particle_stack/`](https://github.com/joelyeois/specter/tree/main/demo-notebooks/create_particle_stack).
+[Composing a forward model by hand](../tutorials/custom-forward-model.md).
+For the same workflow written with the `specter.imaging` objects, see
+[Particle stacks](../walkthrough/particle-stacks.md).
 
 ## See also
 

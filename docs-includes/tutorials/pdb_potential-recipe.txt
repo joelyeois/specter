@@ -1,0 +1,3 @@
+92176 atoms, 661 kDa
+largest extent 192 Å
+potential (256, 256, 256) voxels, peak 136 V

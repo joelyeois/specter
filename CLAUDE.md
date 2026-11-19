@@ -80,7 +80,7 @@ Prose in `docs/` (Concepts, user guide, etc.) follows a formal/academic register
 
 1. **Prototype** in `dev/` — use these freely for experimentation.
 2. **Implement** working code into `src/specter/` source modules.
-3. **Update demo notebooks** in `demo-notebooks/` to reflect the new functionality. These must always be kept up-to-date and working.
+3. **Update the docs examples** that the change touches. The walkthrough, tutorial and recipe pages quote runnable scripts in `docs-figures/` (`walkthrough/`, `tutorials/`); rerun the script so its figures and printed output stay current. There are no notebooks: `demo-notebooks/` was retired on 2026-11-19 in favour of these pages, so do not reintroduce `.ipynb` files.
 4. **Add a test** in `tests/` covering the new behaviour (even a minimal smoke test is better than nothing).
 
 When modifying physics-critical code, validate against known physical quantities (e.g. wavelength at 300 kV ≈ 1.969 pm) before committing.
@@ -122,7 +122,7 @@ mypy src/                                  # type-check
 - GPU tests should gracefully skip or fall back to CPU when CUDA is unavailable.
 - Do not mock physics calculations — test with real (small) inputs to catch numerical regressions.
 - Regression tests in `tests/test_imaging_regression.py` use a **save-or-compare** pattern: on first run they save a golden `.pt` file under `tests/test_data/`; subsequent runs compare against it. Regenerate after an intentional output change with `SPECTER_REGENERATE_GOLDEN=1 python -m pytest <test> -n 0 -s`, which prints how far the new output moved; deleting the file no longer regenerates it.
-- **Do not test what a shipped TOML config says.** No assertion should read `configs/*.toml` (or a demo-notebook TOML) to check its table names, table order, which table a field sits in, or that a field ships a particular value. A canonical config is curated documentation, not behaviour: a test over it turns an ordinary edit to the file into a test failure while catching nothing a user could hit. Test the code the config feeds instead — the spec constructor, the resolver, the fallback. Every such test was removed in 2b1736f, including three that predated the rule (`test_canonical_tomogram_config_builds_its_carbon_and_bead_specs`, `test_shipped_configs_all_default_to_cuda`, `test_bundled_particle_toml_uses_auto`); the bugs they stood in for are all reachable directly, and are covered that way. `tests/test_cli_help_layout.py` is the shape that survives: it inspects the `_*_GROUPS` lists and `build_config_options`' output and never opens a TOML file.
+- **Do not test what a shipped TOML config says.** No assertion should read `configs/*.toml` to check its table names, table order, which table a field sits in, or that a field ships a particular value. A canonical config is curated documentation, not behaviour: a test over it turns an ordinary edit to the file into a test failure while catching nothing a user could hit. Test the code the config feeds instead — the spec constructor, the resolver, the fallback. Every such test was removed in 2b1736f, including three that predated the rule (`test_canonical_tomogram_config_builds_its_carbon_and_bead_specs`, `test_shipped_configs_all_default_to_cuda`, `test_bundled_particle_toml_uses_auto`); the bugs they stood in for are all reachable directly, and are covered that way. `tests/test_cli_help_layout.py` is the shape that survives: it inspects the `_*_GROUPS` lists and `build_config_options`' output and never opens a TOML file.
 
 ## Off-Limits Files
 
@@ -136,7 +136,7 @@ Changes to these would silently break the physical accuracy of all simulations.
 
 ## Repository conventions
 
-- **`demo-scripts/` is gone**: every workflow is a `specter` subcommand; do not reintroduce the directory. Each `demo-notebooks/` workflow pairs a notebook with its curated TOML.
+- **`demo-scripts/` is gone**: every workflow is a `specter` subcommand; do not reintroduce the directory.
 - **`configs/*.toml` order their tables like their command's `--help` panels, ending in `[advanced]`**; panel order comes from `cli/`'s `_*_GROUPS` lists. Deliberately not enforced by a test (see Testing).
 - `dev/` is gitignored scratch, never pushed.
 

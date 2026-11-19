@@ -281,8 +281,10 @@ CLI calls. Build a `TiltSeriesConfig` directly in Python (or load one with
 For anything the config/CLI doesn't expose (quaternion-based tilt geometry,
 per-tilt CTF variation, etc.), use `Sample.tilt_series` and `TiltSeries`
 (`specter.imaging`) directly instead; `run_tilt_series` is a thin wrapper
-around them, and `demo-notebooks/create_tilt_series/` steps through the
-same calls.
+around them. [Tilt series](../walkthrough/tilt-series.md) steps through the
+same calls, and
+[A tilt series from the engines](../tutorials/tilt-series-engines.md) through
+the engines beneath them.
 
 ## See also
 

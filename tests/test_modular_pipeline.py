@@ -3,7 +3,7 @@ Test that SPECTER's forward-model engines can be composed by hand, without
 the `specter.imaging` objects, and that doing so reproduces the objects'
 output given identical parameters.
 
-This mirrors demo-notebooks/create_particle_stack_modular/particle_stack_generator_modular.ipynb:
+This mirrors docs/tutorials/custom-forward-model.md:
 rotate -> pad -> scatter -> aberrate -> detect, calling
 ``VolumeRotator``/``Scattering``/``Aberration``/``Detector`` directly. If the
 chain ever changes order, defaults, or the defocus midplane shift, this test

@@ -1,11 +1,9 @@
 """
-Every name the demo notebooks and the docs' Python examples import from
-`specter` still exists.
+Every name the docs' Python examples import from `specter` still exists.
 
-Running the notebooks is minutes of real simulation each, so this checks
-the part that goes stale first when the API moves: a renamed or deleted
-module, class or function. Each code cell or fenced ``python`` block is
-parsed, not executed, and every ``from specter... import name`` and
+This checks the part that goes stale first when the API moves: a renamed or
+deleted module, class or function. Each fenced ``python`` block is parsed,
+not executed, and every ``from specter... import name`` and
 ``import specter...`` in it is resolved.
 """
 
@@ -13,7 +11,6 @@ from __future__ import annotations
 
 import ast
 import importlib
-import json
 import re
 import warnings
 from pathlib import Path
@@ -21,30 +18,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-NOTEBOOKS = sorted(
-    p
-    for p in (ROOT / "demo-notebooks").rglob("*.ipynb")
-    if ".ipynb_checkpoints" not in p.parts
-)
 DOCS = sorted((ROOT / "docs").rglob("*.md")) + [ROOT / "README.md"]
 _FENCE = re.compile(r"^```python\n(.*?)^```", re.MULTILINE | re.DOTALL)
-
-
-def _notebook_sources(path: Path) -> list[str]:
-    cells = json.loads(path.read_text(encoding="utf-8"))["cells"]
-    sources = []
-    for cell in cells:
-        if cell["cell_type"] != "code":
-            continue
-        source = "".join(cell["source"])
-        # IPython magics and shell escapes are not Python.
-        lines = [
-            line
-            for line in source.splitlines()
-            if not line.lstrip().startswith(("%", "!"))
-        ]
-        sources.append("\n".join(lines))
-    return sources
 
 
 def _doc_sources(path: Path) -> list[str]:
@@ -89,11 +64,6 @@ def _check(sources: list[str], where: Path) -> None:
     assert not missing, (
         f"{where.relative_to(ROOT)} imports what no longer exists: {missing}"
     )
-
-
-@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
-def test_notebook_imports_resolve(path: Path) -> None:
-    _check(_notebook_sources(path), path)
 
 
 @pytest.mark.parametrize(

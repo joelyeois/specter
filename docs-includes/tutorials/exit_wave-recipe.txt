@@ -1,0 +1,5 @@
+array (1, 256, 256), torch.complex64
+image 128 px, propagated on 128 px, 2x finer
+exit face to the defocus plane: -128 Å
+|psi| from 0.935 to 1.087
+largest phase 0.64 rad

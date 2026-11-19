@@ -88,10 +88,16 @@ nav:
           - Inelastic scattering and energy filtering: tutorials/inelastic.md
           - Gradients through the forward model: tutorials/differentiable.md
           - Composing a forward model by hand: tutorials/custom-forward-model.md
+          - A tilt series from the engines: tutorials/tilt-series-engines.md
           - Building an ice library: tutorials/ice-library.md
           - Short recipes:
+              - A potential from a PDB entry: tutorials/pdb-potential.md
+              - Inspecting an exit wave: tutorials/exit-wave.md
+              - The coincidence radius of a camera: tutorials/coincidence-radius.md
+              - A transfer function of your own: tutorials/custom-transfer-function.md
               - The four organelle kinds: tutorials/membrane-organelles.md
               - Composing a membrane from primitives: tutorials/membrane-primitives.md
+              - A gallery of composed membranes: tutorials/membrane-gallery.md
       - Command-line guides:
           - Simulate:
               - Generate a particle stack: user-guide/particle-stack.md

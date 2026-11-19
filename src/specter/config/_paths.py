@@ -13,8 +13,8 @@ import specter
 
 # specter/__init__.py -> specter/ -> src/ -> repo root. Anchoring here (rather
 # than cwd or a caller's __file__) makes path resolution work identically from
-# the script (cwd = repo root, per README.md) and the notebook (cwd =
-# demo-notebooks/particle_stack/, and Jupyter cells have no __file__ at all).
+# the repo root and from a notebook (whose cwd is wherever it was opened,
+# and whose cells have no __file__ at all).
 REPO_ROOT = Path(specter.__file__).resolve().parents[2]
 
 #: Environment variable overriding where downloaded PDB/mmCIF files are cached,

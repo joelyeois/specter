@@ -53,6 +53,13 @@ Read them in any order.
     Rebuild the image from SPECTER's engines one stage at a time, then
     replace a stage with your own.
 
+-   [![A tilt series from the engines](../assets/images/tutorials/tilt_series_engines-thumbnail.png)](tilt-series-engines.md)
+
+    **[A tilt series from the engines](tilt-series-engines.md)**
+
+    Blend the ice, size the volume for the tilt range, and propagate, focus
+    and detect each tilt by hand, identically to the objects.
+
 -   [![Building an ice library](../assets/images/tutorials/ice_library-thumbnail.png)](ice-library.md)
 
     **[Building an ice library](ice-library.md)**
@@ -71,6 +78,34 @@ or the geometry.
 
 <div class="grid cards" markdown>
 
+-   [![A potential from a PDB entry](../assets/images/tutorials/pdb_potential-thumbnail.png)](pdb-potential.md)
+
+    **[A potential from a PDB entry](pdb-potential.md)**
+
+    `basic` · An atomic model rendered into a potential volume, plotted
+    as a slice and two projections.
+
+-   [![Inspecting an exit wave](../assets/images/tutorials/exit_wave-thumbnail.png)](exit-wave.md)
+
+    **[Inspecting an exit wave](exit-wave.md)**
+
+    `basic` · The phase and amplitude of the wave leaving a particle, and
+    the grid it is held on.
+
+-   [![The coincidence radius of a camera](../assets/images/tutorials/coincidence_radius-thumbnail.png)](coincidence-radius.md)
+
+    **[The coincidence radius of a camera](coincidence-radius.md)**
+
+    `basic` · A camera's calibrated coincidence loss carried over to a
+    simulation's pixel size and frames.
+
+-   [![A transfer function of your own](../assets/images/tutorials/custom_transfer-thumbnail.png)](custom-transfer-function.md)
+
+    **[A transfer function of your own](custom-transfer-function.md)**
+
+    `specialized` · A knife edge in the back focal plane, applied to the
+    wave's array between two verbs.
+
 -   [![The four organelle kinds](../assets/images/tutorials/membrane_organelles-thumbnail.png)](membrane-organelles.md)
 
     **[The four organelle kinds](membrane-organelles.md)**
@@ -84,6 +119,13 @@ or the geometry.
 
     `specialized` · A budding vesicle from two balls and a tube, regularised
     and rendered as a bilayer.
+
+-   [![A gallery of composed membranes](../assets/images/tutorials/membrane_gallery-thumbnail.png)](membrane-gallery.md)
+
+    **[A gallery of composed membranes](membrane-gallery.md)**
+
+    `specialized` · Eight shapes from a discocyte to a plasma membrane, each
+    a few lines of primitives.
 
 </div>
 

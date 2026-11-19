@@ -1,0 +1,2 @@
+falcon4i_300kv: 4 e⁻/px/s is a radius of 0.149 px
+k2_300kv: 8 e⁻/px/s is a radius of 0.239 px

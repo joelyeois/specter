@@ -5,10 +5,7 @@ Two groups of figures:
 
 1. Reproductions of Kirkland, *Advanced Computing in Electron Microscopy*
    (2nd ed.), Ch. 5 worked examples for the standard five-element test row
-   (C, Si, Cu, Au, U) -- the same computation as
-   demo-notebooks/compare-atomic-potentials-with-kirkland.ipynb, factored
-   out here so the docs site gets a clean PNG instead of a notebook
-   screenshot. Each of the five (``atomic-potential-3d-kirkland.png``,
+   (C, Si, Cu, Au, U). Each of the five (``atomic-potential-3d-kirkland.png``,
    ``projected-atomic-potential-2d-kirkland.png``,
    ``transmission-function-linescan-kirkland.png``,
    ``coherent-bright-field-image-kirkland.png``,

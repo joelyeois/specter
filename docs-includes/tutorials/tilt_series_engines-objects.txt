@@ -1,0 +1,1 @@
+objects: (21, 256, 256) expected counts

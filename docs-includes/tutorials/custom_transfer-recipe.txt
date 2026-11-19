@@ -1,0 +1,3 @@
+in focus: contrast 0.025
+in focus, knife edge: contrast 0.082
+1.5 µm underfocus: contrast 0.058

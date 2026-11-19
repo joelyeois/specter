@@ -1,0 +1,2 @@
+±60° about x samples 623 voxels along y of a 64-voxel slab
+with margins 639 x 336 in Y x X; the volume is 704 x 704

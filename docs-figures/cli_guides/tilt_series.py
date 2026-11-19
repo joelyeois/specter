@@ -35,7 +35,7 @@ COMMAND = """specter simulate tiltseries \\
     --tomogram_config configs/tomogram.toml \\
     --n_tilts 41 \\
     --min_tilt_angle -60 --max_tilt_angle 60 \\
-    --seed 0 \\
+    --seed 1 \\
     --device cuda"""
 
 workdir = Path(tempfile.mkdtemp(prefix="specter-guide-tiltseries-"))

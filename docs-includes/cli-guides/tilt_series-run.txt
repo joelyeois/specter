@@ -3,21 +3,21 @@
 Volume: (300, 1200, 1200) voxels (Z, Y, X) @ 5.00 A/voxel = 1500 x 6000 x 6000 A
 Device: cuda
 ───────────────────────────────── Carbon film ──────────────────────────────────
-Carbon film: 1s
+Carbon film: 2s
 ────────────────────────────────── Membranes ───────────────────────────────────
 ─────────────────────────────────   Placement ──────────────────────────────────
-  Placement: 6s
+  Placement: 5s
 ──────────────────────────   Generation & compositing ──────────────────────────
   Generation & compositing: 11s
 ───────────────────────────   Region classification ────────────────────────────
   Region classification: 0s
 ──────────────────────────────   Shell labelling ───────────────────────────────
   Shell labelling: 0s
-Membranes (5/6 instance(s) placed): 17s
+Membranes (6/6 instance(s) placed): 16s
 ────────────────────────────────── Filaments ───────────────────────────────────
-Filaments (902 monomer instance(s), 5 microtubule(s)): 0s
+Filaments (815 monomer instance(s), 5 microtubule(s)): 0s
 ──────────────────────────── Loading PDB structures ────────────────────────────
-Loaded 26 PDB structure(s): 1s
+Loaded 26 PDB structure(s): 0s
 ─────────────────────────────── Cytosol species ────────────────────────────────
   Target packing (cytosol): 2s
   Target rendering (cytosol): 0s
@@ -28,17 +28,17 @@ Cytosol species: 14s
   Filler packing (lumen): 2s
   Filler rendering (lumen): 0s
 Lumen species: 2s
-  Membrane instances: 5/6 placed
-  Transmembrane: 183 placed
-  Filaments: 902 monomer instance(s) placed (1 species)
-  Microtubules: 5 tube(s), 4724 dimer instance(s) placed
+  Membrane instances: 6/6 placed
+  Transmembrane: 184 placed
+  Filaments: 815 monomer instance(s) placed (1 species)
+  Microtubules: 5 tube(s), 4719 dimer instance(s) placed
   Carbon film: generated
-  Cytosol: 90 target(s), 19661 filler placed
-  Lumen: 0 target(s), 226 filler placed
-  Occupancy: 37.7% of volume
+  Cytosol: 90 target(s), 19969 filler placed
+  Lumen: 0 target(s), 191 filler placed
+  Occupancy: 37.8% of volume
 ──────────────────────────────────── Saving ────────────────────────────────────
 
-Total time: 57s
+Total time: 55s
 ───────────── Loading specimen volume from tomograms/tomogram.mrc ──────────────
   Volume shape: (300, 1200, 1200)  (Z, Y, X)
 ────────────────────────── Preparing the tilt series ───────────────────────────
@@ -48,4 +48,4 @@ Total time: 57s
   ✓ tiltseries/tilt_series.mrcs
   ✓ tiltseries/tilt_series.star
 
-Total time: 13m 10s
+Total time: 12m 49s

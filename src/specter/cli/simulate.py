@@ -240,6 +240,7 @@ _TILT_SERIES_GROUPS: list[tuple[str, list[str]]] = [
             "bulk_scattering_factors",
             "pad_fft",
             "oversample",
+            "interpolation",
             "seed",
         ],
     ),

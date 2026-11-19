@@ -51,6 +51,7 @@ from specter.options import (
     DetectorModel,
     DoseEnvelopeTarget,
     IceModel,
+    Interpolation,
     NoiseModel,
     ScatteringFactors,
     TiltAxis,
@@ -303,6 +304,15 @@ class TiltSeriesConfig:
     # and accepts the aliasing. Exposed so a caller can make the other choice.
     klim: float | None = klim_setting()  # fraction of Nyquist
     oversample: int = oversample_setting()
+    interpolation: Interpolation = setting(
+        "cubic",
+        help=(
+            "How each tilt reads the volume between its voxels: cubic (a cubic "
+            "B-spline) | linear (trilinear). Trilinear takes about 0.6 of the "
+            "time per tilt and attenuates fine detail: at a period of 2.5 "
+            "voxels it keeps 0.5 of the power, where the spline keeps 0.9."
+        ),
+    )
     bfactor: float | None = bfactor_setting()  # A^2
     pad_fft: bool = setting(
         True,

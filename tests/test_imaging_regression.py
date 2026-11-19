@@ -217,7 +217,7 @@ def _prepared_volume(small_volume_4d):
 
 
 def _tilted_volume(small_volume_4d):
-    series, _ = _tilt_series([0.0], ice=Ice(model="random"))
+    series, _ = _tilt_series([0.0], ice=Ice(model="random"), interpolation="linear")
     return series.volume, _tilt_volume()
 
 

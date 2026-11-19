@@ -275,6 +275,7 @@ def run_tilt_series(
         tilt=tilt,
         deformation=deformation,
         rigid_bodies=rigid_bodies,
+        interpolation=config.interpolation,
         seed=run_seed,
         objective_aperture=config.objective_aperture,
         propagation=bundle_from_config(Propagation, config, alpha=alpha),

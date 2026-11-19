@@ -131,6 +131,8 @@ pad_fft = true                    # real-space FFT headroom: a wider frame, same
 oversample = 2                  # the Fourier-space counterpart of pad_fft: finer pixels, same
                                  # frame, so the transmission x wave product has room below
                                  # Nyquist; 1 = the volume's own grid (aliases), 2 = converged
+interpolation = "cubic"         # cubic | linear: how a tilt reads the volume between voxels;
+                                 # linear takes about 0.6 of the time and blurs fine detail
 
 # --- Reproducibility ---
 # seed = 0                       # RNG seed; auto-generated and logged if unset

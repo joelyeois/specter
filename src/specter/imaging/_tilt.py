@@ -32,6 +32,7 @@ from ..aberrations import defocus_midplane_shift
 from ..fft import RadialSpectrum
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ..ice import solvent_exposure_envelope
+from ..options import Interpolation
 from ..potential import aperture_lowpass_isotropic
 from ..progress import status
 from ..random_seed import derive_seed, seeded_rng
@@ -306,6 +307,11 @@ class _TiltSolvent:
         return self.fit(ice[None])
 
 
+# Vacuum slices above and below a volume read through a cubic B-spline: the
+# coefficients decay by 0.27 per voxel past a face, to 3e-5 after eight.
+_SPLINE_MARGIN = 8
+
+
 def _draw_deflection(
     deformation: Deformation, half_width: float, voxel_size: float, seed: int | None
 ) -> Deflection | None:
@@ -358,15 +364,20 @@ class TiltSeries:
         bent to the exposure at the middle of its own, its pre-exposure plus
         half its dose. The bend is centred on the volume's rotation centre,
         its midplane the volume's middle z slice, and the volume gains its
-        height in vacuum above and below. A bent specimen is sampled
-        between voxels along all three axes, so its volume is interpolated
-        with a cubic B-spline in place of the trilinear default, and
-        ``volume`` then holds the spline's coefficients. Default: rigid.
+        height in vacuum above and below. Default: rigid.
     rigid_bodies : RigidBodies, optional
         The parts of the specimen the bend displaces and turns without
         straining, labelled on `volume`'s grid
         (:meth:`RigidBodies.from_labels`); everything else follows the
         film. Default: the whole specimen follows the film.
+    interpolation : {"cubic", "linear"}, optional
+        How a tilt reads the volume between its voxels. ``"cubic"``
+        interpolates with a cubic B-spline, and ``volume`` and ``absorption``
+        then hold the spline's coefficients, with eight slices of vacuum
+        added above and below for them to decay in; ``"linear"`` is
+        trilinear, which takes about 0.6 of the time per tilt and keeps 0.5
+        of the power at a period of 2.5 voxels where the spline keeps 0.9.
+        Default ``"cubic"``.
     edge_margin : int, optional
         Pixels added on each side of the geometric coverage. Default 8.
     pad_volume : bool, optional
@@ -428,6 +439,7 @@ class TiltSeries:
         tilt: TiltGeometry = TiltGeometry(),
         deformation: Deformation = Deformation(),
         rigid_bodies: RigidBodies | None = None,
+        interpolation: Interpolation = "cubic",
         edge_margin: int = 8,
         pad_volume: bool = True,
         fft_pad_margin: int = FFT_PAD_MARGIN,
@@ -468,6 +480,7 @@ class TiltSeries:
         self.nxy = micrograph_size
         self.propagation = p
         self.damaged = damaged
+        self.interpolation = interpolation
         self.deformation = deformation
         if rigid_bodies is not None and rigid_bodies.shape != volume.shape[-3:]:
             raise ValueError(
@@ -563,7 +576,10 @@ class TiltSeries:
         # volume has, so vacuum leaves every image unchanged.
         self._half_depth = volume.shape[-3] * voxel_size / 2.0
         self.deflection: Deflection | None = None
-        lift = 0
+        # A spline's coefficients ring past a face the specimen reaches, as
+        # its ice does in z, and what falls outside the volume is lost, which
+        # would add 0.2 voxels of material per face. The same vacuum holds it.
+        lift = _SPLINE_MARGIN if interpolation == "cubic" else 0
         drawn = False
 
         canvas_nxy = micrograph_size + (2 * fft_pad_margin if p.pads(True) else 0)
@@ -592,7 +608,7 @@ class TiltSeries:
                 )
                 if self.deflection is not None:
                     self.deflection.check_depth(self._half_depth)
-                    lift = math.ceil(self.deflection.max_height / voxel_size) + 1
+                    lift += math.ceil(self.deflection.max_height / voxel_size) + 1
             if lift:
                 fitted = torch.nn.functional.pad(fitted, (0, 0, 0, 0, lift, lift))
             return fitted
@@ -642,13 +658,13 @@ class TiltSeries:
                 if has_ice and not per_tilt_solvent:
                     self._solvent = volume - dry
             del dry
+        # A volume read through a cubic B-spline is kept as the spline's
+        # coefficients: solved here when it is rendered once, and after each
+        # render otherwise. Solved in place: the spline's vacuum margin has
+        # already made both tensors this series' own.
+        self._cubic = interpolation == "cubic"
         self.volume = volume
         self.absorption = absorption
-        # A bent volume is read through a cubic B-spline, so it is kept as
-        # the spline's coefficients: solved here when it is rendered once,
-        # and after each render otherwise. The bend's vacuum padding has
-        # already made both tensors this series' own.
-        self._cubic = self.deflection is not None
         if self._cubic:
             if absorption is not None:
                 rotations.cubic_bspline_coefficients_(absorption)
@@ -681,8 +697,7 @@ class TiltSeries:
             # is cropped to the field at the detector.
             keep_pad=True,
         )
-        if self._cubic:
-            self.scattering.interpolation = "cubic"
+        self.scattering.interpolation = interpolation
         self._warned_on_host = False
 
     def __len__(self) -> int:

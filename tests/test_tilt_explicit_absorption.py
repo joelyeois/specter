@@ -182,7 +182,11 @@ def test_specimen_field_is_read_off_the_dry_specimen_in_the_volume_frame():
         inelastic_mfp_specimen=INELASTIC_MFP_PROTEIN_A,
     )
     model = seeded(
-        dry, angles=(-30, 0, 30), propagation=propagation, ice=Ice(model="random")
+        dry,
+        angles=(-30, 0, 30),
+        propagation=propagation,
+        ice=Ice(model="random"),
+        interpolation="linear",
     )
     assert model.volume.shape == dry.shape
     expected = inelastic_absorption_potential(
@@ -275,7 +279,13 @@ def test_aperture_lowpasses_the_elastic_volume_isotropically():
     """
     torch.manual_seed(0)
     volume = torch.rand(1, 16, 64, 64)
-    model = make(volume, pixel_size=0.5, objective_aperture=12.0, propagation=MFP)
+    model = make(
+        volume,
+        pixel_size=0.5,
+        objective_aperture=12.0,
+        propagation=MFP,
+        interpolation="linear",
+    )
     spectrum = torch.fft.fftn(model.volume, dim=(-3, -2, -1)).abs()
     nz, ny, nx = model.volume.shape[-3:]
     kz = torch.fft.fftfreq(nz, d=0.5)[:, None, None]
@@ -306,7 +316,7 @@ def test_vacuum_does_not_absorb_without_ice(specimen_mfp):
     propagation = Propagation(
         absorption_model="inelastic_mfp", inelastic_mfp_specimen=specimen_mfp
     )
-    model = make(blob(), angles=ANGLES, propagation=propagation)
+    model = make(blob(), angles=ANGLES, propagation=propagation, interpolation="linear")
     if specimen_mfp is None:
         assert model.absorption is None
         return

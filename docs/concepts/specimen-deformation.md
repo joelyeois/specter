@@ -122,22 +122,25 @@ rotated slices, so the bend adds no second interpolation; an untilted
 view is resampled too, rather than read directly from the volume.
 
 The bent sample points fall between voxels along all three axes, where
-trilinear interpolation attenuates fine detail. A bent volume is
-therefore interpolated with a cubic B-spline (Unser 1999). The volume is
-replaced by the coefficients of the spline that passes through its voxel
-values, solved once for a volume rendered once and after each render for
-one damaged per tilt, and every sample point reads the 64 coefficients
-around it as eight trilinear fetches (Ruijters et al. 2008). Through a
-500 Å dome on 2 Å voxels the spline keeps 0.86 of the power of exact
-sampling at a period of 2.5 voxels, where trilinear interpolation keeps
-0.38. An unbent series keeps the trilinear default (see Limitations).
+trilinear interpolation attenuates fine detail. A tilt series therefore
+interpolates its volume with a cubic B-spline (Unser 1999), bent or not.
+The volume is replaced by the coefficients of the spline that passes
+through its voxel values, solved once for a volume rendered once and
+after each render for one damaged per tilt, and every sample point reads
+the 64 coefficients around it as eight trilinear fetches (Ruijters et
+al. 2008). Through a 500 Å dome on 2 Å voxels the spline keeps 0.86 of
+the power of exact sampling at a period of 2.5 voxels, where trilinear
+interpolation keeps 0.38; for a rigid tilt the two figures are 0.90 and
+0.52. `interpolation = "linear"` selects trilinear interpolation, which
+takes about 0.6 of the time per tilt.
 
 The bend lifts material by up to its height, so the volume gains that
-much vacuum above and below its faces. The defocus is referred to the
-midplane, which the padding leaves in place, so the vacuum does not
-change the image. A multislice tilt of a bent specimen costs about 2 to
-3 times as much as a rigid one of the same depth, the spline
-accounting for a factor of 1.5 to 1.8.
+much vacuum above and below its faces, in addition to the eight slices
+of vacuum in which the spline's coefficients decay past each face. The
+defocus is referred to the midplane, which the padding leaves in place,
+so the vacuum does not change the image. A multislice tilt of a bent
+specimen costs 1.3 to 1.6 times as much as a rigid one of the same
+depth.
 
 ![Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.](../assets/images/specimen-deformation-tilts.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
@@ -232,13 +235,14 @@ From Python, `TiltSeries.displaced(points, i)` and
 - A rigid particle and the film around it overlap or part by up to the
   strain times the particle's radius at its boundary; the blend there
   does not conserve the integrated potential exactly.
-- Interpolation attenuates detail near the voxel Nyquist frequency. An
-  unbent series is interpolated trilinearly: at a period of 2.5 voxels a
-  tilted view keeps 0.72 of the power of one rendered at half the voxel
-  size. The cubic B-spline of a bent series keeps 0.86 of the power of
-  exact sampling at that period and 0.77 at 2.25 voxels. A specimen whose
-  finest detail of interest is close to its voxel size should be rendered
-  on a finer grid.
+- Interpolation attenuates detail near the voxel Nyquist frequency. The
+  cubic B-spline of a bent series keeps 0.86 of the power of exact
+  sampling at a period of 2.5 voxels and 0.77 at 2.25 voxels. A specimen
+  whose finest detail of interest is close to its voxel size should be
+  rendered on a finer grid.
+- A cubic B-spline overshoots at a discontinuity, so the interpolated
+  potential rings by a few percent within two voxels of a sharp face,
+  such as the surface of the ice. The ringing integrates to zero.
 - `TomogramReconstructor` assumes a rigid specimen.
 
 ## References

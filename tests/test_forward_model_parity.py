@@ -270,6 +270,7 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
         micrograph_size=nxy,
         tilt=TiltGeometry(tilt_axis="y"),
         propagation=propagation,
+        interpolation="linear",  # as the inverse samples
         log=False,
     )
     waves = series.scatter(0)
@@ -346,6 +347,7 @@ def test_simulated_tilt_series_reconstructs_back_to_its_volume() -> None:
         tilt=TiltGeometry(tilt_axis="y"),
         propagation=Propagation(scattering_model="multislice", alpha=0.1),
         pad_volume=False,
+        interpolation="linear",  # as the inverse samples
         log=False,
     )
     dose_per_pixel = 2.0 * pixel_size**2

@@ -26,7 +26,7 @@ import roma
 import torch
 
 from specter.ice import RandomIcemaker
-from specter.imaging import CTF, Exposure, Poses, Sample
+from specter.imaging import CTF, Exposure, Poses, Sample, TiltSeries
 from specter.imaging._tilt import fit_volume_to_tilt
 from specter.settings import Envelopes, Ice, Optics, Propagation
 from specter.tilt import (
@@ -101,6 +101,7 @@ def _compare(
         seed=7,
         objective_aperture=optics.objective_aperture,
         propagation=propagation,
+        interpolation="linear",  # as the generator sampled
         log=False,
     )
     got, waves_got = [], []
@@ -272,5 +273,59 @@ def test_a_volume_built_wide_across_the_tilt_axis_is_imaged_unpadded(
 
     got, shape = waves(blobs)
     want, _ = waves(square)
-    assert shape == tuple(blobs.shape)
+    # Unpadded in XY; the spline's vacuum margin is in z alone.
+    assert shape[-2:] == tuple(blobs.shape[-2:])
     torch.testing.assert_close(got, want, rtol=0, atol=1e-4)
+
+
+def _detailed_series(interpolation: str, pixel: float = PIXEL) -> TiltSeries:
+    torch.manual_seed(11)
+    volume = 4.0 * torch.nn.functional.avg_pool3d(
+        torch.rand(1, 1, 14, 98, 98), 3, stride=1
+    )
+    return Sample.from_volume(volume[0], pixel).tilt_series(
+        Poses.tilt_series([0.0, 35.0]),
+        Exposure.tilt_series(3.0, 2),
+        voltage=VOLTAGE,
+        micrograph_size=24,
+        ice=Ice(model=None),
+        interpolation=interpolation,
+        propagation=Propagation(scattering_model="projection"),
+        log=False,
+    )
+
+
+def test_a_series_reads_its_volume_through_a_spline_unless_told_otherwise() -> None:
+    torch.manual_seed(11)
+    given = 4.0 * torch.nn.functional.avg_pool3d(
+        torch.rand(1, 1, 14, 98, 98), 3, stride=1
+    )
+    cubic, linear = _detailed_series("cubic"), _detailed_series("linear")
+    assert cubic.scattering.interpolation == "cubic"
+    assert linear.scattering.interpolation == "linear"
+    # Trilinear keeps the volume it was given; the spline keeps coefficients,
+    # with vacuum above and below for them to decay in.
+    assert torch.equal(linear.volume, given[0])
+    assert cubic.volume.shape[-3] > linear.volume.shape[-3]
+    with torch.no_grad():
+        untilted = [s.scatter(0).array for s in (cubic, linear)]
+        tilted = [s.scatter(1).array for s in (cubic, linear)]
+    # Untilted, both read the voxels themselves; tilted, they differ.
+    torch.testing.assert_close(untilted[0], untilted[1], rtol=0, atol=2e-5)
+    assert (tilted[0] - tilted[1]).abs().max() > 1e-3
+
+
+def test_the_spline_is_never_solved_in_the_callers_volume() -> None:
+    volume = torch.rand(1, 12, 96, 96)
+    kept = volume.clone()
+    series = Sample.from_volume(volume, PIXEL).tilt_series(
+        Poses.tilt_series([0.0]),
+        Exposure.tilt_series(3.0, 1),
+        voltage=VOLTAGE,
+        micrograph_size=24,
+        ice=Ice(model=None),
+        pad_volume=False,
+        log=False,
+    )
+    assert series.scattering.interpolation == "cubic"
+    assert torch.equal(volume, kept)

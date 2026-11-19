@@ -131,6 +131,8 @@ def tilt_series(volume, ice=Ice(), damaged=True, dose=5.0):
             ice=ice,
             damaged=damaged,
             tilt=TiltGeometry(taper_width=2),
+            # These tests read the rendered volume, not a spline's coefficients.
+            interpolation="linear",
             log=False,
         )
 

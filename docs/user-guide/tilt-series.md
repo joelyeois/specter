@@ -125,6 +125,12 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
   the slab at different depths. On by default. Turning it off saves 5-9%
   per tilt and darkens the edges of the high tilts: a uniform slab at 60°
   images 16% off flat there.
+- **`interpolation`**: how each tilt reads the volume between its voxels.
+  `"cubic"` (default) interpolates with a cubic B-spline, which keeps 0.90
+  of the power of exact sampling at a period of 2.5 voxels. `"linear"` is
+  trilinear interpolation, which keeps 0.52 there and takes about 0.6 of
+  the time per tilt. See
+  [Specimen deformation](../concepts/specimen-deformation.md#sampling-the-bent-specimen).
 - **`micrograph_size`**: output tilt-image size in pixels (square).
   Defaults to the specimen volume's own XY extent; set explicitly to crop
   or pad the field of view independent of the specimen box.

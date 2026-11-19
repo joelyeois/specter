@@ -493,3 +493,38 @@ def test_a_series_refuses_bodies_labelled_on_another_grid():
     bodies = _body()
     with pytest.raises(ValueError, match="rigid_bodies were labelled"):
         _images(torch.zeros(1, NZ, NXY + 2, NXY + 2), _CURVED, bodies)
+
+
+def test_a_volume_rendered_per_tilt_is_read_through_the_same_spline():
+    """
+    A bent volume is read as cubic B-spline coefficients. A damaged series
+    renders its volume again for every tilt, and at a negligible dose each
+    render must give the images of the volume rendered once.
+    """
+    volume = _bead((150.0, 40.0, 30.0))
+    deformation = Deformation(
+        model="dome", height=20.0, hole_radius=600.0, burst_dose=1e-9
+    )
+
+    def images(damaged: bool) -> list[torch.Tensor]:
+        series = Sample.from_volume(volume, PIXEL).tilt_series(
+            Poses.tilt_series(ANGLES),
+            Exposure.tilt_series(1e-6, len(ANGLES)),
+            voltage=300.0,
+            micrograph_size=NXY,
+            damaged=damaged,
+            deformation=deformation,
+            pad_volume=False,
+            log=False,
+            propagation=Propagation(
+                scattering_model="projection", alpha=0.0, oversample=1, pad_fft=False
+            ),
+        )
+        assert series.scattering.interpolation == "cubic"
+        return [torch.angle(series.scatter(i).pixels()[0]) for i in range(len(ANGLES))]
+
+    for once, per_tilt in zip(images(False), images(True), strict=True):
+        assert float(once.abs().max()) > 0
+        torch.testing.assert_close(
+            per_tilt, once, atol=1e-4 * float(once.abs().max()), rtol=0
+        )

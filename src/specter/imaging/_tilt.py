@@ -358,7 +358,10 @@ class TiltSeries:
         bent to the exposure at the middle of its own, its pre-exposure plus
         half its dose. The bend is centred on the volume's rotation centre,
         its midplane the volume's middle z slice, and the volume gains its
-        height in vacuum above and below. Default: rigid.
+        height in vacuum above and below. A bent specimen is sampled
+        between voxels along all three axes, so its volume is interpolated
+        with a cubic B-spline in place of the trilinear default, and
+        ``volume`` then holds the spline's coefficients. Default: rigid.
     rigid_bodies : RigidBodies, optional
         The parts of the specimen the bend displaces and turns without
         straining, labelled on `volume`'s grid
@@ -641,6 +644,16 @@ class TiltSeries:
             del dry
         self.volume = volume
         self.absorption = absorption
+        # A bent volume is read through a cubic B-spline, so it is kept as
+        # the spline's coefficients: solved here when it is rendered once,
+        # and after each render otherwise. The bend's vacuum padding has
+        # already made both tensors this series' own.
+        self._cubic = self.deflection is not None
+        if self._cubic:
+            if absorption is not None:
+                rotations.cubic_bspline_coefficients_(absorption)
+            if self._spectrum is None and self._solvent_series is None:
+                rotations.cubic_bspline_coefficients_(self.volume)
         # With a per-tilt solvent and no damage, the padded dry specimen is
         # kept beside the volume to add each tilt's ice to.
         self._solvent_dose: float | None = None
@@ -668,6 +681,8 @@ class TiltSeries:
             # is cropped to the field at the detector.
             keep_pad=True,
         )
+        if self._cubic:
+            self.scattering.interpolation = "cubic"
         self._warned_on_host = False
 
     def __len__(self) -> int:
@@ -689,6 +704,8 @@ class TiltSeries:
                 self._rendered = None
             else:
                 torch.add(self._tilt_dry, solvent, out=self.volume)
+                if self._cubic:
+                    rotations.cubic_bspline_coefficients_(self.volume)
             del solvent
         self._solvent_dose = dose
 
@@ -707,6 +724,8 @@ class TiltSeries:
                 spectrum.filter_into(self.volume[0], envelope)
             if self._solvent is not None:
                 self.volume.add_(self._solvent)
+            if self._cubic:
+                rotations.cubic_bspline_coefficients_(self.volume)
         self._rendered = key
 
     # ------------------------------------------------------------------ #

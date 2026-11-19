@@ -947,3 +947,98 @@ def test_volume_rotator_rotate_fourier_is_rotate_volume_fourier(
         (g_m,) = torch.autograd.grad((out_m * weight).sum(), V)
         (g_f,) = torch.autograd.grad((out_f * weight).sum(), V)
         assert torch.equal(g_m, g_f)
+
+
+# ---------------------------------------------------------------------------
+# Cubic B-spline interpolation
+# ---------------------------------------------------------------------------
+
+
+def test_cubic_coefficients_interpolate_the_volume() -> None:
+    """The spline through the coefficients, zero outside the volume, takes the
+    volume's own values at its voxels, along axes of three different sizes."""
+    torch.manual_seed(3)
+    volume = torch.randn(1, 9, 12, 16, dtype=torch.float64)
+    coefficients = rotations.cubic_bspline_coefficients_(volume.clone())
+    assert not torch.allclose(coefficients, volume)
+
+    kernel = torch.tensor([1.0, 4.0, 1.0], dtype=torch.float64) / 6.0
+    kernel = kernel[:, None, None] * kernel[None, :, None] * kernel[None, None, :]
+    values = F.conv3d(coefficients[None], kernel[None, None], padding=1)[0]
+    torch.testing.assert_close(values, volume, atol=1e-12, rtol=0)
+
+
+@pytest.mark.parametrize("align_corners", [True, False])
+def test_cubic_sampling_keeps_the_detail_trilinear_loses(align_corners: bool) -> None:
+    """Between voxels, a wave of period five voxels read through the cubic
+    spline is several times closer to its true value than read trilinearly."""
+    n = 48
+    k = 2 * torch.pi / 5.0 * torch.tensor([0.6, 0.64, 0.48], dtype=torch.float64)
+
+    def wave(xyz: torch.Tensor) -> torch.Tensor:
+        return torch.cos(xyz @ k + 0.3)
+
+    axis = torch.arange(n, dtype=torch.float64)
+    z, y, x = torch.meshgrid(axis, axis, axis, indexing="ij")
+    volume = wave(torch.stack((x, y, z), dim=-1))[None, None]
+
+    # Away from the faces, where the spline meets the vacuum outside.
+    generator = torch.Generator().manual_seed(4)
+    points = 12 + 24 * torch.rand(1, 1, 1, 4000, 3, generator=generator).double()
+    grid = 2 * points / (n - 1) - 1 if align_corners else (2 * points + 1) / n - 1
+
+    linear = F.grid_sample(volume, grid, align_corners=align_corners)
+    cubic = rotations.cubic_grid_sample(
+        rotations.cubic_bspline_coefficients_(volume.clone()), grid, align_corners
+    )
+    truth = wave(points)[None]
+    linear_error = (linear - truth).pow(2).mean().sqrt()
+    cubic_error = (cubic - truth).pow(2).mean().sqrt()
+    assert cubic_error < 0.02
+    assert cubic_error < linear_error / 8
+
+
+def _blob_and_tilt() -> tuple[torch.Tensor, torch.Tensor, VolumeRotator]:
+    nz, ny, nx = 24, 40, 44
+    z, y, x = torch.meshgrid(
+        torch.arange(nz) - 11.0,
+        torch.arange(ny) - 22.0,
+        torch.arange(nx) - 19.0,
+        indexing="ij",
+    )
+    blob = torch.exp(-(x**2 + y**2 + z**2) / (2 * 5.0**2))
+    theta = build_affine_matrix(_rot_x(25.0).unsqueeze(0))
+    return blob, theta, VolumeRotator(nz=nz, ny=ny, nx=nx, padding_mode="zeros")
+
+
+def test_rotated_slices_read_through_the_spline_match_the_volume() -> None:
+    """A smooth blob sampled as cubic coefficients lands where, and reads what,
+    its trilinear sampling does: the same grid serves both interpolations."""
+    blob, theta, rotator = _blob_and_tilt()
+    indices = torch.arange(-8, 9)
+    linear = rotator.sample_rotated_slices(blob, theta, indices)
+    cubic = rotator.sample_rotated_slices(
+        rotations.cubic_bspline_coefficients_(blob.clone()),
+        theta,
+        indices,
+        interpolation="cubic",
+    )
+    assert float(linear.max()) > 0.9
+    # The blob is wide enough that trilinear interpolation costs it under 2%.
+    torch.testing.assert_close(cubic, linear, atol=0.02, rtol=0)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a second device")
+def test_cubic_sampling_of_a_host_volume_matches_the_device_volume() -> None:
+    """The block fetched from a volume kept on the host is wide enough for
+    the cubic footprint."""
+    blob, theta, rotator = _blob_and_tilt()
+    coefficients = rotations.cubic_bspline_coefficients_(blob)
+    indices = torch.arange(-8, 9)
+    host = rotator.sample_rotated_slices(
+        coefficients, theta, indices, device="cuda", interpolation="cubic"
+    )
+    device = rotator.to("cuda").sample_rotated_slices(
+        coefficients.cuda(), theta.cuda(), indices.cuda(), interpolation="cubic"
+    )
+    torch.testing.assert_close(host, device, atol=1e-5, rtol=0)

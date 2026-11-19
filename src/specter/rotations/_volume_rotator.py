@@ -13,6 +13,7 @@ from .._device_module import DeviceModule
 import torch
 import torch.nn.functional as F
 
+from ._cubic import cubic_grid_sample
 from ._exact import DEFAULT_EXACT_TOLERANCE, rotate_volume_exact
 from ._volume import (
     _isotropic_half_widths,
@@ -21,7 +22,7 @@ from ._volume import (
     rotate_volume_fourier,
     rotation_sampling_grid,
 )
-from specter.options import GridOrigin, GridSamplePadding, RotateMode
+from specter.options import GridOrigin, GridSamplePadding, Interpolation, RotateMode
 
 
 def _check_mode(mode: str, origin: str) -> None:
@@ -114,6 +115,7 @@ def _windowed_grid_sample(
     padding_mode: GridSamplePadding,
     device: torch.device,
     margin: int,
+    interpolation: Interpolation = "linear",
 ) -> torch.Tensor:
     """
     Interpolate `grid` against `V` without moving the whole of `V` to `device`.
@@ -151,7 +153,11 @@ def _windowed_grid_sample(
         Extra padding (px) around the query's exact pixel-space bounding
         box. 2 is generous headroom for bilinear interpolation; validated
         exact (vs. a full-volume-on-GPU reference) to ~1e-4 absolute error
-        (float32 round-off from the extra normalize/renormalize step).
+        (float32 round-off from the extra normalize/renormalize step). It
+        also covers the cubic footprint, which reaches two voxels.
+    interpolation : {"linear", "cubic"}, optional
+        ``"cubic"`` reads `V` as cubic B-spline coefficients. Default
+        ``"linear"``.
 
     Returns
     -------
@@ -196,6 +202,8 @@ def _windowed_grid_sample(
     ).to(device)
 
     V_in = _prepare_volume_for_grid_sample(block, B)
+    if interpolation == "cubic":
+        return cubic_grid_sample(V_in, grid_local, align_corners, padding_mode)[:, 0]
     slices_roi = F.grid_sample(
         V_in, grid_local, align_corners=align_corners, padding_mode=padding_mode
     )
@@ -549,6 +557,7 @@ class VolumeRotator(DeviceModule):
         device: str | torch.device | None = None,
         window_margin: int = 2,
         warp: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None = None,
+        interpolation: Interpolation = "linear",
     ) -> torch.Tensor:
         """
         Sample multiple Z-slices from a rotated volume, restricted to a ROI in XY.
@@ -601,6 +610,12 @@ class VolumeRotator(DeviceModule):
             (:func:`~specter.imaging._deformation.specimen_warp`). It moves
             the points the one interpolation already samples, so it adds
             none of its own. Default None.
+        interpolation : {"linear", "cubic"}, optional
+            ``"cubic"`` reads `V` as the cubic B-spline coefficients of the
+            volume (:func:`~specter.rotations.cubic_bspline_coefficients_`)
+            and interpolates with the spline, which keeps the fine detail
+            that trilinear interpolation attenuates between voxels. Default
+            ``"linear"``.
 
         Returns
         -------
@@ -660,9 +675,17 @@ class VolumeRotator(DeviceModule):
         # -------------------------------
         if target_device == V.device:
             V_in = _prepare_volume_for_grid_sample(V, B)
-            slices_roi = F.grid_sample(
-                V_in, grid, align_corners=self.align_corners, padding_mode=padding_mode
-            )[:, 0]  # (B, K, ny_roi, nx_roi)
+            if interpolation == "cubic":
+                slices_roi = cubic_grid_sample(
+                    V_in, grid, self.align_corners, padding_mode
+                )[:, 0]
+            else:
+                slices_roi = F.grid_sample(
+                    V_in,
+                    grid,
+                    align_corners=self.align_corners,
+                    padding_mode=padding_mode,
+                )[:, 0]  # (B, K, ny_roi, nx_roi)
         else:
             slices_roi = _windowed_grid_sample(
                 V,
@@ -674,5 +697,6 @@ class VolumeRotator(DeviceModule):
                 padding_mode,
                 target_device,
                 window_margin,
+                interpolation,
             )
         return slices_roi if weight is None else slices_roi * weight

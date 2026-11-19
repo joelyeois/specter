@@ -118,6 +118,10 @@ GridConvention = Literal["relion", "torch"]
 #: ``torch.nn.functional.grid_sample`` padding modes.
 GridSamplePadding = Literal["zeros", "border", "reflection"]
 
+#: How a volume is interpolated between voxels: trilinearly, or with a cubic
+#: B-spline through its coefficients (:mod:`specter.rotations._cubic`).
+Interpolation = Literal["linear", "cubic"]
+
 #: Organelle kind a membrane is built as, see :mod:`specter.specimen.membrane`.
 MembraneKind = Literal["vesicle", "tubules", "cisterna", "mitochondrion"]
 
@@ -162,6 +166,7 @@ __all__ = [
     "GridOrigin",
     "GridSamplePadding",
     "ImageUnits",
+    "Interpolation",
     "IceModel",
     "IceOptimizer",
     "KernelParameterization",

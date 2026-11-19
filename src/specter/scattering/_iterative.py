@@ -30,7 +30,12 @@ from ._kernels import (
     fresnel_propagator,
     phase_scale,
 )
-from specter.options import EwaldSphereSign, GridSamplePadding, ScatteringModel
+from specter.options import (
+    EwaldSphereSign,
+    GridSamplePadding,
+    Interpolation,
+    ScatteringModel,
+)
 
 
 class IterativeScattering(DeviceModule):
@@ -180,6 +185,10 @@ class IterativeScattering(DeviceModule):
         self.warp: (
             Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None
         ) = None
+        #: ``"cubic"`` reads the volume as cubic B-spline coefficients
+        #: (`rotations.cubic_bspline_coefficients_`) wherever a slice samples
+        #: it. Set with the volume by `imaging.TiltSeries`.
+        self.interpolation: Interpolation = "linear"
 
         k = frequency_grid(nxy, pixel_size)
         self.register_buffer("k2", k**2, persistent=False)
@@ -316,8 +325,14 @@ class IterativeScattering(DeviceModule):
             None for the identity transform (slices are read directly from V).
         is_identity : bool
         """
-        # A warped volume is resampled even at the identity pose.
-        is_identity = self.warp is None and self._is_identity(theta_matrix)
+        # A warped volume is resampled even at the identity pose, and spline
+        # coefficients are not the volume's values, so they are never read
+        # directly.
+        is_identity = (
+            self.warp is None
+            and self.interpolation == "linear"
+            and self._is_identity(theta_matrix)
+        )
         if is_identity:
             return V.shape[1], None, is_identity
         nz_new, rotator = self._setup_tilt(V, theta_matrix)
@@ -435,6 +450,7 @@ class IterativeScattering(DeviceModule):
             padding_mode=self.roi_padding_mode,
             device=device,
             warp=self.warp,
+            interpolation=self.interpolation,
         )
 
     def _iter_slices(

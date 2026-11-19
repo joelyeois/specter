@@ -119,22 +119,32 @@ f\,\mathbf{u}(\mathbf{X})\), found by fixed-point iteration to
 that the deformation conserves the integrated potential. Both happen
 inside the interpolation each tilt already performs to sample its
 rotated slices, so the bend adds no second interpolation; an untilted
-view is resampled too, rather than read directly from the volume. The
-bent sample points fall between voxels along all three axes, which
-costs fine detail (see Limitations).
+view is resampled too, rather than read directly from the volume.
+
+The bent sample points fall between voxels along all three axes, where
+trilinear interpolation attenuates fine detail. A bent volume is
+therefore interpolated with a cubic B-spline (Unser 1999). The volume is
+replaced by the coefficients of the spline that passes through its voxel
+values, solved once for a volume rendered once and after each render for
+one damaged per tilt, and every sample point reads the 64 coefficients
+around it as eight trilinear fetches (Ruijters et al. 2008). Through a
+500 Å dome on 2 Å voxels the spline keeps 0.86 of the power of exact
+sampling at a period of 2.5 voxels, where trilinear interpolation keeps
+0.38. An unbent series keeps the trilinear default (see Limitations).
 
 The bend lifts material by up to its height, so the volume gains that
 much vacuum above and below its faces. The defocus is referred to the
 midplane, which the padding leaves in place, so the vacuum does not
-change the image. A multislice tilt costs about 1.3 to 1.6 times as
-much as a rigid one.
+change the image. A multislice tilt of a bent specimen costs about 2 to
+3 times as much as a rigid one of the same depth, the spline
+accounting for a factor of 1.5 to 1.8.
 
 ![Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.](../assets/images/specimen-deformation-tilts.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 Simulated tilts of two bead layers 150 Å above and below the midplane, on the flank of a 150 Å dome. Arrows show each bead's displacement against a rigid specimen, magnified three times.
 ///
 
-At 0° the two layers move apart along the slope by 5.6 Å, the faces'
+At 0° the two layers move apart along the slope by 5.5 Å, the faces'
 opposite in-plane slide. Away from 0° the lift \(w\) appears across the
 tilt axis as \(w \sin\theta\): up to 83 Å at 60°.
 
@@ -222,16 +232,19 @@ From Python, `TiltSeries.displaced(points, i)` and
 - A rigid particle and the film around it overlap or part by up to the
   strain times the particle's radius at its boundary; the blend there
   does not conserve the integrated potential exactly.
-- Trilinear interpolation attenuates detail near the voxel Nyquist
-  frequency, and more so through a bend, whose sample points fall between
-  voxels along every axis. At a period of 2.5 voxels a tilted view of an
-  unbent specimen keeps 0.72 of the power of one rendered at half the
-  voxel size, and a bent one 0.48. A specimen whose finest detail of
-  interest is close to its voxel size should be rendered on a finer grid.
+- Interpolation attenuates detail near the voxel Nyquist frequency. An
+  unbent series is interpolated trilinearly: at a period of 2.5 voxels a
+  tilted view keeps 0.72 of the power of one rendered at half the voxel
+  size. The cubic B-spline of a bent series keeps 0.86 of the power of
+  exact sampling at that period and 0.77 at 2.25 voxels. A specimen whose
+  finest detail of interest is close to its voxel size should be rendered
+  on a finer grid.
 - `TomogramReconstructor` assumes a rigid specimen.
 
 ## References
 
 - Brilot, A. F., Chen, J. Z., Cheng, A., Pan, J., Harrison, S. C., Potter, C. S., Carragher, B., Henderson, R., & Grigorieff, N. (2012). Beam-induced motion of vitrified specimen on holey carbon film. *Journal of Structural Biology*, 177(3), 630–637. [doi:10.1016/j.jsb.2012.02.003](https://doi.org/10.1016/j.jsb.2012.02.003)
 - Naydenova, K., Jia, P., & Russo, C. J. (2020). Cryo-EM with sub–1 Å specimen movement. *Science*, 370(6513), 223–226. [doi:10.1126/science.abb7927](https://doi.org/10.1126/science.abb7927)
+- Ruijters, D., ter Haar Romeny, B. M., & Suetens, P. (2008). Efficient GPU-based texture interpolation using uniform B-splines. *Journal of Graphics Tools*, 13(4), 61–69. [doi:10.1080/2151237X.2008.10129269](https://doi.org/10.1080/2151237X.2008.10129269)
+- Unser, M. (1999). Splines: A perfect fit for signal and image processing. *IEEE Signal Processing Magazine*, 16(6), 22–38. [doi:10.1109/79.799930](https://doi.org/10.1109/79.799930)
 - Zivanov, J., Nakane, T., & Scheres, S. H. W. (2019). A Bayesian approach to beam-induced motion correction in cryo-EM single-particle analysis. *IUCrJ*, 6(1), 5–17. [doi:10.1107/S205225251801463X](https://doi.org/10.1107/S205225251801463X)

@@ -11,6 +11,7 @@ Split across:
     _volume.py           - rotate_volume, rotate_volume_fourier, affine matrix helpers
     _exact.py            - rotate_volume_exact (NUFFT, no interpolation), wrapped_fraction
     _volume_rotator.py   - VolumeRotator and its private helpers
+    _cubic.py            - cubic B-spline coefficients and sampling
 
 Everything is re-exported here so existing `from .rotations import X` /
 `from specter.rotations import X` usage is unaffected by the split.
@@ -25,6 +26,7 @@ References
 
 from __future__ import annotations
 
+from ._cubic import cubic_bspline_coefficients_, cubic_grid_sample
 from ._exact import (
     DEFAULT_EXACT_TOLERANCE,
     rotate_volume_exact,
@@ -74,6 +76,8 @@ __all__ = [
     "translations_angstrom_to_torch",
     "build_affine_matrix",
     "VolumeRotator",
+    "cubic_bspline_coefficients_",
+    "cubic_grid_sample",
     "affine_sampling_grid",
     "rotation_sampling_grid",
 ]

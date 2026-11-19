@@ -444,7 +444,7 @@ def test_zero_occupancy_atoms_are_still_typed():
 #   7a4m  carries explicit hydrogens -- HydrogenChange.ReAdd strips every
 #         existing H before re-adding it from monomer-library geometry, so
 #         without a library the strip happened and the re-add did not.
-_ALIGNMENT_FIXTURES = ["3DY4-assembly1.cif", "7a4m.cif"]
+_ALIGNMENT_FIXTURES = ["3DY4-assembly1.cif", "7A4M-assembly1.cif"]
 
 
 @pytest.mark.parametrize("name", _ALIGNMENT_FIXTURES)
@@ -556,7 +556,7 @@ def test_metal_links_dropped_with_library():
 # 7a4m carries its own hydrogens, so it distinguishes the two modes: ReAdd
 # replaces them with the library's ideal geometry, NoChange keeps them where
 # they were deposited.
-_H_FIXTURE = Path(default_pdb_cache_dir()) / "7a4m.cif"
+_H_FIXTURE = Path(default_pdb_cache_dir()) / "7A4M-assembly1.cif"
 
 
 @pytest.mark.skipif(monomer_library() is None, reason="no monomer library available")

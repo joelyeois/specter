@@ -26,7 +26,7 @@ from ..fsc import MAP_TO_MODEL_FSC_THRESHOLD, FSCCurve, fsc_curve
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
 from ._converge import ADJOINT_TOLERANCE, out_of_memory
-from ._memory import predict_batchsize
+from ._memory import BatchPrediction, predict_batchsize
 from ._io import (
     save_fsc_figure,
     save_halfmap_fsc_figure,
@@ -122,7 +122,8 @@ class Reconstructor(_BaseReconstructor):
         predicts the largest chunk that fits in device memory from probes of
         small chunks on the first step (see
         `specter.ghostbuster._memory.predict_batchsize`), and halves it on a
-        PyTorch out-of-memory error, redoing the step. None (default) runs each batch in one pass.
+        PyTorch out-of-memory error, redoing the step; on the CPU the chunk is
+        the batch. Default ``"auto"``; None runs each batch in one pass.
     run_dir : str or Path, optional
         Directory to write per-epoch volumes, final volume, and metadata into.
         ``None`` disables all file output.
@@ -168,7 +169,7 @@ class Reconstructor(_BaseReconstructor):
         symmetry: str | None = None,
         symmetry_batchsize: int | None = None,
         symmetry_mode: SymmetryMode = "exact",
-        micro_batchsize: int | Literal["auto"] | None = None,
+        micro_batchsize: int | Literal["auto"] | None = "auto",
         tag: str = "untagged",
         run_dir: str | Path | None = None,
         halfset_label: str | None = None,
@@ -293,6 +294,8 @@ class Reconstructor(_BaseReconstructor):
         self.micro_batchsize = micro_batchsize
         #: The chunk size "auto" has settled on; None until its first step.
         self._auto_micro_batchsize: int | None = None
+        #: Whether "auto" empties PyTorch's cache before each step.
+        self._empty_cache_each_step = False
 
     def _setup_symmetry(
         self,
@@ -637,16 +640,26 @@ class Reconstructor(_BaseReconstructor):
         The chunk size reached is kept for the steps that follow. The halving
         is a fallback for PyTorch's allocation failures only: a failed
         allocation inside cuFINUFFT leaves the CUDA context unusable, and the
-        redone batch fails too.
+        redone batch fails too. So when the chunk is close enough to the
+        device's memory that PyTorch's cache, grown over many steps, could
+        crowd cuFINUFFT out (`BatchPrediction.cache_may_overfill`), and after
+        any halving, the cache is emptied before each step. That costs 5-8%
+        of a step at a 320 box, and is skipped when the chunk fits easily.
+        The NUFFT plans are kept: a step reuses the same few, and rebuilding
+        them doubled the step's time.
         """
         n = len(batch[1])
         while True:
             if self.micro_batchsize == "auto":
                 if self._auto_micro_batchsize is None:
-                    self._auto_micro_batchsize = self._predict_micro_batchsize(
-                        batch, batch_idx
+                    prediction = self._predict_micro_batchsize(batch, batch_idx)
+                    self._auto_micro_batchsize = prediction.batchsize
+                    self._empty_cache_each_step = prediction.cache_may_overfill(
+                        min(prediction.batchsize, n)
                     )
                 size = min(self._auto_micro_batchsize, n)
+                if self._empty_cache_each_step:
+                    torch.cuda.empty_cache()
             else:
                 assert isinstance(self.micro_batchsize, int)
                 size = self.micro_batchsize
@@ -662,6 +675,7 @@ class Reconstructor(_BaseReconstructor):
             # Outside the `except`, so the failed chunk's graph, which the
             # traceback holds, is already released.
             self._auto_micro_batchsize = max(1, size // 2)
+            self._empty_cache_each_step = True
             logger.info(
                 f"Out of memory: micro_batchsize now {self._auto_micro_batchsize}"
             )
@@ -672,18 +686,18 @@ class Reconstructor(_BaseReconstructor):
 
     def _predict_micro_batchsize(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
-    ) -> int:
+    ) -> BatchPrediction:
         """
         The chunk size that fits in device memory, from probes of small chunks.
 
         The probe accumulates a chunk's gradient while holding two map-sized
         tensors for AdamW's moments, which its first step creates. On the CPU
-        the whole batch.
+        the whole batch, unprobed.
         """
         images, idx = batch
         n = len(idx)
         if not self.V.is_cuda:
-            return n
+            return BatchPrediction(n, 0.0, 0.0, 0.0, {})
         held = 2 if self.lr is not None else 0
 
         def work(b: int) -> None:
@@ -691,9 +705,7 @@ class Reconstructor(_BaseReconstructor):
             self._accumulate((images[:b], idx[:b]), batch_idx, b)
             del moments
 
-        return predict_batchsize(
-            work, self.V.device, n, label="micro_batchsize"
-        ).batchsize
+        return predict_batchsize(work, self.V.device, n, label="micro_batchsize")
 
     def _accumulate(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int, size: int

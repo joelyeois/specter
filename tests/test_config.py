@@ -314,6 +314,35 @@ def test_build_config_options_preserves_mixed_case_field_names() -> None:
     assert "deltav_v" not in names
 
 
+@pytest.mark.parametrize(
+    ("given", "expected"), [("auto", "auto"), ("12", 12), (None, "auto")]
+)
+def test_an_int_or_auto_flag_takes_either(given: str | None, expected: object) -> None:
+    """`int | Literal["auto"]` fields take an integer or the word on the CLI,
+    and an unpassed flag leaves the config's own value."""
+    import click
+    from click.testing import CliRunner
+
+    from specter.cli._click_options import build_config_options, collect_overrides
+    from specter.config import ReconstructionConfig, apply_overrides
+
+    @click.command(params=build_config_options(ReconstructionConfig))
+    @click.pass_context
+    def cmd(ctx: click.Context, **_: object) -> None:
+        config = ReconstructionConfig("a.cs", "a.mrc", dose_per_angstrom=40.0)
+        apply_overrides(config, collect_overrides(ctx, exclude=set()))
+        click.echo(repr(config.micro_batchsize))
+
+    args = [] if given is None else ["--micro_batchsize", given]
+    result = CliRunner().invoke(cmd, args)
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == repr(expected)
+
+    bad = CliRunner().invoke(cmd, ["--micro_batchsize", "half"])
+    assert bad.exit_code == 2
+    assert "neither an integer nor one of 'auto'" in bad.output
+
+
 def test_bulk_materials_do_not_follow_the_structure_scattering_factors() -> None:
     """
     Ice is a bulk material, so it is parameterized independently.

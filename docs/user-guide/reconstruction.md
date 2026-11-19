@@ -370,10 +370,15 @@ equals that of the whole batch in one pass, to floating-point rounding;
 under several GPUs the gradients are averaged once, after the last chunk.
 A multislice gradient at a 300-pixel box needs about 2 GB of device memory
 per particle, so a batch of 256 does not fit in one pass on any current
-GPU. Unset, a batch runs in one pass. In a TOML config, `"auto"` predicts
-the chunk on the first step from the measured peak device memory of small
-chunks, in the way `solver_batchsize` does, and halves it if
-PyTorch then runs out of memory, redoing that step.
+GPU. The default, `auto`, predicts the chunk on the first step from the
+measured peak device memory of small chunks, in the way `solver_batchsize`
+does, and halves it if PyTorch then runs out of memory, redoing that step.
+Over many steps PyTorch's cache of freed memory can grow to about 1.4 times
+the peak of a single step, which would leave no room for cuFINUFFT's own
+allocations. When the predicted chunk is close enough to the free memory
+for that growth to exceed it, the cache is therefore emptied before each
+step, which costs 5 to 8 percent of the step time. On the CPU the chunk is
+the whole batch. An integer fixes the chunk.
 
 Normalized particle stacks are converted to counts in bounded blocks,
 reusing their private storage. The conversion arithmetic and training

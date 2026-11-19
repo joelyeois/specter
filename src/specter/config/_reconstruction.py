@@ -151,7 +151,7 @@ class ReconstructionConfig:
         "auto",
         help=(
             "Particles per forward pass of the converged solve. 'auto' (the "
-            "default; TOML only) predicts the largest batch that fits in "
+            "default) predicts the largest batch that fits in "
             "device memory; an integer fixes it. The solution does not depend "
             "on it."
         ),
@@ -259,18 +259,17 @@ class ReconstructionConfig:
     # Gradient accumulation: the batch's particles go through the forward and
     # backward this many at a time and the optimisers step once, which is the
     # unsplit update to float rounding. Memory, not speed: a multislice
-    # gradient at a 300 box needs ~2 GB per particle. "auto" predicts the
-    # chunk from probes of a few small chunks on the first step, and halves
-    # on a PyTorch out-of-memory error; config-only, as the CLI flag takes an
-    # integer.
+    # gradient at a 300 box needs ~2 GB per particle. "auto" (the default)
+    # predicts the chunk from probes of a few small chunks on the first step,
+    # and halves on a PyTorch out-of-memory error; on the CPU it is the batch.
     micro_batchsize: int | Literal["auto"] | None = setting(
-        None,
+        "auto",
         help=(
             "Run each batch through the forward and backward this many "
             "particles at a time, accumulating the gradient, and step once: "
-            "the same update in less device memory. Unset runs each batch in "
-            "one pass; 'auto' (TOML only) predicts the largest chunk that "
-            "fits in device memory."
+            "the same update in less device memory. 'auto' (the default) "
+            "predicts the largest chunk that fits in device memory; an "
+            "integer fixes it."
         ),
         check="positive",
     )

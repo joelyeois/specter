@@ -398,6 +398,20 @@ def test_fit_batchsize_clamps_to_one_and_to_the_maximum() -> None:
     assert fit_batchsize({1: 1.0 * gib}, free=10 * gib, maximum=1).batchsize == 1
 
 
+def test_the_cache_may_overfill_only_a_batch_close_to_the_budget() -> None:
+    """A batch whose peak, grown by CACHE_GROWTH, stays within the budget
+    leaves the cache alone; the largest batch that fits does not."""
+    from specter.ghostbuster._memory import CACHE_GROWTH
+
+    gib = 2.0**30
+    p = fit_batchsize({1: 1.0 * gib, 2: 1.5 * gib}, free=10 * gib, maximum=100)
+    assert p.cache_may_overfill(p.batchsize)
+    small = int((SAFETY * p.free / CACHE_GROWTH - p.fixed) // p.per_particle)
+    assert small >= 1
+    assert not p.cache_may_overfill(small)
+    assert p.cache_may_overfill(small + 1)
+
+
 def test_fit_batchsize_does_not_trust_a_slope_at_or_below_zero() -> None:
     """The second probe reading lower than the first is measurement noise;
     a line through it would allow any batch."""

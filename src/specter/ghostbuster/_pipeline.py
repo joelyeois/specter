@@ -98,7 +98,8 @@ class Ghostbuster(_GhostbusterBase):
     micro_batchsize : int or "auto", optional
         Particles per forward and backward pass within one optimiser step,
         to fit a batch in less device memory with the same update; see
-        :class:`Reconstructor`. Default None (each batch in one pass).
+        :class:`Reconstructor`. Default ``"auto"``; None runs each batch in
+        one pass.
     init_volume : torch.Tensor, str, Path, or None, optional
         Starting volume, in the reconstruction's units (volts), instead of
         zeros: a ``(N, N, N)`` tensor or a path to a .mrc file. A volume an
@@ -190,7 +191,7 @@ class Ghostbuster(_GhostbusterBase):
         lr_decay: float = LR_DECAY,
         epochs: int = 5,
         batchsize: int = 3,
-        micro_batchsize: int | Literal["auto"] | None = None,
+        micro_batchsize: int | Literal["auto"] | None = "auto",
         init_volume: torch.Tensor | str | Path | None = None,
         init_lowpass: float | None = None,
         propagation: Propagation = Propagation(scattering_model="rytov"),

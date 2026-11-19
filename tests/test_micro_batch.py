@@ -160,6 +160,8 @@ def test_auto_halves_on_out_of_memory(
     split = _train(problem64, refine=True, micro_batchsize="auto")
     assert sizes == [8, 4, 2, 2, 2, 2]
     assert split._auto_micro_batchsize == 2
+    # A chunk that ran out of memory once is kept clear of the cache.
+    assert split._empty_cache_each_step
     for name, value in _refined(whole_batch).items():
         torch.testing.assert_close(
             _refined(split)[name], value, rtol=1e-10, atol=1e-14, msg=name
@@ -215,13 +217,17 @@ def test_split_step_matches_under_16_mixed() -> None:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
-@pytest.mark.parametrize(("free", "chunk"), [(1.0, 1), (1e15, N_PARTICLES)])
+@pytest.mark.parametrize(
+    ("free", "chunk", "empties"), [(1.0, 1, True), (1e15, N_PARTICLES, False)]
+)
 def test_auto_predicts_the_chunk_from_the_free_memory(
-    free: float, chunk: int, monkeypatch: pytest.MonkeyPatch
+    free: float, chunk: int, empties: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """On a device, "auto" probes a chunk of one and of two particles and
     takes the largest predicted to fit: one when almost nothing is free, the
-    whole batch when plenty is. Either way the step is the unsplit one."""
+    whole batch when plenty is. Either way the step is the unsplit one. The
+    cache is emptied before each step only when the chunk is close to the
+    memory."""
     from specter.ghostbuster import _memory
 
     problem = _problem(torch.float32)
@@ -229,4 +235,5 @@ def test_auto_predicts_the_chunk_from_the_free_memory(
     monkeypatch.setattr(_memory, "_free_bytes", lambda device: free)
     split = _train(problem, device=0, micro_batchsize="auto")
     assert split._auto_micro_batchsize == chunk
+    assert split._empty_cache_each_step is empties
     torch.testing.assert_close(split.V, whole.V, rtol=1e-4, atol=1e-6)

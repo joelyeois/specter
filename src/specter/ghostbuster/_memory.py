@@ -31,6 +31,13 @@ from .. import nufft
 #: the same device.
 SAFETY = 0.85
 
+#: How far PyTorch's cache can grow over steady training beyond the peak of
+#: one step taken from an emptied cache: blocks freed by one step are cached
+#: in sizes the next does not reuse. Measured at up to 1.41x the predicted
+#: peak over Adam steps at a 320 box (rytov, real rotation, anisomag, D2),
+#: and back to 1.0x when the cache is emptied before each step.
+CACHE_GROWTH = 1.5
+
 #: Seconds between samples of the device's memory use during a probe.
 _SAMPLE_INTERVAL = 0.001
 
@@ -63,6 +70,14 @@ class BatchPrediction:
     def predicted_peak(self, batchsize: int) -> float:
         """Bytes above the starting use a batch of `batchsize` is predicted to need."""
         return self.fixed + self.per_particle * batchsize
+
+    def cache_may_overfill(self, batchsize: int, safety: float = SAFETY) -> bool:
+        """
+        Whether PyTorch's cache, left to grow over many batches of
+        `batchsize`, may pass ``safety`` times the free memory
+        (`CACHE_GROWTH`); emptying it before each batch prevents that.
+        """
+        return CACHE_GROWTH * self.predicted_peak(batchsize) > safety * self.free
 
 
 def _process_memory(device: torch.device) -> Callable[[], int] | None:

@@ -113,7 +113,7 @@ specter simulate particles [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--device` | `TEXT` | `cuda` | Device to use: cpu \| cuda \| cuda:0 \| 0,1,2,3. A comma-separated list splits the stack across the devices, one worker each; the stack is the one a single device makes. |
-| `--batchsize` | `INTEGER` | `auto` | Number of particles per forward pass. Unset (or 'auto' in a TOML config, which is the default) takes the smaller of what fits in the memory free on --device at run time and what is worth batching -- past the point where one forward pass already saturates the device, a bigger batch costs memory without going faster. See specter.memory.recommend_batchsize. |
+| `--batchsize` | `INTEGER` \| `auto` | `auto` | Number of particles per forward pass. 'auto' (the default) takes the smaller of what fits in the memory free on --device at run time and what is worth batching -- past the point where one forward pass already saturates the device, a bigger batch costs memory without going faster. See specter.memory.recommend_batchsize. |
 
 **Output & job tracking**{ #specter-simulate-particles-output-job-tracking }
 

@@ -38,6 +38,29 @@ DEFAULT_DISPLAY_OVERRIDES: dict[str, str] = {
 }
 
 
+class IntOrChoice(click.ParamType):
+    """An integer, or one of a few words: the CLI form of ``int | Literal[...]``."""
+
+    def __init__(self, words: Sequence[str]) -> None:
+        self.words = list(words)
+        self.name = "|".join(["INTEGER", *self.words])
+
+    def convert(
+        self, value: Any, param: click.Parameter | None, ctx: click.Context | None
+    ) -> int | str:
+        if isinstance(value, int) or value in self.words:
+            return value
+        try:
+            return int(value)
+        except ValueError:
+            self.fail(
+                f"{value!r} is neither an integer nor one of "
+                f"{', '.join(map(repr, self.words))}.",
+                param,
+                ctx,
+            )
+
+
 def build_config_options(
     config_cls: type,
     field_help: dict[str, str] | None = None,
@@ -57,7 +80,8 @@ def build_config_options(
     ----------
     config_cls : type
         A dataclass whose fields become CLI options. ``Literal[...]`` fields
-        become ``click.Choice``; ``bool`` fields accept Click's flexible
+        become ``click.Choice``; ``int | Literal[...]`` fields take an
+        integer or one of the words (`IntOrChoice`); ``bool`` fields accept Click's flexible
         boolean parsing (``true``/``false``/``1``/``0``/``yes``/``no``,
         case-insensitive); ``X | None`` fields are treated as ``X``.
         ``list[...]``-typed fields are skipped entirely (config/TOML-only,
@@ -101,7 +125,7 @@ def build_config_options(
     ------
     TypeError
         If a field's type isn't one of ``str``, ``int``, ``float``, ``bool``,
-        or ``Literal[...]`` (optionally wrapped in ``| None``).
+        ``Literal[...]`` or ``int | Literal[...]`` (optionally with ``| None``).
     ValueError
         If ``field_groups`` doesn't name every field that yields an option,
         or names something that isn't one. Both are silent failures
@@ -123,6 +147,12 @@ def build_config_options(
         if get_origin(ftype) in (Union, types.UnionType):
             non_none = [a for a in get_args(ftype) if a is not type(None)]
             ftype = non_none[0]
+            # `int | Literal["auto"]`: a number, or one of the words.
+            words = [
+                w for a in non_none[1:] if get_origin(a) is Literal for w in get_args(a)
+            ]
+            if ftype is int and words:
+                ftype = IntOrChoice(words)
 
         # list-typed fields (e.g. `atom_species: list[str] | None`) are sized
         # to the structure/dataset, not a single value a flag can hold --
@@ -153,6 +183,11 @@ def build_config_options(
         elif ftype is bool:
             kwargs["type"] = bool
             kwargs["metavar"] = "True|False"
+        elif isinstance(ftype, IntOrChoice):
+            kwargs["type"] = ftype
+            # Click would upper-case the type's name, but the word is typed
+            # in lower case.
+            kwargs["metavar"] = ftype.name
         elif ftype in (str, int, float):
             kwargs["type"] = ftype
         else:

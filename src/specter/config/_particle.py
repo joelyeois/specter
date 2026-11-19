@@ -206,8 +206,8 @@ class ParticleStackConfig:
     batchsize: int | Literal["auto"] = setting(
         "auto",
         help=(
-            "Number of particles per forward pass. Unset (or 'auto' in "
-            "a TOML config, which is the default) takes the smaller of what fits in "
+            "Number of particles per forward pass. 'auto' (the default) "
+            "takes the smaller of what fits in "
             "the memory free on --device at run time and what is worth batching -- "
             "past the point where one forward pass already saturates the device, a "
             "bigger batch costs memory without going faster. See "
@@ -375,9 +375,9 @@ class ParticleStackConfig:
         check="existing_file",
     )
     # bool | Literal["auto"] so TOML can write the natural `true`/`false` as
-    # well as "auto"; the CLI flag flattens to bool (same as batchsize's
-    # int | Literal["auto"]), so "auto" is config-only there -- it is the
-    # default, so a flag for it would only ever undo an explicit setting.
+    # well as "auto"; the CLI flag flattens to bool, so "auto" is config-only
+    # there -- it is the default, so a flag for it would only ever undo an
+    # explicit setting.
     readd_hydrogens: bool | Literal["auto"] = setting(
         "auto",
         help=(

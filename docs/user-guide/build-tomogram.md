@@ -227,8 +227,7 @@ be slow or run out of memory past a small smoke-test box, so
   always runs on CPU regardless).
 - **`render_workers`**: how many PDB species render/fetch concurrently.
   `"auto"` picks `min(n_species, 8)`, the measured sweet spot from a
-  production-scale sweep (TOML/Python config only; the `--render_workers`
-  CLI flag stays integer-only). The sweep found device choice barely
+  production-scale sweep. The sweep found device choice barely
   matters at this worker count.
 - **`accumulator_device`**: device for the shared canvas tensors,
   decoupled from `device` (which stays the compute device regardless).

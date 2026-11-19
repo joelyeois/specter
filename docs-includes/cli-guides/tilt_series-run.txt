@@ -3,42 +3,42 @@
 Volume: (300, 1200, 1200) voxels (Z, Y, X) @ 5.00 A/voxel = 1500 x 6000 x 6000 A
 Device: cuda
 ───────────────────────────────── Carbon film ──────────────────────────────────
-Carbon film: 2s
+Carbon film: 1s
 ────────────────────────────────── Membranes ───────────────────────────────────
 ─────────────────────────────────   Placement ──────────────────────────────────
-  Placement: 5s
+  Placement: 6s
 ──────────────────────────   Generation & compositing ──────────────────────────
   Generation & compositing: 11s
 ───────────────────────────   Region classification ────────────────────────────
   Region classification: 0s
 ──────────────────────────────   Shell labelling ───────────────────────────────
   Shell labelling: 0s
-Membranes (6/6 instance(s) placed): 17s
+Membranes (5/6 instance(s) placed): 17s
 ────────────────────────────────── Filaments ───────────────────────────────────
-Filaments (816 monomer instance(s), 5 microtubule(s)): 1s
+Filaments (902 monomer instance(s), 5 microtubule(s)): 0s
 ──────────────────────────── Loading PDB structures ────────────────────────────
-Loaded 26 PDB structure(s): 0s
+Loaded 26 PDB structure(s): 1s
 ─────────────────────────────── Cytosol species ────────────────────────────────
-  Target packing (cytosol): 3s
+  Target packing (cytosol): 2s
   Target rendering (cytosol): 0s
   Filler packing (cytosol): 7s
-  Filler rendering (cytosol): 2s
+  Filler rendering (cytosol): 3s
 Cytosol species: 14s
 ──────────────────────────────── Lumen species ─────────────────────────────────
   Filler packing (lumen): 2s
   Filler rendering (lumen): 0s
 Lumen species: 2s
-  Membrane instances: 6/6 placed
-  Transmembrane: 199 placed
-  Filaments: 816 monomer instance(s) placed (1 species)
-  Microtubules: 5 tube(s), 4718 dimer instance(s) placed
+  Membrane instances: 5/6 placed
+  Transmembrane: 183 placed
+  Filaments: 902 monomer instance(s) placed (1 species)
+  Microtubules: 5 tube(s), 4724 dimer instance(s) placed
   Carbon film: generated
-  Cytosol: 90 target(s), 19035 filler placed
-  Lumen: 0 target(s), 327 filler placed
-  Occupancy: 37.2% of volume
+  Cytosol: 90 target(s), 19661 filler placed
+  Lumen: 0 target(s), 226 filler placed
+  Occupancy: 37.7% of volume
 ──────────────────────────────────── Saving ────────────────────────────────────
 
-Total time: 1m 0s
+Total time: 57s
 ───────────── Loading specimen volume from tomograms/tomogram.mrc ──────────────
   Volume shape: (300, 1200, 1200)  (Z, Y, X)
 ────────────────────────── Preparing the tilt series ───────────────────────────
@@ -48,4 +48,4 @@ Total time: 1m 0s
   ✓ tiltseries/tilt_series.mrcs
   ✓ tiltseries/tilt_series.star
 
-Total time: 11m 56s
+Total time: 13m 10s

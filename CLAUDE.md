@@ -9,14 +9,7 @@ Do not activate the `superpowers` skill set in this repository — it is too lon
 **SPECTER** has two main objectives:
 
 ### 1. Physics-based cryo-EM / cryo-ET simulator
-Generates training data that best matches experimental data. Accurate physics modelling is the top priority. It supports:
-
-- Electron scattering (multislice, iterative)
-- CTF, defocus, astigmatism, and higher-order aberration models (linear and nonlinear image formation)
-- Amorphous ice simulation
-- Detector effects (MTF, noise, coincidence loss)
-- GPU-accelerated volume rotation and potential calculation
-- CryoSPARC `.cs` and RELION `.star` file integration (`io/` package)
+Generates training data that best matches experimental data. Accurate physics modelling is the top priority.
 
 ### 2. Ghostbuster — 3D reconstruction
 Reconstructs a 3D map from many 2D experimental images paired with their imaging parameters, using the forward model defined in the `imaging` package. Additional features include parameter refinement (rotations, translations, defocus, and other imaging parameters). It is the inverse problem complement to the simulator. Covers both single-particle (`Ghostbuster`/`Reconstructor`) and cryo-ET tilt-series (`TomogramGhostbuster`/`TomogramReconstructor`) reconstruction.
@@ -27,41 +20,13 @@ Reconstructs a 3D map from many 2D experimental images paired with their imaging
 - **Python**: 3.11+
 - **Virtual environment**: always use `.venv` in the project root.
 
-```bash
-uv sync                          # Install/update dependencies
-source .venv/bin/activate        # Activate environment
-uv run --with jupyter jupyter lab  # Launch Jupyter
-```
-
 The environment is self-contained. No additional GPU or cluster setup is required — just activate `.venv`.
 
 ## Code Style
 
 - **Type hints**: required on all function signatures.
 - **Docstrings**: NumPy style for all public functions and classes.
-- **Linter/formatter**: `ruff` (configured in `pyproject.toml`). Run before committing.
-- **Static typing**: `mypy` for type checking.
-- **Pre-commit hooks**: enforce ruff automatically on commit.
 - **Output channels**: library code (`imaging/`, `ghostbuster/`'s reconstructors, `pdb.py`, `specimen/`, ...) reports through `specter.logger` (`logger.info` for progress, `logger.warning` for something the caller should know about), never `print`; it is silent until `specter.set_verbosity` raises the level, which the pipelines do. User-driving code -- `cli/`, `pipelines/`, and the `Ghostbuster`/`TomogramGhostbuster` drivers -- prints through `specter.progress.console` (rich), which also owns the progress bars and section headers. `warnings.warn` is reserved for "your inputs may be wrong" (a fallback that changed the result, a missing library), since it carries the caller's location and can be filtered by category.
-
-Example docstring format:
-
-```python
-def energy_to_wavelength(voltage_kv: float) -> float:
-    """
-    Compute the relativistic de Broglie wavelength of an electron.
-
-    Parameters
-    ----------
-    voltage_kv : float
-        Accelerating voltage in kilovolts.
-
-    Returns
-    -------
-    float
-        Electron wavelength in Angstroms.
-    """
-```
 
 ## Documentation Style
 
@@ -101,28 +66,19 @@ content only — do not put specs or planning docs there.
 
 ## Testing
 
-- Tests live in `tests/` and use `pytest`.
-- The test suite is being actively built up — every new feature or algorithm should include at least a basic test.
 - Run tests with:
 
 ```bash
 python -m pytest tests/                    # full suite, parallel by default (~3 min)
 python -m pytest tests/test_imaging_regression.py::test_particle_regression -v -n 0  # single test
-python -m pytest tests/ --cov=src/specter  # with coverage
-ruff check src/ tests/                     # lint
-ruff format src/ tests/                    # format
-mypy src/                                  # type-check
+mypy src/                                  # type-check (not a pre-commit hook; run by hand)
 ```
 
-- **The suite runs in parallel by default** (~3 min, down from ~19 min serial). `pyproject.toml`'s `addopts` sets `-n 32 --dist worksteal`; `tests/conftest.py` pairs that with 4 intra-op threads per worker, matching this host's 128 cores. Both numbers are host-specific tuning — lower them together on a smaller machine.
 - **Use `-n 0` for a single test, `-s`, or `--pdb`.** 32 worker startups cost ~6 s, which dwarfs a short test (2.9 s serial vs 9.0 s parallel), and xdist swallows `-s` output and breaks interactive debugging.
-- Two non-obvious things make the speedup work, so don't "simplify" either away:
-  - **`worksteal`, not the default `load` scheduler.** The suite is very unevenly weighted (a few tomogram/CLI tests dominate), so handing out work up front strands workers behind a straggler: 5:28 → 3:13 for identical CPU time.
-  - **The thread cap is conditional on being under xdist.** torch sizes its pool from the whole machine, so uncapped workers each grab every core — `-n 32` uncapped is ~16.8 min, barely better than serial, burning ~105,000 s of CPU. But capping *unconditionally* would make a serial run about twice as slow, since it genuinely benefits from intra-op parallelism when alone. See the conftest docstring for the measurements.
 - GPU tests should gracefully skip or fall back to CPU when CUDA is unavailable.
 - Do not mock physics calculations — test with real (small) inputs to catch numerical regressions.
-- Regression tests in `tests/test_imaging_regression.py` use a **save-or-compare** pattern: on first run they save a golden `.pt` file under `tests/test_data/`; subsequent runs compare against it. Regenerate after an intentional output change with `SPECTER_REGENERATE_GOLDEN=1 python -m pytest <test> -n 0 -s`, which prints how far the new output moved; deleting the file no longer regenerates it.
-- **Do not test what a shipped TOML config says.** No assertion should read `configs/*.toml` to check its table names, table order, which table a field sits in, or that a field ships a particular value. A canonical config is curated documentation, not behaviour: a test over it turns an ordinary edit to the file into a test failure while catching nothing a user could hit. Test the code the config feeds instead — the spec constructor, the resolver, the fallback. Every such test was removed in 2b1736f, including three that predated the rule (`test_canonical_tomogram_config_builds_its_carbon_and_bead_specs`, `test_shipped_configs_all_default_to_cuda`, `test_bundled_particle_toml_uses_auto`); the bugs they stood in for are all reachable directly, and are covered that way. `tests/test_cli_help_layout.py` is the shape that survives: it inspects the `_*_GROUPS` lists and `build_config_options`' output and never opens a TOML file.
+- **Do not test what a shipped TOML config says.** No assertion should read `configs/*.toml`; test the code the config feeds instead.
+- `tests/CLAUDE.md` (loaded when working under `tests/`) holds the rest: why the parallel settings must not be simplified, golden-file regeneration, and the full TOML rule.
 
 ## Off-Limits Files
 

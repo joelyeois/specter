@@ -161,7 +161,9 @@ exclusion cell per frame
 Left: the fraction of incident electrons counted, for a Falcon 4i's 2.0 px
 exclusion radius at 320 frames per second (Thermo Fisher Scientific 2022),
 simulated at 1 Å, 40 e⁻/Å² and 40 frames. It falls from 99.5% at
-0.25 e⁻/px/s to 57% at 32 e⁻/px/s.
+0.25 e⁻/px/s to 57% at 32 e⁻/px/s. The fraction is the coincidence loss
+alone. A detector's DQE(0) lowers the count further, by a factor of 0.92 for
+the Falcon 4i.
 Right: the noise power spectrum of the flat images, divided by the mean
 count, so that plain Poisson noise sits at 1.
 ///

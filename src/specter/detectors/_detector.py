@@ -758,18 +758,21 @@ class Detector(DeviceModule):
         Notes
         -----
         Calibrated against beam-only Falcon 4i micrographs spanning
-        0.15-31.29 e-/px/s, with the detector's counting efficiency modelled
-        explicitly as ``dqe0=0.92``: ``coincidence_radius = 2.0`` px (~28 um
-        at the 4096^2 sensor's 14 um pitch) reproduces the measured
-        detected-electron yield to ~3% RMSE across the full dose range,
-        together with the characteristic low-spatial-frequency dip in the
-        power spectrum (``manuscript/coincidence-loss-exp.ipynb``). An
-        earlier fit of 2.394 px was made without DQE(0) and absorbed that
-        ~8% loss into the radius; using it together with ``dqe0=0.92`` counts
-        the loss twice. The radius is a property of the camera unit and its
-        counting configuration, so treat this value as a prior and
-        re-calibrate from beam-only or empty-ice frames when a dataset
-        provides them.
+        0.15-31.29 e-/px/s: ``coincidence_radius = 2.0`` px (28 um at the
+        4096^2 sensor's 14 um pitch), listed as
+        ``specter.detectors.EXCLUSION_RADIUS_PX["falcon4i_300kv"]``. The
+        radius follows from the noise power spectrum alone. For flat
+        illumination the low-frequency noise power divided by the mean count
+        is ``1 - pi * r**2 * m``, with ``m`` the counts per pixel per frame,
+        and the measured spectra give ``r = 2.0`` px independently of the
+        reported dose. With the counting efficiency modelled explicitly as
+        ``dqe0=0.92``, the same radius reproduces the detected-electron yield
+        to ~3% RMSE across the full dose range
+        (``manuscript/coincidence-loss-exp.ipynb``). The radius was fitted
+        with DQE(0) applied separately and must be used with it. The radius
+        is a property of the camera unit and its counting configuration, so
+        treat this value as a prior and re-calibrate from beam-only or
+        empty-ice frames when a dataset provides them.
 
         This is a deliberately simplified, *locally bounded* model: exclusion
         is resolved per grid cell, so coincidence cannot chain transitively

@@ -24,6 +24,7 @@ import torch
 from specter.arrays import radial_profile_2d
 from specter.detectors import (
     DQE0,
+    EXCLUSION_RADIUS_PX,
     dqe0_for_detector,
     falcon3ec_300kv,
     falcon4i_200kv,
@@ -136,7 +137,8 @@ def figure_coincidence_loss() -> None:
     statistics themselves."""
     pixel_size = 1.0
     h = w = 96
-    coinc_radius = 2.394  # px, Falcon 4i calibration (see Detector.apply_coincidence)
+    # px, the Falcon 4i calibration (see Detector.apply_coincidence)
+    coinc_radius = EXCLUSION_RADIUS_PX["falcon4i_300kv"]
     intensity_map = torch.ones(h, w) / (h * w)
     detector = Detector(pixel_size)
 

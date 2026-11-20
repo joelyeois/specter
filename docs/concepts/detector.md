@@ -136,9 +136,13 @@ Two consequences of the same mechanism. On the left, detected efficiency
 drops fast with incident dose rate: more electrons arriving in the same
 frame means more of them land in an already-occupied cell. The exclusion
 radius of the Falcon 4i at 300 kV is calibrated at 2.0 physical pixels
-against real beam-only micrographs spanning 0.15-31.29 e⁻/px/s, with the
-counting efficiency DQE(0) = 0.92 modelled explicitly, reproducing the
-measured detected-electron yield to ~3% RMSE. The K2 Summit's 2.54 physical
+against beam-only micrographs spanning 0.15-31.29 e⁻/px/s. The value is
+obtained from the noise power spectrum alone: for flat illumination the
+low-frequency noise power divided by the mean count equals
+\(1 - \pi r^2 m\), with \(m\) the counts per pixel per frame, which gives
+2.0 px without reference to the reported dose. With the counting efficiency
+DQE(0) = 0.92 modelled explicitly, the same radius reproduces the measured
+detected-electron yield to ~3% RMSE. The K2 Summit's 2.54 physical
 pixels is obtained by inverting the same model against Campbell et al.
 (2015)'s measurement of a 25% loss at ~12 e⁻/px/s and 400 frames per second
 (Li, Mooney et al. 2013).

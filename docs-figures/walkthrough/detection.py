@@ -122,7 +122,12 @@ save(fig, "detection-detectors")
 
 transcript.start("coincidence")
 # --8<-- [start:coincidence]
-from specter.detectors import coincidence_occupancy, coincidence_radius_for_simulation
+from specter.detectors import (
+    EXCLUSION_RADIUS_PX,
+    HARDWARE_FRAME_RATE_HZ,
+    coincidence_occupancy,
+    coincidence_radius_for_simulation,
+)
 from specter.imaging import Image
 
 # Uniform illumination: 16 empty images at the vacuum intensity of 1.
@@ -134,10 +139,13 @@ flat = Image(
     ids=torch.arange(16),
 )
 exposure = Exposure(dose=40.0, n_frames=40)
+camera = "falcon4i_300kv"
+exclusion_px = EXCLUSION_RADIUS_PX[camera]  # 2.0 physical pixels
+frame_rate = HARDWARE_FRAME_RATE_HZ[camera]  # 320 Hz
 
 recorded = {}
 for rate in [0.0, 4.0, 16.0]:  # e⁻ per physical pixel per second
-    occupancy = coincidence_occupancy(2.0, rate, frame_rate_hz=320.0)  # Falcon 4i
+    occupancy = coincidence_occupancy(exclusion_px, rate, frame_rate_hz=frame_rate)
     radius = coincidence_radius_for_simulation(occupancy, 40.0, 1.0, 40)
     recorded[rate] = flat.detect(exposure, coincidence_radius=radius, seed=0).array
     kept = recorded[rate].mean() / 40.0
@@ -148,7 +156,10 @@ rates = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
 counted = []
 for rate in rates:
     radius = coincidence_radius_for_simulation(
-        coincidence_occupancy(2.0, rate, frame_rate_hz=320.0), 40.0, 1.0, 40
+        coincidence_occupancy(exclusion_px, rate, frame_rate_hz=frame_rate),
+        40.0,
+        1.0,
+        40,
     )
     counted.append(
         float(flat.detect(exposure, coincidence_radius=radius, seed=0).array.mean())
@@ -167,7 +178,7 @@ ax1.semilogx(rates, counted, "o-", color=PALETTE[0], lw=1.2, ms=4)
 ax1.set(
     xlabel="Dose rate (e⁻/physical px/s)",
     ylabel="Fraction counted",
-    title="Falcon 4i, 2.0 px exclusion, 320 Hz",
+    title=f"Falcon 4i, {exclusion_px:.1f} px exclusion, {frame_rate:.0f} Hz",
     ylim=(0, 1.05),
 )
 for color, (rate, stack) in zip(PALETTE, recorded.items()):

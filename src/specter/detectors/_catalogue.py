@@ -762,8 +762,13 @@ def dqe0_for_detector(detector_model: str | None) -> float:
 #: entries with a traceable measurement are listed; a model absent here has no
 #: calibration, and callers should say so rather than borrow a neighbour's.
 EXCLUSION_RADIUS_PX: dict[str, float] = {
-    # Fitted against 14 beam-only EER acquisitions spanning 0.15-31 e/px/s with
-    # DQE(0)=0.92 modelled explicitly (manuscript/coincidence-loss-exp.ipynb).
+    # Measured on 14 beam-only EER acquisitions spanning 0.15-31 e/px/s. The
+    # low-frequency noise power of flat illumination, divided by the mean
+    # count, is 1 - pi r^2 m with m the counts per pixel per frame, which gives
+    # r = 2.0 px without reference to the reported dose. With DQE(0) = 0.92
+    # modelled explicitly the same radius reproduces the detected yield to
+    # ~3% RMSE (manuscript/coincidence-loss-exp.ipynb). This is the single
+    # definition of the value: code, figures and examples read it from here.
     "falcon4i_300kv": 2.0,
     # Campbell et al. 2015 (eLife 4:e06380): ~12 e/physical px/s incident
     # recorded as ~9 counts/px/s, a 25% loss at 400 fps, inverted through

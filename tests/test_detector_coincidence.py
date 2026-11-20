@@ -437,3 +437,29 @@ def test_mtf_is_float32_and_one_curve_on_both_paths(preset: str) -> None:
     via_physical = detector_mtf(preset, 64, 1.0, physical_pixel_size=1.0 + 1e-9)
     assert native.dtype == via_physical.dtype == torch.float32
     assert float((native - via_physical).abs().max()) < 5e-3
+
+
+def test_low_frequency_noise_power_gives_the_exclusion_area() -> None:
+    """
+    For flat illumination the noise power at low spatial frequency, divided by
+    the mean count, is ``1 - pi r^2 m`` with ``m`` the counts per pixel per
+    frame: each exclusion cell records at most one electron, so its count is
+    Bernoulli and the variance of a large region falls below Poisson by the
+    cell's occupancy. This is the relation the shipped Falcon 4i radius was
+    measured with, so the model must satisfy it.
+    """
+    radius, size, n_frames, incident = 2.0, 512, 64, 0.05
+    detector = Detector(
+        pixel_size=1.0, noise_model="poisson", n_frames=n_frames, progressbars=False
+    )
+    torch.manual_seed(0)
+    img = detector.apply_coincidence(
+        torch.full((size, size), incident * n_frames), 0.0, radius
+    ).double()
+    counts_per_frame = img.mean().item() / n_frames
+    power = torch.fft.fft2(img - img.mean()).abs() ** 2 / size**2 / img.mean()
+    freq = torch.fft.fftfreq(size)
+    k = torch.sqrt(freq[:, None] ** 2 + freq[None, :] ** 2)
+    low = power[(k > 0) & (k < 0.03)].mean().item()
+    assert low == pytest.approx(1 - math.pi * radius**2 * counts_per_frame, abs=0.07)
+    assert power[k > 0.4].mean().item() == pytest.approx(1.0, abs=0.03)

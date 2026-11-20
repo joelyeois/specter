@@ -174,9 +174,21 @@ without interpolation (see
 [Rotating through the transform](#rotating-through-the-transform)), while
 `"real"` and `"fourier"` interpolate trilinearly and differ only in where.
 `"surface"` never rotates the volume (see
-[Sampling the Ewald surface](#sampling-the-ewald-surface)). Simulation
-defaults to `"exact"`; `Reconstructor`, `Ghostbuster` and
-`ReconstructionConfig` default to `"real"`.
+[Sampling the Ewald surface](#sampling-the-ewald-surface)).
+
+An unset `rotate_mode` is paired with the scattering model, in simulation
+and reconstruction alike (`Propagation.rotation`), so that no pose is
+interpolated. The single-scatter models (projection, first Born, Rytov and
+the CTF model) take `"surface"`, since each is one sample of the volume's
+transform. Multislice and the kinematic model need the posed volume and take
+`"exact"`. Three conditions override the pairing. A simulated specimen
+dressed with crowding, ice, damage, per-image atom rendering or an objective
+aperture needs the posed volume, so it takes `"exact"` for every model, as
+does `absorption_model="inelastic_mfp"`. A reconstruction that refines
+rotations (`lr_R`) takes `"real"`, since neither `"surface"` nor `"exact"`
+carries a gradient to the rotation, and one that refines shifts (`lr_T`)
+takes `"real"` where the pairing would give `"exact"`. A `rotate_mode` that
+is set is used as given.
 
 `"real"` resamples the density with `grid_sample`, applying the
 rotation and the translation together in one trilinear pass. `"fourier"`
@@ -294,9 +306,15 @@ by a phase ramp. `rotate_mode="surface"`
 (`specter.scattering.surface_slice_sum`) evaluates the transform of the
 unrotated volume at the rotated points with a type-2 non-uniform FFT
 (Barnett et al. 2019; Shih et al. 2021), and its adjoint supplies the
-gradient, so no step resamples the grid. On poses that `"real"` applies
-without interpolating (quarter turns and whole-voxel shifts), the two agree
-to 1e-5 for all four models and both curvature signs.
+gradient, so no step resamples the grid. Only points inside the Nyquist
+sphere, \(|\mathbf{q}| < 1/2\) cycles per voxel, are sampled, the band
+`"exact"` keeps; the rest of the image's spectrum, the corners of its square
+beyond Nyquist, is zero. Beyond the sphere a rotated point leaves the cube on
+which the volume's transform is known, and the transform's value there is an
+alias of the periodic spectrum that depends on the orientation, not a
+property of the specimen. With the same band, `"surface"` and `"exact"` give
+the same exit wave to rounding (intensity correlation above 0.9999 for an
+atomic model rendered at 1 Å, at the identity and at a general pose).
 
 The method has three limits. Multislice and the kinematic model are not one
 sample of the transform and are refused. Crowding, ice, dose damage,

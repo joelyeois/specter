@@ -103,11 +103,15 @@ def gb_kwargs(
 def test_ghostbuster_forward_regression(
     gb_kwargs: dict, scattering_model: str, save_or_compare
 ) -> None:
-    """Reconstructor.forward with full CTF params regresses for each scattering model."""
+    """Reconstructor.forward with full CTF params regresses for each scattering
+    model. The rotation is pinned to the trilinear one the fixtures were
+    recorded with, so a change of the default pose mode does not move them."""
     torch.manual_seed(0)
     gb = Reconstructor(
         **gb_kwargs,
-        propagation=Propagation(alpha=0.1, scattering_model=scattering_model),
+        propagation=Propagation(
+            alpha=0.1, scattering_model=scattering_model, rotate_mode="real"
+        ),
     )
     torch.manual_seed(0)
     images = gb.forward(torch.tensor([0]))
@@ -124,12 +128,15 @@ def test_anisomag_forward_regression(
     anisomag: torch.Tensor,
     save_or_compare,
 ) -> None:
-    """Reconstructor.forward with anisotropic magnification and full CTF params."""
+    """Reconstructor.forward with anisotropic magnification and full CTF params,
+    pinned to the trilinear rotation the fixture was recorded with."""
     torch.manual_seed(0)
     gb = Reconstructor(
         **gb_kwargs,
         anisomag=anisomag,
-        propagation=Propagation(alpha=0.1, scattering_model="projection"),
+        propagation=Propagation(
+            alpha=0.1, scattering_model="projection", rotate_mode="real"
+        ),
     )
     torch.manual_seed(0)
     images = gb.forward(torch.tensor([0]))

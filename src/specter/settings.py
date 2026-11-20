@@ -87,6 +87,12 @@ __all__ = [
 MAX_DEFORMATION_GRADIENT = 0.2
 
 
+#: The scattering models whose exit wave is one sample of the volume's
+#: transform, and so can be computed on the posed surface without rotating
+#: the volume (``rotate_mode="surface"``).
+SURFACE_MODELS: tuple[str, ...] = ("projection", "firstborn", "rytov", "ctf")
+
+
 @dataclass(frozen=True)
 class Propagation:
     """
@@ -185,8 +191,10 @@ class Propagation:
         ``"firstborn"``, ``"rytov"``, ``"ctf"``) and, in `Specimen.scatter`,
         only for an undressed template: crowding, ice, damage and per-image
         atom rendering all need the rotated volume. None (the default)
-        takes the path's own default, :meth:`rotation`: ``"exact"`` for
-        simulation (`Specimen.scatter`), ``"real"`` for reconstruction.
+        pairs the mode with `scattering_model` (:meth:`rotation`):
+        ``"surface"`` for the single-scatter models and ``"exact"`` for
+        multislice and kinematic, falling back where the pairing cannot
+        apply.
     """
 
     scattering_model: ScatteringModel = "multislice"
@@ -235,7 +243,7 @@ class Propagation:
         if not isinstance(self.oversample, int) or self.oversample < 1:
             raise ValueError(f"oversample={self.oversample!r} must be an integer >= 1")
         if self.rotate_mode == "surface":
-            if self.scattering_model not in ("projection", "firstborn", "rytov", "ctf"):
+            if self.scattering_model not in SURFACE_MODELS:
                 raise ValueError(
                     f"rotate_mode='surface' with scattering_model="
                     f"{self.scattering_model!r}: only the single-scatter models "
@@ -253,9 +261,52 @@ class Propagation:
         """`pad_fft`, or the imaging path's `default` when it is None."""
         return default if self.pad_fft is None else self.pad_fft
 
-    def rotation(self, default: PoseMode) -> PoseMode:
-        """`rotate_mode`, or the imaging path's `default` when it is None."""
-        return default if self.rotate_mode is None else self.rotate_mode
+    def rotation(
+        self,
+        *,
+        surface: bool = True,
+        refine_rotations: bool = False,
+        refine_shifts: bool = False,
+    ) -> PoseMode:
+        """
+        `rotate_mode`, or the mode paired with `scattering_model` when it is None.
+
+        The pairing applies each pose without interpolation: the
+        single-scatter models (projection, first Born, Rytov, CTF) are one
+        sample of the volume's transform, so they sample it on the posed
+        surface (``"surface"``), and multislice and kinematic, which need the
+        posed volume, rotate it through its transform (``"exact"``). Where the
+        pairing cannot apply, the fallback is ``"exact"`` when the posed
+        volume must be formed, and ``"real"`` when a pose is refined, since
+        neither ``"surface"`` nor ``"exact"`` carries a gradient to the
+        rotation, and ``"exact"`` none to the shift.
+
+        Parameters
+        ----------
+        surface : bool
+            Whether the caller can sample the surface: False when the posed
+            volume must be formed (a dressed specimen, or one materialised).
+            ``absorption_model="inelastic_mfp"`` also forms it.
+        refine_rotations, refine_shifts : bool
+            Whether the caller refines rotations or shifts (a reconstruction
+            with ``lr_R`` or ``lr_T``).
+
+        Returns
+        -------
+        PoseMode
+            `rotate_mode` itself whenever it is set.
+        """
+        if self.rotate_mode is not None:
+            return self.rotate_mode
+        if refine_rotations:
+            return "real"
+        if (
+            surface
+            and self.scattering_model in SURFACE_MODELS
+            and self.absorption_model == "alpha"
+        ):
+            return "surface"
+        return "real" if refine_shifts else "exact"
 
 
 @dataclass(frozen=True)

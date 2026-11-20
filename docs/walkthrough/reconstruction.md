@@ -143,8 +143,9 @@ the 0.5 threshold. The vertical rise at the far left is the first shell,
 discussed above.
 ///
 
-Ten epochs took the map from 7.4 Å to 4.2 Å, close to the 4 Å Nyquist
-limit of 2 Å voxels, and it was still improving.
+Ten epochs took the map from 7.0 Å to 4.05 Å, at the 4 Å Nyquist limit of
+2 Å voxels. It reached 4.06 Å in the fourth epoch and improved by less than
+0.01 Å after that.
 The loss tells a different story. Each step's loss is the mean squared
 difference between the recorded and simulated counts per pixel. A map that
 reproduced every image exactly, apart from its shot noise, would leave a
@@ -161,12 +162,13 @@ The loss over training, per step and as a 50-step running mean, with the
 shot-noise variance of the data (dashed).
 ///
 
-The loss falls below the shot-noise variance early in the sixth epoch,
-which means the map has begun to reproduce the noise of the particular images
-it was trained on. The steps down at the epoch boundaries are the same
-effect: from the second epoch on, every image has been seen before. The FSC
-kept improving for the four epochs after that, so the training loss alone
-cannot say when a reconstruction has finished. Without a model to compare against, the
+The loss falls below the shot-noise variance in the fourth epoch, which
+means the map has begun to reproduce the noise of the particular images it
+was trained on. The steps down at the epoch boundaries are the same effect:
+from the second epoch on, every image has been seen before. The FSC against
+the model levels off in the same epoch, while the loss keeps falling for the
+six that follow, so the training loss alone cannot say when a reconstruction
+has finished. Without a model to compare against, the
 half maps below are what to watch.
 
 ## Half maps
@@ -201,7 +203,7 @@ noise (Rosenthal & Henderson 2003): the full map's correlation with the
 truth is \(\sqrt{2\,\mathrm{FSC}_{1/2}/(1+\mathrm{FSC}_{1/2})}\), and a half-map
 FSC of 0.143 corresponds to 0.5 against the truth. That is why half maps are
 read at 0.143. Here the prediction follows the measured curve across the
-band, and the two thresholds give 4.13 Å and 4.22 Å.
+band, and the two thresholds give 4.03 Å and 4.05 Å.
 
 ## Real data
 

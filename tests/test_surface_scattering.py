@@ -16,6 +16,8 @@ import pytest
 import roma
 import torch
 
+from specter.rotations._exact import DEFAULT_EXACT_TOLERANCE
+
 from specter.ghostbuster import Reconstructor
 from specter.imaging import Poses, Specimen
 from specter.settings import Propagation
@@ -51,6 +53,12 @@ def _grid_poses() -> Poses:
     return Poses(quaternions, shifts.float(), torch.arange(len(turns)))
 
 
+#: The exact rotation runs its NUFFTs at a relative accuracy of
+#: `DEFAULT_EXACT_TOLERANCE` (1e-4), and the two paths agree to that: 1-2e-4
+#: on the grid poses below. A few times it bounds them.
+_EXACT_AGREEMENT = 5 * DEFAULT_EXACT_TOLERANCE
+
+
 def _rel(a: torch.Tensor, b: torch.Tensor) -> float:
     return float((a - b).abs().norm() / (b - b.mean()).abs().norm())
 
@@ -69,6 +77,9 @@ def _waves(volume: torch.Tensor, rotate_mode: str, **settings: object) -> torch.
 def test_surface_matches_rotate_then_sum_on_grid_poses(
     model: str, sign: str, pad_fft: bool
 ) -> None:
+    """Against the exact rotation, which keeps the same band: the Nyquist
+    sphere. Trilinear rotation keeps the cube's corners instead, which the
+    surface does not sample."""
     volume = _compact_object(25)
     settings = dict(
         scattering_model=model,
@@ -78,9 +89,9 @@ def test_surface_matches_rotate_then_sum_on_grid_poses(
         oversample=2,
     )
     surface = _waves(volume, "surface", **settings)
-    rotated = _waves(volume, "real", **settings)
+    rotated = _waves(volume, "exact", **settings)
     assert surface.shape == rotated.shape
-    assert _rel(surface, rotated) < 1e-4
+    assert _rel(surface, rotated) < _EXACT_AGREEMENT
 
 
 def test_surface_tells_the_ewald_signs_apart() -> None:
@@ -179,8 +190,8 @@ def _reconstructor(rotate_mode: str, **kwargs: object) -> Reconstructor:
 def test_reconstructor_forward_is_the_same_image_under_surface() -> None:
     idx = torch.tensor([0])
     surface = _reconstructor("surface").forward(idx)
-    rotated = _reconstructor("real").forward(idx)
-    assert _rel(surface, rotated) < 1e-4
+    rotated = _reconstructor("exact").forward(idx)
+    assert _rel(surface, rotated) < _EXACT_AGREEMENT
 
 
 def test_reconstructor_trains_under_surface_and_refuses_lr_r() -> None:

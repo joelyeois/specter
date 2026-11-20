@@ -2,16 +2,35 @@
 64 particles at 2.9240 Å, 128 px box, 300 kV
 probes: 64 particles at 128 px / 2.924 Å (1x binned), 1 worker(s) on cuda
 ─────────────── Checking that the poses are aligned to the model ───────────────
-matched 0.327 vs shuffled 0.082, 100% of pairs above, z = 55.6: PASS
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
+matched 0.326 vs shuffled 0.082, 100% of pairs above, z = 55.6: PASS
 ────── Deriving detector and envelope settings from the acquisition card ───────
 ──────── Probing ice thickness and neighbour spacing against the images ────────
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
 ─────────── Comparing two seeds with the experiment at matched poses ───────────
-SNR ratio sim/exp per band: 0.97 [0.80, 1.18], 2.21 [2.03, 2.41], 1.34 [1.03, 
-1.76], 12.34 [2.90, 105.84], nan  | twin d = -0.19
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
+  Poses and CTF: copied particle for particle from 
+empiar-11377-64particles-pdbframe.cs
+SNR ratio sim/exp per band: 1.21 [1.03, 1.44], 2.20 [2.06, 2.36], 3.80 [3.03, 
+4.92], 4.15 [1.40, 29.77], nan  | twin d = 0.05
 ───────────────────── Writing matched.toml and the report ──────────────────────
 ✓ match/matched.toml
 ✓ match/match_report.md
 ✓ match/match_report.png
-match: simulated and experimental SNR agree within 3x at every scale coarser 
-than 6.7 Å.
-Done in 6m 20s
+residual: the simulation is 4x (68%: 3x to 5x) cleaner than the experiment in at
+least one band coarser than 6.7 Å. No parameter of the forward model closes 
+this; see Warnings.
+Done in 1m 11s

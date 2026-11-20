@@ -134,8 +134,11 @@ coincidence_radius = 0.0       # pixels; single value, or [low, high] to sample 
 ews_curvature_sign = "negative"  # negative | positive, matches CryoSPARC's convention
 # klim = 0.66                   # fraction of Nyquist, Kirkland's anti-aliasing bandlimit;
                                  # unset keeps the full Nyquist range
-rotate_mode = "exact"            # exact | real | fourier: exact turns the template through its
-                                 # transform (NUFFT), no interpolation; real/fourier are trilinear
+# rotate_mode = "exact"          # unset pairs it with scattering_model: surface (sample the
+                                 # template's transform on the posed Ewald surface) for
+                                 # projection/firstborn/rytov/ctf on a bare template, exact (turn
+                                 # it through its transform) for multislice and for any template
+                                 # with crowding, ice or damage; real/fourier are trilinear
 pad_fft = true                   # real-space FFT headroom: a wider frame, same pixels, so the
                                  # wave cannot wrap at the frame edge
 oversample = 2                  # the Fourier-space counterpart of pad_fft: finer pixels, same

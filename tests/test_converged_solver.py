@@ -43,6 +43,7 @@ def _problem(
     noise: float = 1.0,
     symmetry: str | None = None,
     n: int = N,
+    rotate_mode: str | None = None,
 ) -> tuple[Reconstructor, torch.Tensor, torch.Tensor]:
     """A Reconstructor, its noisy images of a known map, and that map."""
     torch.manual_seed(0)
@@ -63,7 +64,9 @@ def _problem(
         voltage=300.0,
         dose_per_angstrom=50.0,
         scale=0.8 + 0.4 * torch.rand(n_particles),
-        propagation=Propagation(scattering_model=scattering_model),
+        propagation=Propagation(
+            scattering_model=scattering_model, rotate_mode=rotate_mode
+        ),
         kmask=ball3d(n, n),
         lr=0.1,
         symmetry=symmetry,
@@ -454,10 +457,14 @@ def test_auto_batchsize_fits_a_small_device_and_does_not_change_the_map(
     batching only splits a sum. The free memory is capped in what the
     predictor reads rather than by filling the device, which would starve
     the suite's other workers; ``set_per_process_memory_fraction`` would cap
-    PyTorch alone, not cuFINUFFT."""
+    PyTorch alone, not cuFINUFFT. Trilinear rotation, the path heavy enough
+    to need a fraction here: on the surface a particle of this box costs the
+    solve under 3 MiB, and the whole half fits."""
     device = torch.device("cuda")
     n, n_particles = 96, 48
-    model, images, truth = _problem(scattering_model, n_particles=n_particles, n=n)
+    model, images, truth = _problem(
+        scattering_model, n_particles=n_particles, n=n, rotate_mode="real"
+    )
     model = model.to(device)
     start = _start(truth).to(device)
     reference = ConvergedSolver(model, images, np.ones(n // 2 + 1), batchsize=2)

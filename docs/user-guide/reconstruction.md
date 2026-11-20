@@ -321,9 +321,10 @@ model as `--fsc_ref`:
 The model the stack was simulated from and the average of the two
 half-maps, each projected along z, with the FSC curves up to the 5.85 Å
 Nyquist frequency. After five epochs on 500 particles per half and the
-converged solve, the half-maps correlate to 0.143 (Rosenthal & Henderson 2003) at 6.5 Å, the
-`resolution_gold_standard` that `job.json` records, and the average of the
-halves correlates with the model to 0.5 at 6.6 Å.
+converged solve, the half-maps correlate above 0.143 (Rosenthal & Henderson 2003) out to
+Nyquist, so the `resolution_gold_standard` that `job.json` records is
+`>Nyquist`, and the average of the halves correlates with the model to 0.5
+at 5.8 Å.
 ///
 
 Reconstruction records four resolution numbers per epoch in `job.json`:
@@ -422,13 +423,20 @@ whole-command speed gains depend on the workload.
 
 ## Pose application
 
-`--rotate_mode surface` computes each particle's exit wave from the
-unrotated volume's transform, sampled on the posed Ewald surface with a
-non-uniform FFT, instead of rotating the volume with trilinear interpolation
-(`real`, the default, or `fourier`). It removes the interpolation error from
-the forward model and is faster per particle, for the `projection`,
-`firstborn`, `rytov` and `ctf` scattering models. It does not refine
-rotations, so it cannot be combined with `--lr_R`. See
+The scattering model selects how each particle's pose is applied, and
+`--rotate_mode` is needed only to override it. For the `projection`,
+`firstborn`, `rytov` and `ctf` models the pose is applied as `surface`: the
+exit wave is computed from the unrotated volume's transform, sampled on the
+posed Ewald surface with a non-uniform FFT. For `multislice` and
+`kinematic` it is `exact`: the volume is rotated through its transform at
+the rotated frequencies. Neither interpolates, so the forward model carries
+no interpolation error, and `surface` is also faster per particle than
+rotating the volume. Neither carries a gradient to the rotations, and
+`exact` none to the shifts, so a run that sets `--lr_R`, or `--lr_T` under
+`multislice`, applies the pose with trilinear interpolation (`real`)
+instead. `--rotate_mode real` or `fourier` selects trilinear interpolation
+explicitly; an explicit `surface` or `exact` refuses the refinement it
+cannot carry. See
 [Sampling the Ewald surface](../concepts/conventions.md#sampling-the-ewald-surface).
 
 ## Symmetry

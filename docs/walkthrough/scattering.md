@@ -183,9 +183,9 @@ Three behaviours follow from the forms in the table.
   conserved, and drifts upward with thickness, by 6.7% at 2000 Å.
 - **First Born** does not conserve electrons. Its mean intensity is
   approximately \(1 + |\Theta|^2\), so the 1.5 rad of uniform phase per 500 Å
-  of ice becomes a mean of 3.25 at 500 Å and 36.5 at 2000 Å, and the
+  of ice becomes a mean of 3.25 at 500 Å and 36.4 at 2000 Å, and the
   spurious \(|\Theta|^2\) term overwhelms the pattern: correlation falls from
-  0.80 without ice to 0.22 at 2000 Å. The particle that shows in its
+  0.86 without ice to 0.22 at 2000 Å. The particle that shows in its
   intensity in the bottom row comes from that spurious term.
 - **Projection** is a pure phase object, so its exit-wave intensity is
   exactly flat. Its phase carries the projected potential, and for a thin
@@ -256,7 +256,7 @@ further:
 ![Exit-wave phase of 6BDF at 120, 200 and 300 kV, on a shared scale.](../assets/images/walkthrough/scattering-voltage.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
 The exit-wave phase at three voltages on a shared scale. The largest phase
-shift grows from 0.64 rad at 300 kV to 0.79 rad at 120 kV as \(\sigma\)
+shift grows from 0.68 rad at 300 kV to 0.81 rad at 120 kV as \(\sigma\)
 grows.
 ///
 

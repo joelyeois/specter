@@ -61,8 +61,8 @@ from specter.options import (
     EwaldSphereSign,
     IceModel,
     NoiseModel,
+    PoseMode,
     PotentialMethod,
-    RotateMode,
     ScatteringFactors,
     TemporalCoherence,
 )
@@ -427,16 +427,22 @@ class ParticleStackConfig:
     # and accepts the aliasing. Exposed so a caller can make the other choice.
     klim: float | None = klim_setting()  # fraction of Nyquist
     oversample: int = oversample_setting()
-    rotate_mode: RotateMode = setting(
-        "exact",
+    # Unset pairs the mode with scattering_model (Propagation.rotation):
+    # surface for the single-scatter models on a bare template, exact for
+    # multislice, kinematic and any template with crowding, ice or damage.
+    rotate_mode: PoseMode | None = setting(
+        None,
         help=(
-            "How the template is rotated to each particle's pose. 'exact' (default): no "
-            "interpolation; the template's transform is evaluated at the rotated "
-            "frequencies with a NUFFT. The transform is periodic, so density a rotation "
-            "and shift carry past a face re-enters at the opposite one; it warns when "
-            "more than 1% of the template could. 'real': trilinear "
-            "interpolation, which keeps about half the amplitude near Nyquist. "
-            "'fourier': trilinear on the spectrum, about 0.8 of it in every band."
+            "How the template is turned to each particle's pose. Unset (the "
+            "default) pairs it with scattering_model: surface for projection, "
+            "firstborn, rytov and ctf, exact for multislice and kinematic, and "
+            "exact for any model once crowding, ice or damage dress the "
+            "template, which the surface cannot carry. surface: sample the "
+            "template's transform on the posed Ewald surface. exact: turn the "
+            "template through its transform with a NUFFT (periodic: it warns "
+            "when more than 1% of the template could wrap across a face). "
+            "real/fourier: trilinear interpolation, which keeps about half (real) "
+            "or 0.8 (fourier) of the amplitude near Nyquist."
         ),
     )
 

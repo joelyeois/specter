@@ -284,18 +284,19 @@ def render_figure(
     if report.snr is not None:
         keep = [i for i, r in enumerate(report.snr.ratio) if math.isfinite(r) and r > 0]
         values = [report.snr.ratio[i] for i in keep]
-        # An unbounded upper end is drawn to the top of the axis.
-        lower = [v - report.snr.ratio_lo[i] for v, i in zip(values, keep)]
-        upper = [min(report.snr.ratio_hi[i], 1e4) - v for v, i in zip(values, keep)]
+        # The interval is drawn between its own bounds, not as error bars
+        # about the estimate: the bootstrap percentiles of a ratio need not
+        # bracket the ratio of the full set, which then made a negative bar
+        # length. An unbounded upper end is drawn to the top of the axis.
+        lows = [report.snr.ratio_lo[i] for i in keep]
+        highs = [min(report.snr.ratio_hi[i], 1e4) for i in keep]
         ax.bar(range(len(keep)), values, color="tab:red")
-        ax.errorbar(
-            range(len(keep)),
-            values,
-            yerr=[lower, upper],
-            fmt="none",
-            ecolor="k",
-            capsize=3,
-            label="68% interval",
+        ax.vlines(range(len(keep)), lows, highs, color="k", label="68% interval")
+        ax.hlines(
+            lows + highs,
+            [x - 0.15 for x in range(len(keep))] * 2,
+            [x + 0.15 for x in range(len(keep))] * 2,
+            color="k",
         )
         ax.axhspan(0.5, 2.0, color="tab:green", alpha=0.15, label="within 2x")
         ax.set_yscale("log")

@@ -458,15 +458,20 @@ class ReconstructionConfig:
         help="Hard frequency cutoff (1/Angstrom) applied to the simulated images.",
         check="non_negative",
     )
-    rotate_mode: PoseMode = setting(
-        "real",
+    # Unset pairs the mode with scattering_model (Propagation.rotation):
+    # surface for the single-scatter models, exact for multislice; real when
+    # lr_R (or, where exact would be chosen, lr_T) refines a pose.
+    rotate_mode: PoseMode | None = setting(
+        None,
         help=(
-            "How each particle's pose is applied. real/fourier: rotate the volume "
-            "with trilinear interpolation. exact: rotate it without interpolation, "
-            "through its transform at rotated frequencies (no lr_R or lr_T). "
-            "surface: sample the unrotated volume's "
-            "transform on the posed Ewald surface, with no interpolation "
-            "(projection, firstborn, rytov and ctf only; no lr_R)."
+            "How each particle's pose is applied. Unset (the default) pairs it "
+            "with scattering_model: surface for projection, firstborn, rytov and "
+            "ctf, exact for multislice and kinematic, and real when lr_R (or lr_T, "
+            "where exact would apply) refines a pose. surface: sample the unrotated "
+            "volume's transform on the posed Ewald surface (single-scatter "
+            "models only; no lr_R). exact: rotate it through its transform at "
+            "rotated frequencies (no lr_R or lr_T). real/fourier: trilinear "
+            "interpolation."
         ),
     )
 

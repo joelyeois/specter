@@ -102,7 +102,8 @@ Each of these looks like a safe simplification and is not. Nothing fails when on
 
 ### Physics and conventions
 - **The inverse accepts only `Propagation` and `Optics`.** `Envelopes` and `Camera` are deliberately absent from the reconstructors: the data cannot determine them. Defocus reference and `specimen_absorption` are shared code between simulator and inverse (`tests/test_forward_model_parity.py`).
-- **The inverse stays Cc-free and on `"real"` rotation.** `Reconstructor` calls `intensity(cc=None)` explicitly, and the ghostbuster golden fixtures must not move when a forward default changes. `ReconstructionConfig.rotate_mode` stays `"real"`; changing it is the user's call.
+- **The inverse stays Cc-free.** `Reconstructor` calls `intensity(cc=None)` explicitly, and the ghostbuster golden fixtures must not move when a forward default changes.
+- **An unset `rotate_mode` pairs with the scattering model** (`Propagation.rotation`, the user's call on 2026-11-20): `surface` for projection/firstborn/rytov/ctf, `exact` for multislice/kinematic, in simulation and reconstruction alike. It falls back to `exact` on a dressed specimen (crowding, ice, damage, atoms, aperture) or `inelastic_mfp`, and to `real` when `lr_R` (or `lr_T` where `exact` would apply) refines a pose. The particle pipeline settles it once per run, so its clean exit waves are posed like its images.
 - **`rotate_volume(V, build_affine_matrix(R))` turns the density by `R^T`.** A caller holding a template-to-world rotation passes `R.transpose(-1, -2)`.
 - **Never z-flip V to "fix" the propagator sign.** `exp(-i pi lambda dz k^2)` is physical and validated (a4b36c9).
 - **`dfang` in the `ctf_params` dict is in degrees**; `phaseshift`/`tiltx`/`tilty` are in radians.

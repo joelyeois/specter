@@ -45,9 +45,12 @@ from ._waves import ExitWave
 __all__ = ["Specimen", "Structure"]
 
 
-def _resolve(p: Propagation) -> Propagation:
-    """`p` with its rotation mode settled: a simulation rotates exactly by default."""
-    return replace(p, rotate_mode=p.rotation("exact"))
+def _resolve(p: Propagation, surface: bool) -> Propagation:
+    """
+    `p` with its rotation mode settled: the one paired with its scattering
+    model (`Propagation.rotation`), ``"exact"`` when `surface` is False.
+    """
+    return replace(p, rotate_mode=p.rotation(surface=surface))
 
 
 @dataclass(frozen=True)
@@ -355,7 +358,9 @@ class Specimen:
         **settings: Any,
     ) -> list[str]:
         """What :meth:`scatter` will do to each image, in order."""
-        p = _resolve(settings_group(Propagation, propagation, settings))
+        p = _resolve(
+            settings_group(Propagation, propagation, settings), not self.dressing()
+        )
         nz, nxy, pad = self.nz, self.nxy, self.pad_nxy(p.pads(False))
         if p.rotate_mode == "surface":
             steps = [
@@ -399,9 +404,11 @@ class Specimen:
         """
         The volumes :meth:`scatter` would propagate, ``(n, Z, Y, X)``.
 
-        Takes :meth:`scatter`'s arguments and draws the same specimens.
+        Takes :meth:`scatter`'s arguments and draws the same specimens. An
+        unset ``rotate_mode`` is ``"exact"`` for every model, since the posed
+        volume is what this returns.
         """
-        p = _resolve(settings_group(Propagation, propagation, settings))
+        p = _resolve(settings_group(Propagation, propagation, settings), False)
         return self._volume(poses, voltage, exposure, seed, objective_aperture, p)[0]
 
     def scatter(
@@ -436,8 +443,13 @@ class Specimen:
             How the exit wave is computed, or its fields as keywords
             (``scattering_model``, ``alpha``, ``absorption_model``,
             ``oversample``, ``pad_fft``, ...). An unset ``rotate_mode`` is
-            ``"exact"``: the template is turned through its own transform,
-            without interpolation.
+            paired with ``scattering_model`` (`Propagation.rotation`):
+            ``"surface"`` for the single-scatter models, which sample the
+            template's transform on the posed surface, and ``"exact"`` for
+            multislice and kinematic, which turn the template through its
+            transform; ``"exact"`` too for a dressed specimen
+            (:meth:`dressing`), which the surface cannot carry. Neither
+            interpolates.
         **settings
             `Propagation`'s fields as keywords, from which the group is built
             when `propagation` is not given; passing both raises
@@ -449,7 +461,10 @@ class Specimen:
             On the propagation grid, ``oversample`` times finer than the
             pixels, or on the pixel grid for the models that never leave it.
         """
-        p = _resolve(settings_group(Propagation, propagation, settings))
+        p = _resolve(
+            settings_group(Propagation, propagation, settings),
+            not self.dressing(objective_aperture),
+        )
         device = self.potential.device
         uniform = 0.0
         if p.absorption_model == "inelastic_mfp" and p.inelastic_mfp_specimen is None:
@@ -512,8 +527,26 @@ class Specimen:
             solvent_filtered=self._filters_solvent,
         )
 
-    def _check_surface(self, objective_aperture: float | None) -> None:
-        """Refuse what ``rotate_mode="surface"`` cannot do: it never forms the posed volume."""
+    def dressing(self, objective_aperture: float | None = None) -> list[str]:
+        """
+        What acts on the posed volume, so that it must be formed.
+
+        Crowding, ice, damage, per-image atom rendering and an objective
+        aperture each act on the specimen in the beam frame, which
+        ``rotate_mode="surface"`` never forms: it samples the bare template's
+        transform on the posed surface. An empty list means the surface can
+        be sampled.
+
+        Parameters
+        ----------
+        objective_aperture : float, optional
+            The aperture :meth:`scatter` is given, if any.
+
+        Returns
+        -------
+        list of str
+            The names of what is present, for messages.
+        """
         dressed = {
             "crowding": self.crowding is not None,
             "ice": self.icemaker is not None,
@@ -521,12 +554,16 @@ class Specimen:
             "per-image atom rendering": self.atoms is not None,
             "an objective aperture": objective_aperture is not None,
         }
-        present = [name for name, on in dressed.items() if on]
+        return [name for name, on in dressed.items() if on]
+
+    def _check_surface(self, objective_aperture: float | None) -> None:
+        """Refuse what ``rotate_mode="surface"`` cannot do: it never forms the posed volume."""
+        present = self.dressing(objective_aperture)
         if present:
             raise ValueError(
                 "rotate_mode='surface' samples the bare template's transform and "
                 f"cannot apply {', '.join(present)}, which act on the posed volume; "
-                "use rotate_mode='real'"
+                "use rotate_mode='exact', or leave it unset"
             )
 
     def _volume(

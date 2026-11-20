@@ -102,11 +102,13 @@ the two-seed comparison within the set (its default is 200):
 
 ![The report figure of a match on 64 EMPIAR-11377 particles](../assets/images/cli-guides/dataset_twin-report.png){ width="900" style="display:block;margin:1.2em auto;" }
 ///caption
-The report figure of the run above. The pose check passed with a matched-pair correlation of 0.327 against 0.082
-for shuffled pairs. The per-band SNR ratios are 0.97, 2.21 and 1.34 from
-coarse to 6.7 Å, so the verdict is a match. The 6.7-4 Å ratio of 12.34 has
-a 68% interval of 2.90 to 105.84, since the experiment carries almost no
-signal there. The twin test gives Cohen's d = -0.19. Ice thickness was not
+The report figure of the run above. The pose check passed with a matched-pair correlation of 0.326 against 0.082
+for shuffled pairs. The per-band SNR ratios are 1.21, 2.20 and 3.80 from
+coarse to 6.7 Å. The third band's 68% interval, 3.03 to 4.92, lies wholly
+above 3, so the verdict is a residual: the simulation is about four times
+cleaner than the experiment at that scale. The 6.7-4 Å ratio of 4.15 has
+a 68% interval of 1.40 to 29.77, since the experiment carries almost no
+signal there. The twin test gives Cohen's d = 0.05. Ice thickness was not
 resolved at 64 particles, and the report keeps the first candidate, 0 Å,
 with a warning.
 ///

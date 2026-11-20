@@ -103,11 +103,15 @@ class Reconstructor(_BaseReconstructor):
         How the forward model computes the exit wave, including the
         amplitude contrast ratio. The same object the simulator that
         produced the data was built with, when it was simulated. Default
-        ``Propagation()``, whose unset ``rotate_mode`` means ``"real"`` here.
+        ``Propagation()``. An unset ``rotate_mode`` is paired with
+        ``scattering_model`` (`Propagation.rotation`): ``"surface"`` for the
+        single-scatter models and ``"exact"`` for multislice and kinematic,
+        neither of which interpolates. ``"exact"`` and ``"surface"`` carry no
+        gradient to the rotations, and ``"exact"`` none to the shifts, so the
+        unset mode is ``"real"`` when `lr_R` is set, or `lr_T` where it would
+        be ``"exact"``; set explicitly, they refuse those rates.
         ``absorption_model="inelastic_mfp"`` is rejected; absorption comes
-        from `alpha` alone. ``rotate_mode="exact"`` and ``"surface"`` carry
-        no gradient to the rotations, so they refuse `lr_R`; ``"exact"``
-        refuses `lr_T` too.
+        from `alpha` alone.
     optics : Optics, optional
         The aberration engine and phase plate. Default ``Optics()``.
         `Envelopes` and `Camera` are deliberately not accepted: neither can
@@ -235,8 +239,14 @@ class Reconstructor(_BaseReconstructor):
         self._register_anisomag_and_scale(anisomag, scale, quaternions.shape[0])
 
         # imaging models
-        # Reconstruction keeps trilinear rotation unless asked otherwise.
-        propagation = replace(propagation, rotate_mode=propagation.rotation("real"))
+        # The mode paired with the scattering model, unless a pose is refined
+        # that it carries no gradient to.
+        propagation = replace(
+            propagation,
+            rotate_mode=propagation.rotation(
+                refine_rotations=lr_R is not None, refine_shifts=lr_T is not None
+            ),
+        )
         if propagation.rotate_mode in ("surface", "exact") and lr_R is not None:
             raise ValueError(
                 f"rotate_mode={propagation.rotate_mode!r} does not refine "

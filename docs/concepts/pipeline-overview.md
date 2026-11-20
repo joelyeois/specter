@@ -86,10 +86,13 @@ differently but hand it to the same downstream chain.
   every `scatter` call: it rotates the coordinates, then `PotentialBuilder`
   voxelizes them. This is the more expensive path per image, and the one
   that keeps gradients with respect to the atomic coordinates.
-- **`Specimen`** with a pre-built volume rotates the *volume* itself for
-  each image: by default exactly, through the volume's transform
-  (`rotate_mode="exact"`), or with trilinear interpolation (`"real"`,
-  `"fourier"`); see
+- **`Specimen`** with a pre-built volume poses the *volume* itself for
+  each image, without interpolation by default: a single-scatter model
+  samples the volume's transform on the posed Ewald surface
+  (`rotate_mode="surface"`), and multislice, or any model on a specimen
+  dressed with crowding, ice or damage, rotates the volume through its
+  transform (`"exact"`). Trilinear interpolation (`"real"`, `"fourier"`)
+  is available on request; see
   [Conventions](conventions.md#applying-a-pose-real-space-or-fourier-space).
   It is cheaper per image than the coordinate path, at the cost of losing
   per-atom gradients. `Specimen.crowd`, `Specimen.damage` and

@@ -365,7 +365,17 @@ class _ParticleRun:
         config = self.config
         specimen = self.specimen(device)
         dry = specimen.dry() if config.save_clean_exitwaves else None
-        propagation = asdict(bundle_from_config(Propagation, config, alpha=self.alpha))
+        propagation = bundle_from_config(Propagation, config, alpha=self.alpha)
+        # Settled once, from the specimen as dressed: the clean exit waves of
+        # its dry copy are then posed the way the images are, not on the
+        # surface the bare copy alone could use.
+        propagation = replace(
+            propagation,
+            rotate_mode=propagation.rotation(
+                surface=not specimen.dressing(config.objective_aperture)
+            ),
+        )
+        beam_propagation = asdict(propagation)
         microscope = _Microscope.from_config(config)
         n = stop - start
         images, exitwaves, clean = _HostStack(n), _HostStack(n), _HostStack(n)
@@ -380,7 +390,7 @@ class _ParticleRun:
                     exposure=exposure,
                     seed=self.seed,
                     objective_aperture=config.objective_aperture,
-                    **propagation,
+                    **beam_propagation,
                 )
                 waves = specimen.scatter(self.poses[i], **beam)
                 if config.save_exitwaves:

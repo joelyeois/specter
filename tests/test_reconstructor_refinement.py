@@ -49,24 +49,29 @@ def _volume() -> torch.Tensor:
 
 
 @pytest.fixture(scope="module")
-def truth() -> tuple[torch.Tensor, Poses, CTF, torch.Tensor]:
+def truth() -> tuple[torch.Tensor, Poses, CTF, dict[str, torch.Tensor]]:
+    """
+    The images in each pose mode a `Reconstructor` resolves to here: the
+    tests refine under a matched forward model. A mismatched one biases the
+    fit; trilinear data fitted with exact rotation put the defocus 110 A off.
+    """
     V = _volume()
     poses = Poses.random(N, shift=4.0, seed=0)
     ctf = CTF.sample(N, defocus=[10000.0, 20000.0], seed=0)
+    images = {}
     with torch.no_grad():
-        # Rotated as the Reconstructor rotates (trilinear): this tests
-        # refinement under a matched forward model.
-        images = simulate_particles(
-            Specimen(V, VOXEL),
-            poses,
-            ctf,
-            Exposure(DOSE),
-            voltage=VOLTAGE,
-            batch_size=N,
-            scatter=dict(rotate_mode="real"),
-            coherence=dict(cc=None),
-            camera=dict(noise=None),
-        ).array
+        for mode in ("real", "exact"):
+            images[mode] = simulate_particles(
+                Specimen(V, VOXEL),
+                poses,
+                ctf,
+                Exposure(DOSE),
+                voltage=VOLTAGE,
+                batch_size=N,
+                scatter=dict(rotate_mode=mode),
+                coherence=dict(cc=None),
+                camera=dict(noise=None),
+            ).array
     return V, poses, ctf, images
 
 
@@ -134,8 +139,9 @@ def test_refinement_recovers_the_true_parameters(truth, groups: str, steps: int)
     before = _errors(model, poses, applied)
     optimizers, _ = model.configure_optimizers()
     index = torch.arange(N)
+    target = images[model.propagation.rotate_mode]
     for _ in range(steps):
-        loss = mse_loss(model(index), images)
+        loss = mse_loss(model(index), target)
         for opt in optimizers:
             opt.zero_grad()
         loss.backward()
@@ -170,7 +176,8 @@ def test_a_fit_refines_shifts_and_defocus(truth):
         lr_T=0.1,
         lr_D=20.0,
     )
-    loader = DataLoader(TensorDataset(images, torch.arange(N)), batch_size=N)
+    target = images[model.propagation.rotate_mode]
+    loader = DataLoader(TensorDataset(target, torch.arange(N)), batch_size=N)
     fit(model, loader, max_epochs=150, device="cpu", progress=False)
     errors = _errors(model, poses, 300.0)
     assert errors["T"] < 0.02

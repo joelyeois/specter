@@ -268,15 +268,67 @@ def _reconstructor(**kwargs: object):
     )
 
 
-def test_simulation_defaults_to_exact_and_reconstruction_to_real() -> None:
-    assert Propagation().rotate_mode is None
+@pytest.mark.parametrize(
+    ("scattering_model", "paired"),
+    [
+        ("multislice", "exact"),
+        ("kinematic", "exact"),
+        ("rytov", "surface"),
+        ("firstborn", "surface"),
+        ("projection", "surface"),
+        ("ctf", "surface"),
+    ],
+)
+def test_an_unset_rotate_mode_pairs_with_the_scattering_model(
+    scattering_model: str, paired: str
+) -> None:
+    """Simulation and reconstruction pair alike, with no interpolation."""
+    p = Propagation(scattering_model=scattering_model)
+    assert p.rotate_mode is None
+    assert p.rotation() == paired
     spec = Specimen(_blobs((24, 24, 24)), 1.0)
+    assert f"({paired})" in spec.plan(propagation=p)[0] or (
+        paired == "surface" and "posed" in spec.plan(propagation=p)[0]
+    )
+    model = _reconstructor(propagation=p)
+    assert model.propagation.rotate_mode == paired
+
+
+def test_the_pairing_falls_back_where_it_cannot_apply() -> None:
+    rytov, multislice = Propagation(scattering_model="rytov"), Propagation()
+    # The surface carries no crowding, ice or damage: the posed volume is formed.
+    assert rytov.rotation(surface=False) == "exact"
+    damaged = Specimen(_blobs((24, 24, 24)), 1.0).damage()
+    assert damaged.dressing() == ["damage"]
+    assert "(exact)" in damaged.plan(propagation=rytov)[0]
+    absorbing = Propagation(
+        scattering_model="rytov", absorption_model="inelastic_mfp", alpha=0.0
+    )
+    assert absorbing.rotation() == "exact"
+    # Refining a pose needs its gradient, which only interpolation carries.
+    assert (
+        _reconstructor(propagation=rytov, lr_R=1e-3).propagation.rotate_mode == "real"
+    )
+    assert (
+        _reconstructor(propagation=rytov, lr_T=1e-3).propagation.rotate_mode
+        == "surface"
+    )
+    assert (
+        _reconstructor(propagation=multislice, lr_T=1e-3).propagation.rotate_mode
+        == "real"
+    )
+    # A materialised volume is formed by definition.
     poses = Poses(roma.random_unitquat(2), torch.zeros(2, 2), torch.arange(2))
-    assert "(exact)" in spec.plan()[0]
-    default = spec.materialize(poses, voltage=300.0)
-    exact = spec.materialize(poses, voltage=300.0, rotate_mode="exact")
-    torch.testing.assert_close(default, exact)
-    assert _reconstructor().propagation.rotate_mode == "real"
+    spec = Specimen(_blobs((24, 24, 24)), 1.0)
+    torch.testing.assert_close(
+        spec.materialize(poses, voltage=300.0, propagation=rytov),
+        spec.materialize(poses, voltage=300.0, rotate_mode="exact"),
+    )
+
+
+def test_a_set_rotate_mode_is_used_as_given() -> None:
+    p = Propagation(scattering_model="rytov", rotate_mode="real")
+    assert p.rotation(surface=False, refine_rotations=True) == "real"
     exact_model = _reconstructor(propagation=Propagation(rotate_mode="exact"))
     assert exact_model.propagation.rotate_mode == "exact"
 

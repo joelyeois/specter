@@ -68,7 +68,11 @@ def _train(
         DOSE,
         scale=problem["scale"].clone(),
         lr=0.1,
-        propagation=Propagation(alpha=0.07, scattering_model="rytov"),
+        # Trilinear: the surface's adjoint runs at the 1e-4 NUFFT tolerance,
+        # which differs chunk to chunk at the size of the tolerance checked.
+        propagation=Propagation(
+            alpha=0.07, scattering_model="rytov", rotate_mode="real"
+        ),
         **lrs,
         **kwargs,
     )

@@ -116,7 +116,8 @@ class Ghostbuster(_GhostbusterBase):
     propagation : Propagation, optional
         How the forward model computes the exit wave. Default
         ``Propagation(scattering_model="rytov")``; an unset ``rotate_mode``
-        is ``"real"``, as in `Reconstructor`. Its ``alpha`` is replaced
+        is paired with the scattering model, as in `Reconstructor`
+        (``"surface"`` for Rytov). Its ``alpha`` is replaced
         by the amplitude contrast recorded in the ``.cs`` file, since that is
         data rather than a modelling choice, or by `alpha` when given.
     optics : Optics, optional

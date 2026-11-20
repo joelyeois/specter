@@ -29,7 +29,10 @@ from specter.potential import (
 
 
 DOSE = 40.0
-LINEAR = dict(scattering_model="ctf", alpha=0.0)
+#: Posed exactly whether or not the specimen is damaged: a damaged specimen
+#: is dressed and cannot take the surface its bare copy would pair with, and
+#: the comparisons here are between the two.
+LINEAR = dict(scattering_model="ctf", alpha=0.0, rotate_mode="exact")
 
 
 def _ctf() -> CTF:

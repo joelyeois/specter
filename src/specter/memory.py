@@ -72,7 +72,7 @@ from typing import Literal
 import psutil
 import torch
 
-from .options import RotateMode
+from .options import PoseMode
 from .scattering._kernels import _MULTISLICE_SLICE_CHUNK
 
 __all__ = [
@@ -176,7 +176,7 @@ def estimate_peak_bytes(
     pad_nxy: int,
     oversample: int = 1,
     ice: bool = True,
-    rotate_mode: RotateMode = "real",
+    rotate_mode: PoseMode | None = "real",
 ) -> int:
     """
     Estimate peak memory for one forward pass of the particle pipeline.
@@ -198,12 +198,15 @@ def estimate_peak_bytes(
     ice : bool, optional
         Whether the run solvates (an icemaker is set), which adds the ice
         path's own working set. Default True.
-    rotate_mode : RotateMode, optional
+    rotate_mode : PoseMode or None, optional
         How the template is posed. ``"exact"`` adds its NUFFT plan, held on
         the device outside torch's allocator (1 GiB at a 256 box); its
         per-particle workspace (the posed volume, the half-spectrum and a
         chunk's points) is within the trilinear grid's fitted copies.
-        Default ``"real"``.
+        ``"surface"`` and None (paired with the scattering model at scatter
+        time, so either NUFFT) are charged the same plan; ``"surface"``
+        never forms the posed volume, so the estimate is high for it, which
+        is the side it is biased to. Default ``"real"``.
 
     Returns
     -------
@@ -227,7 +230,7 @@ def estimate_peak_bytes(
     )
     ice_column = max(nz - nxy, 0) * nxy**2 * _BYTES_PER_ELEMENT if ice else 0
     plan = 0
-    if rotate_mode == "exact":
+    if rotate_mode not in ("real", "fourier"):
         from .rotations._exact import plan_bytes
 
         plan = plan_bytes((nxy, nxy, nxy))
@@ -282,7 +285,7 @@ def recommend_batchsize(
     n_particles: int | None = None,
     oversample: int = 1,
     ice: bool = True,
-    rotate_mode: RotateMode = "real",
+    rotate_mode: PoseMode | None = "real",
 ) -> int:
     """
     Largest batch size worth running on `device`, given the free memory there.

@@ -10,6 +10,15 @@ shift multiplies it by a phase ramp, so a posed exit wave needs one non-uniform
 FFT of the UNROTATED volume (`specter.nufft.sample_transform`) and no
 interpolation anywhere. Multislice and the kinematic model are not single
 samples of the transform and have no such form.
+
+Only frequencies inside the Nyquist sphere, ``|k| dx < 1/2``, are sampled; the
+rest of the image's spectrum (its corners, between Nyquist and sqrt(2) times
+it) is zero. That is the band `specter.rotations.rotate_volume_exact` keeps,
+for the same reason: beyond the sphere a rotated frequency leaves the cube the
+volume's transform is known on, so what the transform returns there depends
+on the orientation, and is an alias of the periodic spectrum rather than the
+specimen. With the same band, a pose applied by sampling the surface and one
+applied by rotating exactly give the same image to rounding.
 """
 
 from __future__ import annotations
@@ -74,8 +83,9 @@ def surface_slice_sum(
     Returns
     -------
     torch.Tensor
-        Complex spectra of shape (B, pad_nxy, pad_nxy) in native FFT order.
-        Differentiable in ``volume`` and ``shifts``, not in ``quaternions``.
+        Complex spectra of shape (B, pad_nxy, pad_nxy) in native FFT order,
+        zero outside the Nyquist sphere ``|k| dx < 1/2``. Differentiable in
+        ``volume`` and ``shifts``, not in ``quaternions``.
     """
     nz, ny, nx = volume.shape
     if ny != nx:
@@ -90,10 +100,15 @@ def surface_slice_sum(
     kz = torch.zeros_like(k2) if flat else sign * lam * k2 / 2
     q = torch.stack([kx, ky, kz], -1).reshape(-1, 3)  # 1/A, (x, y, z)
 
+    # The band `rotate_volume_exact` keeps; a rotation preserves |q|, so the
+    # points inside are the same for every pose and only they are evaluated.
+    inside = torch.nonzero((q * dx).norm(dim=-1) < 0.5).flatten()
     rot = roma.unitquat_to_rotmat(quaternions.detach().to(device, torch.float64))
-    rotated = torch.einsum("bij,mj->bmi", rot, q)  # R q: the template's frequency
+    rotated = torch.einsum("bij,mj->bmi", rot, q[inside])  # R q, the template's
     batch = len(rot)
-    values = sample_transform(volume, (rotated * dx).reshape(-1, 3))
+    sampled = sample_transform(volume, (rotated * dx).reshape(-1, 3))
+    values = sampled.new_zeros(batch, pad_nxy * pad_nxy)
+    values = values.index_copy(1, inside, sampled.reshape(batch, -1))
     values = values.reshape(batch, pad_nxy, pad_nxy)
 
     # sample_transform is centred on the template's voxel shape // 2; the

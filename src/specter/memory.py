@@ -177,6 +177,7 @@ def estimate_peak_bytes(
     oversample: int = 1,
     ice: bool = True,
     rotate_mode: PoseMode | None = "real",
+    device: str | torch.device | None = None,
 ) -> int:
     """
     Estimate peak memory for one forward pass of the particle pipeline.
@@ -207,6 +208,10 @@ def estimate_peak_bytes(
         time, so either NUFFT) are charged the same plan; ``"surface"``
         never forms the posed volume, so the estimate is high for it, which
         is the side it is biased to. Default ``"real"``.
+    device : str or torch.device, optional
+        The device the forward runs on, whose memory sets the exact
+        rotation's upsampling factor and so its plan's size. Default: the
+        current CUDA device when there is one, else the CPU.
 
     Returns
     -------
@@ -233,7 +238,7 @@ def estimate_peak_bytes(
     if rotate_mode not in ("real", "fourier"):
         from .rotations._exact import plan_bytes
 
-        plan = plan_bytes((nxy, nxy, nxy))
+        plan = plan_bytes((nxy, nxy, nxy), device)
     return int(
         plan
         + _PADDED_COPIES_PER_PARTICLE * batchsize * padded_volume
@@ -339,7 +344,7 @@ def recommend_batchsize(
     )
     budget = free_bytes * fraction
 
-    args = (nxy, nz, pad_nxy, oversample, ice, rotate_mode)
+    args = (nxy, nz, pad_nxy, oversample, ice, rotate_mode, device)
     overhead = estimate_peak_bytes(0, *args)
     per_particle = estimate_peak_bytes(1, *args) - overhead
     batchsize = int(math.floor((budget - overhead) / per_particle))

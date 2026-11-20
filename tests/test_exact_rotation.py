@@ -121,13 +121,104 @@ def test_backward_is_the_adjoint(device: str, shape: tuple[int, int, int]) -> No
     assert abs(lhs - rhs) / abs(lhs) < 1e-4
 
 
-def test_poses_are_chunked_without_changing_the_result(monkeypatch) -> None:
-    V = _blobs((24, 24, 24))
-    theta = _theta(5, 24, 2.0)
-    whole = rotate_volume_exact(V, theta, eps=1e-6)
-    monkeypatch.setattr(_exact, "_POINTS_PER_CALL", 1)  # one pose per NUFFT call
-    chunked = rotate_volume_exact(V, theta, eps=1e-6)
+@pytest.mark.parametrize("device", DEVICES)
+def test_poses_are_chunked_without_changing_the_result(
+    monkeypatch, device: str
+) -> None:
+    """One pose per NUFFT call gives what all poses in one call give, both ways."""
+    V = _blobs((24, 24, 24)).to(device)
+    W = torch.randn(5, 24, 24, 24, generator=torch.Generator().manual_seed(2))
+    W = W.to(device)
+    theta = _theta(5, 24, 2.0).to(device)
+
+    def run() -> tuple[torch.Tensor, torch.Tensor]:
+        v = V.clone().requires_grad_(True)
+        out = rotate_volume_exact(v, theta, eps=1e-6)
+        (grad,) = torch.autograd.grad((out * W).sum(), v)
+        return out.detach(), grad
+
+    whole, whole_grad = run()
+    monkeypatch.setattr(_exact, "_points_per_call", lambda device: 1)
+    assert len(_exact._chunks(5, 100, torch.device(device))) == 5
+    chunked, chunked_grad = run()
+    if device == "cuda":
+        # cuFINUFFT's type 2 does not depend on the call's other points
+        assert torch.equal(chunked, whole)
     torch.testing.assert_close(chunked, whole, atol=1e-5, rtol=0)
+    # the type 1 spreads with atomic adds, so the backward is close, not equal
+    torch.testing.assert_close(chunked_grad, whole_grad, atol=1e-5, rtol=1e-5)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_a_gpu_call_takes_several_poses_of_a_reconstruction_box() -> None:
+    """Every call repeats the oversampled grid's FFT, so poses share calls."""
+    device = torch.device("cuda")
+    M = _exact._grid((300, 300, 300), device, False).M
+    poses = _exact._points_per_call(device) // M
+    total = torch.cuda.get_device_properties(device).total_memory
+    if total >= 40 * 2**30:  # an L40, A100 or H100
+        assert poses >= 8
+
+
+def _gaussians(
+    shape: tuple[int, int, int], centres: torch.Tensor, sigma: float
+) -> torch.Tensor:
+    """Gaussians at `centres` ((x, y, z) voxels) sampled on the grid, in float64."""
+    axes = [torch.arange(n, dtype=torch.float64) for n in shape]
+    z, y, x = torch.meshgrid(*axes, indexing="ij")
+    v = torch.zeros(shape, dtype=torch.float64)
+    for cx, cy, cz in centres.tolist():
+        v += torch.exp(
+            -((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2) / (2 * sigma**2)
+        )
+    return v
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_matches_the_analytic_rotation_of_gaussians(device: str) -> None:
+    """
+    Against the rotated and shifted Gaussians rendered afresh, to the tolerance.
+
+    Gaussians of sigma 2 voxels are band-limited to 3e-9 at Nyquist, so the
+    rendering is the exact answer, and at eps 1e-4 the rotation reaches it to
+    6e-5 at boxes 256-512 (4e-2 for trilinear interpolation).
+    """
+    n, sigma = 40, 2.0
+    g = torch.Generator().manual_seed(4)
+    c = torch.full((3,), float(n // 2), dtype=torch.float64)
+    d = torch.randn(12, 3, generator=g, dtype=torch.float64)
+    mu = c + d / d.norm(dim=1, keepdim=True) * 9 * torch.rand(12, 1, generator=g)
+    R = roma.random_rotmat(3, generator=g).double()
+    T_vox = (torch.rand(3, 3, generator=g, dtype=torch.float64) - 0.5) * 4
+    theta = build_affine_matrix(R.float(), (T_vox / (n / 2)).float())
+    V = _gaussians((n, n, n), mu, sigma).float().to(device)
+    out = rotate_volume_exact(V, theta.to(device)).double().cpu()
+    for i in range(3):
+        # theta = [R | R T]: a Gaussian at mu lands at c + R^T (mu - c) - T
+        expected = _gaussians((n, n, n), c + (mu - c) @ R[i] - T_vox[i], sigma)
+        assert float((out[i] - expected).norm() / expected.norm()) < 2e-4
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.filterwarnings("ignore:.*wraps it to the opposite face")
+def test_gradient_matches_a_double_precision_reference(device: str) -> None:
+    """The single-precision backward, against the eps-1e-9 float64 one (1.2e-4 at 256-300^3)."""
+    shape = (32, 32, 32)
+    g = torch.Generator().manual_seed(6)
+    V = torch.randn(shape, generator=g)
+    W = torch.randn((4, *shape), generator=g)
+    theta = _theta(4, 32, 2.5)
+
+    def grad(
+        v: torch.Tensor, w: torch.Tensor, t: torch.Tensor, eps: float
+    ) -> torch.Tensor:
+        v = v.to(device).requires_grad_(True)
+        out = rotate_volume_exact(v, t.to(device), eps=eps)
+        return torch.autograd.grad((out * w.to(device)).sum(), v)[0].double().cpu()
+
+    reference = grad(V.double(), W.double(), theta.double(), 1e-9)
+    single = grad(V, W, theta, _exact.DEFAULT_EXACT_TOLERANCE)
+    assert float((single - reference).norm() / reference.norm()) < 5e-4
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
@@ -411,9 +502,23 @@ def test_auto_batch_sizing_counts_the_plan() -> None:
     from specter.rotations._exact import plan_bytes
 
     args = (2, 256, 256, 512, 2, True)
-    extra = estimate_peak_bytes(*args, rotate_mode="exact") - estimate_peak_bytes(*args)
-    assert extra == plan_bytes((256, 256, 256))
-    assert plan_bytes((256, 256, 256)) == 512**3 * 8  # upsampfac 2, complex64
+    exact = estimate_peak_bytes(*args, rotate_mode="exact", device="cpu")
+    extra = exact - estimate_peak_bytes(*args, device="cpu")
+    assert extra == plan_bytes((256, 256, 256), "cpu")
+    assert plan_bytes((256, 256, 256), "cpu") == 512**3 * 8  # upsampfac 2, complex64
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_upsampling_factor_follows_the_device_memory(device: str) -> None:
+    """Factor 2 while one plan's grid fits the device's budget, 1.25 beyond it."""
+    d = torch.device(device)
+    if d.type == "cuda":
+        budget = torch.cuda.get_device_properties(d).total_memory / 16
+    else:
+        budget = 2 * 2**30
+    largest = int((budget / 8) ** (1 / 3) / 2)  # factor-2 grid of (2n)^3 complex64
+    assert _exact._plan_settings((largest,) * 3, False, d) == 2.0
+    assert _exact._plan_settings((largest + 2,) * 3, False, d) == 1.25
 
 
 def test_scatter_never_samples_rotated_slices(monkeypatch) -> None:

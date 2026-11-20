@@ -713,6 +713,7 @@ def _resolve_batchsize(
             config.oversample,
             ice,
             config.rotate_mode,
+            sizing_device,
         )
         / 1024**3
     )

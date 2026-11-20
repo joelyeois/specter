@@ -284,6 +284,24 @@ that can cross (`specter.rotations.wrapped_fraction`) and warns when it
 exceeds 1%; below that bound the exactly rotated template was measured closer
 to the per-pose render than `"real"`, and above it a larger box is required.
 
+Each call to the non-uniform FFT costs two parts: the spreading or
+interpolation, which grows with the number of points, and the fast Fourier
+transform, deconvolution and clearing of the oversampled grid, which does
+not. The second part is repeated in every call, so on the GPU
+`rotate_volume_exact` concatenates the points of as many poses as fit in an
+eighth of the device's memory, at about 56 bytes per point, and transforms
+them in one call. On an L40 at a \(300^3\) box the forward and backward passes
+take 24.5 ms per pose at five poses per call, 19.9 ms at eight and 15.7 ms at
+thirty-two. The oversampled grid is twice the box along each axis while one
+plan's grid fits in a sixteenth of the device's memory, and 1.25 times
+otherwise, which holds a quarter of the memory. At a \(432^3\) box the
+factor 2 takes 61 ms per pose and 1.25 takes 69 ms; at \(512^3\) the order
+reverses (129 against 122 ms). The forward is identical bit for bit at any grouping; the
+backward's type-1 transform accumulates with atomic additions, so it varies
+in the last bits from run to run at any grouping. On the CPU each pose is
+transformed in its own call, which keeps a pose's result independent of the
+batch it is computed in.
+
 ### Sampling the Ewald surface
 
 For the single-scatter models the slice sum that forms the exit wave is the

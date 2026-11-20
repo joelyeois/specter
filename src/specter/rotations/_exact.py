@@ -41,13 +41,31 @@ __all__ = [
 #: about 8x more accurate than 1e-3 for about 16% more time.
 DEFAULT_EXACT_TOLERANCE = 1e-4
 
-#: Upper bound on the points one GPU NUFFT call takes (poses are concatenated
-#: up to it): 8 poses of a 256^3 grid, one of a 512^3 grid. The CPU always
-#: takes one pose per call (see `rotate_volume_exact`).
-_POINTS_PER_CALL = 40_000_000
+#: Share of the device's memory the points of one GPU NUFFT call may take;
+#: poses are concatenated up to it. Every call repeats the work on the
+#: oversampled grid (its FFT, deconvolution and zeroing) whatever its number
+#: of points, about 47 ms forward and backward at a 300^3 box on an L40, so
+#: fewer calls are faster: 24.5 ms a pose at 5 poses a call, 19.9 at 8 and
+#: 15.7 at 32 (32 poses). An eighth of an 80 GB H100 holds 26 poses of a
+#: 300^3 grid, 8 of 432^3 and 5 of 512^3; of a 48 GB L40, 14, 5 and 3. The
+#: CPU always takes one pose per call (see `rotate_volume_exact`).
+_CALL_MEMORY_FRACTION = 1 / 8
 
-#: Oversampled-grid budget under which the faster upsampling factor 2 is used;
-#: larger grids fall back to `nufft`'s 1.25, which holds a quarter of the memory.
+#: Peak device memory per point of a GPU call, forward and backward: the
+#: points, cuFINUFFT's sort indices, the samples and the shift phase
+#: (measured 55 bytes on an L40 at 256^3 and 300^3).
+_BYTES_PER_POINT = 56
+
+#: Share of a GPU's memory one plan's oversampled grid may take at the
+#: upsampling factor 2; larger grids fall back to `nufft`'s 1.25, which holds a
+#: quarter of the memory. Factor 2 at a 432^3 box on an L40 takes 61 ms a pose
+#: forward and backward where 1.25 takes 69 (8 poses a call), but at 512^3 it
+#: is the slower (129 against 122 ms, 4 poses), and its two plans hold 10.3 and
+#: 17.2 GB there. A sixteenth of an 80 GB H100 takes factor 2 to about a 436^3 box;
+#: of a 48 GB L40, to about 359^3.
+_UPSAMPFAC_2_FRACTION = 1 / 16
+
+#: The same budget on the CPU, in bytes of host memory.
 _UPSAMPFAC_2_BYTES = 2 * 2**30
 
 #: cuFINUFFT spreading methods measured fastest for these transforms (H100,
@@ -94,7 +112,7 @@ class _Grid:
         cplx = torch.complex128 if double else torch.complex64
         self.origin = torch.exp(-2j * math.pi * turns.sum(-1)).to(cplx)
         self.real, self.complex = real, cplx
-        self.upsampfac = _plan_settings(shape, double)
+        self.upsampfac = _plan_settings(shape, double, device)
 
     # Both geometry helpers loop over poses with fixed-shape products: a
     # batched matmul or einsum picks its blocking from the batch size, which
@@ -121,14 +139,23 @@ def _grid(shape: tuple[int, int, int], device: torch.device, double: bool) -> _G
     return _Grid(shape, device, double)
 
 
-def _plan_settings(shape: tuple[int, int, int], double: bool) -> float:
-    """The upsampling factor: 2 while its grid fits `_UPSAMPFAC_2_BYTES`."""
-    if nufft._plan_bytes(shape, double, 2.0) <= _UPSAMPFAC_2_BYTES:
+def _plan_settings(
+    shape: tuple[int, int, int], double: bool, device: torch.device
+) -> float:
+    """The upsampling factor: 2 while its grid fits the device's budget."""
+    if device.type == "cuda":
+        total = torch.cuda.get_device_properties(device).total_memory
+        budget = total * _UPSAMPFAC_2_FRACTION
+    else:
+        budget = _UPSAMPFAC_2_BYTES
+    if nufft._plan_bytes(shape, double, 2.0) <= budget:
         return 2.0
     return nufft._UPSAMPFAC
 
 
-def plan_bytes(shape: tuple[int, int, int]) -> int:
+def plan_bytes(
+    shape: tuple[int, int, int], device: str | torch.device | None = None
+) -> int:
     """
     Device memory of one single-precision plan `rotate_volume_exact` holds.
 
@@ -139,20 +166,38 @@ def plan_bytes(shape: tuple[int, int, int]) -> int:
     ----------
     shape : tuple of int
         ``(Z, Y, X)``.
+    device : str or torch.device, optional
+        The device the plan is made on, whose memory sets its upsampling
+        factor. Default: the current CUDA device when there is one, else the
+        CPU.
 
     Returns
     -------
     int
         Bytes.
     """
-    return nufft._plan_bytes(shape, False, _plan_settings(shape, False))
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device)
+    return nufft._plan_bytes(shape, False, _plan_settings(shape, False, device))
 
 
-def _chunks(n: int, M: int, gpu: bool) -> list[tuple[int, int]]:
+@functools.lru_cache(maxsize=None)
+def _points_per_call(device: torch.device) -> int:
+    """Points one NUFFT call on `device` may take (see `_CALL_MEMORY_FRACTION`)."""
+    total = torch.cuda.get_device_properties(device).total_memory
+    return int(total * _CALL_MEMORY_FRACTION / _BYTES_PER_POINT)
+
+
+def _chunks(n: int, M: int, device: torch.device) -> list[tuple[int, int]]:
     # FINUFFT's CPU interpolation changes a point's value in the last bit with
     # how many points share the call; one pose per call keeps a pose a
-    # function of its own points. cuFINUFFT is bit-identical either way.
-    per = max(1, _POINTS_PER_CALL // max(M, 1)) if gpu else 1
+    # function of its own points. cuFINUFFT's type 2 is bit-identical either
+    # way; its type 1 spreads with atomic adds, so the backward varies in the
+    # last bits from run to run at any chunking.
+    per = 1
+    if device.type == "cuda":
+        per = max(1, _points_per_call(device) // max(M, 1))
     return [(s, min(s + per, n)) for s in range(0, n, per)]
 
 
@@ -173,7 +218,7 @@ class _ExactRotate(torch.autograd.Function):
         spec = torch.zeros(
             len(R), nz * ny * (nx // 2 + 1), dtype=g.complex, device=V.device
         )
-        for s, e in _chunks(len(R), g.M, V.is_cuda):
+        for s, e in _chunks(len(R), g.M, V.device):
             vals = nufft._execute(
                 2, values, g.points(R[s:e]), shape, eps, g.upsampfac, _GPU_METHOD[2]
             )
@@ -197,7 +242,7 @@ class _ExactRotate(torch.autograd.Function):
         )
         grad = grad.reshape(len(R), -1).to(g.complex)
         out = torch.zeros(shape, dtype=g.real, device=grad.device)
-        for s, e in _chunks(len(R), g.M, grad.is_cuda):
+        for s, e in _chunks(len(R), g.M, grad.device):
             c = grad[s:e][:, g.idx] * g.phase(R[s:e], tau[s:e]).conj()
             out += nufft._execute(
                 1,

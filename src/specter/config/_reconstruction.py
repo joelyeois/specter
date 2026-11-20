@@ -117,8 +117,15 @@ class ReconstructionConfig:
     epochs: int = setting(
         5, help="Number of passes over the particle stack.", check="positive"
     )
+    # The global batch: several devices split each batch between them and
+    # take the one-device step (see `ghostbuster._training`).
     batchsize: int = setting(
-        3, help="Particles per optimisation step.", check="positive"
+        3,
+        help=(
+            "Particles per optimisation step, over every device: several "
+            "devices split each batch between them."
+        ),
+        check="positive",
     )
     # What follows the Adam epochs in a gold run. "converged" minimises the
     # same loss plus a Wiener prior built from the Adam halves' FSC, by
@@ -243,13 +250,17 @@ class ReconstructionConfig:
 
     # --- Compute ---
     # "cpu" | "cuda" | "cuda:N" | a bare GPU index | a comma-separated list of
-    # GPU indices ("0,1"), which trains data-parallel across them.
+    # GPU indices ("0,1"), which trains data-parallel across them. A gold run
+    # first divides the list between its halves (A every other device from
+    # the first, B the rest), each half data-parallel across its share.
     device: str = setting(
         "cuda",
         help=(
             "cpu | cuda | cuda:N | a bare GPU index | a comma-separated "
-            "list of GPU indices (0,1), which trains data-parallel across them, "
-            "one process each, with gradients averaged every step."
+            "list of GPU indices (0,1), which trains and solves data-parallel "
+            "across them, one process each. A gold run divides the list "
+            "between its halves: A takes every other device from the first, "
+            "B the rest."
         ),
     )
     precision: str = setting(

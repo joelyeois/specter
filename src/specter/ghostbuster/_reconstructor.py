@@ -567,17 +567,20 @@ class Reconstructor(_BaseReconstructor):
         out = level + scale[:, None, None] * (out - level)
         return mse_loss(out, images)
 
-    def _log_loss(self, loss: torch.Tensor) -> None:
+    def _log_loss(self, loss: torch.Tensor) -> torch.Tensor:
         """
-        Record a batch's loss, averaged across ranks under multi-GPU (see
-        ``_gather_for_logging``); the loss the gradient comes from stays the
-        local, per-rank value, since `_step` averages the gradients.
+        Record a batch's loss, summed across ranks under several devices
+        (see ``_gather_for_logging``), and return it; the loss the gradient
+        comes from stays the rank's share-weighted value, since `_step` sums
+        the gradients.
         """
         # Kept on the device: a `.cpu()` here is a sync per step, and with
         # three of them the step ran 270 ms where the same work runs 160 ms
         # asynchronously. The lists are read once, when the epoch's metrics
         # are built.
-        self.log_total_loss.append(self._gather_for_logging(loss).detach())
+        logged = self._gather_for_logging(loss).detach()
+        self.log_total_loss.append(logged)
+        return logged
 
     def _common_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -603,7 +606,7 @@ class Reconstructor(_BaseReconstructor):
         Returns
         -------
         torch.Tensor
-            Scalar loss for the current batch.
+            Scalar loss for the current batch, over every rank, detached.
 
         Notes
         -----
@@ -611,23 +614,32 @@ class Reconstructor(_BaseReconstructor):
         many particles, each backpropagated with its loss weighted by its
         share of the batch, and the optimisers step once on the summed
         gradient. The loss is a per-particle mean (see `_compute_loss`), so
-        the sum is the batch's loss and gradient. Under several GPUs the
-        gradients are averaged once, after the last chunk.
+        the sum is the batch's loss and gradient. Under several devices each
+        rank holds a share of the global batch, and its chunks are weighted
+        by their share of the global batch, so the gradients summed across
+        ranks once, after the last chunk, are the global batch's: the step
+        one device takes, to float rounding.
         """
+        n = len(batch[1])
+        if n == 0:
+            return self._idle_step()
         if self.micro_batchsize is None:
             loss, _, _ = self._common_step(batch, batch_idx)
-            self._log_loss(loss)
+            total = self._batch_total(n)
+            if total != n:
+                loss = loss * (n / total)
+            logged = self._log_loss(loss)
             # The NUFFT adjoints of the backward (surface sampling, anisomag
             # warp) at the converged solver's tolerance: on EMPIAR-13202 100 kV
             # the 3D spreading was 66% of an Adam step's GPU time at 1e-6, and
             # 1e-4 made the step 1.4x faster.
             with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
                 self._optimise(loss)
-            return loss
+            return logged
         loss = self._accumulate_with_retry(batch, batch_idx)
-        self._log_loss(loss)
+        logged = self._log_loss(loss)
         self._step()
-        return loss
+        return logged
 
     def _accumulate_with_retry(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -664,7 +676,9 @@ class Reconstructor(_BaseReconstructor):
                 assert isinstance(self.micro_batchsize, int)
                 size = self.micro_batchsize
             try:
-                return self._accumulate(batch, batch_idx, size)
+                return self._accumulate(
+                    batch, batch_idx, size, total=self._batch_total(n)
+                )
             except (torch.cuda.OutOfMemoryError, RuntimeError) as error:
                 if (
                     self.micro_batchsize != "auto"
@@ -708,10 +722,26 @@ class Reconstructor(_BaseReconstructor):
         return predict_batchsize(work, self.V.device, n, label="micro_batchsize")
 
     def _accumulate(
-        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int, size: int
+        self,
+        batch: tuple[torch.Tensor, torch.Tensor],
+        batch_idx: int,
+        size: int,
+        total: int | None = None,
     ) -> torch.Tensor:
         """
         Zero the gradients and accumulate the batch's in chunks of at most ``size``.
+
+        Parameters
+        ----------
+        batch : tuple of torch.Tensor
+            ``(images, indices)``: this rank's particles.
+        batch_idx : int
+            Batch index, passed through to `_common_step`.
+        size : int
+            Most particles per chunk.
+        total : int, optional
+            The particles the loss is a mean over: the global batch, of which
+            ``batch`` is this rank's share. Default ``len(batch)``.
 
         Returns
         -------
@@ -720,6 +750,8 @@ class Reconstructor(_BaseReconstructor):
         """
         images, idx = batch
         n = len(idx)
+        if total is None:
+            total = n
         self._zero_grad()
         losses = []
         # Chunks equal to within one rather than full ones and a short last
@@ -728,7 +760,7 @@ class Reconstructor(_BaseReconstructor):
         k = -(-n // size)
         for chunk in zip(images.tensor_split(k), idx.tensor_split(k), strict=True):
             loss, _, _ = self._common_step(chunk, batch_idx)
-            weighted = loss * (len(chunk[1]) / n)
+            weighted = loss * (len(chunk[1]) / total)
             with nufft.adjoint_tolerance(ADJOINT_TOLERANCE):
                 self._backward(weighted)
             losses.append(weighted.detach())

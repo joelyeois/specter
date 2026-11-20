@@ -81,7 +81,8 @@ class TomogramGhostbuster(_GhostbusterBase):
     epochs : int
         Training epochs.  Default 5.
     batchsize : int
-        Tilt images per optimisation step.  Default 1 (one tilt per step).
+        Tilt images per optimisation step, over every device.  Default 1
+        (one tilt per step).
     propagation : Propagation, optional
         How the forward model computes the exit wave (model, amplitude
         contrast, bandlimit). Default ``Propagation()``.

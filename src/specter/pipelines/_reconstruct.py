@@ -45,7 +45,6 @@ turn that class into a command:
 from __future__ import annotations
 
 import dataclasses
-import itertools
 import multiprocessing
 import queue
 import time
@@ -323,6 +322,30 @@ def _collect_halfset_result(
                 return None
 
 
+def _half_devices(devices: Sequence[str]) -> tuple[list[str], list[str]]:
+    """
+    The devices halfsets A and B run on: alternate entries of the pool.
+
+    A takes ``devices[0::2]`` and B ``devices[1::2]``, so two devices give
+    one each and eight give four each; an odd pool gives A the extra one.
+    One device is shared, the halves then running one after the other.
+
+    Parameters
+    ----------
+    devices : sequence of str
+        The pool, as `specter.devices.DeviceSpec.devices` spells it.
+
+    Returns
+    -------
+    tuple of list of str
+        A's devices and B's.
+    """
+    devices = list(devices)
+    if len(devices) < 2:
+        return devices, devices
+    return devices[0::2], devices[1::2]
+
+
 def _run_both_halfsets(
     config: ReconstructionConfig,
     run_dir: Path,
@@ -332,14 +355,17 @@ def _run_both_halfsets(
     """
     Reconstruct halfsets A and B as separate worker processes.
 
-    Runs them in parallel, one per device, when at least two devices are
-    given. With only one device, runs them sequentially instead of spawning
-    both onto it at once -- concurrent training memory on a single GPU isn't
-    calibrated the way `specter.memory`'s forward-pass estimate is (that
-    model covers `Specimen.scatter`'s batched generation, not `Reconstructor`'s
-    training footprint of gradients + optimizer state), so contending for one
-    GPU's memory risks an OOM crash partway through a multi-hour run. Extra
-    devices beyond the first two are unused -- there are only two halfsets.
+    Runs them in parallel when at least two devices are given, the pool
+    split between them by `_half_devices`; a half given several devices
+    runs data-parallel across them, in a process group of its own, which
+    the half's worker opens (`specter.ghostbuster._training.run_on_ranks`),
+    so the two halves' groups never meet. With only one device, runs the
+    halves sequentially instead of spawning both onto it at once --
+    concurrent training memory on a single GPU isn't calibrated the way
+    `specter.memory`'s forward-pass estimate is (that model covers
+    `Specimen.scatter`'s batched generation, not `Reconstructor`'s training
+    footprint of gradients + optimizer state), so contending for one GPU's
+    memory risks an OOM crash partway through a multi-hour run.
 
     Each worker's result is retrieved from the shared `Queue` (via
     `_collect_halfset_result`) before this function joins it, not after: a
@@ -380,9 +406,11 @@ def _run_both_halfsets(
     halfsets: tuple[Literal["A"], Literal["B"]] = ("A", "B")
     half_configs = [
         dataclasses.replace(
-            config, halfset=cast(Literal["A", "B"], halfset), device=device
+            config,
+            halfset=cast(Literal["A", "B"], halfset),
+            device=",".join(pool),
         )
-        for halfset, device in zip(halfsets, itertools.cycle(devices))
+        for halfset, pool in zip(halfsets, _half_devices(devices), strict=True)
     ]
 
     results: dict[str, dict[str, Any]] = {}
@@ -594,18 +622,20 @@ def _run_converged_halfset(
     import logging
 
     import numpy as np
-    import torch
 
     import specter
     from specter.ghostbuster import Ghostbuster
-    from specter.ghostbuster._converge import ConvergedSolver
+    from specter.ghostbuster._converge import solve_on_devices
+    from specter.ghostbuster._run_helpers import torch_devices
     from specter.io import write_mrc
     from specter.jobs._job import _serialize_value
 
     assert config.halfset in ("A", "B")
     h = config.halfset
     specter.set_verbosity(logging.INFO)
-    device = torch.device(parse_device(resolve_available_device(config.device)).primary)
+    devices = torch_devices(
+        parse_device(resolve_available_device(config.device)).ghostbuster_target()
+    )
     kwargs = _ghostbuster_kwargs(config)
     # The Adam map is the start, as it is; references are not needed.
     kwargs.update(
@@ -621,17 +651,17 @@ def _run_converged_halfset(
     else:
         images, voxel_size = gb._images, gb._voxel_size
     model, _ = gb._build_reconstructor_and_loader(images, voxel_size, 1)
-    model = model.to(device)
-    solver = ConvergedSolver(
+    n_iter = 1 if config.test_run else config.solver_iterations
+    result = solve_on_devices(
         model,
         images,
         np.asarray(ssnr),
+        n_iter,
+        devices,
         batchsize=config.solver_batchsize,
         seed=0 if h == "A" else 1,
         label=h,
     )
-    n_iter = 1 if config.test_run else config.solver_iterations
-    result = solver.solve(model.V.detach(), n_iter)
     write_mrc(run_dir / f"volume_{h}_filtered.mrc", result.volume, voxel_size)
     write_mrc(run_dir / f"volume_{h}.mrc", result.unfiltered, voxel_size)
     summary = {

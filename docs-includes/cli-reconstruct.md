@@ -43,7 +43,7 @@ specter reconstruct particle [OPTIONS]
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--epochs` | `INTEGER` | `5` | Number of passes over the particle stack. |
-| `--batchsize` | `INTEGER` | `3` | Particles per optimisation step. |
+| `--batchsize` | `INTEGER` | `3` | Particles per optimisation step, over every device: several devices split each batch between them. |
 | `--solver` | `converged` \| `adam` | `converged` | converged (the default): after the Adam epochs, solve each half to the minimum of the image loss plus a Wiener prior from the Adam half-maps' FSC. adam: keep the Adam maps. Gold runs only. |
 | `--solver_iterations` | `INTEGER` | `4` | Conjugate-gradient iterations of the converged solve, per half. |
 | `--solver_batchsize` | `INTEGER` \| `auto` | `auto` | Particles per forward pass of the converged solve. 'auto' (the default) predicts the largest batch that fits in device memory; an integer fixes it. The solution does not depend on it. |
@@ -72,7 +72,7 @@ specter reconstruct particle [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--device` | `TEXT` | `cuda` | cpu \| cuda \| cuda:N \| a bare GPU index \| a comma-separated list of GPU indices (0,1), which trains data-parallel across them, one process each, with gradients averaged every step. |
+| `--device` | `TEXT` | `cuda` | cpu \| cuda \| cuda:N \| a bare GPU index \| a comma-separated list of GPU indices (0,1), which trains and solves data-parallel across them, one process each. A gold run divides the list between its halves: A takes every other device from the first, B the rest. |
 | `--precision` | `TEXT` | `16-mixed` | Training precision: 16-mixed, bf16-mixed or 32. Forced to 32 on CPU. |
 | `--micro_batchsize` | `INTEGER` \| `auto` | `auto` | Run each batch through the forward and backward this many particles at a time, accumulating the gradient, and step once: the same update in less device memory. 'auto' (the default) predicts the largest chunk that fits in device memory; an integer fixes it. |
 | `--num_workers` | `INTEGER` | `0` | Dataloader worker processes; 0 avoids multiprocessing for resident images. |

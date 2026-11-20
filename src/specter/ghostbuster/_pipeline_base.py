@@ -12,7 +12,7 @@ from typing import Any, Sequence, TypeVar
 import torch
 from torch import nn
 
-from ._run_helpers import resolve_device
+from ._run_helpers import torch_devices
 from ._training import fit
 
 _M = TypeVar("_M", bound=nn.Module)
@@ -35,9 +35,12 @@ class _GhostbusterBase:
 
     @staticmethod
     def _device_label(device: int | Sequence[int] | str) -> str:
-        """``"GPU 0"``, ``"GPU [0, 1]"`` or ``"CPU"``, for the run banner."""
-        use_gpu, ids = resolve_device(device)
-        return f"GPU {ids}" if use_gpu else "CPU"
+        """``"GPU 0"``, ``"GPU [0, 1]"``, ``"CPU"`` or ``"CPU x2"``, for the run banner."""
+        devices = torch_devices(device)
+        if devices[0].type == "cpu":
+            return "CPU" if len(devices) == 1 else f"CPU x{len(devices)}"
+        ids = [d.index for d in devices]
+        return f"GPU {ids[0]}" if len(ids) == 1 else f"GPU {ids}"
 
     def _fit(
         self,

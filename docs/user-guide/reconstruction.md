@@ -149,10 +149,15 @@ without a model bias (Henderson et al. 2012; Scheres & Chen 2012).
 the split; `--halfset A` or `--halfset B` reconstructs one half alone, useful
 for a quick look at a single volume before committing to a paired run.
 
-The two halves run as separate worker processes: in parallel across
-devices when `--device` names at least two, sequentially on one device
-otherwise. Only the first two devices are ever used, since there are only
-two halves to run.
+The two halves run as separate worker processes. When `--device` names at
+least two devices, the halves run in parallel and divide the devices
+between them: half A takes every other device starting with the first, and
+half B the rest, so `--device 0,1` gives each half one GPU and
+`--device 0,1,2,3,4,5,6,7` gives A GPUs 0, 2, 4 and 6 and B GPUs 1, 3, 5
+and 7. An odd number of devices gives A one more than B. A half given
+several devices runs both stages data-parallel across them (see
+[Compute](#compute)), in a process group of its own, so the two halves
+never communicate. With one device the halves run sequentially.
 
 ### The converged solve
 
@@ -213,8 +218,19 @@ sixteen iterations, to $1 - \mathrm{FSC} \le 3 \times 10^{-6}$ in every band.
 An iteration costs about one Adam epoch. `--solver adam` keeps the Adam maps
 as the result.
 
+On several devices the solve is data-parallel. Every quantity an
+iteration takes from the particles (the gradient, the loss, the curvature
+probes and the line search's loss changes) is a sum over them, so each
+device sums a contiguous share of the particles against its own copy of the
+map, and the shares are summed across the devices before the
+conjugate-gradient update, which every device then takes identically. The
+map and each search direction are copied from the first device to the
+others before the particles see them, so the devices cannot drift apart by
+rounding. The result is the single-device solve's up to the order of the
+summation.
+
 `solver_batchsize` sets how many particles pass through the forward model
-at once. It changes speed and device memory, not the solution, since every
+at once, on each device. It changes speed and device memory, not the solution, since every
 iteration sums over all particles. The default, `"auto"`, predicts the
 largest batch that fits before the solve begins. It runs one gradient pass
 and the line search's two passes on a single batch, while holding as many
@@ -352,9 +368,23 @@ list/show/diff CLI. `--project` and `--job_id` behave as documented there.
 
 `--device` accepts `cpu`, `cuda`, `cuda:N`, a bare GPU index, or a
 comma-separated list (`0,1`), which trains data-parallel across them, one
-process per GPU, averaging gradients every step. For a gold-standard run, a
-comma-separated list instead splits the two halves across devices (see
-above) rather than sharding one half's batches across them. `--precision`
+process per GPU. For a gold-standard run the list is first divided between
+the two halves (see [The gold-standard workflow](#the-gold-standard-workflow)),
+and each half is data-parallel across its share.
+
+`--batchsize` is the global batch: the particles in one optimisation step,
+whatever the number of devices. With `--batchsize 256` on four GPUs, each
+GPU takes 64 particles of every batch. The particle order is drawn once per
+epoch, as a single device draws it, and each batch is divided among the
+devices in contiguous shares that differ in size by at most one particle,
+so a short last batch can leave a device no particles. Each device weights
+its loss, a mean over its share, by the share's fraction of the batch, and
+the gradients are summed across the devices before the optimiser steps.
+The sum is the gradient of the whole batch's mean loss, so N devices take
+the same steps on the same particles as one device, up to floating-point
+rounding. Under `16-mixed`, the loss scaler's overflow check runs on the
+summed gradient, which is the same on every device, so all devices skip or
+take a step together. `--precision`
 sets the training precision (`16-mixed` by default, also `bf16-mixed` or
 `32`, forced to `32` on CPU); `--num_workers` sets dataloader worker processes. It defaults
 to `0`: the particle images are already resident in memory, so workers add
@@ -367,7 +397,10 @@ and backpropagated that many particles at a time, every chunk's loss
 weighted by its share of the batch, and the optimisers step once on the
 accumulated gradient. The loss is a mean over particles, so the update
 equals that of the whole batch in one pass, to floating-point rounding;
-under several GPUs the gradients are averaged once, after the last chunk.
+under several GPUs each device accumulates its share of the batch this way,
+each chunk weighted by its fraction of the global batch, and the gradients
+are summed across the devices once, after the last chunk. `auto` predicts
+the chunk on each device separately.
 A multislice gradient at a 300-pixel box needs about 2 GB of device memory
 per particle, so a batch of 256 does not fit in one pass on any current
 GPU. The default, `auto`, predicts the chunk on the first step from the
@@ -447,7 +480,7 @@ The converged solve holds poses, shifts and defocus fixed. A run that sets
 `--lr_R`, `--lr_T` or `--lr_D` therefore keeps the Adam result and skips
 the solve, with a warning. The solve also runs only for `--halfset gold`,
 since its prior needs both halves; `--halfset A`, `B` and `all` stop after
-the Adam stage. Each half runs on one device.
+the Adam stage.
 
 The prior depends on the Adam half-maps' FSC, so it depends on the mask that
 FSC is measured in. Scaling every $\lambda(k)$ by a factor between 0.3 and 3

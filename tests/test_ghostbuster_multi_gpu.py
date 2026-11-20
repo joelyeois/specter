@@ -1,14 +1,14 @@
 """
 Does Reconstructor's multi-GPU training (`fit` with several devices, as
-`Ghostbuster.run(device=[...])` calls it) actually work?
+`Ghostbuster.run(device=[...])` calls it) take the steps one GPU takes?
 
-Correctness check: two GPUs with per-GPU batch size B are mathematically
-equivalent to one GPU with one combined batch of 2B (same particles), since
-each rank's loss is already a mean over its own local batch and the loop
-averages gradients across ranks -- the two normalizations compose to match a
-single combined-batch run exactly. This also exercises pose refinement
-(lr_R), which shares full-dataset-length parameters across ranks differently
-than the volume V does.
+The loader's batch size is the global batch: rank 0 draws the epoch's order
+as one GPU would, each rank takes its share of every global batch, weights
+its loss by that share, and the gradients are summed. So two GPUs and one
+see the same particles at every step and end on the same map, to float
+rounding. The CPU-rank versions of these tests (`test_data_parallel.py`)
+cover the scattering models and the solver; these run the NCCL path,
+mixed precision and the auto micro-batch, which only exist on GPUs.
 """
 
 from __future__ import annotations
@@ -19,117 +19,72 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from specter.ghostbuster import Reconstructor, fit
-from specter.settings import Propagation
-
-NXY = NZ = 16
-N_PARTICLES = 4
-PIXEL_SIZE = 1.5
-VOLTAGE = 300.0
-DOSE = 22.5
+from _data_parallel_helpers import RecordingReconstructor, make_model, make_problem
+from specter.ghostbuster import fit
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available() or torch.cuda.device_count() < 2,
     reason="requires >=2 GPUs",
 )
 
-
-def _make_problem() -> dict:
-    import roma
-
-    # roma's samplers draw from the global stream whatever generator they
-    # are given, so seed that.
-    torch.manual_seed(0)
-    V0 = torch.rand(NZ, NXY, NXY) * 0.02
-    quats = roma.random_unitquat(size=(N_PARTICLES,))
-    trans = (torch.rand(N_PARTICLES, 2) - 0.5) * 5
-    ctf = {
-        "dfu": torch.empty(N_PARTICLES).uniform_(9000, 11000),
-        "dfv": torch.empty(N_PARTICLES).uniform_(9000, 11000),
-        "dfang": torch.empty(N_PARTICLES).uniform_(0, 180),
-        "cs": torch.full((N_PARTICLES,), 2.7e7),
-        "phaseshift": torch.zeros(N_PARTICLES),
-        "tiltx": torch.zeros(N_PARTICLES),
-        "tilty": torch.zeros(N_PARTICLES),
-        "trefoil1": torch.zeros(N_PARTICLES),
-        "trefoil2": torch.zeros(N_PARTICLES),
-    }
-    images = torch.rand(N_PARTICLES, NXY, NXY)
-    return dict(V0=V0, quats=quats, trans=trans, ctf=ctf, images=images)
+N_PARTICLES = 10
+BATCH = 4  # 4, 4, 2: the last global batch is short
 
 
-def _train(
-    problem: dict, devices: list[int], batch_size: int, **kwargs: Any
-) -> Reconstructor:
-    """Train a fresh model for one epoch on `devices`, in file order."""
-    model = Reconstructor(
-        problem["V0"].clone(),
-        PIXEL_SIZE,
-        problem["quats"].clone(),
-        problem["trans"].clone(),
-        {k: v.clone() for k, v in problem["ctf"].items()},
-        VOLTAGE,
-        DOSE,
-        lr=0.1,
-        lr_R=0.01,
-        symmetry=None,
-        propagation=Propagation(
-            alpha=0.0,
-            scattering_model="rytov",
-            rotate_mode="real",
-            ews_curvature_sign="negative",
-        ),
-        **kwargs,
-    )
+def _train(problem: dict, devices: list[int], **kwargs: Any) -> RecordingReconstructor:
+    """A fresh model fitted for two shuffled epochs on `devices`."""
+    precision = kwargs.pop("precision", "32")
+    model = make_model(problem, "rytov", lr=0.1, lr_T=0.01, **kwargs)
     loader = DataLoader(
         TensorDataset(problem["images"], torch.arange(N_PARTICLES)),
-        batch_size=batch_size,
-        shuffle=False,
+        batch_size=BATCH,
+        shuffle=True,
     )
-    return fit(model, loader, max_epochs=1, device=devices, progress=False)
-
-
-def test_reconstructor_multi_gpu_matches_single_gpu() -> None:
-    problem = _make_problem()
-    single = _train(problem, [0], N_PARTICLES)
-    multi = _train(problem, [0, 1], N_PARTICLES // 2)
-
-    for model in (single, multi):
-        V = model.V.detach()
-        assert V.device == torch.device("cpu")
-        assert not torch.isnan(V).any()
-        # Moved from initialization: gradients flowed and the step took effect.
-        assert (V - problem["V0"]).norm() > 1e-6
-
-    V_relerr = (single.V - multi.V).norm() / single.V.norm()
-    rot_relerr = (single.rotations - multi.rotations).norm() / single.rotations.norm()
-    assert V_relerr < 1e-3, f"V mismatch between single- and multi-GPU: {V_relerr}"
-    assert rot_relerr < 1e-3, (
-        f"rotations mismatch between single- and multi-GPU: {rot_relerr}"
+    torch.manual_seed(5)
+    return fit(
+        model,
+        loader,
+        max_epochs=2,
+        device=devices,
+        precision=precision,
+        progress=False,
     )
-    # The logged loss is the mean over ranks, which is the combined batch's.
+
+
+def _assert_same_run(
+    single: RecordingReconstructor, multi: RecordingReconstructor, tol: float
+) -> None:
+    assert multi.global_batches() == single.global_batches()
+    # Three batches, two epochs, two optimisers (volume and shifts).
+    assert multi.global_step == single.global_step == 12
+    for name in ("V", "translations"):
+        a, b = getattr(single, name).detach(), getattr(multi, name).detach()
+        assert a.device == torch.device("cpu")
+        relerr = float((a - b).abs().max() / a.abs().max())
+        assert relerr < tol, f"{name} differs by {relerr:.2e} between one GPU and two"
     torch.testing.assert_close(
         torch.stack(multi.log_total_loss).cpu(),
         torch.stack(single.log_total_loss).cpu(),
-        rtol=1e-4,
+        rtol=tol,
         atol=0,
     )
 
 
-def test_micro_batches_across_gpus_match_single_gpu() -> None:
-    """Each rank accumulates its chunks and the ranks average once, after the
-    last: the same step as one GPU taking the combined batch whole."""
-    problem = _make_problem()
-    single = _train(problem, [0], N_PARTICLES)
-    multi = _train(problem, [0, 1], N_PARTICLES // 2, micro_batchsize=1)
-    assert multi.global_step == single.global_step == 2
-    V_relerr = (single.V - multi.V).norm() / single.V.norm()
-    rot_relerr = (single.rotations - multi.rotations).norm() / single.rotations.norm()
-    assert V_relerr < 1e-3, f"V mismatch: {V_relerr}"
-    assert rot_relerr < 1e-3, f"rotations mismatch: {rot_relerr}"
-    torch.testing.assert_close(
-        torch.stack(multi.log_total_loss).cpu(),
-        torch.stack(single.log_total_loss).cpu(),
-        rtol=1e-4,
-        atol=0,
-    )
+@pytest.mark.parametrize("micro_batchsize", [None, 1, "auto"])
+def test_two_gpus_take_the_one_gpu_steps(micro_batchsize: Any) -> None:
+    problem = make_problem(N_PARTICLES)
+    single = _train(problem, [0], micro_batchsize=micro_batchsize)
+    multi = _train(problem, [0, 1], micro_batchsize=micro_batchsize)
+    assert not torch.isnan(multi.V).any()
+    assert (multi.V - problem["V0"]).norm() > 1e-6
+    _assert_same_run(single, multi, 1e-4)
+
+
+def test_two_gpus_take_the_one_gpu_steps_under_16_mixed() -> None:
+    """One loss-scale decision for every rank: the overflow check runs on
+    the summed gradient, which is the same on both."""
+    problem = make_problem(N_PARTICLES)
+    single = _train(problem, [0], precision="16-mixed")
+    multi = _train(problem, [0, 1], precision="16-mixed")
+    # Half-precision intermediates, summed in another order.
+    _assert_same_run(single, multi, 2e-2)

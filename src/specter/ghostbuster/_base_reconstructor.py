@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 import torch
+import torch.distributed as dist
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
@@ -25,7 +26,7 @@ from ._helpers import (
     _kmask_half_spectrum,
     _log_current_lr,
 )
-from ._training import TrainingState, all_reduce_mean
+from ._training import TrainingState, all_reduce_sum
 from .._device_module import DeviceModule
 from ..io import write_mrc
 from specter.options import Scheduler
@@ -136,10 +137,45 @@ class _BaseReconstructor(DeviceModule):
         )
         return [optimizer], [lr_scheduler]
 
+    def _batch_total(self, n_local: int) -> int:
+        """
+        Particles in the step's whole batch, of which this rank holds `n_local`.
+
+        `n_local` itself on one device. Under several ranks, the global batch
+        the loop split (`TrainingState.global_batch_size`): a rank's loss,
+        a mean over its share, is weighted by ``n_local / total`` so that the
+        ranks' summed gradients are the global batch's mean.
+        """
+        state = self._training
+        if state is None or state.world_size <= 1:
+            return n_local
+        return state.global_batch_size
+
+    def _idle_step(self) -> torch.Tensor:
+        """
+        The step of a rank whose share of the batch is empty.
+
+        It contributes no gradient and no loss but joins the step's
+        collectives, which every rank must, and steps its optimisers on the
+        summed gradient as the others do. Returns the batch's logged loss.
+        """
+        state = self._training
+        assert state is not None, "_idle_step runs inside `_training.fit`"
+        self._zero_grad()
+        zero = torch.zeros((), device=self.V.device)
+        if state.scaler is not None:
+            # The scaler sets its scale on its first `scale`; a rank whose
+            # first share is empty would otherwise reach `step` without one.
+            state.scaler.scale(zero)
+        logged = self._gather_for_logging(zero)
+        self.log_total_loss.append(logged)
+        self._step()
+        return logged
+
     def _optimise(self, loss: torch.Tensor) -> None:
         """
         One manual optimisation step on ``loss``: zero every optimiser,
-        backpropagate (scaled under ``"16-mixed"``), average the gradients
+        backpropagate (scaled under ``"16-mixed"``), sum the gradients
         across ranks, step every optimiser, then the schedulers.
 
         The scaler is updated after each optimiser's step and ``global_step``
@@ -171,15 +207,13 @@ class _BaseReconstructor(DeviceModule):
 
     def _step(self) -> None:
         """
-        Average the accumulated gradients across ranks, step every optimiser
+        Sum the accumulated gradients across ranks, step every optimiser
         (updating the scaler after each), then the schedulers.
         """
         state = self._training
         assert state is not None, "_step runs inside `_training.fit`"
         if state.world_size > 1:
-            for p in self.parameters():
-                if p.grad is not None:
-                    all_reduce_mean(p.grad, state.world_size)
+            self._sum_gradients()
         for opt in state.optimizers:
             if state.scaler is not None:
                 state.scaler.step(opt)
@@ -188,6 +222,32 @@ class _BaseReconstructor(DeviceModule):
                 opt.step()
             state.global_step += 1
         self._step_schedulers()
+
+    def _sum_gradients(self) -> None:
+        """
+        Sum every trainable parameter's gradient across the ranks, in place.
+
+        Each rank's loss is weighted by its share of the global batch
+        (`_batch_total`), so the sum is the global batch's gradient. Every
+        rank must reduce the same tensors in the same order, but a rank
+        whose share was empty has no gradient at all; it reduces zeros. A
+        parameter no rank has a gradient for keeps none, as on one device,
+        where the optimiser then skips it rather than stepping on a zero.
+        Under ``"16-mixed"`` the gradients are scaled by the same factor on
+        every rank, so the scaler's overflow check on the sum is one
+        decision for all of them.
+        """
+        params = [p for p in self.parameters() if p.requires_grad]
+        present = torch.tensor(
+            [float(p.grad is not None) for p in params], device=self.V.device
+        )
+        dist.all_reduce(present)
+        for p, count in zip(params, present.tolist(), strict=True):
+            if count == 0:
+                continue
+            if p.grad is None:
+                p.grad = torch.zeros_like(p)
+            dist.all_reduce(p.grad)
 
     def _make_run_dir(self) -> bool:
         """
@@ -306,22 +366,20 @@ class _BaseReconstructor(DeviceModule):
         """
         Reduce a per-rank scalar to a single global value, for logging only.
 
-        Under multi-GPU, each rank computes ``value`` from a different
-        local batch -- averaging across ranks here (matching the gradient
-        all-reduce in ``_optimise``) makes the logged value reflect the
-        true global-batch loss, not just one rank's local view. A no-op
-        (returns ``value`` detached) on one device, or outside a fit (e.g.
-        calling ``_compute_loss`` directly).
+        Under several ranks, each rank's ``value`` is its share-weighted
+        loss (see `_batch_total`), so the sum across ranks is the global
+        batch's loss, as the gradient all-reduce in `_step` sums the
+        gradients. A no-op (returns ``value`` detached) on one device, or
+        outside a fit (e.g. calling ``_compute_loss`` directly).
 
         Only ever call this on a value being logged/recorded. Never use its
         result in place of the original ``value`` for ``backward()`` --
-        ``_optimise`` already averages the gradients across ranks, and
-        averaging the loss a second time here before backward would double
-        that averaging and silently change the effective learning rate.
+        `_step` already sums the gradients across ranks, and summing the
+        loss here before backward would count every rank's share again.
         """
         if self._training is None or self._training.world_size <= 1:
             return value.detach()
-        return all_reduce_mean(value.detach().clone(), self._training.world_size)
+        return all_reduce_sum(value.detach().clone(), self._training.world_size)
 
     def _save_metrics(
         self,
@@ -333,7 +391,7 @@ class _BaseReconstructor(DeviceModule):
 
         Rank-0-only under multi-GPU to avoid every replica racing to
         write the same file. ``log_total_loss`` is
-        gathered/averaged across ranks at the point it is recorded (see
+        summed across ranks at the point it is recorded (see
         ``_gather_for_logging``), so under multi-GPU the saved metrics
         reflect the true global-batch loss, not just rank 0's local view.
         ``log_lrs`` needs no such gathering -- the learning rate is a

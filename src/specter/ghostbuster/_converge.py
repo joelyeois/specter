@@ -23,6 +23,14 @@ parabola through the loss on a random subset of particles. The
 preconditioner is ``1 / (W(k) + lambda(k))``, radial, so it commutes with
 the point-group and band-limit projections.
 
+Every quantity the solve takes from the particles (the gradient, the loss,
+the curvature probes and the line search's loss changes) is a sum over
+them, so it shards: on several devices (`solve_on_devices`) each rank sums
+its contiguous share of the particles against its own replica of the map,
+the shares are all-reduced, and every rank takes the same conjugate-gradient
+step from the same sums. The result is the one-device solve's to float
+rounding, since only the order of the summation changes.
+
 References
 ----------
 .. [1] Scheres, S. H. W. (2012). RELION: Implementation of a Bayesian
@@ -39,6 +47,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch.func import functional_call
 
 from specter import logger
@@ -49,6 +58,7 @@ from ..symmetries import apply_symmetry
 from ._helpers import _apply_kmask_inplace
 from ._memory import BatchPrediction, predict_batchsize
 from ._resolution import spherical_mask, unfilter
+from ._training import run_on_ranks
 
 if TYPE_CHECKING:
     from ._reconstructor import Reconstructor
@@ -151,6 +161,13 @@ class ConvergedSolver:
         region every pose of a real-space rotation keeps in the box. Pass a
         forward model's own window when it applies one to the map, and ones
         for the whole box.
+    distributed : bool
+        Solve as one rank of the default process group, which must be
+        initialised: every rank constructs a solver with the same arguments,
+        on its own device, and calls `solve` together. Each pass over
+        particles covers this rank's share of them and is summed across the
+        ranks; ``batchsize="auto"`` is predicted per device, for its share.
+        `solve_on_devices` sets this up. Default False.
 
     Notes
     -----
@@ -181,8 +198,11 @@ class ConvergedSolver:
         seed: int = 0,
         label: str = "",
         probe_support: torch.Tensor | None = None,
+        distributed: bool = False,
     ) -> None:
         self.model = model.eval()
+        self.rank = dist.get_rank() if distributed else 0
+        self.world_size = dist.get_world_size() if distributed else 1
         self.images = images
         self.device = model.V.device
         self.n_particles = len(images)
@@ -218,6 +238,57 @@ class ConvergedSolver:
         self.probe_support = support.to(self.device, torch.float32)
 
     # ------------------------------------------------------------------
+    # Ranks: which particles are this rank's, and agreeing on the rest
+
+    def _shard(self, idx: torch.Tensor) -> torch.Tensor:
+        """This rank's contiguous share of `idx`, sizes equal to within one."""
+        if self.world_size == 1:
+            return idx
+        return idx.tensor_split(self.world_size)[self.rank]
+
+    def _sum(self, values: torch.Tensor) -> torch.Tensor:
+        """`values` summed over the ranks, in place."""
+        if self.world_size > 1:
+            dist.all_reduce(values)
+        return values
+
+    def _sum_floats(self, values: list[float]) -> list[float]:
+        """Scalars summed over the ranks, in float64."""
+        if self.world_size == 1:
+            return values
+        t = torch.tensor(values, dtype=torch.float64, device=self.device)
+        return [float(v) for v in self._sum(t)]
+
+    def _sync(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Rank 0's `x`, on every rank.
+
+        The ranks compute every map-sized quantity redundantly from summed
+        inputs, so they already agree to the last bit wherever the kernels
+        are deterministic; the exact point-group average spreads through a
+        NUFFT with atomic adds, which is not. The map and each search
+        direction are taken from rank 0 before the particles see them, so
+        every rank's share is a share of the same sum.
+        """
+        if self.world_size > 1:
+            dist.broadcast(x, src=0)
+        return x
+
+    def _agree(self, value: float) -> float:
+        """
+        Rank 0's `value`, on every rank.
+
+        For the scalars the solve branches on: ranks that disagreed by
+        rounding on the sign of a slope would take different branches and
+        then wait on different collectives.
+        """
+        if self.world_size == 1:
+            return value
+        t = torch.tensor([value], dtype=torch.float64, device=self.device)
+        dist.broadcast(t, src=0)
+        return float(t)
+
+    # ------------------------------------------------------------------
     # The forward model and the passes over particles
 
     def _predict(self, idx: torch.Tensor, V: torch.Tensor) -> torch.Tensor:
@@ -241,6 +312,8 @@ class ConvergedSolver:
         above one of 59, which the batch-size probe measures. Three of 50
         stay below it.
         """
+        if len(idx) == 0:
+            return []
         return list(idx.tensor_split(-(-len(idx) // self.batchsize)))
 
     def _choose_batchsize(self, V: torch.Tensor) -> None:
@@ -254,8 +327,10 @@ class ConvergedSolver:
         """
         if self._requested_batchsize != "auto":
             return
+        # This rank's share is the most a pass gives it.
+        n_local = max(1, len(self._shard(torch.arange(self.n_particles))))
         if self.device.type != "cuda":
-            self.batchsize = min(_CPU_BATCHSIZE, self.n_particles)
+            self.batchsize = min(_CPU_BATCHSIZE, n_local)
             return
         gen = torch.Generator(device=self.device).manual_seed(self.seed)
         d = torch.randn(V.shape, device=self.device, generator=gen)
@@ -274,7 +349,7 @@ class ConvergedSolver:
             del held
 
         self.batch_prediction = predict_batchsize(
-            work, self.device, self.n_particles, label=self._tag
+            work, self.device, n_local, label=self._tag
         )
         self.batchsize = self.batch_prediction.batchsize
 
@@ -326,11 +401,11 @@ class ConvergedSolver:
                     torch.cuda.empty_cache()
 
     def _gradient(self, V: torch.Tensor) -> tuple[torch.Tensor, float]:
-        """Data-term gradient and loss over every particle."""
-        result: tuple[torch.Tensor, float] = self._retrying(
-            lambda: self._gradient_pass(V)
-        )
-        return result
+        """Data-term gradient and loss over every particle, summed over the ranks."""
+        idx = self._shard(torch.arange(self.n_particles, device=self.device))
+        grad, loss = self._retrying(lambda: self._gradient_pass(V, idx))
+        (loss,) = self._sum_floats([loss])
+        return self._sum(grad), loss
 
     def _gradient_pass(
         self, V: torch.Tensor, idx: torch.Tensor | None = None
@@ -346,15 +421,17 @@ class ConvergedSolver:
                 loss = 0.5 * (r**2).sum()
                 loss.backward()
                 total += loss.detach().double()
-        assert X.grad is not None
+        if X.grad is None:  # no particles: this rank's share is empty
+            return torch.zeros_like(X), 0.0
         return X.grad, float(total)
 
     def _curvature(
         self, V: torch.Tensor, d: torch.Tensor, step: float, idx: torch.Tensor
     ) -> float:
-        """``sum_i ||J_i d||^2`` over `idx` (see `_curvature_pass`)."""
+        """``sum_i ||J_i d||^2`` over `idx` (see `_curvature_pass`), over the ranks."""
+        idx = self._shard(idx)
         result: float = self._retrying(lambda: self._curvature_pass(V, d, step, idx))
-        return result
+        return self._sum_floats([result])[0]
 
     @torch.no_grad()
     def _curvature_pass(
@@ -372,11 +449,12 @@ class ConvergedSolver:
     def _loss_changes(
         self, V: torch.Tensor, d: torch.Tensor, steps: list[float], idx: torch.Tensor
     ) -> list[float]:
-        """Change of the data loss on `idx` for each step (see `_loss_changes_pass`)."""
+        """Change of the data loss on `idx` for each step (see `_loss_changes_pass`), over the ranks."""
+        idx = self._shard(idx)
         result: list[float] = self._retrying(
             lambda: self._loss_changes_pass(V, d, steps, idx)
         )
-        return result
+        return self._sum_floats(result)
 
     @torch.no_grad()
     def _loss_changes_pass(
@@ -494,7 +572,7 @@ class ConvergedSolver:
         for b in range(nb):
             selection = (self.radius >= edges[b]) & (self.radius < edges[b + 1])
             for _ in range(n_probes):
-                d = self._random_direction(selection, gen)
+                d = self._sync(self._random_direction(selection, gen))
                 bands[b] += (
                     self._curvature(V, d, self._step_size(V, d), particles)
                     * per_particle
@@ -511,6 +589,7 @@ class ConvergedSolver:
                 d = d / d.norm()
             else:
                 d = self._random_direction(selection, gen)
+            d = self._sync(d)
             low.append(
                 self._curvature(V, d, self._step_size(V, d), particles) * per_particle
             )
@@ -544,6 +623,7 @@ class ConvergedSolver:
         # an Adam map's norm on EMPIAR-12391) changes 14% per application, the
         # whole map 2%, and the projected iteration walked uphill.
         V = self._project(V.to(self.device, torch.float32))  # the map for U = the start
+        V = self._sync(V)
         self._choose_batchsize(V)
 
         t0 = time.perf_counter()
@@ -577,6 +657,7 @@ class ConvergedSolver:
         z_prev: torch.Tensor | None = None
         for it in range(n_iter):
             t0 = time.perf_counter()
+            V = self._sync(V)
             self._release()
             _log_memory(self.device, f"iteration {it + 1} start")
             grad, data_loss = self._gradient(V)
@@ -605,14 +686,14 @@ class ConvergedSolver:
             # from the full gradient in V, not as g.d, which equals it only
             # as far as S is self-adjoint (1e-5 on a real map, 1.6e-3 for I1
             # on an 8^3 box, enough near convergence to flip its sign).
-            d_map = self._project(d)
-            slope = float((grad_V * d_map).sum())
+            d_map = self._sync(self._project(d))
+            slope = self._agree(float((grad_V * d_map).sum()))
             if slope >= 0 and not steepest:
                 d = -z
-                d_map = self._project(d)
-                slope = float((grad_V * d_map).sum())
+                d_map = self._sync(self._project(d))
+                slope = self._agree(float((grad_V * d_map).sum()))
             del grad_V
-            d_lam_d = float((d_map * self._filter(d_map, lam)).sum())
+            d_lam_d = self._agree(float((d_map * self._filter(d_map, lam)).sum()))
             subset = self._subset(
                 self.line_search_fraction, 32, self.n_particles, cpu_gen
             )
@@ -658,9 +739,16 @@ class ConvergedSolver:
             )
 
         prediction = self.batch_prediction
+        batchsizes = [self.batchsize]
+        if self.world_size > 1:
+            gathered: list[Any] = [None] * self.world_size
+            dist.all_gather_object(gathered, self.batchsize)
+            batchsizes = [int(b) for b in gathered]
         info = dict(
             n_particles=self.n_particles,
             batchsize=self.batchsize,
+            n_devices=self.world_size,
+            batchsize_per_device=batchsizes,
             batch_prediction=None
             if prediction is None
             else dict(
@@ -678,3 +766,68 @@ class ConvergedSolver:
         return SolveResult(
             volume=V, unfiltered=unfilter(V, self.ssnr), log=log, info=info
         )
+
+
+def solve_on_devices(
+    model: Reconstructor,
+    images: torch.Tensor,
+    ssnr: np.ndarray,
+    n_iter: int,
+    devices: list[torch.device],
+    **solver_kwargs: Any,
+) -> SolveResult:
+    """
+    `ConvergedSolver.solve` on one device or data-parallel across several.
+
+    On several devices this process is rank 0 and every other rank is a
+    spawned process (`_training.run_on_ranks`) with its own replica of
+    `model`, its own NUFFT plans and its own batch-size prediction, over
+    its share of the particles. `images` stays on the CPU and reaches the
+    other ranks through shared memory; each rank copies only its share's
+    batches to its device.
+
+    Parameters
+    ----------
+    model : Reconstructor
+        The forward model, holding the starting map ``V``; moved to the
+        first device.
+    images : torch.Tensor
+        The half-set's images, ``(N, H, W)``, on the CPU.
+    ssnr : numpy.ndarray
+        Half-map SSNR per shell (see `ConvergedSolver`).
+    n_iter : int
+        Conjugate-gradient iterations.
+    devices : list of torch.device
+        One rank per device.
+    **solver_kwargs
+        Further `ConvergedSolver` arguments (``batchsize``, ``seed``,
+        ``label``, ...).
+
+    Returns
+    -------
+    SolveResult
+        Rank 0's result; every rank holds the same map.
+    """
+    if len(devices) == 1:
+        model = model.to(devices[0])
+        solver = ConvergedSolver(model, images, ssnr, **solver_kwargs)
+        return solver.solve(model.V.detach(), n_iter)
+    result: SolveResult = run_on_ranks(
+        _solve_rank, devices, (model.cpu(), images, ssnr, n_iter, solver_kwargs)
+    )
+    return result
+
+
+def _solve_rank(
+    rank: int,
+    devices: list[torch.device],
+    model: Reconstructor,
+    images: torch.Tensor,
+    ssnr: np.ndarray,
+    n_iter: int,
+    solver_kwargs: dict[str, Any],
+) -> SolveResult:
+    """One rank of `solve_on_devices`, inside its process group."""
+    model = model.to(devices[rank])
+    solver = ConvergedSolver(model, images, ssnr, distributed=True, **solver_kwargs)
+    return solver.solve(model.V.detach(), n_iter)

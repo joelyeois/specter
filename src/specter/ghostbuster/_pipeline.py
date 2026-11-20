@@ -94,7 +94,9 @@ class Ghostbuster(_GhostbusterBase):
     epochs : int
         Number of training epochs.
     batchsize : int
-        Dataloader batch size.
+        Particles per optimisation step, over every device: :meth:`run` on
+        several GPUs splits each batch between them and takes the step one
+        GPU would take.
     micro_batchsize : int or "auto", optional
         Particles per forward and backward pass within one optimiser step,
         to fit a batch in less device memory with the same update; see
@@ -560,11 +562,14 @@ class Ghostbuster(_GhostbusterBase):
         ----------
         device : int or sequence of int or {"cpu"}
             GPU index, or a sequence of GPU indices (e.g. ``[0, 1]``) to train
-            data-parallel, one process per GPU. Gradients (for the volume,
-            and for rotations/translations/defocus when pose refinement is
-            enabled) are averaged across the GPUs every step, so every rank
-            holds the same model and this process returns rank 0's. Pass ``"cpu"`` to force CPU
-            training; any other value uses the GPU when CUDA is
+            data-parallel, one process per GPU. Each batch of ``batchsize``
+            particles is split between the GPUs, in the order one GPU would
+            draw it, and the gradients (for the volume, and for
+            rotations/translations/defocus when pose refinement is enabled)
+            are summed with each GPU's loss weighted by its share, so the
+            GPUs take one GPU's steps, to float rounding; every rank holds
+            the same model and this process returns rank 0's. Pass ``"cpu"``
+            to force CPU training; any other value uses the GPU when CUDA is
             available and falls back to the CPU when it is not.
         callbacks : list, optional
             Objects with any of the training hooks (``on_train_batch_start``,

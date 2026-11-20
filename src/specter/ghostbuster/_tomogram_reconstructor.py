@@ -535,9 +535,18 @@ class TomogramReconstructor(_BaseReconstructor):
         Returns
         -------
         torch.Tensor
-            Scalar loss for the current batch.
+            Scalar loss for the current batch, over every rank, detached.
+
+        Notes
+        -----
+        Under several devices each rank holds a share of the global batch
+        and weights its mean loss by that share, so the gradients `_step`
+        sums across ranks are the global batch's.
         """
         obs_images, tilt_indices = batch
+        n = len(tilt_indices)
+        if n == 0:
+            return self._idle_step()
 
         # Prepare V once per step (the taper is a deterministic transform)
         V_prepared = self._prepare_volume()
@@ -548,18 +557,21 @@ class TomogramReconstructor(_BaseReconstructor):
             sim = self._forward_tilt(V_prepared, idx)
             total_loss = total_loss + self._compute_loss(sim, obs_images[i], idx)
 
-        loss = total_loss / max(len(tilt_indices), 1)
+        loss = total_loss / n
+        total = self._batch_total(n)
+        if total != n:
+            loss = loss * (n / total)
 
-        # Gathered/averaged across ranks under multi-GPU for logging
-        # only -- `loss` itself (fed to `_optimise` below) stays the
-        # local, per-rank value; `_optimise` averages the gradients itself.
-        # Kept on the device, as in `Reconstructor`: a `.cpu()` here is a
-        # host sync per step. The lists are read once, when the metrics are
-        # built.
-        self.log_total_loss.append(self._gather_for_logging(loss).detach())
+        # Summed across ranks under several devices for logging only --
+        # `loss` itself (fed to `_optimise` below) stays this rank's
+        # share-weighted value; `_step` sums the gradients itself. Kept on
+        # the device, as in `Reconstructor`: a `.cpu()` here is a host sync
+        # per step. The lists are read once, when the metrics are built.
+        logged = self._gather_for_logging(loss).detach()
+        self.log_total_loss.append(logged)
 
         self._optimise(loss)
-        return loss
+        return logged
 
     # ------------------------------------------------------------------ #
     # Epoch / fit callbacks                                                #

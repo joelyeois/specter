@@ -302,11 +302,13 @@ def test_a_pass_that_runs_out_of_memory_is_redone_with_smaller_batches() -> None
     real_pass = solver._gradient_pass
     calls = {"n": 0}
 
-    def flaky(X: torch.Tensor) -> tuple[torch.Tensor, float]:
+    def flaky(
+        X: torch.Tensor, idx: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, float]:
         calls["n"] += 1
         if calls["n"] == 1:
             raise torch.cuda.OutOfMemoryError("CUDA out of memory")
-        return real_pass(X)
+        return real_pass(X, idx)
 
     solver._gradient_pass = flaky  # type: ignore[method-assign]
     grad, _ = solver._gradient(V)

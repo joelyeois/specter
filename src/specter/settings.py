@@ -277,9 +277,10 @@ class Propagation:
         surface (``"surface"``), and multislice and kinematic, which need the
         posed volume, rotate it through its transform (``"exact"``). Where the
         pairing cannot apply, the fallback is ``"exact"`` when the posed
-        volume must be formed, and ``"real"`` when a pose is refined, since
-        neither ``"surface"`` nor ``"exact"`` carries a gradient to the
-        rotation, and ``"exact"`` none to the shift.
+        volume must be formed, and ``"real"`` when a pose is refined where
+        the pairing gives ``"exact"``, which carries no gradient to the
+        rotation or the shift. ``"surface"`` carries both, so a refinement
+        under a single-scatter model stays on it.
 
         Parameters
         ----------
@@ -298,15 +299,13 @@ class Propagation:
         """
         if self.rotate_mode is not None:
             return self.rotate_mode
-        if refine_rotations:
-            return "real"
         if (
             surface
             and self.scattering_model in SURFACE_MODELS
             and self.absorption_model == "alpha"
         ):
             return "surface"
-        return "real" if refine_shifts else "exact"
+        return "real" if refine_rotations or refine_shifts else "exact"
 
 
 @dataclass(frozen=True)

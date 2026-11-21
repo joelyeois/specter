@@ -185,10 +185,10 @@ transform. Multislice and the kinematic model need the posed volume and take
 dressed with crowding, ice, damage, per-image atom rendering or an objective
 aperture needs the posed volume, so it takes `"exact"` for every model, as
 does `absorption_model="inelastic_mfp"`. A reconstruction that refines
-rotations (`lr_R`) takes `"real"`, since neither `"surface"` nor `"exact"`
-carries a gradient to the rotation, and one that refines shifts (`lr_T`)
-takes `"real"` where the pairing would give `"exact"`. A `rotate_mode` that
-is set is used as given.
+rotations or shifts (`lr_R`, `lr_T`) where the pairing gives `"exact"`
+takes `"real"`, since `"exact"` carries no gradient to the pose;
+`"surface"` carries both, so a single-scatter refinement stays on it. A
+`rotate_mode` that is set is used as given.
 
 `"real"` resamples the density with `grid_sample`, applying the
 rotation and the translation together in one trilinear pass. `"fourier"`
@@ -342,10 +342,18 @@ The method has three limits. Multislice and the kinematic model are not one
 sample of the transform and are refused. Crowding, ice, dose damage,
 per-image atom rendering and an objective aperture act on the posed volume,
 which this method never forms, so `Specimen.scatter` refuses them as well;
-it serves the bare template that `Reconstructor` scatters. No gradient flows
-to the rotation, so `Reconstructor` refuses `lr_R` under it, while shifts
-remain differentiable. Content shifted across the box edge wraps
-periodically, where `"real"` clips it.
+it serves the bare template that `Reconstructor` scatters. Content shifted
+across the box edge wraps periodically, where `"real"` clips it.
+
+The rotation and the shift are both differentiable. The spectrum at
+frequency \(\mathbf{q}\) is \(\hat V(R\mathbf{q})\), so its change with the
+rotation is \(\nabla\hat V(R\mathbf{q})\cdot(\mathrm{d}R\,\mathbf{q})\), and each
+component of \(\nabla\hat V\) is the transform of the volume weighted by
+one of its centred coordinates, \(-2\pi i\,x V\), evaluated at the same
+points. The three are computed in one batched transform, only when the
+rotations are refined. A Rytov training step at a 300-voxel box that refines
+rotations takes 5.9 ms per particle on an L40, against 13.9 ms with
+trilinear rotation and 3.6 ms with the map alone.
 
 ### Point-group averaging
 

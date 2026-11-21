@@ -112,10 +112,10 @@ class Reconstructor(_BaseReconstructor):
         ``Propagation()``. An unset ``rotate_mode`` is paired with
         ``scattering_model`` (`Propagation.rotation`): ``"surface"`` for the
         single-scatter models and ``"exact"`` for multislice and kinematic,
-        neither of which interpolates. ``"exact"`` and ``"surface"`` carry no
-        gradient to the rotations, and ``"exact"`` none to the shifts, so the
-        unset mode is ``"real"`` when `lr_R` is set, or `lr_T` where it would
-        be ``"exact"``; set explicitly, they refuse those rates.
+        neither of which interpolates. ``"surface"`` carries gradients to the
+        rotations and shifts; ``"exact"`` carries neither, so where the
+        pairing gives ``"exact"`` the unset mode is ``"real"`` when `lr_R` or
+        `lr_T` is set, and an explicit ``"exact"`` refuses them.
         ``absorption_model="inelastic_mfp"`` is rejected; absorption comes
         from `alpha` alone.
     optics : Optics, optional
@@ -253,11 +253,11 @@ class Reconstructor(_BaseReconstructor):
                 refine_rotations=lr_R is not None, refine_shifts=lr_T is not None
             ),
         )
-        if propagation.rotate_mode in ("surface", "exact") and lr_R is not None:
+        if propagation.rotate_mode == "exact" and lr_R is not None:
             raise ValueError(
-                f"rotate_mode={propagation.rotate_mode!r} does not refine "
-                "rotations: the sampled transform carries no gradient to the "
-                "pose. Leave lr_R unset or use rotate_mode='real'."
+                "rotate_mode='exact' does not refine rotations: the rotated "
+                "transform carries no gradient to the pose. Leave lr_R unset, "
+                "or use rotate_mode='surface' (single-scatter models) or 'real'."
             )
         if propagation.rotate_mode == "exact" and lr_T is not None:
             raise ValueError(

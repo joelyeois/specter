@@ -235,14 +235,15 @@ def test_reconstructor_forward_is_the_same_image_under_surface() -> None:
     assert _rel(surface, rotated) < _EXACT_AGREEMENT
 
 
-def test_reconstructor_trains_under_surface_and_refuses_lr_r() -> None:
-    model = _reconstructor("surface", lr=0.1)
+def test_reconstructor_trains_under_surface_with_rotations_refined() -> None:
+    model = _reconstructor("surface", lr=0.1, lr_R=1e-3)
     images = model.forward(torch.tensor([0])).detach() * 1.1
-    before = model.V.detach().clone()
+    before = model.V.detach().clone(), model.rotations.detach().clone()
     fit_one_epoch(model, images, max_epochs=1)
-    assert not torch.equal(model.V.detach(), before)
+    assert not torch.equal(model.V.detach(), before[0])
+    assert not torch.equal(model.rotations.detach(), before[1])
     with pytest.raises(ValueError, match="does not refine rotations"):
-        _reconstructor("surface", lr=0.1, lr_R=1e-3)
+        _reconstructor("exact", lr=0.1, lr_R=1e-3)
 
 
 def test_symmetrization_reuses_the_surface_plan() -> None:

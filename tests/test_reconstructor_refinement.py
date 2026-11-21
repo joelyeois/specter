@@ -22,6 +22,7 @@ import torch.nn.functional as F
 from specter.ghostbuster import Reconstructor
 from specter.ghostbuster._losses import mse_loss
 from specter.imaging import CTF, Exposure, Poses, Specimen, simulate_particles
+from specter.settings import Propagation
 
 N, BOX, VOXEL, DOSE, VOLTAGE = 8, 32, 4.0, 50.0, 300.0
 
@@ -51,28 +52,39 @@ def _volume() -> torch.Tensor:
 @pytest.fixture(scope="module")
 def truth() -> tuple[torch.Tensor, Poses, CTF, dict[str, torch.Tensor]]:
     """
-    The images in each pose mode a `Reconstructor` resolves to here: the
-    tests refine under a matched forward model. A mismatched one biases the
-    fit; trilinear data fitted with exact rotation put the defocus 110 A off.
+    The images under each (scattering model, pose mode) a `Reconstructor`
+    resolves to here: the tests refine under a matched forward model. A
+    mismatched one biases the fit; trilinear data fitted with exact rotation
+    put the defocus 110 A off.
     """
     V = _volume()
     poses = Poses.random(N, shift=4.0, seed=0)
     ctf = CTF.sample(N, defocus=[10000.0, 20000.0], seed=0)
     images = {}
     with torch.no_grad():
-        for mode in ("real", "exact"):
-            images[mode] = simulate_particles(
+        for model, mode in (
+            ("multislice", "real"),
+            ("multislice", "exact"),
+            ("rytov", "surface"),
+        ):
+            images[model, mode] = simulate_particles(
                 Specimen(V, VOXEL),
                 poses,
                 ctf,
                 Exposure(DOSE),
                 voltage=VOLTAGE,
                 batch_size=N,
-                scatter=dict(rotate_mode=mode),
+                scatter=dict(scattering_model=model, rotate_mode=mode),
                 coherence=dict(cc=None),
                 camera=dict(noise=None),
             ).array
     return V, poses, ctf, images
+
+
+def _target(images: dict, model: Reconstructor) -> torch.Tensor:
+    """The images simulated under `model`'s own scattering model and pose mode."""
+    p = model.propagation
+    return images[p.scattering_model, p.rotate_mode]
 
 
 def _perturbed(
@@ -103,11 +115,19 @@ def _errors(model: Reconstructor, poses: Poses, defocus: float) -> dict[str, flo
 
 
 @pytest.mark.parametrize(
+    "scattering_model",
+    # Multislice refines poses through trilinear rotation (exact carries no
+    # pose gradient); Rytov through the surface sampling.
+    ["multislice", "rytov"],
+)
+@pytest.mark.parametrize(
     "groups, steps",
     [("R", 150), ("T", 150), ("D", 150), ("RTD", 200)],
     ids=["rotations", "shifts", "defocus", "joint"],
 )
-def test_refinement_recovers_the_true_parameters(truth, groups: str, steps: int):
+def test_refinement_recovers_the_true_parameters(
+    truth, groups: str, steps: int, scattering_model: str
+):
     """
     The defocus case is the one AdamW's default weight decay broke: it pulled
     the offset towards zero by ``lr * 0.01 * offset`` a step against an Adam
@@ -135,11 +155,14 @@ def test_refinement_recovers_the_true_parameters(truth, groups: str, steps: int)
         lr_R=1e-2 if "R" in groups else None,
         lr_T=0.1 if "T" in groups else None,
         lr_D=20.0 if "D" in groups else None,
+        propagation=Propagation(scattering_model=scattering_model),
     )
+    if scattering_model == "rytov":
+        assert model.propagation.rotate_mode == "surface"
     before = _errors(model, poses, applied)
     optimizers, _ = model.configure_optimizers()
     index = torch.arange(N)
-    target = images[model.propagation.rotate_mode]
+    target = _target(images, model)
     for _ in range(steps):
         loss = mse_loss(model(index), target)
         for opt in optimizers:
@@ -176,7 +199,7 @@ def test_a_fit_refines_shifts_and_defocus(truth):
         lr_T=0.1,
         lr_D=20.0,
     )
-    target = images[model.propagation.rotate_mode]
+    target = _target(images, model)
     loader = DataLoader(TensorDataset(target, torch.arange(N)), batch_size=N)
     fit(model, loader, max_epochs=150, device="cpu", progress=False)
     errors = _errors(model, poses, 300.0)

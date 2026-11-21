@@ -398,7 +398,8 @@ def test_the_pairing_falls_back_where_it_cannot_apply() -> None:
     assert absorbing.rotation() == "exact"
     # Refining a pose needs its gradient, which only interpolation carries.
     assert (
-        _reconstructor(propagation=rytov, lr_R=1e-3).propagation.rotate_mode == "real"
+        _reconstructor(propagation=rytov, lr_R=1e-3).propagation.rotate_mode
+        == "surface"
     )
     assert (
         _reconstructor(propagation=rytov, lr_T=1e-3).propagation.rotate_mode

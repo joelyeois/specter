@@ -431,12 +431,13 @@ posed Ewald surface with a non-uniform FFT. For `multislice` and
 `kinematic` it is `exact`: the volume is rotated through its transform at
 the rotated frequencies. Neither interpolates, so the forward model carries
 no interpolation error, and `surface` is also faster per particle than
-rotating the volume. Neither carries a gradient to the rotations, and
-`exact` none to the shifts, so a run that sets `--lr_R`, or `--lr_T` under
-`multislice`, applies the pose with trilinear interpolation (`real`)
-instead. `--rotate_mode real` or `fourier` selects trilinear interpolation
-explicitly; an explicit `surface` or `exact` refuses the refinement it
-cannot carry. See
+rotating the volume. `surface` carries gradients to the rotations and
+shifts, so `--lr_R` and `--lr_T` refine poses through it. `exact` carries
+neither, so a `multislice` or `kinematic` run that sets `--lr_R` or
+`--lr_T` applies the pose with trilinear interpolation (`real`) instead.
+`--rotate_mode real` or `fourier` selects trilinear interpolation
+explicitly; an explicit `exact` refuses the refinement it cannot carry.
+See
 [Sampling the Ewald surface](../concepts/conventions.md#sampling-the-ewald-surface).
 
 Under `exact` the map is multiplied by a soft sphere before every rotation:

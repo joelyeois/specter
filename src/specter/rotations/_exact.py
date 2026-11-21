@@ -9,7 +9,15 @@ with one type-2 non-uniform FFT (`specter.nufft`), applies the shift as a
 phase, and inverts with ``irfftn``; frequencies outside the sphere have no
 rotated counterpart inside the source's band and are set to zero. The
 backward is the adjoint, a type-1 NUFFT that spreads every pose's spectrum
-gradient onto one grid. Only the rotations and shifts are saved.
+gradient onto one grid. Only the rotations and shifts are saved, and the
+volume when the pose itself is differentiated.
+
+The gradient to the pose follows from ``U^(p) = V^(w) exp(2 pi i w . tau)``
+with ``w = R p``: its change with ``w`` is ``(grad V^(w) + 2 pi i tau V^(w))``
+times the phase, and with ``tau`` it is ``2 pi i w U^(p)``. Each component
+of ``grad V^`` is the transform of ``-2 pi i (x_j - c_j) V``, so one more
+type-2 NUFFT, of ``V`` and its three coordinate-weighted copies at the
+points the backward already sets, gives everything the pose needs.
 
 The transform is periodic, so content farther from the centre than the
 inscribed sphere (less the shift) re-enters the box at the opposite face
@@ -55,6 +63,12 @@ _CALL_MEMORY_FRACTION = 1 / 8
 #: points, cuFINUFFT's sort indices, the samples and the shift phase
 #: (measured 55 bytes on an L40 at 256^3 and 300^3).
 _BYTES_PER_POINT = 56
+
+#: Further device memory per point when the backward also differentiates the
+#: pose: four complex samples (the transform and its gradient) and the
+#: products formed one component at a time from them (measured 48 bytes in
+#: PyTorch's allocator at 256^3, on top of the 59 the backward holds).
+_POSE_BYTES_PER_POINT = 64
 
 #: Share of a GPU's memory one plan's oversampled grid may take at the
 #: upsampling factor 2; larger grids fall back to `nufft`'s 1.25, which holds a
@@ -189,7 +203,9 @@ def _points_per_call(device: torch.device) -> int:
     return int(total * _CALL_MEMORY_FRACTION / _BYTES_PER_POINT)
 
 
-def _chunks(n: int, M: int, device: torch.device) -> list[tuple[int, int]]:
+def _chunks(
+    n: int, M: int, device: torch.device, bytes_per_point: int = _BYTES_PER_POINT
+) -> list[tuple[int, int]]:
     # FINUFFT's CPU interpolation changes a point's value in the last bit with
     # how many points share the call; one pose per call keeps a pose a
     # function of its own points. cuFINUFFT's type 2 is bit-identical either
@@ -197,7 +213,10 @@ def _chunks(n: int, M: int, device: torch.device) -> list[tuple[int, int]]:
     # last bits from run to run at any chunking.
     per = 1
     if device.type == "cuda":
-        per = max(1, _points_per_call(device) // max(M, 1))
+        # A backward that also differentiates the pose holds more per point
+        # (`_POSE_BYTES_PER_POINT`), so the same budget takes fewer points.
+        points = _points_per_call(device) * _BYTES_PER_POINT // bytes_per_point
+        per = max(1, points // max(M, 1))
     return [(s, min(s + per, n)) for s in range(0, n, per)]
 
 
@@ -211,7 +230,9 @@ class _ExactRotate(torch.autograd.Function):
         shape = tuple(V.shape)
         double = V.dtype == torch.float64
         g = _grid(shape, V.device, double)  # type: ignore[arg-type]
-        ctx.save_for_backward(R, tau)
+        # The volume is needed again only to differentiate the pose.
+        pose = ctx.needs_input_grad[1] or ctx.needs_input_grad[2]
+        ctx.save_for_backward(R, tau, V.detach() if pose else None)
         ctx.shape, ctx.eps, ctx.double = shape, eps, double
         nz, ny, nx = shape
         values = V.detach().to(g.complex).contiguous()
@@ -234,27 +255,120 @@ class _ExactRotate(torch.autograd.Function):
 
     @staticmethod
     def _backward(ctx: Any, grad: torch.Tensor) -> tuple[Any, ...]:
-        R, tau = ctx.saved_tensors
+        R, tau, V = ctx.saved_tensors
         shape, double = ctx.shape, ctx.double
         g = _grid(shape, grad.device, double)
         eps = (
             ctx.eps if nufft._ADJOINT_EPS is None else max(ctx.eps, nufft._ADJOINT_EPS)
         )
         grad = grad.reshape(len(R), -1).to(g.complex)
-        out = torch.zeros(shape, dtype=g.real, device=grad.device)
-        for s, e in _chunks(len(R), g.M, grad.device):
+        want_volume = ctx.needs_input_grad[0]
+        pose = V is not None
+        out = (
+            torch.zeros(shape, dtype=g.real, device=grad.device)
+            if want_volume
+            else None
+        )
+        grad_R = torch.zeros_like(R) if pose else None
+        grad_tau = torch.zeros_like(tau) if pose else None
+        stack = _with_coordinate_weights(V, g.complex) if pose else None
+        per_point = _BYTES_PER_POINT + (_POSE_BYTES_PER_POINT if pose else 0)
+        for s, e in _chunks(len(R), g.M, grad.device, per_point):
             c = grad[s:e][:, g.idx] * g.phase(R[s:e], tau[s:e]).conj()
-            out += nufft._execute(
-                1,
-                c.reshape(-1).contiguous(),
-                g.points(R[s:e]),
-                shape,
-                eps,
-                g.upsampfac,
-                _GPU_METHOD[1],
-            ).real
+            pts = g.points(R[s:e])
+            if out is not None:
+                out += nufft._execute(
+                    1,
+                    c.reshape(-1).contiguous(),
+                    pts,
+                    shape,
+                    eps,
+                    g.upsampfac,
+                    _GPU_METHOD[1],
+                ).real
+            if pose:
+                assert grad_R is not None and grad_tau is not None
+                assert stack is not None
+                grad_R[s:e], grad_tau[s:e] = _pose_gradient(
+                    c, stack, pts, R[s:e], tau[s:e], g, shape, eps
+                )
         # rotate_volume_exact hands V over already in its working precision.
-        return out, None, None, None
+        return out, grad_R, grad_tau, None
+
+
+def _with_coordinate_weights(V: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    """``V`` and ``-2 pi i (x_j - c_j) V`` for j = x, y, z, as one (4, Z, Y, X) stack.
+
+    Their transforms at a point ``w`` are ``V^(w)`` and the three components
+    of its gradient, ``c = shape // 2`` being the NUFFT's centre.
+    """
+    axes = [torch.arange(n, device=V.device, dtype=V.dtype) - n // 2 for n in V.shape]
+    z, y, x = torch.meshgrid(*axes, indexing="ij")
+    stack = torch.stack([V, x * V, y * V, z * V]).to(dtype)
+    stack[1:] *= -2j * math.pi
+    return stack
+
+
+def _pose_gradient(
+    c: torch.Tensor,
+    stack: torch.Tensor,
+    pts: torch.Tensor,
+    R: torch.Tensor,
+    tau: torch.Tensor,
+    g: _Grid,
+    shape: tuple[int, int, int],
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    The loss's gradient to `R` and `tau` for a chunk of poses.
+
+    Parameters
+    ----------
+    c : torch.Tensor
+        ``(k, M)``: the spectrum's incoming gradient times the conjugate
+        phase, as the volume's backward forms it.
+    stack : torch.Tensor
+        `_with_coordinate_weights` of the volume.
+    pts, R, tau
+        The chunk's NUFFT points, rotations ``(k, 3, 3)`` and shifts
+        ``(k, 3)`` in voxels.
+    g : _Grid
+        The frequencies ``p`` (cycles per voxel, (x, y, z)).
+    shape : tuple of int
+        The volume's ``(Z, Y, X)``.
+    eps : float
+        NUFFT accuracy, the backward's.
+
+    Returns
+    -------
+    tuple of torch.Tensor
+        ``(k, 3, 3)`` and ``(k, 3)``.
+
+    Notes
+    -----
+    With ``S = V^(w) phase``, ``w = R p`` and the upstream gradient ``G``,
+    PyTorch's convention gives ``dL/dx = Re(conj(G) dS/dx)`` for a real
+    ``x``, and ``conj(G) phase = conj(c)``. So ``dL/dw_j = Re(conj(c)
+    (dV^/dw_j + 2 pi i tau_j V^))``, ``dL/dR_ij = sum_p dL/dw_i p_j`` and
+    ``dL/dtau_j = Re(conj(c) 2 pi i w_j V^)`` summed over ``p``.
+    """
+    k = len(R)
+    samples = nufft._execute(2, stack, pts, shape, eps, g.upsampfac, _GPU_METHOD[2])
+    samples = samples.reshape(4, k, g.M)
+    value, slope = samples[0], samples[1:]  # V^(w); dV^/dw (x, y, z)
+    # conj(c) 2 pi i V^, shared by both gradients; one component at a time
+    # below, so no (k, 3, M) complex temporary is formed.
+    cv = c.conj() * value * (2j * math.pi)
+    cc = c.conj()
+    grad_R = torch.empty(k, 3, 3, dtype=g.real, device=c.device)
+    grad_tau = torch.empty(k, 3, dtype=g.real, device=c.device)
+    Rr, t = R.to(g.real), tau.to(g.real)
+    for j in range(3):
+        d_w = (cc * slope[j]).real + (cv * t[:, j, None]).real  # dL/dw_j, (k, M)
+        grad_R[:, j] = d_w @ g.qT.T
+        w_j = torch.stack([Rr[i, j] @ g.qT for i in range(k)])  # (k, M)
+        grad_tau[:, j] = (cv * w_j).real.sum(-1)
+    return grad_R.to(R.dtype), grad_tau.to(tau.dtype)
 
 
 class _ContiguousGrad(torch.autograd.Function):
@@ -350,7 +464,9 @@ def rotate_volume_exact(
     sphere, a phase for the shift and an inverse real FFT. Nothing is
     interpolated, so every band keeps its amplitude, where trilinear
     sampling keeps 0.45 of it near Nyquist. Differentiable in `V` (the
-    backward is the adjoint type-1 NUFFT); no gradient reaches `theta`.
+    backward is the adjoint type-1 NUFFT) and in `theta`, through one more
+    type-2 NUFFT of `V` and its coordinate-weighted copies, computed only
+    when `theta` requires a gradient.
 
     Measured on apoferritin (22FX, 256^3 at 0.78 A) and a ribosome (6BDF,
     256^3 at 1 A) against the band-limited atomic potential with the
@@ -406,7 +522,7 @@ def rotate_volume_exact(
     with torch.autocast(V.device.type, enabled=False):
         work = torch.float64 if V.dtype == torch.float64 else torch.float32
         V = V.to(work)
-        theta = theta.detach().to(device=V.device, dtype=work)
+        theta = theta.to(device=V.device, dtype=work)
         R = theta[:, :, :3].contiguous()
         # x-normalised units -> each axis's own normalised scale -> voxels.
         t = _translation_per_axis(theta[:, :, 3], nz, ny, nx, align_corners)
@@ -418,7 +534,7 @@ def rotate_volume_exact(
         tau = t * half
         if len(tau):
             # The lab-frame displacement of the content is R^T tau.
-            shift = float(torch.einsum("bji,bj->bi", R, tau).abs().max())
+            shift = float(torch.einsum("bji,bj->bi", R, tau).detach().abs().max())
             fraction = wrapped_fraction(V, shift)
             if fraction > _WRAP_WARNING_FRACTION:
                 warnings.warn(

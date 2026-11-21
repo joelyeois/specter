@@ -111,7 +111,7 @@ specter reconstruct particle [OPTIONS]
 | `--alpha` | `FLOAT` | _none_ | Amplitude contrast ratio for the forward model, overriding the .cs file's ctf/amp_contrast. Unset uses the .cs file's value. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2 damping high-resolution signal in the forward model. |
 | `--klim` | `FLOAT` | _none_ | Hard frequency cutoff (1/Angstrom) applied to the simulated images. |
-| `--rotate_mode` | `real` \| `fourier` \| `exact` \| `surface` | _none_ | How each particle's pose is applied. Unset (the default) pairs it with scattering_model: surface for projection, firstborn, rytov and ctf, exact for multislice and kinematic, and real when lr_R or lr_T refines a pose where exact would apply. surface: sample the unrotated volume's transform on the posed Ewald surface (single-scatter models only; refines rotations and shifts). exact: rotate it through its transform at rotated frequencies (no lr_R or lr_T). real/fourier: trilinear interpolation. |
+| `--rotate_mode` | `real` \| `fourier` \| `exact` \| `surface` | _none_ | How each particle's pose is applied. Unset (the default) pairs it with scattering_model: surface for projection, firstborn, rytov and ctf, exact for multislice and kinematic; both refine rotations and shifts. surface: sample the unrotated volume's transform on the posed Ewald surface (single-scatter models only). exact: rotate it through its transform at rotated frequencies. real/fourier: trilinear interpolation. |
 
 ## `specter ghostbuster` { #specter-ghostbuster }
 

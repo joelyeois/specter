@@ -116,8 +116,8 @@ def _errors(model: Reconstructor, poses: Poses, defocus: float) -> dict[str, flo
 
 @pytest.mark.parametrize(
     "scattering_model",
-    # Multislice refines poses through trilinear rotation (exact carries no
-    # pose gradient); Rytov through the surface sampling.
+    # Multislice refines poses through the exact rotation, Rytov through the
+    # surface sampling; both carry the gradient to the pose.
     ["multislice", "rytov"],
 )
 @pytest.mark.parametrize(

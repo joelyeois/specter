@@ -396,19 +396,12 @@ def test_the_pairing_falls_back_where_it_cannot_apply() -> None:
         scattering_model="rytov", absorption_model="inelastic_mfp", alpha=0.0
     )
     assert absorbing.rotation() == "exact"
-    # Refining a pose needs its gradient, which only interpolation carries.
-    assert (
-        _reconstructor(propagation=rytov, lr_R=1e-3).propagation.rotate_mode
-        == "surface"
-    )
-    assert (
-        _reconstructor(propagation=rytov, lr_T=1e-3).propagation.rotate_mode
-        == "surface"
-    )
-    assert (
-        _reconstructor(propagation=multislice, lr_T=1e-3).propagation.rotate_mode
-        == "real"
-    )
+    # Both modes carry gradients to the pose, so refinement keeps the pairing.
+    for lr in ("lr_R", "lr_T"):
+        model = _reconstructor(propagation=rytov, **{lr: 1e-3})
+        assert model.propagation.rotate_mode == "surface"
+        model = _reconstructor(propagation=multislice, **{lr: 1e-3})
+        assert model.propagation.rotate_mode == "exact"
     # A materialised volume is formed by definition.
     poses = Poses(roma.random_unitquat(2), torch.zeros(2, 2), torch.arange(2))
     spec = Specimen(_blobs((24, 24, 24)), 1.0)
@@ -420,15 +413,61 @@ def test_the_pairing_falls_back_where_it_cannot_apply() -> None:
 
 def test_a_set_rotate_mode_is_used_as_given() -> None:
     p = Propagation(scattering_model="rytov", rotate_mode="real")
-    assert p.rotation(surface=False, refine_rotations=True) == "real"
+    assert p.rotation(surface=False) == "real"
     exact_model = _reconstructor(propagation=Propagation(rotate_mode="exact"))
     assert exact_model.propagation.rotate_mode == "exact"
 
 
-def test_reconstructor_refuses_pose_refinement_under_exact() -> None:
-    for lr in ("lr_R", "lr_T"):
-        with pytest.raises(ValueError, match="exact"):
-            _reconstructor(propagation=Propagation(rotate_mode="exact"), **{lr: 1e-3})
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("shape", [(13, 13, 13), (12, 14, 16)])
+def test_pose_gradient_matches_finite_differences(
+    device: str, shape: tuple[int, int, int]
+) -> None:
+    """
+    The gradient to the affine, its rotation block and shift column alike.
+
+    In float64 at eps 1e-12 a central difference and the analytic gradient
+    agree to ~1e-10; a wrong sign, axis order or per-axis shift scale (the
+    non-cubic box) is off by order one.
+    """
+    V = torch.zeros(shape, dtype=torch.float64)
+    n = min(shape)
+    V[:n, :n, :n] = _blobs((n, n, n)).double()
+    V = V.to(device)
+    generator = torch.Generator().manual_seed(3)
+    R = roma.random_rotmat(3, dtype=torch.float64)
+    T = 0.5 * torch.randn(3, 3, dtype=torch.float64, generator=generator)
+    theta = build_affine_matrix(R, T).to(device).requires_grad_()
+    weights = torch.rand((3, *shape), dtype=torch.float64, generator=generator)
+    weights = weights.to(device)
+
+    def loss(th: torch.Tensor) -> torch.Tensor:
+        return (rotate_volume_exact(V, th, eps=1e-12) * weights).sum()
+
+    loss(theta).backward()
+    assert theta.grad is not None
+    direction = torch.randn(3, 3, 4, dtype=torch.float64, generator=generator)
+    direction = direction.to(device)
+    h = 1e-6
+    with torch.no_grad():
+        fd = (loss(theta + h * direction) - loss(theta - h * direction)) / (2 * h)
+    analytic = (theta.grad * direction).sum()
+    assert float(analytic) == pytest.approx(float(fd), rel=1e-7)
+
+
+def test_reconstructor_refines_poses_under_exact() -> None:
+    model = _reconstructor(
+        propagation=Propagation(rotate_mode="exact"), lr=None, lr_R=1e-3, lr_T=1e-3
+    )
+    images = model(torch.arange(2)).detach() * 1.1
+    optimizers, _ = model.configure_optimizers()
+    before = model.rotations.detach().clone(), model.translations.detach().clone()
+    loss = ((model(torch.arange(2)) - images) ** 2).mean()
+    loss.backward()
+    for opt in optimizers:
+        opt.step()
+    assert not torch.equal(model.rotations.detach(), before[0])
+    assert not torch.equal(model.translations.detach(), before[1])
 
 
 def _corner_content(n: int) -> torch.Tensor:

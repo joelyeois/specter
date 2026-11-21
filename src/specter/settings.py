@@ -261,13 +261,7 @@ class Propagation:
         """`pad_fft`, or the imaging path's `default` when it is None."""
         return default if self.pad_fft is None else self.pad_fft
 
-    def rotation(
-        self,
-        *,
-        surface: bool = True,
-        refine_rotations: bool = False,
-        refine_shifts: bool = False,
-    ) -> PoseMode:
+    def rotation(self, *, surface: bool = True) -> PoseMode:
         """
         `rotate_mode`, or the mode paired with `scattering_model` when it is None.
 
@@ -276,11 +270,9 @@ class Propagation:
         sample of the volume's transform, so they sample it on the posed
         surface (``"surface"``), and multislice and kinematic, which need the
         posed volume, rotate it through its transform (``"exact"``). Where the
-        pairing cannot apply, the fallback is ``"exact"`` when the posed
-        volume must be formed, and ``"real"`` when a pose is refined where
-        the pairing gives ``"exact"``, which carries no gradient to the
-        rotation or the shift. ``"surface"`` carries both, so a refinement
-        under a single-scatter model stays on it.
+        surface cannot apply, because the posed volume must be formed, the
+        mode is ``"exact"``. Both carry gradients to the rotation and the
+        shift, so a reconstruction that refines poses keeps the pairing.
 
         Parameters
         ----------
@@ -288,9 +280,6 @@ class Propagation:
             Whether the caller can sample the surface: False when the posed
             volume must be formed (a dressed specimen, or one materialised).
             ``absorption_model="inelastic_mfp"`` also forms it.
-        refine_rotations, refine_shifts : bool
-            Whether the caller refines rotations or shifts (a reconstruction
-            with ``lr_R`` or ``lr_T``).
 
         Returns
         -------
@@ -305,7 +294,7 @@ class Propagation:
             and self.absorption_model == "alpha"
         ):
             return "surface"
-        return "real" if refine_rotations or refine_shifts else "exact"
+        return "exact"
 
 
 @dataclass(frozen=True)

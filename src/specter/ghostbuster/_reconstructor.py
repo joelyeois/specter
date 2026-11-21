@@ -112,10 +112,8 @@ class Reconstructor(_BaseReconstructor):
         ``Propagation()``. An unset ``rotate_mode`` is paired with
         ``scattering_model`` (`Propagation.rotation`): ``"surface"`` for the
         single-scatter models and ``"exact"`` for multislice and kinematic,
-        neither of which interpolates. ``"surface"`` carries gradients to the
-        rotations and shifts; ``"exact"`` carries neither, so where the
-        pairing gives ``"exact"`` the unset mode is ``"real"`` when `lr_R` or
-        `lr_T` is set, and an explicit ``"exact"`` refuses them.
+        neither of which interpolates, and both of which carry gradients to
+        the rotations and shifts that `lr_R` and `lr_T` refine.
         ``absorption_model="inelastic_mfp"`` is rejected; absorption comes
         from `alpha` alone.
     optics : Optics, optional
@@ -245,25 +243,9 @@ class Reconstructor(_BaseReconstructor):
         self._register_anisomag_and_scale(anisomag, scale, quaternions.shape[0])
 
         # imaging models
-        # The mode paired with the scattering model, unless a pose is refined
-        # that it carries no gradient to.
-        propagation = replace(
-            propagation,
-            rotate_mode=propagation.rotation(
-                refine_rotations=lr_R is not None, refine_shifts=lr_T is not None
-            ),
-        )
-        if propagation.rotate_mode == "exact" and lr_R is not None:
-            raise ValueError(
-                "rotate_mode='exact' does not refine rotations: the rotated "
-                "transform carries no gradient to the pose. Leave lr_R unset, "
-                "or use rotate_mode='surface' (single-scatter models) or 'real'."
-            )
-        if propagation.rotate_mode == "exact" and lr_T is not None:
-            raise ValueError(
-                "rotate_mode='exact' does not refine shifts: no gradient reaches "
-                "them. Leave lr_T unset or use rotate_mode='real'."
-            )
+        # The mode paired with the scattering model; every mode carries
+        # gradients to the rotations and shifts.
+        propagation = replace(propagation, rotate_mode=propagation.rotation())
         self.propagation = propagation
         self.optics = optics
         self._register_bfactor(bfactor, quaternions.shape[0])

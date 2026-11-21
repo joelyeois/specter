@@ -149,6 +149,9 @@ def test_surface_pose_gradient_matches_finite_differences(
     model: str, sign: str
 ) -> None:
     """The pose gradient through the sample points: ``grad V^(R q) . dR q``."""
+    # Seeded: roma's sampler and the direction draw from the global stream,
+    # which a parallel run leaves in any state.
+    torch.manual_seed(0)
     volume = _compact_object(13, torch.float64)
     quaternions = roma.random_unitquat(3, dtype=torch.float64).requires_grad_()
     shifts = torch.randn(3, 2, dtype=torch.float64)
@@ -175,7 +178,7 @@ def test_surface_pose_gradient_matches_finite_differences(
     assert float(quaternions.grad.abs().max()) > 0
     # As for the volume and shift gradients above, the NUFFT's eps (1e-6)
     # bounds the agreement; a wrong sign or axis order is off by order one.
-    dq, h = torch.randn_like(quaternions), 1e-5
+    dq, h = torch.randn_like(quaternions), 1e-4
     with torch.no_grad():
         fd = (loss(quaternions + h * dq) - loss(quaternions - h * dq)) / (2 * h)
         assert torch.equal(loss(quaternions), value.detach())  # value unchanged
@@ -242,8 +245,6 @@ def test_reconstructor_trains_under_surface_with_rotations_refined() -> None:
     fit_one_epoch(model, images, max_epochs=1)
     assert not torch.equal(model.V.detach(), before[0])
     assert not torch.equal(model.rotations.detach(), before[1])
-    with pytest.raises(ValueError, match="does not refine rotations"):
-        _reconstructor("exact", lr=0.1, lr_R=1e-3)
 
 
 def test_symmetrization_reuses_the_surface_plan() -> None:

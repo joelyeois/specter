@@ -181,14 +181,12 @@ and reconstruction alike (`Propagation.rotation`), so that no pose is
 interpolated. The single-scatter models (projection, first Born, Rytov and
 the CTF model) take `"surface"`, since each is one sample of the volume's
 transform. Multislice and the kinematic model need the posed volume and take
-`"exact"`. Three conditions override the pairing. A simulated specimen
+`"exact"`. One condition overrides the pairing: a simulated specimen
 dressed with crowding, ice, damage, per-image atom rendering or an objective
 aperture needs the posed volume, so it takes `"exact"` for every model, as
-does `absorption_model="inelastic_mfp"`. A reconstruction that refines
-rotations or shifts (`lr_R`, `lr_T`) where the pairing gives `"exact"`
-takes `"real"`, since `"exact"` carries no gradient to the pose;
-`"surface"` carries both, so a single-scatter refinement stays on it. A
-`rotate_mode` that is set is used as given.
+does `absorption_model="inelastic_mfp"`. Both modes carry gradients to the
+rotation and the shift, so a reconstruction that refines poses (`lr_R`,
+`lr_T`) keeps the pairing. A `rotate_mode` that is set is used as given.
 
 `"real"` resamples the density with `grid_sample`, applying the
 rotation and the translation together in one trilinear pass. `"fourier"`
@@ -247,8 +245,15 @@ resamples the grid. The spectrum is kept inside the Nyquist sphere,
 \(|\mathbf{q}| < 1/2\) cycles per voxel, the band every orientation samples
 in full; the corners of the cube beyond it are set to zero. The backward pass
 is the adjoint, a type-1 transform of the incoming gradient, so the posed
-volume is differentiable in the template. It carries no gradient to \(R\) or
-\(\mathbf{t}\), and `Reconstructor` refuses `lr_R` and `lr_T` under it.
+volume is differentiable in the template. It is differentiable in the pose
+too. With \(\mathbf{w} = R\mathbf{q}\), the spectrum \(\hat V(\mathbf{w})\,
+e^{2\pi i\,\mathbf{w}\cdot\boldsymbol{\tau}}\) changes with \(\mathbf{w}\) by
+\(\nabla\hat V(\mathbf{w}) + 2\pi i\,\boldsymbol{\tau}\,\hat V(\mathbf{w})\) times the
+phase, and with the shift \(\boldsymbol{\tau}\) by \(2\pi i\,\mathbf{w}\) times the
+spectrum. The components of \(\nabla\hat V\) are the transforms of the
+volume weighted by its centred coordinates, so the backward evaluates
+\(\hat V\) and its gradient in one more batched type-2 transform at the
+points it already sets, and only when the pose requires a gradient.
 
 The reference for a rotated template is the same atoms rendered at the pose
 (`Specimen.from_atoms`). The renderer takes each voxel's average of the atomic

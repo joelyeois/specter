@@ -85,7 +85,17 @@ def surface_slice_sum(
     torch.Tensor
         Complex spectra of shape (B, pad_nxy, pad_nxy) in native FFT order,
         zero outside the Nyquist sphere ``|k| dx < 1/2``. Differentiable in
-        ``volume`` and ``shifts``, not in ``quaternions``.
+        ``volume``, ``shifts`` and ``quaternions``.
+
+    Notes
+    -----
+    The gradient to the pose follows from the chain rule through the sample
+    points: the spectrum at frequency ``q`` is the transform ``V^(R q)``, so
+    its change with the rotation is ``grad V^(R q) . (dR q)``. Each component
+    of ``grad V^`` is itself a transform, of the volume weighted by one of its
+    centred coordinates (``-2 pi i x V``), evaluated at the same points; the
+    three are computed, in one batched NUFFT, only when ``quaternions``
+    requires a gradient.
     """
     nz, ny, nx = volume.shape
     if ny != nx:
@@ -103,10 +113,16 @@ def surface_slice_sum(
     # The band `rotate_volume_exact` keeps; a rotation preserves |q|, so the
     # points inside are the same for every pose and only they are evaluated.
     inside = torch.nonzero((q * dx).norm(dim=-1) < 0.5).flatten()
-    rot = roma.unitquat_to_rotmat(quaternions.detach().to(device, torch.float64))
-    rotated = torch.einsum("bij,mj->bmi", rot, q[inside])  # R q, the template's
+    rot = roma.unitquat_to_rotmat(quaternions.to(device, torch.float64))
+    rotated = torch.einsum("bij,mj->bmi", rot, q[inside]) * dx  # R q, cycles/voxel
+    points = rotated.detach().reshape(-1, 3)
     batch = len(rot)
-    sampled = sample_transform(volume, (rotated * dx).reshape(-1, 3))
+    sampled = sample_transform(volume, points)
+    if rotated.requires_grad:
+        # Zero in value, so the spectrum is unchanged; its derivative is the
+        # first-order change of V^(R q) with the points, and so with the pose.
+        moved = (rotated.reshape(-1, 3) - points).to(sampled.real.dtype)
+        sampled = sampled + (moved * _transform_gradient(volume, points)).sum(-1)
     values = sampled.new_zeros(batch, pad_nxy * pad_nxy)
     values = values.index_copy(1, inside, sampled.reshape(batch, -1))
     values = values.reshape(batch, pad_nxy, pad_nxy)
@@ -132,3 +148,36 @@ def surface_slice_sum(
     )
     factor = factor[None] * torch.polar(torch.ones_like(ramp), ramp)
     return values * factor.to(values.dtype)
+
+
+def _transform_gradient(volume: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
+    """
+    The gradient of `volume`'s transform at `points`, in their (x, y, z) order.
+
+    ``V^(p) = sum_n V[n] exp(-2 pi i p . (n - c))`` with ``c = shape // 2``, as
+    `sample_transform` defines it, so ``dV^/dp_j`` is the transform of
+    ``-2 pi i (n_j - c_j) V``. Held constant by autograd: the pose gradient
+    needs it only to first order.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Real grid of shape (Z, Y, X).
+    points : torch.Tensor
+        Frequencies of shape (M, 3) in cycles per voxel, (x, y, z).
+
+    Returns
+    -------
+    torch.Tensor
+        Complex gradients of shape (M, 3).
+    """
+    with torch.no_grad():
+        v = volume.detach()
+        axes = [
+            torch.arange(size, device=v.device, dtype=v.dtype) - size // 2
+            for size in v.shape
+        ]
+        z, y, x = torch.meshgrid(*axes, indexing="ij")
+        weighted = torch.stack([x * v, y * v, z * v])  # (x, y, z) order
+        samples = sample_transform(weighted, points)  # (3, M)
+        return (-2j * math.pi) * samples.T

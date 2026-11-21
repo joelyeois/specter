@@ -141,6 +141,47 @@ def test_surface_gradients_match_finite_differences() -> None:
     assert float((shifts.grad * dt).sum()) == pytest.approx(float(fd_t), rel=1e-3)
 
 
+@pytest.mark.parametrize(
+    ("model", "sign"),
+    [("rytov", "negative"), ("rytov", "positive"), ("projection", "negative")],
+)
+def test_surface_pose_gradient_matches_finite_differences(
+    model: str, sign: str
+) -> None:
+    """The pose gradient through the sample points: ``grad V^(R q) . dR q``."""
+    volume = _compact_object(13, torch.float64)
+    quaternions = roma.random_unitquat(3, dtype=torch.float64).requires_grad_()
+    shifts = torch.randn(3, 2, dtype=torch.float64)
+    weights = torch.linspace(0.5, 1.5, 3 * 13 * 13, dtype=torch.float64)
+
+    def loss(q: torch.Tensor) -> torch.Tensor:
+        wave = (
+            Specimen(volume, VOXEL)
+            .scatter(
+                Poses(q, shifts, torch.arange(3)),
+                voltage=300.0,
+                scattering_model=model,
+                ews_curvature_sign=sign,
+                rotate_mode="surface",
+                oversample=1,
+            )
+            .array
+        )
+        return (wave.abs() ** 2 * weights.reshape(wave.shape)).sum()
+
+    value = loss(quaternions)
+    value.backward()
+    assert quaternions.grad is not None
+    assert float(quaternions.grad.abs().max()) > 0
+    # As for the volume and shift gradients above, the NUFFT's eps (1e-6)
+    # bounds the agreement; a wrong sign or axis order is off by order one.
+    dq, h = torch.randn_like(quaternions), 1e-5
+    with torch.no_grad():
+        fd = (loss(quaternions + h * dq) - loss(quaternions - h * dq)) / (2 * h)
+        assert torch.equal(loss(quaternions), value.detach())  # value unchanged
+    assert float((quaternions.grad * dq).sum()) == pytest.approx(float(fd), rel=1e-3)
+
+
 def test_surface_refuses_models_it_cannot_express() -> None:
     with pytest.raises(ValueError, match="single-scatter"):
         Propagation(scattering_model="multislice", rotate_mode="surface")

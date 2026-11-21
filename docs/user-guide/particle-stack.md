@@ -140,8 +140,9 @@ default, and the defaults reproduce the amplitude-contrast model.
   together with the particle. `dose_envelope_target = "specimen"` instead
   damages the particle's own potential, and those of its crowding
   neighbours, before the ice is added, so the water keeps its structure.
-  The occupancy that decides how much ice each voxel receives is read from
-  the undamaged particle. See [Aberrations](../concepts/aberrations.md#envelopes).
+  The occupancy that decides how much ice each voxel receives takes the
+  same envelope, so the particle's contrast against its solvent fades as
+  measured. See [Aberrations](../concepts/aberrations.md#envelopes).
 - **Solvent motion**: `ice_motion_variance` is the beam-induced displacement
   of the water per axis, in Å² per e⁻/Å² (McMullan et al. 2015 measured
   0.38 at 300 kV). The ice fluctuation is filtered to what survives the

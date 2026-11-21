@@ -251,3 +251,60 @@ def test_solvent_motion_filters_the_fluctuation_and_keeps_the_mean():
     assert float(frozen.std()) > 0
     assert float(exposed.mean()) == pytest.approx(float(frozen.mean()), rel=1e-4)
     assert float(exposed.std()) < 0.5 * float(frozen.std())
+
+
+def test_a_damaged_specimen_displaces_water_through_its_envelope(small_volume):
+    """
+    The occupancy takes the envelope the specimen took, so the envelope acts
+    on the contrast against the solvent; the volume displaced is unchanged.
+    """
+    V = small_volume.clone().unsqueeze(0)
+    full = torch.full((1, 1, 1, 1), FULL_OCCUPANCY_POTENTIAL_V)
+    free = stages.free_fraction(V, 2.0, full)
+    expected = apply_dose_damage(1.0 - free.float(), 2.0, DOSE, n_frames=40)
+    got = stages.damaged_free_fraction(
+        free.clone(), 2.0, torch.tensor([DOSE]), n_frames=40
+    )
+    assert got.dtype == torch.float16
+    assert torch.allclose(1.0 - got.float(), expected.clamp(0.0, 1.0), atol=1e-3)
+    assert not torch.allclose(got.float(), free.float(), atol=1e-2)
+    assert float(got.float().mean()) == pytest.approx(
+        float(free.float().mean()), abs=2e-3
+    )
+
+
+def test_dose_envelope_on_a_solvated_specimen_fades_its_contrast():
+    """
+    In ice the low-resolution image of a damaged specimen is the envelope
+    times that of the undamaged one. A ball at full occupancy keeps 0.31 of
+    its vacuum contrast in ice, so a solvent hole left at full depth would
+    cost it 0.87 where the envelope is 0.96.
+    """
+    n = 48
+    x = torch.arange(n) - n / 2
+    r = 2.0 * torch.sqrt(x[:, None, None] ** 2 + x[None, :, None] ** 2 + x**2)
+    ball = FULL_OCCUPANCY_POTENTIAL_V * torch.sigmoid((20.0 - r) / 2.0)
+    solvated = Specimen(ball, 2.0).solvate(model="random")
+    exposure = Exposure(DOSE, n_frames=40)
+
+    def image(specimen: Specimen) -> torch.Tensor:
+        with torch.no_grad():
+            waves = specimen.scatter(
+                _pose(), voltage=300.0, exposure=exposure, seed=3, **LINEAR
+            )
+        return waves.pixels()[0]
+
+    bare = image(Specimen(ball, 2.0))
+    on, off = image(solvated.damage()), image(solvated)
+    k = torch.fft.fftfreq(n, d=2.0)
+    radius = torch.hypot(k[:, None], k[None, :])
+    band = (radius > 0) & (radius < 1 / 10.0)
+    reference = torch.fft.fft2(bare - bare.mean())
+
+    def kept(x: torch.Tensor) -> float:
+        return float((torch.fft.fft2(x - x.mean()) * reference.conj()).real[band].sum())
+
+    envelope = frame_damage_envelope(radius, DOSE, 40)
+    weight = reference.abs() ** 2
+    expected = float((envelope * weight)[band].sum() / weight[band].sum())
+    assert kept(on) / kept(off) == pytest.approx(expected, abs=0.02)

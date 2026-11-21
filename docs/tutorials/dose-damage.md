@@ -88,7 +88,7 @@ structure. On the transfer function its power follows \(E^2\) exactly, down
 to 12% at 40 e⁻/Å² and 6% at 80. That is the protein's damage law applied to
 the solvent, as if the water's own structure were destroyed by the beam.
 Water is not damaged in that sense: each frame of a raw movie shows the ring
-at full strength across 50 e⁻/Å². On the specimen, the ring keeps 95% to 97%
+at full strength across 50 e⁻/Å². On the specimen, the ring keeps 92% to 95%
 of its power at every dose, the remainder being the particle's own
 contribution to that band, which is damaged.
 
@@ -114,7 +114,7 @@ ring's power against dose; the grey band on the left marks the ring.
 ///
 
 Between 0.1 and 0.2 Å⁻¹ the particle alone keeps 22% of its power at
-40 e⁻/Å², matching \(E^2\) = 0.223, while the solvated image keeps 70% on the
+40 e⁻/Å², matching \(E^2\) = 0.223, while the solvated image keeps 66% on the
 specimen route, because most of the image power there is the ice's.
 
 ![Power spectra of the undamaged image and of 80 e⁻/Å² under each route, on one scale.](../assets/images/tutorials/dose_damage-spectra.png){ width="900" style="display:block;margin:1.2em auto;" }

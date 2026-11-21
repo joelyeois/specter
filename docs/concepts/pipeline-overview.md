@@ -47,8 +47,8 @@ the underlying math.
 5. **Specimen radiation damage** *(optional)*. Under
    `dose_envelope_target="specimen"`, SPECTER applies the dose envelope to
    the specimen's 3D potential, crowding neighbours included, before the
-   ice is added. The occupancy that weights the ice is read from the
-   undamaged specimen. See [Aberrations](aberrations.md#envelopes).
+   ice is added. In a particle stack the occupancy that weights the ice
+   takes the same envelope. See [Aberrations](aberrations.md#envelopes).
 6. **Ice (solvation)** *(optional)*. SPECTER adds an amorphous ice
    volume, weighting it in each voxel by the fraction that the specimen
    leaves free: \(1 - \mathrm{clamp}(\bar V / 7.0\,\mathrm{V}, 0, 1)\),

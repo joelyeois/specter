@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
@@ -30,6 +30,7 @@ from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
     aperture_mfp_ice,
     aperture_mfp_protein,
+    apply_dose_damage,
     ice_inelastic_mfp,
     inelastic_absorption_potential,
     potential_occupancy_slabs,
@@ -47,6 +48,7 @@ __all__ = [
     "check_objective_aperture",
     "crowd_into",
     "draw_ice",
+    "damaged_free_fraction",
     "free_fraction",
     "mfp_absorption_field",
     "read_dose_weights",
@@ -442,12 +444,11 @@ def free_fraction(
     """
     The fraction of each voxel still available to water, ``1 - occupancy``.
 
-    Computed from `V` as given, so a caller can take it from the UNDAMAGED
-    specimen and hand it to :func:`solvate` after the specimen has been
-    damaged. A molecule occupies the same volume whatever its radiation
-    history, and the dose envelope conserves the potential's integral while
-    spreading it, so reading occupancy after damage admits ice into a solid
-    interior (peak core occupancy 1.00 -> 0.81 on 1A6M at 50 e-/A^2).
+    Computed from `V` as given. A damaged specimen reads it from the
+    undamaged potential and passes it through :func:`damaged_free_fraction`,
+    which filters the occupancy with the specimen's own envelope; reading the
+    occupancy off the damaged potential instead clamps after the envelope and
+    is not that filter.
 
     Stored as float16: a weight in [0, 1] multiplying the ice, where half
     precision costs ~5e-4 relative against a blur that is itself an
@@ -479,6 +480,67 @@ def free_fraction(
                 occ.neg_().add_(1.0).clamp_(0.0, 1.0).to(torch.float16)
             )
             del occ
+    return free
+
+
+def damaged_free_fraction(
+    free: torch.Tensor,
+    pixel_size: float,
+    dose: torch.Tensor,
+    pre_exposure: torch.Tensor | float = 0.0,
+    **envelope: Any,
+) -> torch.Tensor:
+    """
+    The free fraction of a specimen damaged by the dose envelope, in place.
+
+    The occupancy ``1 - free`` takes the envelope its specimen took. A
+    particle in ice is imaged through its potential less that of the water
+    it displaces, and the critical exposures of Grant & Grigorieff [1]_ were
+    measured on that contrast. With the envelope on the potential alone the
+    displaced water keeps its full depth, and where the two nearly cancel
+    the contrast fades several times faster than measured: a 70S ribosome
+    at 40 e-/A^2 kept 0.62 of its amplitude at 50-33 A where the envelope
+    is 0.92, and 0.78 with the occupancy filtered. The envelope preserves
+    the occupancy's mean, so the volume of water displaced is unchanged.
+
+    Parameters
+    ----------
+    free : torch.Tensor
+        :func:`free_fraction` of the undamaged specimen, ``(B, Z, Y, X)``;
+        overwritten.
+    pixel_size : float
+        Voxel size in Angstrom.
+    dose, pre_exposure : torch.Tensor or float
+        Per item or scalar, as given to
+        :func:`~specter.potential.apply_dose_damage` for the specimen.
+    **envelope
+        Its remaining keywords (``weighted``, ``voltage``, ``n_frames``,
+        ``frame_weights``, ``frame_weights_max_frequency``).
+
+    Returns
+    -------
+    torch.Tensor
+        `free` itself.
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
+    """
+    dose_t = torch.as_tensor(dose, dtype=torch.float32).reshape(-1)
+    pre_t = torch.as_tensor(pre_exposure, dtype=torch.float32).reshape(-1)
+    for b in range(free.shape[0]):
+        occ = free[b].float().neg_().add_(1.0)
+        apply_dose_damage(
+            occ,
+            pixel_size,
+            dose_t[b if dose_t.numel() > 1 else 0],
+            pre_t[b if pre_t.numel() > 1 else 0],
+            **envelope,
+        )
+        free[b] = occ.neg_().add_(1.0).clamp_(0.0, 1.0).to(free.dtype)
+        del occ
     return free
 
 

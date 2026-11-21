@@ -380,7 +380,7 @@ class Specimen:
         if p.absorption_model == "inelastic_mfp":
             steps.append("absorb: mean-free-path field read off the dry specimen")
         if self.damaged:
-            steps.append("damage: dose envelope on the specimen, occupancy read first")
+            steps.append("damage: dose envelope on the specimen and its occupancy")
         if self.icemaker is not None:
             assert self.ice is not None
             steps.append(f"solvate: {self.ice.model} ice, {nz * self.voxel_size:.0f} A")
@@ -579,9 +579,9 @@ class Specimen:
         Each image's specimen, ``(n, Z, Y, X)``, and its absorption field.
 
         The order is the one physics fixes: the absorption field and the
-        occupancy are read off the dry specimen, the dose envelope acts
-        before the ice is added so the solvent keeps its structure, and the
-        aperture filters what will be propagated.
+        occupancy are read off the dry specimen, the dose envelope acts on
+        both before the ice is added so the solvent keeps its structure, and
+        the aperture filters what will be propagated.
         """
         stages.check_objective_aperture(p, objective_aperture)
         if (self.damaged or self._filters_solvent) and exposure is None:
@@ -667,17 +667,21 @@ class Specimen:
                 with torch.no_grad():
                     if self.icemaker is not None:
                         free = stages.free_fraction(V, self.voxel_size, full())
-                    V = apply_dose_damage(
-                        V,
-                        self.voxel_size,
-                        doses.to(device),
-                        pre_exposure=0.0 if pre is None else pre.to(device),
+                    envelope: dict[str, Any] = dict(
                         weighted=exposure.weighted,
                         voltage=voltage,
                         n_frames=exposure.n_frames,
                         frame_weights=exposure.weights,
                         frame_weights_max_frequency=exposure.weights_max_frequency,
                     )
+                    pre_t = 0.0 if pre is None else pre.to(device)
+                    V = apply_dose_damage(
+                        V, self.voxel_size, doses.to(device), pre_t, **envelope
+                    )
+                    if free is not None:
+                        stages.damaged_free_fraction(
+                            free, self.voxel_size, doses, pre_t, **envelope
+                        )
 
             if self.icemaker is not None:
                 assert self.ice is not None

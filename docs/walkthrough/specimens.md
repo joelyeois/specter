@@ -248,8 +248,9 @@ setup fixes that generator, and with it the poses `Poses.random` draws;
 `damage` applies each exposure's dose envelope (Grant & Grigorieff 2015) to
 the specimen's potential, fading its high-resolution structure as the electron
 dose destroys it. It acts
-on the specimen before the ice is added, so the ice keeps its structure, and
-the volume the specimen displaces is read from the undamaged potential.
+on the specimen before the ice is added, so the ice keeps its structure. The
+occupancy that decides how much water the specimen displaces takes the same
+envelope, so the envelope fades the specimen's contrast against its solvent.
 `plan` shows that order:
 
 ```python

@@ -17,6 +17,8 @@ The cases with random ice (``crowded_solvated_noisy``, ``specimen_damage``,
 2026-11-07, when `RandomIcemaker` began convolving its waters periodically
 (the generator's linear convolution left each face plane at 85-94% of the
 interior's potential): from then on they pin the chain, not the generator.
+``specimen_damage`` was re-recorded again on 2026-11-21, when the dose
+envelope began filtering the specimen's occupancy with its potential.
 """
 
 from __future__ import annotations

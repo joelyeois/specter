@@ -1,5 +1,5 @@
-mean ice potential: frozen 4.5474 V, moving 4.5474 V
-0.020-0.050 1/Å: surviving ice power 0.146 (relaxed model 0.156, Gaussian 0.884)
+mean ice potential: frozen 4.5482 V, moving 4.5482 V
+0.020-0.050 1/Å: surviving ice power 0.144 (relaxed model 0.156, Gaussian 0.884)
 0.050-0.100 1/Å: surviving ice power 0.059 (relaxed model 0.060, Gaussian 0.622)
 0.100-0.200 1/Å: surviving ice power 0.048 (relaxed model 0.048, Gaussian 0.269)
 0.255-0.285 1/Å: surviving ice power 0.086 (relaxed model 0.087, Gaussian 0.088)

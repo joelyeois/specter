@@ -255,9 +255,17 @@ apply it to the specimen's three-dimensional potential before the
 solvent is added (`"specimen"`, `potential.apply_dose_damage`), as a radial
 envelope in 3D Fourier space. By the projection-slice theorem this is the same
 filter on the projected specimen, but the ice blended in afterwards is left
-undamaged, with occupancy read from the undamaged specimen: the envelope
-conserves the potential's integral while spreading it, and a molecule does not
-displace less water for having been irradiated. The distinction is measurable.
+undamaged. A particle in ice is imaged through its potential less that of the
+water it displaces, and the critical exposures of Grant & Grigorieff (2015)
+were measured on that contrast. A particle stack therefore filters the
+occupancy that weights the ice with the specimen's own envelope, which
+conserves the volume of water displaced. With the envelope on the potential
+alone the displaced water keeps its full depth, and at low resolution, where
+the two nearly cancel, the contrast fades several times faster than measured:
+a 70S ribosome at 40 e⁻/Å² kept 0.62 of its amplitude between 50 and 33 Å,
+where the envelope is 0.92, and 0.78 with the occupancy filtered. Micrographs
+and tilt series still weight their ice by the undamaged occupancy. That the
+solvent itself is not damaged is measurable.
 On raw EER movies of EMPIAR-11461 (Harder et al. 2023) and EMPIAR-11377
 (Fromm et al. 2023), the power of the 3.7 Å
 water ring per fraction is constant to within about 10 % across 40 to

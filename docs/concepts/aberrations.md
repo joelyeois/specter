@@ -257,14 +257,17 @@ envelope in 3D Fourier space. By the projection-slice theorem this is the same
 filter on the projected specimen, but the ice blended in afterwards is left
 undamaged. A particle in ice is imaged through its potential less that of the
 water it displaces, and the critical exposures of Grant & Grigorieff (2015)
-were measured on that contrast. A particle stack therefore filters the
-occupancy that weights the ice with the specimen's own envelope, which
-conserves the volume of water displaced. With the envelope on the potential
+were measured on that contrast, so the envelope acts on the contrast. A
+particle stack filters the occupancy that weights the ice with the specimen's
+own envelope, which conserves the volume of water displaced. Micrographs and
+tilt series filter the specimen less the mean potential of the ice it
+displaces, and restore that mean afterwards, which gives the same contrast at
+low resolution without a second occupancy per exposure. With the envelope on
+the potential
 alone the displaced water keeps its full depth, and at low resolution, where
 the two nearly cancel, the contrast fades several times faster than measured:
 a 70S ribosome at 40 e⁻/Å² kept 0.62 of its amplitude between 50 and 33 Å,
-where the envelope is 0.92, and 0.78 with the occupancy filtered. Micrographs
-and tilt series still weight their ice by the undamaged occupancy. That the
+where the envelope is 0.92, and 0.78 with the occupancy filtered. That the
 solvent itself is not damaged is measurable.
 On raw EER movies of EMPIAR-11461 (Harder et al. 2023) and EMPIAR-11377
 (Fromm et al. 2023), the power of the 3.7 Å

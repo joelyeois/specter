@@ -10,7 +10,7 @@ from specter.fft import RadialSpectrum, apply_radial_envelope_
 from specter.ice import apply_solvent_exposure
 from specter.imaging import CTF, Exposure, Field, Poses, Sample
 from specter.imaging._tilt import fit_volume_to_tilt
-from specter.potential import apply_dose_damage
+from specter.potential import apply_dose_damage, potential_occupancy
 from specter.settings import Ice, TiltGeometry
 
 DX = 2.0
@@ -42,18 +42,22 @@ def draw(f, dose=None, seed=0, **kwargs):
 
 def test_micrograph_specimen_damage_leaves_the_ice_untouched():
     """
-    The damaged specimen is the dry specimen under the envelope for the
-    micrograph's dose plus exactly the ice the undamaged one would get.
+    The envelope for the micrograph's dose acts on the specimen's contrast,
+    which is the dry specimen less the mean potential of the ice it
+    displaces, and on nothing else: the rest of the volume is exactly what
+    the undamaged one holds.
     """
     plain = draw(field(), keep_dry=True)
     damaged = draw(field().damage(), DOSE, keep_dry=True)
     dry = plain.dry
     torch.testing.assert_close(damaged.dry, dry, rtol=0, atol=0)
     ice = plain.volume - dry
-    expected = (
-        apply_dose_damage(dry.clone(), DX, DOSE, weighted=True, voltage=300.0) + ice
-    )
-    torch.testing.assert_close(damaged.volume, expected, rtol=1e-5, atol=1e-5)
+    occupancy = potential_occupancy(dry, DX)
+    contrast = dry - occupancy * (ice.sum() / (1.0 - occupancy).sum())
+    expected = plain.volume - contrast
+    expected += apply_dose_damage(contrast, DX, DOSE, weighted=True, voltage=300.0)
+    # The occupancy is held at half precision, 1e-3 V of the displaced ice.
+    torch.testing.assert_close(damaged.volume, expected, rtol=1e-5, atol=2e-3)
     # Damage conserves the mean and removes high-frequency power.
     assert float(damaged.volume.mean()) == pytest.approx(
         float(plain.volume.mean()), rel=1e-5
@@ -181,16 +185,41 @@ def test_dose_series_and_tilt_render_one_exposure_alike():
         assert torch.equal(out, model.volume)
 
 
+def tilt_contrast(volume, per_tilt=False):
+    """
+    What a series' dose envelope acts on, padded and tapered as the series
+    does it: the dry specimen less the mean potential of the ice it
+    displaces. That mean is read off the weighted ice when one ice serves
+    every tilt, and off the unweighted canvas when each tilt renders its own.
+    """
+    from specter.ice import RandomIcemaker, blend_ice_into_volume
+
+    means = []
+    specter.seed(3)
+    with limited_cpu_threads(1):
+        blended = blend_ice_into_volume(
+            volume.clone(),
+            RandomIcemaker(dx=DX, n=48, nz=16),
+            DX,
+            ice_filter=lambda c: means.append(float(c.mean())),
+        )
+    occupancy = potential_occupancy(volume, DX)
+    mean = means[0]
+    if not per_tilt:
+        mean = float((blended - volume).sum() / (1.0 - occupancy).sum())
+    return fit(volume - occupancy * mean)
+
+
 def test_each_tilt_is_damaged_at_its_own_pre_exposure():
     """
-    Tilt i's specimen is the dry specimen under the envelope of its own dose
-    after the pre-exposure of the tilts before it, and the ice is untouched.
+    Tilt i's contrast is under the envelope of its own dose after the
+    pre-exposure of the tilts before it, and the rest of the volume is
+    untouched.
     """
     volume = tilt_volume()
     plain = tilt_series(volume, Ice(model="random"), damaged=False)
     model = tilt_series(volume, Ice(model="random"))
-    dry_model = tilt_series(volume, Ice(), damaged=False)
-    dry = dry_model.volume  # the same padding and taper, without ice
+    dry = tilt_contrast(volume)
     ice = plain.volume - dry
     seen = []
     render = model._render_exposure
@@ -201,7 +230,7 @@ def test_each_tilt_is_damaged_at_its_own_pre_exposure():
         expected = apply_dose_damage(
             dry.clone(), DX, dose, pre_exposure=pre, weighted=False, voltage=300.0
         )
-        torch.testing.assert_close(model.volume, expected + ice, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(model.volume, expected + ice, rtol=1e-5, atol=2e-3)
 
     model._render_exposure = spy
     with torch.no_grad():
@@ -317,7 +346,7 @@ def test_tilt_solvent_motion_at_one_dose_matches_the_single_filter():
 
 
 def test_tilt_solvent_motion_per_tilt_with_specimen_damage():
-    """Each tilt is its damaged dry specimen plus the ice of its own dose."""
+    """Each tilt is its damaged contrast plus the rest at its own dose."""
     volume = tilt_volume()
     doses = [5.0, 8.0, 2.0]
     model = tilt_series(
@@ -325,7 +354,7 @@ def test_tilt_solvent_motion_per_tilt_with_specimen_damage():
         Ice(model="random", motion_variance=0.38),
         dose=torch.tensor(doses),
     )
-    dry = tilt_series(volume, Ice(), damaged=False).volume
+    dry = tilt_contrast(volume, per_tilt=True)
     ice = [ice_for_dose(volume, d) - dry for d in doses]
     pre = [0.0, 5.0, 13.0]
 
@@ -338,7 +367,7 @@ def test_tilt_solvent_motion_per_tilt_with_specimen_damage():
             weighted=False,
             voltage=300.0,
         )
-        torch.testing.assert_close(model.volume, damaged + ice[i], rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(model.volume, damaged + ice[i], rtol=1e-5, atol=1e-4)
 
     assert spy_on_tilts(model, check) == [0, 1, 2]
 

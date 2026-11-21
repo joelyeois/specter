@@ -18,8 +18,9 @@ from specter.aberrations import dose_envelope
 from specter.config import ParticleStackConfig
 from specter.config._validation import validate_config
 from specter.ice import RandomIcemaker
-from specter.imaging import CTF, Exposure, Poses, Sample, Specimen
+from specter.imaging import CTF, Exposure, Field, Poses, Sample, Specimen
 from specter.imaging import _stages as stages
+from specter.settings import Crowding, Ice, Propagation
 from specter.potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
     apply_dose_damage,
@@ -308,3 +309,131 @@ def test_dose_envelope_on_a_solvated_specimen_fades_its_contrast():
     weight = reference.abs() ** 2
     expected = float((envelope * weight)[band].sum() / weight[band].sum())
     assert kept(on) / kept(off) == pytest.approx(expected, abs=0.02)
+
+
+def _ball(n: int = 48) -> torch.Tensor:
+    x = torch.arange(n) - n / 2
+    r = 2.0 * torch.sqrt(x[:, None, None] ** 2 + x[None, :, None] ** 2 + x**2)
+    return FULL_OCCUPANCY_POTENTIAL_V * torch.sigmoid((20.0 - r) / 2.0)
+
+
+def _contrast_kept(
+    on: torch.Tensor, off: torch.Tensor, bare: torch.Tensor, exposure: Exposure
+) -> tuple[float, float]:
+    """
+    The share of the low-resolution image of `bare` that `on` keeps of
+    `off`, and the dose envelope's own, weighted by the same spectrum.
+    """
+    k = torch.fft.fftfreq(on.shape[-1], d=2.0)
+    radius = torch.hypot(k[:, None], k[None, :])
+    band = (radius > 0) & (radius < 1 / 10.0)
+    reference = torch.fft.fft2(bare - bare.mean())
+
+    def kept(x: torch.Tensor) -> float:
+        return float((torch.fft.fft2(x - x.mean()) * reference.conj()).real[band].sum())
+
+    dose = float(torch.as_tensor(exposure.dose).reshape(-1)[-1])
+    pre = exposure.pre_exposure
+    before = 0.0 if pre is None else float(torch.as_tensor(pre).reshape(-1)[-1])
+    envelope = exposure.damage_envelope(dose, before, 300.0)(radius)
+    weight = reference.abs() ** 2
+    expected = float((envelope * weight)[band].sum() / weight[band].sum())
+    return kept(on) / kept(off), expected
+
+
+MODEL = dict(scattering_model="ctf", alpha=0.0)
+
+
+@pytest.mark.parametrize("motion_variance", [None, 0.3])
+def test_a_damaged_prepared_sample_fades_its_contrast(motion_variance):
+    """
+    A pre-assembled volume in ice keeps the envelope's share of its
+    low-resolution contrast, 0.96, where a solvent hole left at full depth
+    kept 0.87.
+    """
+    ball, exposure = _ball(), Exposure(DOSE, n_frames=40)
+    ice = Ice(model="random", motion_variance=motion_variance)
+
+    def image(damaged: bool) -> torch.Tensor:
+        torch.manual_seed(5)
+        sample = Sample.from_volume(ball[None].clone(), 2.0).prepare(
+            ice,
+            voltage=300.0,
+            icemaker=RandomIcemaker(2.0, 48, 48),
+            damaged=damaged,
+            exposure=exposure,
+            **MODEL,
+        )
+        with torch.no_grad():
+            waves = sample.scatter(voltage=300.0, exposure=exposure, **MODEL)
+        return waves.pixels()[0]
+
+    with torch.no_grad():
+        bare = Sample.from_volume(ball[None], 2.0).scatter(voltage=300.0, **MODEL)
+    got, expected = _contrast_kept(
+        image(True), image(False), bare.pixels()[0], exposure
+    )
+    assert got == pytest.approx(expected, abs=0.02)
+
+
+def test_a_damaged_field_fades_its_particles_contrast():
+    """The same for a micrograph specimen drawn from a template."""
+    exposure = Exposure(DOSE, n_frames=40)
+    template = _ball()[8:40, 8:40, 8:40].clone()
+
+    def draw(damaged: bool) -> Sample:
+        field = Field(
+            template, 2.0, 96, nz=40, crowding=Crowding(min_distance=70.0)
+        ).solvate(Ice(model="random"), icemaker=RandomIcemaker(2.0, 96, 40))
+        if damaged:
+            field = field.damage()
+        return field.draw(
+            voltage=300.0, exposure=exposure, seed=7, index=0, keep_dry=True, **MODEL
+        )
+
+    def image(sample: Sample) -> torch.Tensor:
+        with torch.no_grad():
+            return sample.scatter(voltage=300.0, **MODEL).pixels()[0].cpu()
+
+    on, off = draw(True), draw(False)
+    got, expected = _contrast_kept(image(on), image(off), image(off.clean()), exposure)
+    assert got == pytest.approx(expected, abs=0.02)
+
+
+@pytest.mark.parametrize(
+    "dose, motion_variance",
+    [(10.0, None), (10.0, 0.3), (torch.tensor([8.0, 10.0, 12.0]), 0.3)],
+    ids=["fixed ice", "one filtered ice", "ice per tilt"],
+)
+def test_a_damaged_tilt_fades_its_contrast(dose, motion_variance):
+    """
+    The same for the last tilt of a series, through each of the three ways
+    its ice is held. Untilted views, so that the bare specimen's image is
+    the reference for every one.
+    """
+    ball = _ball()
+    exposure = Exposure.tilt_series(dose, 3)
+
+    def image(damaged: bool, ice: Ice) -> torch.Tensor:
+        torch.manual_seed(5)
+        series = Sample.from_volume(ball[None].clone(), 2.0).tilt_series(
+            Poses.tilt_series([0.0, 0.0, 0.0]),
+            exposure,
+            voltage=300.0,
+            micrograph_size=48,
+            ice=ice,
+            icemaker=RandomIcemaker(2.0, 48, 48) if ice.model else None,
+            damaged=damaged,
+            seed=7,
+            propagation=Propagation(**MODEL),
+            log=False,
+        )
+        with torch.no_grad():
+            return series.scatter(2).pixels()[0].cpu()
+
+    ice = Ice(model="random", motion_variance=motion_variance)
+    bare = image(False, Ice())
+    got, expected = _contrast_kept(
+        image(True, ice), image(False, ice), bare, exposure[2:3]
+    )
+    assert got == pytest.approx(expected, abs=0.02)

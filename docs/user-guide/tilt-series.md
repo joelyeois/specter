@@ -100,9 +100,9 @@ in the [command reference](../api/cli/simulate.md#specter-simulate-tiltseries).
   specimen through every tilt. Multislice only. See
   [Scattering](../concepts/scattering/index.md#mean-free-path-absorption-support).
 - **Radiation damage on the specimen**: `dose_envelope_target = "specimen"`
-  damages the specimen's potential rather than the whole image, so the ice
-  keeps its structure. Each tilt is damaged by its own dose after the
-  pre-exposure of the tilts before it. The dry specimen is kept as its 3D
+  damages the specimen's contrast against its ice rather than the whole
+  image, so the ice keeps its structure. Each tilt is damaged by its own dose
+  after the pre-exposure of the tilts before it. That contrast is kept as its 3D
   spectrum, which costs four resident volumes instead of one and an inverse
   transform per tilt (0.03 s on a GPU at 200 × 576 × 576 voxels). See
   [Aberrations](../concepts/aberrations.md).

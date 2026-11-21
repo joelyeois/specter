@@ -27,7 +27,7 @@ from ..ice import (
     blend_ice_into_volume,
     resolve_icemaker,
 )
-from ..ice._blend import AbsorptionTarget
+from ..ice._blend import AbsorptionTarget, DisplacedSolvent
 from ..potential import absorption_potential, aperture_lowpass
 from ..random_seed import derive_seed, seeded_rng
 from ..scattering import IterativeScattering
@@ -48,18 +48,36 @@ class _DoseSeries:
     """
     A fixed specimen kept in the form each exposure's damage is made from.
 
-    The dose envelope on the specimen damages the dry specimen and not its
-    ice, and a pre-assembled volume is imaged at more than one exposure. It
-    is therefore held as the 3D spectrum of the dry specimen and the ice it
-    was blended with, from which the damaged volume for an exposure is
-    rendered, in place, with one inverse transform.
+    The dose envelope on the specimen damages the specimen's contrast and
+    not its ice, and a pre-assembled volume is imaged at more than one
+    exposure. It is therefore held as the 3D spectrum of what the envelope
+    acts on and the remainder of the volume, from which the damaged volume
+    for an exposure is rendered, in place, with one inverse transform. In
+    vacuum the envelope acts on the dry specimen. In ice it acts on the dry
+    specimen less the mean potential of the water it displaces, `displaced`
+    (:class:`~specter.ice._blend.DisplacedSolvent`), and the remainder is the
+    ice with that mean restored.
     """
 
     def __init__(
-        self, dry: torch.Tensor, volume: torch.Tensor, voxel_size: float
+        self,
+        dry: torch.Tensor,
+        volume: torch.Tensor,
+        voxel_size: float,
+        displaced: DisplacedSolvent | None = None,
     ) -> None:
-        self.spectrum = RadialSpectrum(dry[0], voxel_size)
-        self.solvent = None if volume is dry else volume - dry
+        if volume is dry:
+            self.spectrum = RadialSpectrum(dry[0], voxel_size)
+            self.solvent = None
+        else:
+            # One canvas throughout: the displaced solvent, then the
+            # contrast, then the remainder.
+            work = torch.zeros_like(dry)
+            if displaced is not None:
+                displaced.add_(work, -1.0)
+            work.add_(dry)
+            self.spectrum = RadialSpectrum(work[0], voxel_size)
+            self.solvent = work.neg_().add_(volume)
         self.rendered: tuple[float, float] | None = None
 
     def render(
@@ -143,8 +161,9 @@ class Sample:
         The untilted counterpart of :meth:`tilt_series`: ice is blended into
         the dry volume once, wherever it has little existing scattering
         potential, the mean-free-path field is read off the dry specimen,
-        and with `damaged` the specimen, not its ice, is damaged afresh for
-        each exposure :meth:`scatter` is given.
+        and with `damaged` the specimen's contrast against that ice, not
+        the ice, is damaged afresh for each exposure :meth:`scatter` is
+        given.
 
         Parameters
         ----------
@@ -246,11 +265,19 @@ class Sample:
                 # caller's tensor.
                 volume = volume.clone()
                 dry = volume
-            series = _DoseSeries(
-                lowpass(dry, inplace=False) if has_ice else volume,
-                volume,
-                self.voxel_size,
-            )
+            if has_ice:
+                clear = lowpass(dry, inplace=False)
+                added = float(volume.sum(dtype=torch.float64)) - float(
+                    clear.sum(dtype=torch.float64)
+                )
+                series = _DoseSeries(
+                    clear,
+                    volume,
+                    self.voxel_size,
+                    DisplacedSolvent(dry, self.voxel_size, added, profile=ice.profile),
+                )
+            else:
+                series = _DoseSeries(volume, volume, self.voxel_size)
         return replace(
             self,
             volume=volume,

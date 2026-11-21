@@ -20,7 +20,7 @@ from ..ice import (
     blend_ice_into_volume,
     resolve_icemaker,
 )
-from ..ice._blend import AbsorptionTarget
+from ..ice._blend import AbsorptionTarget, DisplacedSolvent
 from ..potential import potential_occupancy_slabs, template_occupancy_reference
 from ..progress import status
 from ..settings import Crowding, Ice, Packing
@@ -396,9 +396,22 @@ class MicrographSpecimenGenerator(DeviceModule):
                     # The ice is weighted by the undamaged specimen's
                     # occupancy, so it is blended into a copy of it and the
                     # difference, which is the weighted ice alone, is added to
-                    # the specimen once that has been damaged.
+                    # the specimen once that has been damaged. The envelope
+                    # acts on the specimen's contrast, so the mean potential
+                    # of the water it displaces is moved from the specimen
+                    # into that difference first.
                     solvent = self._blend(V, target, ice_filter, inplace=False)
                     solvent.sub_(V)
+                    displaced = DisplacedSolvent(
+                        V,
+                        self.pixel_size,
+                        float(solvent.sum(dtype=torch.float64)),
+                        full_potential=self._occupancy_reference(),
+                        profile=self.ice_profile,
+                    )
+                    displaced.add_(V, -1.0)
+                    displaced.add_(solvent)
+                    del displaced
                     V = damage(V)
                     V.add_(solvent)
                     del solvent

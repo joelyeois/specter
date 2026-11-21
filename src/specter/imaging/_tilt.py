@@ -32,6 +32,7 @@ from ..aberrations import defocus_midplane_shift
 from ..fft import RadialSpectrum
 from ..ice import IceBank, RandomIcemaker, blend_ice_into_volume, resolve_icemaker
 from ..ice import solvent_exposure_envelope
+from ..ice._blend import DisplacedSolvent
 from ..options import Interpolation
 from ..potential import aperture_lowpass_isotropic
 from ..progress import status
@@ -258,6 +259,11 @@ class _TiltSolvent:
     range. The canvas is therefore kept as its 3D spectrum and the free
     fraction beside it, so the ice for a dose costs one inverse transform,
     one product and the padding.
+
+    Beside a damaged specimen the series also restores `displaced_mean`, the
+    mean potential of the ice, to the volume the specimen occupies: the
+    damage series holds the specimen less that term, so that the dose
+    envelope reaches the specimen's contrast against its solvent.
     """
 
     def __init__(
@@ -269,7 +275,9 @@ class _TiltSolvent:
         weights: torch.Tensor | None,
         weights_max_frequency: float | None,
         fit: Callable[[torch.Tensor], torch.Tensor],
+        displaced_mean: float = 0.0,
     ) -> None:
+        self.displaced_mean = displaced_mean
         self.spectrum = spectrum
         self.free = free
         self.motion_variance = motion_variance
@@ -303,7 +311,11 @@ class _TiltSolvent:
             self.spectrum.shape, device=self.device, dtype=self.spectrum.dtype
         )
         self.spectrum.filter_into(ice, envelope)
-        ice.mul_(self.free[0])
+        if self.displaced_mean:
+            # free * ice + (1 - free) * mean
+            ice.sub_(self.displaced_mean).mul_(self.free[0]).add_(self.displaced_mean)
+        else:
+            ice.mul_(self.free[0])
         return self.fit(ice[None])
 
 
@@ -354,9 +366,9 @@ class TiltSeries:
     icemaker : IceBank or RandomIcemaker, optional
         A prebuilt icemaker for that blend.
     damaged : bool, optional
-        Damage the specimen, not its ice, per tilt: tilt ``i`` sees the dry
-        specimen under the envelope of its own dose after the tilts before
-        it, plus the ice. Default False.
+        Damage the specimen, not its ice, per tilt: tilt ``i`` sees the
+        specimen's contrast against its ice under the envelope of its own
+        dose after the tilts before it. Default False.
     tilt : TiltGeometry, optional
         Tilt axis and the XY/Z cosine tapers.
     deformation : Deformation, optional
@@ -521,6 +533,7 @@ class TiltSeries:
             torch.all(self.doses == self.doses[0])
         )
         captured: list[RadialSpectrum] = []
+        ice_mean: list[float] = []
         ice_filter: Callable[[torch.Tensor], None] | None = None
         if per_tilt_solvent:
 
@@ -528,6 +541,7 @@ class TiltSeries:
                 # Keep the unweighted ice as its spectrum and let the blend
                 # weight a canvas of ones: what it adds is then the free
                 # fraction of every voxel.
+                ice_mean.append(float(canvas.mean(dtype=torch.float64)))
                 captured.append(RadialSpectrum(canvas[0], voxel_size))
                 canvas.fill_(1.0)
 
@@ -560,11 +574,28 @@ class TiltSeries:
                     ice_filter=ice_filter,
                 )
         free: torch.Tensor | None = None
+        displaced_mean = 0.0
         if per_tilt_solvent:
             # The specimen is padded without its ice, which each tilt adds.
             free = blended.sub_(volume)
             del blended
+            if damaged:
+                # The dose envelope acts on the specimen's contrast: the
+                # damage series holds the specimen less the mean potential
+                # of the ice it displaces, which each tilt's ice restores.
+                displaced_mean = ice_mean[0]
+                with torch.no_grad():
+                    dry = (1.0 - free).mul_(-displaced_mean).add_(volume)
         else:
+            if damaged and has_ice:
+                # As above, with the displaced ice left in the fixed solvent.
+                with torch.no_grad():
+                    added = float(blended.sum(dtype=torch.float64)) - float(
+                        volume.sum(dtype=torch.float64)
+                    )
+                    dry = DisplacedSolvent(volume, voxel_size, added).add_(
+                        volume.clone(), -1.0
+                    )
             volume = blended
 
         # The bend is tabulated over the footprint the tilts sample, known
@@ -640,12 +671,14 @@ class TiltSeries:
                 exposure.weights,
                 exposure.weights_max_frequency,
                 lambda v: lowpass(fit(v, log=False)),
+                displaced_mean,
             )
             del free, captured
 
-        # The damage series: the dry specimen kept as its spectrum, damaged
-        # per tilt with one inverse transform, plus the ice it was blended
-        # with, which was weighted by the undamaged specimen's occupancy.
+        # The damage series: the specimen's contrast kept as its spectrum,
+        # damaged per tilt with one inverse transform, plus the remainder of
+        # the volume, which is the ice weighted by the undamaged specimen's
+        # occupancy and the mean ice potential over the specimen.
         self._spectrum: RadialSpectrum | None = None
         self._solvent: torch.Tensor | None = None
         self._rendered: tuple[float, float] | None = None

@@ -13,6 +13,8 @@ Every case with ice was re-recorded from these objects on 2026-11-07, when
 `RandomIcemaker` began convolving its waters periodically (the generator's
 linear convolution left each face plane at 85-94% of the interior's
 potential): from then on they pin the objects, not the generator.
+The two cases that damage a specimen in ice were re-recorded on 2026-11-21,
+when the dose envelope began to act on its contrast against that ice.
 """
 
 from __future__ import annotations

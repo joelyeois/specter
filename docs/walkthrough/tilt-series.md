@@ -167,7 +167,9 @@ range a thick specimen can be imaged over.
 
 `damaged=True` damages the specimen, and not its ice, before every tilt: tilt
 \(i\) sees the specimen under the damage envelope of its own dose after the
-pre-exposure of the tilts before it. The series keeps the dry specimen as its
+pre-exposure of the tilts before it. The envelope acts on the specimen's
+contrast against its solvent, which is the dry specimen less the mean
+potential of the ice it displaces. The series keeps that contrast as its
 3D spectrum, so each tilt's damaged volume costs one inverse transform. See
 [Envelopes](../concepts/aberrations.md#envelopes) for the damage model and
 [The solvent under exposure](../concepts/ice.md#the-solvent-under-exposure)

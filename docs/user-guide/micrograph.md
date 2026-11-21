@@ -182,10 +182,11 @@ with the same fields.
   needs a second canvas the size of the specimen. Multislice only. See
   [Scattering](../concepts/scattering/index.md#mean-free-path-absorption-support).
 - **Radiation damage**: `dose_envelope_target = "specimen"` (with
-  `dose_envelope = true`) damages the specimen's potential and leaves its ice
-  undamaged, rather than filtering the whole image. Each micrograph's
-  specimen is built for its own dose. The ice is blended into a copy of the
-  undamaged specimen, so assembly holds a second canvas while it runs. See
+  `dose_envelope = true`) damages the specimen's contrast against its ice and
+  leaves the ice undamaged, rather than filtering the whole image. Each
+  micrograph's specimen is built for its own dose. The ice is blended into a
+  copy of the undamaged specimen, so assembly holds a second canvas and the
+  specimen's occupancy at half precision while it runs. See
   [Aberrations](../concepts/aberrations.md).
 - **Solvent motion**: `ice_motion_variance` filters the ice to what survives
   the summed exposure. It requires `dose_envelope_target = "specimen"` when

@@ -31,6 +31,7 @@ from ..potential import (
     WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     occupancy_blur_halo_voxels,
     potential_occupancy,
+    potential_occupancy_slabs,
 )
 import math
 import numpy as np
@@ -298,6 +299,91 @@ def resolve_icemaker(
     raise ValueError(
         f"Unknown ice_model '{ice_model}'. Choose 'gd', 'random', or 'none'."
     )
+
+
+class DisplacedSolvent:
+    """
+    The mean potential of the solvent a dry specimen displaces.
+
+    A specimen in ice is imaged through its potential less that of the
+    water it displaces, and the dose envelope is measured on that contrast
+    (Grant & Grigorieff [1]_), so the envelope has to reach both. Damaging
+    the potential alone leaves the displaced water at its full depth, and
+    where the two nearly cancel the contrast fades several times faster
+    than the envelope. This is the field to take out of the specimen before
+    it is damaged and to put back after: ``occupancy * mean * window``, with
+    ``mean`` the potential of the unweighted ice and ``window`` its profile.
+    The ice's own structure is in neither term and is never filtered.
+
+    The occupancy is held at half precision, on the specimen's device.
+
+    Parameters
+    ----------
+    dry : torch.Tensor
+        The undamaged specimen without its ice, ``(B, Z, Y, X)``, in volts.
+    voxel_size : float
+        In Angstrom.
+    solvent_total : float
+        The sum over voxels of the ice the blend added to `dry`, which fixes
+        ``mean``: the blend weights the ice by ``1 - occupancy``.
+    full_potential : float or torch.Tensor, optional
+        The occupancy reference the blend used.
+    profile : IceProfile, optional
+        The profile the blend confined the ice to.
+    device : torch.device or str, optional
+        Where the occupancy blur runs. Default `dry`'s own.
+
+    References
+    ----------
+    .. [1] Grant, T., & Grigorieff, N. (2015). Measuring the optimal exposure for
+       single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6.
+       *eLife*, 4, e06980. https://doi.org/10.7554/eLife.06980
+    """
+
+    def __init__(
+        self,
+        dry: torch.Tensor,
+        voxel_size: float,
+        solvent_total: float,
+        full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
+        profile: "IceProfile | None" = None,
+        device: torch.device | str | None = None,
+    ) -> None:
+        nz, ny, nx = dry.shape[-3:]
+        self.voxel_size = voxel_size
+        self.profile = profile
+        self.chunk = max(1, 2**24 // (ny * nx))
+        self.occupancy = torch.empty(dry.shape, dtype=torch.float16, device=dry.device)
+        free = 0.0
+        for z0, z1, occ in potential_occupancy_slabs(
+            dry, voxel_size, self.chunk, full_potential=full_potential, device=device
+        ):
+            room = 1.0 - occ
+            window = self._window(z0, z1, occ.device)
+            free += float((room if window is None else room * window).sum())
+            self.occupancy[..., z0:z1, :, :] = occ.to(dry.device, torch.float16)
+            del occ, room
+        self.mean = solvent_total / free if free > 0.0 else 0.0
+
+    def _window(self, z0: int, z1: int, device: torch.device) -> torch.Tensor | None:
+        if self.profile is None:
+            return None
+        nz, _, nx = self.occupancy.shape[-3:]
+        return self.profile.window(
+            nz, nx, self.voxel_size, z_slice=slice(z0, z1), device=device
+        )
+
+    def add_(self, V: torch.Tensor, sign: float = 1.0) -> torch.Tensor:
+        """Add `sign` times the displaced solvent to `V`, in place."""
+        nz = V.shape[-3]
+        for z0 in range(0, nz, self.chunk):
+            z1 = min(z0 + self.chunk, nz)
+            term = self.occupancy[..., z0:z1, :, :].to(V.device, V.dtype)
+            window = self._window(z0, z1, V.device)
+            if window is not None:
+                term = term * window
+            V[..., z0:z1, :, :].add_(term, alpha=sign * self.mean)
+        return V
 
 
 def blend_ice_into_volume(

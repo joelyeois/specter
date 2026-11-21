@@ -15,6 +15,8 @@ thread-scheduling order, so they carry ~1e-5 V of that noise, which Poisson
 counts would turn into different integers.
 The cases with ice were re-recorded on 2026-11-07, when `RandomIcemaker`
 began convolving its waters periodically; they pin the objects since.
+The case that damages a specimen in ice was re-recorded on 2026-11-21, when
+the dose envelope began to act on its contrast against that ice.
 """
 
 from __future__ import annotations

@@ -24,13 +24,17 @@ References
 from __future__ import annotations
 
 import contextlib
+import gc
 import math
+import sys
 import warnings
 from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
 import torch
+
+from . import logger
 
 __all__ = ["GridTransform", "adjoint_tolerance", "clear_plan_cache", "sample_transform"]
 
@@ -203,8 +207,10 @@ def _cached_plan(
     The cached FINUFFT plan for one transform type, shape, precision and device.
 
     Returns the plan and whether it runs on the GPU. A CUDA device falls back to
-    a CPU plan, with a warning, only when cuFINUFFT cannot be loaded at all; a
-    plan that cannot be created on a working GPU is an out-of-memory error.
+    a CPU plan, with a warning, only when cuFINUFFT cannot be loaded at all. A
+    `gpu_method` the GPU refuses (for want of shared memory) is replaced by the
+    library's choice, with a logged warning; a plan that cannot be created
+    either way is an out-of-memory error.
     `n_trans` is the number of grids a GPU plan transforms per execute, at the
     same points; CPU plans always take one. `upsampfac` and `gpu_method`
     (cuFINUFFT's spreading algorithm; None for the library's choice) let a
@@ -245,23 +251,53 @@ def _cached_plan(
         return _PLANS[key], False
     import cufinufft
 
+    def create(method: int | None) -> Any:
+        extra = {} if method is None else {"gpu_method": method}
+        with _quiet_refused_plan_teardown():
+            try:
+                return cufinufft.Plan(
+                    kind,
+                    shape,
+                    n_trans,
+                    gpu_device_id=device.index or 0,
+                    **kwargs,
+                    **extra,
+                )
+            except RuntimeError as err:
+                message = str(err)
+            # The refused plan, held by the traceback until here, is torn
+            # down inside the quiet block.
+            gc.collect()
+        raise RuntimeError(message)
+
     for attempt in range(2):
         # cuFINUFFT allocates from the driver, not from torch's caching
         # allocator, so memory torch has cached but no longer uses is invisible
         # to it until released.
         torch.cuda.empty_cache()
         try:
-            extra = {} if gpu_method is None else {"gpu_method": gpu_method}
-            _PLANS[key] = cufinufft.Plan(
-                kind,
-                shape,
-                n_trans,
-                gpu_device_id=device.index or 0,
-                **kwargs,
-                **extra,
-            )
+            _PLANS[key] = create(gpu_method)
             return _PLANS[key], True
         except RuntimeError as err:
+            if gpu_method is not None:
+                # A pinned spreading method is refused, with the same error as
+                # a failed allocation, when its kernel's working set exceeds the
+                # GPU's shared memory: block-gather (3) at eps 1e-9 in double
+                # precision with upsampfac 1.25 needs 134 kB, which an L40
+                # (101 kB) lacks and an H100 (228 kB) has. The library's own
+                # choice then runs; only if it fails too is memory the cause.
+                try:
+                    _PLANS[key] = create(None)
+                except RuntimeError:
+                    pass
+                else:
+                    logger.warning(
+                        f"cuFINUFFT refused gpu_method={gpu_method} for a "
+                        f"type-{kind} plan on {device} ({dtype}, eps {eps:g}, "
+                        f"upsampfac {upsampfac:g}), likely for want of shared "
+                        "memory; using the library's choice of method"
+                    )
+                    return _PLANS[key], True
             if attempt:
                 raise torch.OutOfMemoryError(
                     f"cuFINUFFT could not create a type-{kind} plan for a "
@@ -272,6 +308,31 @@ def _cached_plan(
             for other in [k for k in _PLANS if k[3] and k[4] == key[4]]:
                 del _PLANS[other]
     raise AssertionError("unreachable")
+
+
+@contextlib.contextmanager
+def _quiet_refused_plan_teardown() -> Iterator[None]:
+    """
+    Silence the teardown of a plan cuFINUFFT refused to create.
+
+    A refused `cufinufft.Plan` is collected half-built, and its ``__del__``
+    raises "Error destroying plan.", which Python prints as an ignored
+    exception. The refusal itself is raised and handled by the caller.
+    """
+    previous = sys.unraisablehook
+
+    def hook(unraisable: Any) -> None:
+        if not (
+            isinstance(unraisable.exc_value, RuntimeError)
+            and "destroying plan" in str(unraisable.exc_value)
+        ):
+            previous(unraisable)
+
+    sys.unraisablehook = hook
+    try:
+        yield
+    finally:
+        sys.unraisablehook = previous
 
 
 _CUFINUFFT_LOADS: list[bool] = []

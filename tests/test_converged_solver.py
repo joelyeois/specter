@@ -17,6 +17,7 @@ from specter.ghostbuster._memory import SAFETY, _PeakMemory, fit_batchsize
 from specter.ghostbuster._resolution import (
     FSC_CLIP,
     auto_mask,
+    exact_rotation_support,
     frequency_shells,
     mask_check,
     masked_fsc,
@@ -293,6 +294,22 @@ def test_curvature_probes_stay_inside_the_support() -> None:
     assert torch.equal(default.probe_support.cpu(), spherical_mask(N))
     with pytest.raises(ValueError, match="probe_support"):
         ConvergedSolver(model, images, ssnr, probe_support=torch.ones(N, N, N - 1))
+
+
+def test_an_exact_rotation_model_is_solved_inside_its_window() -> None:
+    """Under rotate_mode="exact" the probes are drawn in the model's window, and
+    the map returned is the windowed one the forward saw."""
+    n = 16
+    model, images, truth = _problem("rytov", n=n, rotate_mode="exact")
+    window = exact_rotation_support(n)
+    assert torch.equal(model.support, window)
+    ssnr = np.linspace(4.0, 0.05, n // 2 + 1)
+    solver = ConvergedSolver(model, images, ssnr)
+    assert torch.equal(solver.probe_support.cpu(), window)
+    result = solver.solve(_start(truth), n_iter=2)
+    assert float(result.volume[window == 0].abs().max()) == 0.0
+    objectives = [e["objective"] for e in result.log]
+    assert objectives[-1] < objectives[0]
 
 
 def test_a_pass_that_runs_out_of_memory_is_redone_with_smaller_batches() -> None:

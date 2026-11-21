@@ -106,6 +106,36 @@ def unfilter(volume: torch.Tensor, ssnr: np.ndarray | torch.Tensor) -> torch.Ten
     return torch.fft.irfftn(torch.fft.rfftn(volume) * factor, s=volume.shape)
 
 
+#: Where `exact_rotation_support` starts to fall and where it reaches zero, as
+#: fractions of half the box: 16 and 4 voxels inside it at a 432 box, the
+#: window measured on EMPIAR-10551. Fractions, so a binned run keeps it.
+EXACT_SUPPORT_INNER = 0.925
+EXACT_SUPPORT_OUTER = 0.98
+
+
+def exact_rotation_support(n: int) -> torch.Tensor:
+    """
+    The window a reconstruction applies to its map before an exact rotation.
+
+    1 out to ``EXACT_SUPPORT_INNER * n / 2`` from the centre voxel
+    ``n // 2``, then a cosine to 0 at ``EXACT_SUPPORT_OUTER * n / 2``. An
+    exact rotation is periodic, so density a fit places beyond the inscribed
+    sphere re-enters the posed volume at the opposite face; the window keeps
+    the map inside, and the gap to the faces absorbs a shift of 2% of the box.
+
+    Parameters
+    ----------
+    n : int
+        Box size.
+
+    Returns
+    -------
+    torch.Tensor
+        ``(n, n, n)`` float32 weights in [0, 1].
+    """
+    return spherical_mask(n, EXACT_SUPPORT_INNER, EXACT_SUPPORT_OUTER)
+
+
 def spherical_mask(n: int, inner: float = 0.85, outer: float = 0.99) -> torch.Tensor:
     """A soft sphere: 1 inside `inner`, cosine to 0 at `outer`, as fractions of half the box."""
     r = torch.arange(n, dtype=torch.float32) - n // 2

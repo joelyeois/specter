@@ -439,6 +439,24 @@ explicitly; an explicit `surface` or `exact` refuses the refinement it
 cannot carry. See
 [Sampling the Ewald surface](../concepts/conventions.md#sampling-the-ewald-surface).
 
+Under `exact` the map is multiplied by a soft sphere before every rotation:
+1 out to 0.925 of half the box, then a cosine to 0 at 0.98 of it. An exact
+rotation is periodic, so density placed beyond the box's inscribed sphere
+re-enters the posed volume at the opposite face. Without the window the fit
+places noise in the box corners, where nothing in the data constrains it, and
+the rotation then adds that noise to the predicted images. On EMPIAR-10551
+(box 432, 5,000 particles per half, Rytov), the unwindowed fit held 4.1% of
+its energy beyond the window's flat region, against 1.1% with the window.
+Scored against the other half's images, it was worse by 20.8 nats per particle,
+and worse for 99.3% of the particles; its unmasked half-map FSC was 1.988 Å,
+against 1.871 Å. The written maps are the windowed ones, which the forward
+model saw. The converged solve draws its curvature probes inside the same
+window, so the prior's weight is measured where the data constrain the map.
+A run warns when `--fsc_mask` places more than 1% of its weight beyond the
+window's flat region, since the particle may then not fit the box. `surface`,
+`real` and `fourier` are not windowed: the first never forms a posed volume,
+and the other two clip what leaves the box instead of wrapping it.
+
 ## Symmetry
 
 `--symmetry` enforces a point-group symmetry (e.g. `C3`, `D7`, `I1`) on the

@@ -430,6 +430,62 @@ def test_reconstructor_refuses_pose_refinement_under_exact() -> None:
             _reconstructor(propagation=Propagation(rotate_mode="exact"), **{lr: 1e-3})
 
 
+def _corner_content(n: int) -> torch.Tensor:
+    """Density only where the exact-rotation window is zero."""
+    from specter.ghostbuster._resolution import exact_rotation_support
+
+    noise = torch.rand(n, n, n, generator=torch.Generator().manual_seed(8))
+    return noise * (exact_rotation_support(n) == 0)
+
+
+def test_a_reconstruction_under_exact_rotation_sees_only_the_windowed_map() -> None:
+    """Corner density, which an exact rotation would wrap, neither predicts nor learns."""
+    model = _reconstructor(
+        propagation=Propagation(scattering_model="rytov", rotate_mode="exact"), lr=0.1
+    )
+    assert model.support is not None
+    idx = torch.arange(2)
+    with torch.no_grad():
+        clean = model.forward(idx)
+        model.V.add_(_corner_content(24))
+        torch.testing.assert_close(model.forward(idx), clean, rtol=0, atol=0)
+    model.forward(idx).sum().backward()
+    assert model.V.grad is not None
+    assert float(model.V.grad[model.support == 0].abs().max()) == 0.0
+    assert float(model.V.grad.abs().max()) > 0.0
+    # the map written out is the one the forward saw
+    torch.testing.assert_close(
+        model._volume_cpu(), (model.V.detach() * model.support).cpu()
+    )
+    assert "support" not in model.state_dict()  # rebuilt from the box size
+
+
+@pytest.mark.parametrize("rotate_mode", ["real", "surface"])
+def test_other_pose_modes_are_not_windowed(rotate_mode: str) -> None:
+    model = _reconstructor(
+        propagation=Propagation(scattering_model="rytov", rotate_mode=rotate_mode)
+    )
+    assert model.support is None
+    torch.testing.assert_close(model._volume_cpu(), model.V.detach().cpu())
+
+
+def test_warns_when_the_fsc_mask_reaches_past_the_window() -> None:
+    n = 24
+    full = torch.ones(n, n, n)
+    exact = Propagation(scattering_model="rytov", rotate_mode="exact")
+    with pytest.warns(UserWarning, match="fsc_mask"):
+        _reconstructor(propagation=exact, fsc_mask=full)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        from specter.ghostbuster._resolution import exact_rotation_support
+
+        _reconstructor(propagation=exact, fsc_mask=exact_rotation_support(n) > 0.99)
+        _reconstructor(  # not windowed, so not checked
+            propagation=Propagation(scattering_model="rytov", rotate_mode="real"),
+            fsc_mask=full,
+        )
+
+
 @pytest.mark.parametrize("device", DEVICES)
 def test_gradient_reaches_the_template_through_scatter(device: str) -> None:
     V = _blobs((24, 24, 24)).to(device).mul(5).requires_grad_(True)

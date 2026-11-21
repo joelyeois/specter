@@ -283,6 +283,10 @@ inscribed sphere loses nothing. `rotate_volume_exact` bounds the fraction
 that can cross (`specter.rotations.wrapped_fraction`) and warns when it
 exceeds 1%; below that bound the exactly rotated template was measured closer
 to the per-pose render than `"real"`, and above it a larger box is required.
+A simulated template is therefore rotated as it is: a window would delete its
+density instead of noise. A reconstruction's map is windowed instead, since
+its corners hold only what the fit puts there (see the
+[reconstruction guide](../user-guide/reconstruction.md#pose-application)).
 
 Each call to the non-uniform FFT costs two parts: the spreading or
 interpolation, which grows with the number of points, and the fast Fourier

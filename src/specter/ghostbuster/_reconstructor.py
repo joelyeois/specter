@@ -9,6 +9,7 @@ from __future__ import annotations
 from specter import logger
 
 import os
+import warnings
 from pathlib import Path
 from dataclasses import asdict, replace
 from typing import Any, Literal
@@ -26,6 +27,7 @@ from ..fsc import MAP_TO_MODEL_FSC_THRESHOLD, FSCCurve, fsc_curve
 from ..symmetries import apply_symmetry, get_rotation_matrices
 from ._base_reconstructor import _BaseReconstructor
 from ._converge import ADJOINT_TOLERANCE, out_of_memory
+from ._resolution import EXACT_SUPPORT_INNER, exact_rotation_support
 from ._memory import BatchPrediction, predict_batchsize
 from ._io import (
     save_fsc_figure,
@@ -35,6 +37,10 @@ from ._io import (
 from ._losses import mse_loss
 from ..settings import Optics, Propagation
 from specter.options import Scheduler, SymmetryMode
+
+#: Share of the FSC mask's weight beyond the exact-rotation window's flat
+#: region above which `Reconstructor` warns.
+_SUPPORT_WARNING_FRACTION = 0.01
 
 
 class Reconstructor(_BaseReconstructor):
@@ -261,6 +267,60 @@ class Reconstructor(_BaseReconstructor):
         self.propagation = propagation
         self.optics = optics
         self._register_bfactor(bfactor, quaternions.shape[0])
+        self._register_support()
+
+    def _register_support(self) -> None:
+        """
+        The window `forward` applies to the map before an exact rotation; None otherwise.
+
+        An exact rotation is periodic: density the fit puts in the box's
+        corners re-enters the posed volume at the opposite face. Windowed,
+        the map is held inside its inscribed sphere, which a particle
+        reconstruction occupies anyway. On EMPIAR-10551 (box 432, 5,000
+        particles a half, Rytov) the unwindowed fit put 4.1% of its energy
+        outside 0.93 of half the box against 1.1%, and predicted the other half's
+        images worse by 20.8 nats a particle (99.3% of particles), its
+        unmasked half-map FSC 1.988 A against 1.871 A. The simulators do not
+        window: there the template is known, and the window would delete its
+        density instead of noise. Not a checkpoint field: it is rebuilt from
+        the box size.
+        """
+        support = None
+        if self.propagation.rotate_mode == "exact":
+            n = int(self.V.shape[-1])
+            support = exact_rotation_support(n).to(self.V.device)
+            self._warn_beyond_support(n)
+        self.register_buffer("support", support, persistent=False)
+
+    def _warn_beyond_support(self, n: int) -> None:
+        """
+        Warn when the FSC mask reaches past the window's flat region.
+
+        The mask is the caller's statement of where the particle lies. The
+        starting map is not checked: in the converged solve it is the run's
+        own windowed Adam map, whose taper alone holds about 4% of its
+        absolute density.
+        """
+        mask = self.fsc_mask
+        if not isinstance(mask, torch.Tensor) or tuple(mask.shape) != (n,) * 3:
+            return
+        weight = mask.detach().float().abs().cpu()
+        total = float(weight.sum())
+        if total == 0.0:
+            return
+        r = torch.arange(n, dtype=torch.float32) - n // 2
+        radius = torch.sqrt(
+            r[:, None, None] ** 2 + r[None, :, None] ** 2 + r[None, None] ** 2
+        )
+        flat = EXACT_SUPPORT_INNER * n / 2
+        fraction = float(weight[radius > flat].sum()) / total
+        if fraction > _SUPPORT_WARNING_FRACTION:
+            warnings.warn(
+                f"{fraction:.1%} of fsc_mask lies more than {flat:.0f} voxels "
+                "from the centre, where rotate_mode='exact' tapers the map to "
+                "zero; the particle may not fit the box.",
+                stacklevel=4,
+            )
 
     def _setup_optimization_state(
         self,
@@ -465,7 +525,8 @@ class Reconstructor(_BaseReconstructor):
         if quaternions.ndim < 2:
             quaternions, shifts = quaternions.unsqueeze(0), shifts.unsqueeze(0)
         poses = Poses(quaternions, shifts, torch.arange(len(quaternions)))
-        waves = Specimen(self.V, self.voxel_size).scatter(
+        V = self.V if self.support is None else self.V * self.support
+        waves = Specimen(V, self.voxel_size).scatter(
             poses, voltage=self.voltage, **asdict(self.propagation)
         )
         bfactor = self.bfactor_per_particle
@@ -483,6 +544,11 @@ class Reconstructor(_BaseReconstructor):
             .detect(Exposure(self.dose_per_angstrom), noise=None, anisomag=anisomag)
             .array
         )
+
+    def _volume_cpu(self) -> torch.Tensor:
+        """The map the forward model sees (windowed under exact rotation), on the host."""
+        V = self.V.detach() if self.support is None else self.V.detach() * self.support
+        return V.cpu().float()
 
     def symmetrize(self) -> None:
         """Apply the configured point-group symmetry to the current volume in-place."""

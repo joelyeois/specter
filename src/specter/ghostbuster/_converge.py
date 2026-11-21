@@ -157,10 +157,10 @@ class ConvergedSolver:
         Prefixed to progress messages, e.g. the half-set's name.
     probe_support : torch.Tensor, optional
         Real-space weight ``(n, n, n)`` the curvature probes are drawn
-        inside. Default: the inscribed soft sphere (`spherical_mask`), the
-        region every pose of a real-space rotation keeps in the box. Pass a
-        forward model's own window when it applies one to the map, and ones
-        for the whole box.
+        inside. Default: the model's own window when it applies one to the
+        map (``model.support``, under ``rotate_mode="exact"``), else the
+        inscribed soft sphere (`spherical_mask`), the region every pose of a
+        real-space rotation keeps in the box. Pass ones for the whole box.
     distributed : bool
         Solve as one rank of the default process group, which must be
         initialised: every rank constructs a solver with the same arguments,
@@ -230,7 +230,12 @@ class ConvergedSolver:
                 f"ssnr has {len(self.ssnr)} shells; a {self.n}^3 volume has {self.n // 2 + 1}"
             )
         self._kmask_half = model._kmask_half()
-        support = spherical_mask(self.n) if probe_support is None else probe_support
+        window = getattr(model, "support", None)
+        support = probe_support
+        if support is None:
+            support = spherical_mask(self.n) if window is None else window
+        #: The window the model applies to the map, which the result is given in.
+        self.window = None if window is None else window.to(self.device, torch.float32)
         if tuple(support.shape) != (self.n,) * 3:
             raise ValueError(
                 f"probe_support has shape {tuple(support.shape)}; the map is {self.n}^3"
@@ -763,6 +768,8 @@ class ConvergedSolver:
             low_shell_curvature=low,
             ssnr=self.ssnr.tolist(),
         )
+        if self.window is not None:
+            V = V * self.window  # the map the forward model saw
         return SolveResult(
             volume=V, unfiltered=unfilter(V, self.ssnr), log=log, info=info
         )

@@ -385,7 +385,11 @@ The sum is the gradient of the whole batch's mean loss, so N devices take
 the same steps on the same particles as one device, up to floating-point
 rounding. Under `16-mixed`, the loss scaler's overflow check runs on the
 summed gradient, which is the same on every device, so all devices skip or
-take a step together. `--precision`
+take a step together. A device whose process dies (an out-of-memory kill,
+a failure while loading its share) stops the run within seconds, with an
+error naming the device and how its process ended; the other devices would
+otherwise wait for it until the group's 60-minute communication timeout.
+`--precision`
 sets the training precision (`16-mixed` by default, also `bf16-mixed` or
 `32`, forced to `32` on CPU); `--num_workers` sets dataloader worker processes. It defaults
 to `0`: the particle images are already resident in memory, so workers add

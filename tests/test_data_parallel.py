@@ -24,8 +24,17 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from _data_parallel_helpers import RecordingReconstructor, make_model, make_problem
+import time
+
+from _data_parallel_helpers import (
+    DiesWhenUnpickled,
+    RecordingReconstructor,
+    dies_on_rank_1,
+    make_model,
+    make_problem,
+)
 from specter.ghostbuster import fit
+from specter.ghostbuster._training import run_on_ranks
 from specter.ghostbuster._converge import solve_on_devices
 from specter.ghostbuster._run_helpers import torch_devices
 from specter.pipelines._reconstruct import _half_devices
@@ -138,3 +147,20 @@ def test_torch_devices() -> None:
         torch_devices([0, "cpu"])  # type: ignore[list-item]
     with pytest.raises(ValueError, match="only string"):
         torch_devices("cuda")
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (("ok", DiesWhenUnpickled()), "died before joining"),
+        (("mid",), "died .exit code 3. while the others were running"),
+    ],
+    ids=["before-joining", "while-running"],
+)
+def test_a_dead_rank_fails_the_run_at_once(args: tuple, message: str) -> None:
+    """Not at the group's timeout (60 minutes): a rank that dies before joining
+    is noticed while rank 0 waits for it, one that dies later by the watchdog."""
+    start = time.monotonic()
+    with pytest.raises(RuntimeError, match=f"rank 1 \\(cpu\\) {message}"):
+        run_on_ranks(dies_on_rank_1, CPU3[:2], args)
+    assert time.monotonic() - start < 60

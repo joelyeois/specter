@@ -102,3 +102,26 @@ def make_model(
         ),
         **kwargs,
     )
+
+
+class DiesWhenUnpickled:
+    """Kills the process that unpickles it: a rank that dies before joining."""
+
+    def __reduce__(self) -> tuple[Any, tuple[int]]:
+        import os
+
+        return (os._exit, (5,))
+
+
+def dies_on_rank_1(
+    rank: int, devices: list[torch.device], when: str, *rest: Any
+) -> str:
+    """Rank 1 dies after one collective (``when="mid"``); rank 0 waits in the next."""
+    import os
+
+    t = torch.ones(4, device=devices[rank])
+    dist.all_reduce(t)
+    if rank == 1 and when == "mid":
+        os._exit(3)  # a hard death, as an out-of-memory kill would be
+    dist.all_reduce(t)
+    return f"{float(t.sum())}"

@@ -37,6 +37,9 @@ from __future__ import annotations
 import contextlib
 import copy
 import datetime
+import signal
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Sequence, TypeVar
 
@@ -68,6 +71,12 @@ _T = TypeVar("_T")
 #: the group fails. Rank 0 writes each epoch's volume and figures while the
 #: other ranks wait at the next step's all-reduce, so this bounds that too.
 _GROUP_TIMEOUT = datetime.timedelta(minutes=60)
+
+#: How often rank 0 checks that the other ranks are alive, in seconds.
+_LIVENESS_POLL = 1.0
+
+#: Store key a spawned rank sets just before it joins the group.
+_JOINING_KEY = "specter/joining/{rank}"
 
 
 @dataclass
@@ -481,11 +490,106 @@ def _worker_rank(
     store = dist.TCPStore(
         "127.0.0.1", port, len(devices), is_master=False, timeout=_GROUP_TIMEOUT
     )
+    # Rank 0 waits for this, checking meanwhile that the rank is alive.
+    store.set(_JOINING_KEY.format(rank=rank), "1")
     _join_group(rank, devices, store)
     try:
         target(rank, devices, *args)
     finally:
         dist.destroy_process_group()
+
+
+class _RankFailed(RuntimeError):
+    """A spawned rank died before or while the group ran; raised by rank 0."""
+
+
+def _exit_description(code: int) -> str:
+    """``exit code 3``, or ``killed by SIGKILL`` for a death by signal."""
+    if code < 0:
+        try:
+            return f"killed by {signal.Signals(-code).name}"
+        except ValueError:
+            return f"killed by signal {-code}"
+    return f"exit code {code}"
+
+
+def _failed_rank(workers: Sequence[Any]) -> tuple[int, int] | None:
+    """The first spawned rank that has exited with an error, and its code."""
+    for rank, worker in enumerate(workers, start=1):
+        if worker.exitcode not in (None, 0):
+            return rank, worker.exitcode
+    return None
+
+
+def _await_joining(
+    store: dist.TCPStore, workers: Sequence[Any], devices: list[torch.device]
+) -> None:
+    """
+    Wait until every spawned rank is about to join, failing at once if one dies.
+
+    Without this, rank 0 would wait in the group's rendezvous for a rank that
+    died first (an unpicklable argument, an import error, a device already
+    full), and fail only when `_GROUP_TIMEOUT` ran out.
+    """
+    pending = set(range(1, len(devices)))
+    while pending:
+        for rank in list(pending):
+            # Non-blocking; present at runtime, absent from torch's stubs.
+            if store.check([_JOINING_KEY.format(rank=rank)]):  # type: ignore[attr-defined]
+                pending.discard(rank)
+        failed = _failed_rank(workers)
+        if failed is not None and failed[0] in pending:
+            rank, code = failed
+            raise _RankFailed(
+                f"rank {rank} ({devices[rank]}) died before joining the process "
+                f"group ({_exit_description(code)}); see its output above."
+            )
+        if pending:
+            time.sleep(_LIVENESS_POLL / 10)
+
+
+def _abort_group() -> None:
+    """
+    Shut down the default group's communicators, so that a collective waiting
+    on a rank that has died returns with an error instead of waiting out
+    `_GROUP_TIMEOUT`.
+
+    NCCL does not notice a dead peer: the collective spins on the device
+    until the group's timeout. Gloo does notice, from the closed connection,
+    and needs nothing.
+    """
+    if not dist.is_initialized():
+        return
+    group = dist.distributed_c10d._get_default_group()
+    try:
+        backend = group._get_backend(torch.device("cuda"))
+    except RuntimeError:
+        return  # no NCCL backend: gloo
+    shutdown = getattr(backend, "abort", None) or getattr(backend, "_shutdown", None)
+    if shutdown is not None:
+        shutdown()
+
+
+class _Watchdog(threading.Thread):
+    """Rank 0's watch on the spawned ranks while the group runs."""
+
+    def __init__(self, workers: Sequence[Any]) -> None:
+        super().__init__(daemon=True, name="specter-rank-watchdog")
+        self.workers = workers
+        self.failed: tuple[int, int] | None = None
+        self._stop_event = threading.Event()
+
+    def run(self) -> None:
+        while not self._stop_event.wait(_LIVENESS_POLL):
+            failed = _failed_rank(self.workers)
+            if failed is not None:
+                self.failed = failed
+                _abort_group()
+                return
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self.join()
 
 
 def run_on_ranks(
@@ -504,6 +608,12 @@ def run_on_ranks(
     gold-standard run) never share one. The group's store is bound to a
     port the operating system picks before any rank is spawned, so two
     groups started at the same moment cannot race for one port.
+
+    A rank that dies fails the call within seconds rather than at the
+    group's timeout: one that dies before joining is noticed while rank 0
+    waits for the others to join, and one that dies later by a watchdog
+    thread, which shuts the group's communicators down so that rank 0's
+    pending collective returns.
 
     Parameters
     ----------
@@ -525,7 +635,8 @@ def run_on_ranks(
     Raises
     ------
     RuntimeError
-        If any spawned rank exits with a nonzero code.
+        If any spawned rank dies or exits with a nonzero code, naming the
+        first that did.
     """
     import torch.multiprocessing as mp
 
@@ -547,25 +658,42 @@ def run_on_ranks(
     ]
     for worker in workers:
         worker.start()
+    watchdog = _Watchdog(workers)
     finished = False
     try:
+        _await_joining(store, workers, devices)
+        watchdog.start()
         _join_group(0, devices, store)
         try:
             result = target(0, devices, *args, **(rank0_kwargs or {}))
         finally:
             dist.destroy_process_group()
         finished = True
+    except Exception as error:
+        dead = watchdog.failed or _failed_rank(workers)
+        if dead is not None and not isinstance(error, _RankFailed):
+            rank, code = dead
+            raise _RankFailed(
+                f"rank {rank} ({devices[rank]}) died ({_exit_description(code)}) "
+                "while the others were running; see its output above."
+            ) from error
+        raise
     finally:
+        if watchdog.is_alive():
+            watchdog.stop()
         for worker in workers:
             if not finished:
                 # A rank stuck in a collective rank 0 will never join.
                 worker.terminate()
             worker.join()
-    failed = [w.exitcode for w in workers if w.exitcode != 0]
-    if failed:
-        raise RuntimeError(
-            f"{len(failed)} of {len(workers)} worker rank(s) exited with "
-            f"code(s) {failed}; see their output above."
+    # A rank that died while rank 0's target ran to the end still fails the
+    # call: a collective in flight when it died can complete on stale data.
+    dead = watchdog.failed or _failed_rank(workers)
+    if dead is not None:
+        rank, code = dead
+        raise _RankFailed(
+            f"rank {rank} ({devices[rank]}) died ({_exit_description(code)}) "
+            "while the others were running; see its output above."
         )
     return result
 

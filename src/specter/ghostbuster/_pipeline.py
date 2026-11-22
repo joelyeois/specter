@@ -582,7 +582,8 @@ class Ghostbuster(_GhostbusterBase):
         -------
         Reconstructor
             The trained model. Access the volume via ``model.V.detach()``, times
-            ``model.support`` under ``rotate_mode="exact"``, as the written maps are.
+            ``model.support`` under ``rotate_mode="exact"`` or ``"surface"``, as the
+            written maps are.
         """
         console.print(
             f"Starting reconstruction: {len(self._images)} particles  |  "

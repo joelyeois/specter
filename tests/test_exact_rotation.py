@@ -478,10 +478,12 @@ def _corner_content(n: int) -> torch.Tensor:
     return noise * (exact_rotation_support(n) == 0)
 
 
-def test_a_reconstruction_under_exact_rotation_sees_only_the_windowed_map() -> None:
-    """Corner density, which an exact rotation would wrap, neither predicts nor learns."""
+@pytest.mark.parametrize("rotate_mode", ["exact", "surface"])
+def test_a_reconstruction_sees_only_the_windowed_map(rotate_mode: str) -> None:
+    """Corner density, which both modes would carry into the image, neither predicts nor learns."""
     model = _reconstructor(
-        propagation=Propagation(scattering_model="rytov", rotate_mode="exact"), lr=0.1
+        propagation=Propagation(scattering_model="rytov", rotate_mode=rotate_mode),
+        lr=0.1,
     )
     assert model.support is not None
     idx = torch.arange(2)
@@ -500,8 +502,8 @@ def test_a_reconstruction_under_exact_rotation_sees_only_the_windowed_map() -> N
     assert "support" not in model.state_dict()  # rebuilt from the box size
 
 
-@pytest.mark.parametrize("rotate_mode", ["real", "surface"])
-def test_other_pose_modes_are_not_windowed(rotate_mode: str) -> None:
+@pytest.mark.parametrize("rotate_mode", ["real", "fourier"])
+def test_interpolating_pose_modes_are_not_windowed(rotate_mode: str) -> None:
     model = _reconstructor(
         propagation=Propagation(scattering_model="rytov", rotate_mode=rotate_mode)
     )

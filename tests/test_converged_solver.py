@@ -196,9 +196,10 @@ def test_linear_solve_reaches_the_dense_minimum(symmetry: str | None) -> None:
     With C4 on an even box the exact point-group average is not idempotent
     (a quarter turn does not map the grid onto itself), as it is not for a
     box-filling capsid, so the problem is the one the solver poses: minimise
-    over U with the map S(U).
+    over U with the map S(U). Trilinear rotation, so the map is not windowed
+    (the windowed solve is checked below) and the dense reference needs none.
     """
-    model, images, truth = _problem("ctf", symmetry=symmetry)
+    model, images, truth = _problem("ctf", symmetry=symmetry, rotate_mode="real")
     solver = ConvergedSolver(
         model, images, np.linspace(4.0, 0.05, N // 2 + 1), line_search_fraction=1.0
     )
@@ -263,8 +264,9 @@ def test_rytov_solve_lowers_the_objective(symmetry: str | None) -> None:
 def test_curvature_probes_stay_inside_the_support() -> None:
     """A forward model that windows the map before projecting it cannot see a
     probe's energy outside the window, so whole-box probes read its curvature
-    low; probes drawn inside the window read what an unwindowed model does."""
-    model, images, truth = _problem("ctf")
+    low; probes drawn inside the window read what an unwindowed model does.
+    The model rotates trilinearly, so it brings no window of its own."""
+    model, images, truth = _problem("ctf", rotate_mode="real")
     r = torch.arange(N, dtype=torch.float32) - N // 2
     radius = torch.sqrt(
         r[:, None, None] ** 2 + r[None, :, None] ** 2 + r[None, None] ** 2
@@ -296,11 +298,12 @@ def test_curvature_probes_stay_inside_the_support() -> None:
         ConvergedSolver(model, images, ssnr, probe_support=torch.ones(N, N, N - 1))
 
 
-def test_an_exact_rotation_model_is_solved_inside_its_window() -> None:
-    """Under rotate_mode="exact" the probes are drawn in the model's window, and
-    the map returned is the windowed one the forward saw."""
+@pytest.mark.parametrize("rotate_mode", ["exact", "surface"])
+def test_a_windowed_model_is_solved_inside_its_window(rotate_mode: str) -> None:
+    """Under rotate_mode="exact" or "surface" the probes are drawn in the
+    model's window, and the map returned is the windowed one the forward saw."""
     n = 16
-    model, images, truth = _problem("rytov", n=n, rotate_mode="exact")
+    model, images, truth = _problem("rytov", n=n, rotate_mode=rotate_mode)
     window = exact_rotation_support(n)
     assert torch.equal(model.support, window)
     ssnr = np.linspace(4.0, 0.05, n // 2 + 1)

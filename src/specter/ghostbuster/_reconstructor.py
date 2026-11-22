@@ -253,10 +253,17 @@ class Reconstructor(_BaseReconstructor):
 
     def _register_support(self) -> None:
         """
-        The window `forward` applies to the map before an exact rotation; None otherwise.
+        The window `forward` applies to the map under ``"exact"`` or ``"surface"``; None otherwise.
 
         An exact rotation is periodic: density the fit puts in the box's
-        corners re-enters the posed volume at the opposite face. Windowed,
+        corners re-enters the posed volume at the opposite face. The surface
+        sampling brings the same density into the image: what projects past
+        the image's edge returns at the opposite one, since the image is
+        sampled on the box's own frequency grid, and nothing is clipped along
+        the beam. For corner density the two give the same image (a blob at
+        0.78 of half a 64 box, turned 45 degrees either way, lands on the same
+        pixel with the same integrated phase), and a reconstruction through
+        either is the same to four decimals windowed or not. Windowed,
         the map is held inside its inscribed sphere, which a particle
         reconstruction occupies anyway. On EMPIAR-10551 (box 432, 5,000
         particles a half, Rytov) the unwindowed fit put 4.1% of its energy
@@ -268,7 +275,7 @@ class Reconstructor(_BaseReconstructor):
         the box size.
         """
         support = None
-        if self.propagation.rotate_mode == "exact":
+        if self.propagation.rotate_mode in ("exact", "surface"):
             n = int(self.V.shape[-1])
             support = exact_rotation_support(n).to(self.V.device)
             self._warn_beyond_support(n)

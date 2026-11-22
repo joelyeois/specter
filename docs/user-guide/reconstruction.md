@@ -437,7 +437,7 @@ so `--lr_R` and `--lr_T` refine poses through whichever the model takes.
 explicitly. See
 [Sampling the Ewald surface](../concepts/conventions.md#sampling-the-ewald-surface).
 
-Under `exact` the map is multiplied by a soft sphere before every rotation:
+Under `exact` and `surface` the map is multiplied by a soft sphere before every pose is applied:
 1 out to 0.925 of half the box, then a cosine to 0 at 0.98 of it. An exact
 rotation is periodic, so density placed beyond the box's inscribed sphere
 re-enters the posed volume at the opposite face. Without the window the fit
@@ -451,9 +451,15 @@ against 1.871 Å. The written maps are the windowed ones, which the forward
 model saw. The converged solve draws its curvature probes inside the same
 window, so the prior's weight is measured where the data constrain the map.
 A run warns when `--fsc_mask` places more than 1% of its weight beyond the
-window's flat region, since the particle may then not fit the box. `surface`,
-`real` and `fourier` are not windowed: the first never forms a posed volume,
-and the other two clip what leaves the box instead of wrapping it.
+window's flat region, since the particle may then not fit the box.
+
+`surface` never forms the posed volume, but it brings corner density into the
+image in the same way. The image is sampled on the box's own frequency grid,
+so density projected past one edge returns at the opposite edge, and nothing
+is clipped along the beam. For corner density the two modes give the same
+image, and a reconstruction through either, windowed or not, is the same to
+four decimals, so the window applies to both. `real` and `fourier` are not
+windowed: they clip what leaves the box instead of wrapping it.
 
 ## Symmetry
 

@@ -158,7 +158,7 @@ class ConvergedSolver:
     probe_support : torch.Tensor, optional
         Real-space weight ``(n, n, n)`` the curvature probes are drawn
         inside. Default: the model's own window when it applies one to the
-        map (``model.support``, under ``rotate_mode="exact"``), else the
+        map (``model.support``, under ``rotate_mode="exact"`` or ``"surface"``), else the
         inscribed soft sphere (`spherical_mask`), the region every pose of a
         real-space rotation keeps in the box. Pass ones for the whole box.
     distributed : bool

@@ -79,6 +79,18 @@ class BatchPrediction:
         """
         return CACHE_GROWTH * self.predicted_peak(batchsize) > safety * self.free
 
+    def steady_batchsize(self, safety: float = SAFETY) -> int:
+        """
+        The largest batch the cache cannot overfill (`cache_may_overfill`),
+        at most `batchsize`; 0 when even one particle can.
+
+        A training loop that takes this batch never needs to empty the cache.
+        """
+        if self.per_particle <= 0:
+            return self.batchsize
+        room = safety * self.free / CACHE_GROWTH - self.fixed
+        return max(0, min(self.batchsize, int(room // self.per_particle)))
+
 
 def _process_memory(device: torch.device) -> Callable[[], int] | None:
     """

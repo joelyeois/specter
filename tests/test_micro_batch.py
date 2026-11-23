@@ -241,3 +241,19 @@ def test_auto_predicts_the_chunk_from_the_free_memory(
     assert split._auto_micro_batchsize == chunk
     assert split._empty_cache_each_step is empties
     torch.testing.assert_close(split.V, whole.V, rtol=1e-4, atol=1e-6)
+
+
+def test_the_steady_chunk_leaves_room_for_the_cache_to_grow() -> None:
+    """The largest chunk whose peak, grown by CACHE_GROWTH, fits the budget:
+    a training loop that takes it never needs to empty the cache."""
+    from specter.ghostbuster._memory import CACHE_GROWTH, SAFETY, BatchPrediction
+
+    p = BatchPrediction(batchsize=84, fixed=1.0, per_particle=1.0, free=100.0, peaks={})
+    steady = p.steady_batchsize()
+    assert steady == int((SAFETY * 100.0 / CACHE_GROWTH - 1.0) // 1.0) == 55
+    assert not p.cache_may_overfill(steady) and p.cache_may_overfill(steady + 1)
+    # never more than the batch that fits once, and none when one particle overfills
+    assert BatchPrediction(10, 1.0, 1.0, 100.0, {}).steady_batchsize() == 10
+    assert BatchPrediction(1, 1.0, 50.0, 60.0, {}).steady_batchsize() == 0
+    # the CPU's prediction (no device to probe) keeps the whole batch
+    assert BatchPrediction(32, 0.0, 0.0, 0.0, {}).steady_batchsize() == 32

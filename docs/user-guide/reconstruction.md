@@ -413,10 +413,15 @@ measured peak device memory of small chunks, in the way `solver_batchsize`
 does, and halves it if PyTorch then runs out of memory, redoing that step.
 Over many steps PyTorch's cache of freed memory can grow to about 1.4 times
 the peak of a single step, which would leave no room for cuFINUFFT's own
-allocations. When the predicted chunk is close enough to the free memory
-for that growth to exceed it, the cache is therefore emptied before each
-step, which costs 5 to 8 percent of the step time. On the CPU the chunk is
-the whole batch. An integer fixes the chunk.
+allocations. `auto` therefore takes the largest chunk whose peak, grown by
+that factor, still fits the free memory, and the cache is never emptied.
+This is faster than emptying the cache before every step with the largest
+chunk that fits once: at a 300-pixel box on an L40, a step took 1.10 to
+1.14 times less time under `multislice` (11 particles a chunk against 17)
+and 1.18 to 1.29 times less under trilinear `rytov` (74 against 113 or 86),
+with a peak 7 to 13 GiB lower. The cache is emptied before each step only
+when not even one particle leaves room for the growth. On the CPU the chunk
+is the whole batch. An integer fixes the chunk.
 
 Normalized particle stacks are converted to counts in bounded blocks,
 reusing their private storage. The conversion arithmetic and training

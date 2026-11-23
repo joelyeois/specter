@@ -717,23 +717,35 @@ class Reconstructor(_BaseReconstructor):
         The chunk size reached is kept for the steps that follow. The halving
         is a fallback for PyTorch's allocation failures only: a failed
         allocation inside cuFINUFFT leaves the CUDA context unusable, and the
-        redone batch fails too. So when the chunk is close enough to the
-        device's memory that PyTorch's cache, grown over many steps, could
-        crowd cuFINUFFT out (`BatchPrediction.cache_may_overfill`), and after
-        any halving, the cache is emptied before each step. That costs 5-8%
-        of a step at a 320 box, and is skipped when the chunk fits easily.
-        The NUFFT plans are kept: a step reuses the same few, and rebuilding
-        them doubled the step's time.
+        redone batch fails too. PyTorch's cache, grown over many steps, must
+        therefore never crowd cuFINUFFT out, and the chunk taken is the
+        largest whose peak, grown by `CACHE_GROWTH`, still fits
+        (`BatchPrediction.steady_batchsize`), so the cache is never emptied.
+        Emptying it before every step instead, with the largest chunk that
+        fits once, was slower and held more memory: at a 300 box on an L40
+        the steady chunk took 1.10-1.14x less time per step under
+        multislice (11 particles against 17) and 1.18-1.29x under trilinear
+        Rytov (74 against 113 or 86), with 7-13 GiB lower peaks; a smaller
+        chunk runs more efficiently near the memory limit than a larger one
+        that must refill the cache. The cache is emptied before each step
+        only when even one particle could overfill it, and after any
+        halving. The NUFFT plans are kept: a step reuses the same few, and
+        rebuilding them doubled the step's time.
         """
         n = len(batch[1])
         while True:
             if self.micro_batchsize == "auto":
                 if self._auto_micro_batchsize is None:
                     prediction = self._predict_micro_batchsize(batch, batch_idx)
-                    self._auto_micro_batchsize = prediction.batchsize
-                    self._empty_cache_each_step = prediction.cache_may_overfill(
-                        min(prediction.batchsize, n)
-                    )
+                    steady = prediction.steady_batchsize()
+                    if steady >= 1:
+                        self._auto_micro_batchsize = steady
+                        self._empty_cache_each_step = False
+                    else:
+                        self._auto_micro_batchsize = prediction.batchsize
+                        self._empty_cache_each_step = prediction.cache_may_overfill(
+                            min(prediction.batchsize, n)
+                        )
                 size = min(self._auto_micro_batchsize, n)
                 if self._empty_cache_each_step:
                     torch.cuda.empty_cache()

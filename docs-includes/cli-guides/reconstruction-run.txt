@@ -25,4 +25,4 @@ Loading particle stack from particles.mrcs ...
   500 images  |  box 128×128  |  dtype torch.float32
   starting volume: reconstructions/J001/volume_B_adam.mrc
 ───────────────────────────────────── Done ─────────────────────────────────────
-  reconstructions/J001  |  1m 40s
+  reconstructions/J001  |  1m 31s

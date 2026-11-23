@@ -1,2 +1,2 @@
-half-map FSC = 0.143:            4.029 Å
-full map against the model, 0.5: 4.054 Å
+half-map FSC = 0.143:            >Nyquist
+full map against the model, 0.5: 4.044 Å

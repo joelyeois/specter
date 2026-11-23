@@ -628,3 +628,21 @@ def test_choose_probe_takes_the_best_when_the_data_decide():
     assert choice.distinguished
     assert choice.p_fallback_not_worse < 0.05
     assert choice.scores[1] < choice.scores[0]
+
+
+def test_matched_toml_says_its_motion_variance_is_for_the_matched_ice(
+    tmp_path: Path,
+) -> None:
+    """A config switched to random ice must be told the exposure filter came with gd ice."""
+    from specter.match import MatchReport, PoseAlignmentResult
+    from specter.pipelines._match import _write_matched_toml
+
+    report = MatchReport(pose=PoseAlignmentResult(0.8, 0.1, 1.0, 10.0))
+    path = _write_matched_toml(
+        str(tmp_path), {"ice_model": "gd", "ice_motion_variance": 0.38}, report, True
+    )
+    text = Path(path).read_text()
+    assert "ice_motion_variance is calibrated for ice_model='gd'" in text
+    assert tomllib.loads(text)["specimen"]["ice_motion_variance"] == 0.38
+    path = _write_matched_toml(str(tmp_path), {"ice_model": "gd"}, report, True)
+    assert "calibrated for" not in Path(path).read_text()

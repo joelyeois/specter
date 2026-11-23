@@ -1098,6 +1098,14 @@ def _write_matched_toml(
         + ".\nRun with: specter simulate particles --config matched.toml --n_particles <N>\n"
         + "\n".join(f"{d.name}: {d.value} ({d.source})" for d in report.derived)
     )
+    if base.get("ice_motion_variance") is not None:
+        # The exposure filter's decorrelation shape was measured on structured
+        # ice; on random ice it imposes a water ring (+11 % at 3.9 A on a 70S
+        # stack), so a config switched to ice_model="random" must not keep it.
+        header += (
+            f"\nice_motion_variance is calibrated for ice_model={base.get('ice_model')!r}; "
+            "with --ice_model random, pass --ice_motion_variance 0 for unmoving random ice"
+        )
     path = os.path.join(out_dir, "matched.toml")
     with open(path, "w") as fh:
         fh.write(dumps_toml(tables, header=header))

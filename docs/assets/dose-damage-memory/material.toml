@@ -1,6 +1,6 @@
 [inputs]
-metadata_path = "/scratch/loh/joel/empiar-11377/claude_match/j446_2000_passthrough_512.cs"
-images_path = "/scratch/loh/joel/empiar-11377/claude_match/exp_2000_j446_512.mrcs"
+metadata_path = "/scratch/loh/joel/specter-docs-data/empiar-11377_j446_2000/j446_2000_passthrough_512.cs"
+images_path = "/scratch/loh/joel/specter-docs-data/empiar-11377_j446_2000/exp_2000_j446_512.mrcs"
 pdb_source = "/mnt/cbis/home/e0788253/.cache/specter/pdb/8b0x-assembly1.cif"
 assembly = false
 

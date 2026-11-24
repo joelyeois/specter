@@ -25,11 +25,11 @@ def main():
     )
     p.add_argument(
         "--cs-512",
-        default="/scratch/loh/joel/empiar-11377/claude_match/j446_2000_passthrough_512.cs",
+        default="/scratch/loh/joel/specter-docs-data/empiar-11377_j446_2000/j446_2000_passthrough_512.cs",
     )
     p.add_argument(
         "--stack-512",
-        default="/scratch/loh/joel/empiar-11377/claude_match/exp_2000_j446_512.mrcs",
+        default="/scratch/loh/joel/specter-docs-data/empiar-11377_j446_2000/exp_2000_j446_512.mrcs",
     )
     a = p.parse_args()
     root = Path(a.output)

@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "path": "/scratch/loh/joel/empiar-11377/claude_match/j446_2000_passthrough_512.cs",
+    "path": "/scratch/loh/joel/specter-docs-data/empiar-11377_j446_2000/j446_2000_passthrough_512.cs",
     "sha256": "f8189b7945b77abbf39c99b14aea3316156c0a6dbf90cb4a8a5b1a3789d21cf6"
   },
   "pdb": {
@@ -12,7 +12,7 @@
     "sha256": "7d45bb2dbacba4dc90a9bec5208b1d06777b80fd13fd5d0ecb73f26a57d8cb05"
   },
   "images": {
-    "path": "/scratch/loh/joel/empiar-11377/claude_match/exp_2000_j446_512.mrcs",
+    "path": "/scratch/loh/joel/specter-docs-data/empiar-11377_j446_2000/exp_2000_j446_512.mrcs",
     "shape_used": [
       200,
       512,

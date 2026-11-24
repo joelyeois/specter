@@ -185,6 +185,7 @@ def potential_occupancy(
     voxel_size: float,
     sigma_angstrom: float = WATER_COARSE_GRAIN_SIGMA_ANGSTROM,
     full_potential: float | torch.Tensor = FULL_OCCUPANCY_POTENTIAL_V,
+    clamp: bool = True,
 ) -> torch.Tensor:
     """
     Fraction of each voxel already filled, read off the potential.
@@ -213,11 +214,17 @@ def potential_occupancy(
         the clamp, which is why this is a parameter rather than something
         to divide out of the result: dividing afterwards would clamp
         against the wrong reference and cap occupancy far below 1.
+    clamp : bool, optional
+        Clamp to [0, 1]. Default True. Unclamped, the field is linear in `V`,
+        so the fields of several molecules sum to the field of their sum and
+        can be clamped once afterwards, which is how `Specimen` places a
+        template's occupancy with each of its copies.
 
     Returns
     -------
     torch.Tensor
-        Occupancy in [0, 1], same shape as `V`.
+        Occupancy in [0, 1], same shape as `V`; unbounded when `clamp` is
+        False.
 
     Notes
     -----
@@ -249,7 +256,8 @@ def potential_occupancy(
     sigma_vox = sigma_angstrom / voxel_size
     if sigma_vox >= 0.25:
         field = gaussian_blur3d(field, sigma_vox)
-    return (field / full_potential).clamp_(0.0, 1.0)
+    field = field / full_potential
+    return field.clamp_(0.0, 1.0) if clamp else field
 
 
 def potential_occupancy_slabs(

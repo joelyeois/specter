@@ -821,13 +821,52 @@ def inelastic_absorption_potential(
     >>> round(float(v_ab.mean()), 4)
     0.194
     """
-    v_solvent = absorption_potential(mfp_solvent_A, voltage_kv)
     if mfp_specimen_A is None:
         # No occupancy needed: the field is uniform, so the blur is skipped
         # entirely rather than computed and then ignored.
-        return torch.full_like(v, v_solvent)
-    v_specimen = absorption_potential(mfp_specimen_A, voltage_kv)
+        return torch.full_like(v, absorption_potential(mfp_solvent_A, voltage_kv))
     occupancy = _occupancy_chunked(v, voxel_size, full_potential, max_voxels_per_slab)
+    return absorption_from_occupancy(
+        occupancy, voltage_kv, mfp_solvent_A, mfp_specimen_A
+    )
+
+
+def absorption_from_occupancy(
+    occupancy: torch.Tensor,
+    voltage_kv: float,
+    mfp_solvent_A: float = INELASTIC_MFP_ICE_A,
+    mfp_specimen_A: float | None = None,
+) -> torch.Tensor:
+    """
+    :func:`inelastic_absorption_potential` from an occupancy already in hand.
+
+    For a caller that holds the occupancy field
+    (:func:`~specter.potential.potential_occupancy`) and need not read it off
+    the potential again.
+
+    Parameters
+    ----------
+    occupancy : torch.Tensor
+        Material fraction in [0, 1], shape ``(..., Z, Y, X)``; overwritten
+        with the result when `mfp_specimen_A` is given.
+    voltage_kv : float
+        Accelerating voltage in kV.
+    mfp_solvent_A : float, optional
+        Inelastic mean free path of the embedding medium in Angstrom.
+        Default :data:`INELASTIC_MFP_ICE_A`.
+    mfp_specimen_A : float or None, optional
+        Inelastic mean free path of the specimen material in Angstrom. None
+        makes the field uniform at the solvent's value.
+
+    Returns
+    -------
+    torch.Tensor
+        Absorption potential in volts, same shape as `occupancy`.
+    """
+    v_solvent = absorption_potential(mfp_solvent_A, voltage_kv)
+    if mfp_specimen_A is None:
+        return torch.full_like(occupancy, v_solvent)
+    v_specimen = absorption_potential(mfp_specimen_A, voltage_kv)
     return occupancy.mul_(v_specimen - v_solvent).add_(v_solvent)
 
 

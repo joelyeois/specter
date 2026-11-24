@@ -28,6 +28,7 @@ from ..ice import IceBank, RandomIcemaker
 from ..ice._blend import IceSlabBlender
 from ..potential import (
     FULL_OCCUPANCY_POTENTIAL_V,
+    absorption_from_occupancy,
     aperture_mfp_ice,
     aperture_mfp_protein,
     apply_dose_damage,
@@ -330,6 +331,47 @@ def mfp_absorption_field(
             else removal_mfps.removal("specimen")
         ),
         full_potential=full_potential,
+    )
+
+
+def mfp_absorption_from_occupancy(
+    occupancy: torch.Tensor,
+    removal_mfps: RemovalMFPs,
+    has_solvent: bool,
+) -> torch.Tensor:
+    """
+    :func:`mfp_absorption_field` from the dry specimen's occupancy, in place.
+
+    For `Specimen`, which places a template's occupancy with each copy of it
+    rather than reading it off every image's volume.
+
+    Parameters
+    ----------
+    occupancy : torch.Tensor
+        Occupancy of the dry specimen in [0, 1], ``(..., Z, Y, X)``;
+        overwritten.
+    removal_mfps : RemovalMFPs
+        The resolved mean free paths.
+    has_solvent : bool
+        Whether solvent surrounds the specimen.
+
+    Returns
+    -------
+    torch.Tensor
+        Absorption potential in volts, `occupancy` itself unless the field is
+        uniform.
+    """
+    return absorption_from_occupancy(
+        occupancy,
+        removal_mfps.voltage,
+        mfp_solvent_A=(
+            removal_mfps.removal("solvent") if has_solvent else float("inf")
+        ),
+        mfp_specimen_A=(
+            None
+            if removal_mfps.inelastic_specimen is None
+            else removal_mfps.removal("specimen")
+        ),
     )
 
 

@@ -11,8 +11,9 @@ it. The building is :mod:`specter.imaging._stages`; this module only orders it.
 from __future__ import annotations
 
 import contextlib
+import math
 from dataclasses import dataclass, field, replace
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import roma
 import torch
@@ -21,7 +22,12 @@ from .. import rotations
 from ..aberrations import defocus_midplane_shift
 from ..arrays import compute_nz, pad_volume, padded_nxy
 from ..cpu_threads import limited_cpu_threads
-from ..crowding import CrowdWithDuplicates
+from ..crowding import (
+    CrowdWithDuplicates,
+    rotation_safe_crop,
+    support_radius,
+    zero_outside_sphere_,
+)
 from ..ice import IceBank, RandomIcemaker, resolve_icemaker
 from ..options import ConvBackend, PotentialMethod, RotateMode, ScatteringFactors
 from ..pdb import DEFAULT_PDB_CACHE_DIR, PDB
@@ -31,6 +37,7 @@ from ..potential import (
     aperture_lowpass,
     apply_dose_damage,
     molecular_mass_from_atoms,
+    potential_occupancy,
     template_occupancy_reference,
 )
 from ..random_seed import derive_seeds
@@ -51,6 +58,15 @@ def _resolve(p: Propagation, surface: bool) -> Propagation:
     model (`Propagation.rotation`), ``"exact"`` when `surface` is False.
     """
     return replace(p, rotate_mode=p.rotation(surface=surface))
+
+
+#: How far past the template's support sphere its filtered fields are kept,
+#: in Angstrom (:meth:`Specimen._template_fields`). The dose envelope is a
+#: stretched exponential in |k|, so its real-space kernel has power-law tails:
+#: on a sharp-edged cube at 2 A voxels and 40 e-/A^2, cutting at 10 A left
+#: 1.7e-3 of the peak in the image and 20 A left 5.5e-4. Smooth molecules at
+#: finer voxels leave less.
+_FIELD_MARGIN_ANGSTROM = 20.0
 
 
 @dataclass(frozen=True)
@@ -220,6 +236,13 @@ class Specimen:
     damaged: bool = False
     absorbs: bool = True
     atoms: Atoms | None = field(default=None, repr=False)
+
+    #: Filter the dose envelope and the occupancy once on the template and
+    #: pose the results with each image (:meth:`_posed_fields`), rather than
+    #: filtering every image's padded canvas. A class switch, not a field:
+    #: it changes only how the same volumes are computed, and False keeps the
+    #: per-image path for comparison.
+    pose_template_fields: ClassVar[bool] = True
 
     @classmethod
     def from_atoms(
@@ -634,54 +657,62 @@ class Specimen:
             else contextlib.nullcontext()
         )
         with cap:
-            if self.atoms is None:
-                R = roma.unitquat_to_rotmat(poses.quaternions.to(device))
-                T = rotations.translations_angstrom_to_torch(
-                    poses.shifts.to(device), nxy, self.voxel_size
-                )
-                V = rotator(template, rotations.build_affine_matrix(R, T))
-            else:
-                V = self._render_atoms(poses, device)
-            V = pad_volume(V, nxy, nz, thickness, p.pads(False), xy_pad_mode="constant")
-
-            if crowd is not None:
-                stages.crowd_into(
-                    V, crowd, derive_seeds(seed, poses.ids, stages.SEED_STAGE_CROWD)
-                )
-
-            v_ab = None
-            if rates is not None and rates.inelastic_specimen is not None:
-                with torch.no_grad():
-                    v_ab = stages.mfp_absorption_field(
-                        V,
-                        self.voxel_size,
-                        rates,
-                        has_solvent=self.icemaker is not None,
-                        full_potential=full(),
-                    )
-
-            free = None
-            if self.damaged:
+            if self._can_pose_fields(p, seed, exposure, doses):
                 assert exposure is not None and doses is not None
-                pre = exposure.pre_exposure
-                with torch.no_grad():
-                    if self.icemaker is not None:
-                        free = stages.free_fraction(V, self.voxel_size, full())
-                    envelope: dict[str, Any] = dict(
-                        weighted=exposure.weighted,
-                        voltage=voltage,
-                        n_frames=exposure.n_frames,
-                        frame_weights=exposure.weights,
-                        frame_weights_max_frequency=exposure.weights_max_frequency,
+                V, v_ab, free = self._posed_fields(
+                    poses, p, rotator, rates, exposure, doses, voltage, full(), seed
+                )
+            else:
+                if self.atoms is None:
+                    R = roma.unitquat_to_rotmat(poses.quaternions.to(device))
+                    T = rotations.translations_angstrom_to_torch(
+                        poses.shifts.to(device), nxy, self.voxel_size
                     )
-                    pre_t = 0.0 if pre is None else pre.to(device)
-                    V = apply_dose_damage(
-                        V, self.voxel_size, doses.to(device), pre_t, **envelope
+                    V = rotator(template, rotations.build_affine_matrix(R, T))
+                else:
+                    V = self._render_atoms(poses, device)
+                V = pad_volume(
+                    V, nxy, nz, thickness, p.pads(False), xy_pad_mode="constant"
+                )
+
+                if crowd is not None:
+                    stages.crowd_into(
+                        V, crowd, derive_seeds(seed, poses.ids, stages.SEED_STAGE_CROWD)
                     )
-                    if free is not None:
-                        stages.damaged_free_fraction(
-                            free, self.voxel_size, doses, pre_t, **envelope
+
+                v_ab = None
+                if rates is not None and rates.inelastic_specimen is not None:
+                    with torch.no_grad():
+                        v_ab = stages.mfp_absorption_field(
+                            V,
+                            self.voxel_size,
+                            rates,
+                            has_solvent=self.icemaker is not None,
+                            full_potential=full(),
                         )
+
+                free = None
+                if self.damaged:
+                    assert exposure is not None and doses is not None
+                    pre = exposure.pre_exposure
+                    with torch.no_grad():
+                        if self.icemaker is not None:
+                            free = stages.free_fraction(V, self.voxel_size, full())
+                        envelope: dict[str, Any] = dict(
+                            weighted=exposure.weighted,
+                            voltage=voltage,
+                            n_frames=exposure.n_frames,
+                            frame_weights=exposure.weights,
+                            frame_weights_max_frequency=exposure.weights_max_frequency,
+                        )
+                        pre_t = 0.0 if pre is None else pre.to(device)
+                        V = apply_dose_damage(
+                            V, self.voxel_size, doses.to(device), pre_t, **envelope
+                        )
+                        if free is not None:
+                            stages.damaged_free_fraction(
+                                free, self.voxel_size, doses, pre_t, **envelope
+                            )
 
             if self.icemaker is not None:
                 assert self.ice is not None
@@ -706,6 +737,225 @@ class Specimen:
                         V, self.voxel_size, objective_aperture, voltage
                     )
         return V, v_ab
+
+    def _can_pose_fields(
+        self,
+        p: Propagation,
+        seed: int | None,
+        exposure: Exposure | None,
+        doses: torch.Tensor | None,
+    ) -> bool:
+        """
+        Whether :meth:`_posed_fields` gives what the per-image filters give.
+
+        It needs a damaged specimen rendered from a template and dressed with
+        ice or neighbours (the case it speeds up: otherwise the posed volume
+        is the template's own box and filtering it costs what filtering the
+        template does), the exact rotation, which commutes with the isotropic
+        filters it moves onto the template, one dose and pre-exposure for
+        every image, so the template is filtered once, and a seed when there
+        are neighbours, so that each field's copies are drawn at the same
+        places.
+        """
+        if not self.pose_template_fields or not self.damaged:
+            return False
+        if self.icemaker is None and self.crowding is None:
+            return False
+        if self.atoms is not None or p.rotate_mode != "exact":
+            return False
+        if self.crowding is not None and seed is None:
+            return False
+        if exposure is None or doses is None or len(doses) == 0:
+            return False
+        if not bool((doses == doses[0]).all()):
+            return False
+        pre = exposure.pre_exposure
+        if pre is not None:
+            pre_t = torch.as_tensor(pre).reshape(-1)
+            if not bool((pre_t == pre_t[0]).all()):
+                return False
+        return True
+
+    def _template_fields(
+        self,
+        exposure: Exposure,
+        dose: float,
+        pre: float,
+        voltage: float,
+        full: float,
+        need_occupancy: bool,
+        need_free: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        """
+        The damaged potential, occupancy and damaged occupancy of the template.
+
+        The occupancy is left unclamped, so the fields of a molecule and its
+        neighbours sum to the field of their sum before the one clamp each
+        image takes. The damaged occupancy is clamped before it is filtered,
+        as :func:`~specter.imaging._stages.damaged_free_fraction` clamps
+        before it filters; summing those differs from the per-image result
+        only where two molecules' clamped interiors overlap. Each field is
+        cut to the template's support sphere widened by
+        `_FIELD_MARGIN_ANGSTROM`, since the dose envelope's transform spreads
+        a trace of every field over the whole box and the crowd's crop
+        (:func:`~specter.crowding.rotation_safe_crop`) would then have nothing
+        to cut. Cached on the specimen for the run.
+        """
+        weights = exposure.weights
+        key = (
+            dose,
+            pre,
+            voltage,
+            full,
+            exposure.weighted,
+            exposure.n_frames,
+            None if weights is None else weights.data_ptr(),
+            exposure.weights_max_frequency,
+            self.potential.data_ptr(),
+            need_occupancy,
+            need_free,
+        )
+        cached = self.__dict__.get("_template_fields_cache")
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        envelope: dict[str, Any] = dict(
+            weighted=exposure.weighted,
+            voltage=voltage,
+            n_frames=exposure.n_frames,
+            frame_weights=weights,
+            frame_weights_max_frequency=exposure.weights_max_frequency,
+        )
+        template = self.potential
+        radius = support_radius(template)
+        margin = math.ceil(_FIELD_MARGIN_ANGSTROM / self.voxel_size)
+        with torch.no_grad():
+            damaged = apply_dose_damage(
+                template.clone(), self.voxel_size, dose, pre, **envelope
+            )
+            occupancy = damaged_occupancy = None
+            if need_occupancy or need_free:
+                occupancy = potential_occupancy(
+                    template, self.voxel_size, full_potential=full, clamp=False
+                )
+            if need_free:
+                assert occupancy is not None
+                damaged_occupancy = apply_dose_damage(
+                    occupancy.clamp(0.0, 1.0), self.voxel_size, dose, pre, **envelope
+                )
+            if not need_occupancy:
+                occupancy = None
+            if radius >= 0:
+                for f in (damaged, occupancy, damaged_occupancy):
+                    if f is not None:
+                        zero_outside_sphere_(f, radius + margin)
+        # Held cropped to that sphere: at an 800-voxel box the three whole
+        # fields are 6 GB beside canvases that already fill the device.
+        fields = tuple(
+            None if f is None else rotation_safe_crop(f).contiguous()
+            for f in (damaged, occupancy, damaged_occupancy)
+        )
+        del damaged, occupancy, damaged_occupancy
+        object.__setattr__(self, "_template_fields_cache", (key, fields))
+        return fields  # type: ignore[return-value]
+
+    def _uncropped(self, crop: torch.Tensor) -> torch.Tensor:
+        """A centred crop of the template's box, back in a zeroed box of its shape."""
+        shape = self.potential.shape
+        out = crop.new_zeros(shape)
+        starts = [(n - c) // 2 for n, c in zip(shape, crop.shape)]
+        out[
+            starts[0] : starts[0] + crop.shape[0],
+            starts[1] : starts[1] + crop.shape[1],
+            starts[2] : starts[2] + crop.shape[2],
+        ] = crop
+        return out
+
+    def _posed_fields(
+        self,
+        poses: Poses,
+        p: Propagation,
+        rotator: VolumeRotator,
+        rates: stages.RemovalMFPs | None,
+        exposure: Exposure,
+        doses: torch.Tensor,
+        voltage: float,
+        full: torch.Tensor,
+        seed: int | None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        """
+        The damaged volume, absorption field and damaged free fraction of
+        each image, from the template's fields posed with it.
+
+        What the per-image path filters on every image's padded canvas (the
+        dose envelope and the occupancy blur, each over the full ice depth)
+        is filtered once on the template by :meth:`_template_fields`. Each
+        field is then rotated to the image's pose and its neighbours are
+        stamped from the same field, drawn from the same seed and hence at the
+        same places. Both filters are isotropic and linear, so they commute
+        with the rotation and with the sum over copies, up to the
+        interpolation of the stamped copies and the overlaps noted in
+        :meth:`_template_fields`.
+        """
+        pre = exposure.pre_exposure
+        pre_f = 0.0 if pre is None else float(torch.as_tensor(pre).reshape(-1)[0])
+        absorbs = rates is not None and rates.inelastic_specimen is not None
+        damaged, occupancy, damaged_occupancy = self._template_fields(
+            exposure,
+            float(doses[0]),
+            pre_f,
+            voltage,
+            float(full.reshape(-1)[0]),
+            need_occupancy=absorbs,
+            need_free=self.icemaker is not None,
+        )
+        device = self.potential.device
+        R = roma.unitquat_to_rotmat(poses.quaternions.to(device))
+        T = rotations.translations_angstrom_to_torch(
+            poses.shifts.to(device), self.nxy, self.voxel_size
+        )
+        affine = rotations.build_affine_matrix(R, T)
+        thickness = None if self.ice is None else self.ice.thickness
+        crowd_seeds = (
+            None
+            if self.crowding is None
+            else derive_seeds(seed, poses.ids, stages.SEED_STAGE_CROWD)
+        )
+
+        def posed(crop: torch.Tensor) -> torch.Tensor:
+            # The whole box, not the crop, for both: the crowd reads its
+            # default lateral reach off the template's size, and the rotator
+            # was built for the template's shape.
+            field = self._uncropped(crop)
+            X = rotator(field, affine)
+            X = pad_volume(
+                X, self.nxy, self.nz, thickness, p.pads(False), xy_pad_mode="constant"
+            )
+            crowd = self._build_crowd(p.pads(False), template=field)
+            if crowd is not None:
+                stages.crowd_into(X, crowd, crowd_seeds)
+            del crowd, field
+            return X
+
+        with torch.no_grad():
+            v_ab = None
+            if absorbs:
+                assert occupancy is not None and rates is not None
+                v_ab = stages.mfp_absorption_from_occupancy(
+                    posed(occupancy).clamp_(0.0, 1.0),
+                    rates,
+                    has_solvent=self.icemaker is not None,
+                )
+            free = None
+            if damaged_occupancy is not None:
+                free = (
+                    posed(damaged_occupancy)
+                    .neg_()
+                    .add_(1.0)
+                    .clamp_(0.0, 1.0)
+                    .to(torch.float16)
+                )
+        V = posed(damaged)
+        return V, v_ab, free
 
     def _render_atoms(self, poses: Poses, device: torch.device) -> torch.Tensor:
         """
@@ -733,12 +983,14 @@ class Specimen:
             and self.ice.motion_variance is not None
         )
 
-    def _build_crowd(self, pad_fft: bool) -> CrowdWithDuplicates | None:
+    def _build_crowd(
+        self, pad_fft: bool, template: torch.Tensor | None = None
+    ) -> CrowdWithDuplicates | None:
         c = self.crowding
         if c is None:
             return None
         return CrowdWithDuplicates(
-            self.potential,
+            self.potential if template is None else template,
             self.voxel_size,
             cast(float, c.min_distance),
             nxy_out=self.pad_nxy(pad_fft),

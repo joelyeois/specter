@@ -215,6 +215,75 @@ _CROP_RADIUS_CHUNK_VOXELS = 2**24
 _SUBVOXEL_SHIFT_REACH = math.sqrt(3.0) / 2
 
 
+def support_radius(volume: torch.Tensor) -> float:
+    """
+    Distance from the box centre to the furthest nonzero voxel, in voxels.
+
+    The centre is ``(n - 1) / 2`` on each axis, the point a rotation turns
+    about. Evaluated a z-chunk at a time, so no whole-volume radius grid is
+    held.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Template of shape ``(..., Z, Y, X)``.
+
+    Returns
+    -------
+    float
+        The radius, or -1.0 for an all-zero volume.
+    """
+    nz, ny, nx = volume.shape[-3:]
+    axis_grid = [
+        torch.arange(n, device=volume.device, dtype=torch.float32) - (n - 1) / 2
+        for n in (nz, ny, nx)
+    ]
+    plane_r2 = axis_grid[1][:, None] ** 2 + axis_grid[2][None, :] ** 2
+    furthest_r2 = -1.0
+    chunk = max(1, _CROP_RADIUS_CHUNK_VOXELS // (ny * nx))
+    for z0 in range(0, nz, chunk):
+        occupied = volume[..., z0 : z0 + chunk, :, :] != 0
+        if not bool(occupied.any()):
+            continue
+        r2 = plane_r2 + (axis_grid[0][z0 : z0 + chunk] ** 2)[:, None, None]
+        furthest_r2 = max(
+            furthest_r2, float(torch.where(occupied, r2, r2.new_zeros(())).amax())
+        )
+    return math.sqrt(furthest_r2) if furthest_r2 >= 0 else -1.0
+
+
+def zero_outside_sphere_(volume: torch.Tensor, radius: float) -> torch.Tensor:
+    """
+    Zero every voxel further than `radius` voxels from the box centre, in place.
+
+    The centre is the one :func:`support_radius` measures from. A z-chunk at
+    a time, as there.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        ``(Z, Y, X)``; modified in place.
+    radius : float
+        Radius in voxels.
+
+    Returns
+    -------
+    torch.Tensor
+        `volume` itself.
+    """
+    nz, ny, nx = volume.shape[-3:]
+    axis_grid = [
+        torch.arange(n, device=volume.device, dtype=torch.float32) - (n - 1) / 2
+        for n in (nz, ny, nx)
+    ]
+    plane_r2 = axis_grid[1][:, None] ** 2 + axis_grid[2][None, :] ** 2
+    chunk = max(1, _CROP_RADIUS_CHUNK_VOXELS // (ny * nx))
+    for z0 in range(0, nz, chunk):
+        r2 = plane_r2 + (axis_grid[0][z0 : z0 + chunk] ** 2)[:, None, None]
+        volume[..., z0 : z0 + chunk, :, :].masked_fill_(r2 > radius * radius, 0.0)
+    return volume
+
+
 def rotation_safe_crop(volume: torch.Tensor) -> torch.Tensor:
     """
     The smallest centred crop no rotation about the centre can move density
@@ -262,22 +331,8 @@ def rotation_safe_crop(volume: torch.Tensor) -> torch.Tensor:
     duplicate.
     """
     nz, ny, nx = volume.shape[-3:]
-    axis_grid = [
-        torch.arange(n, device=volume.device, dtype=torch.float32) - (n - 1) / 2
-        for n in (nz, ny, nx)
-    ]
-    plane_r2 = axis_grid[1][:, None] ** 2 + axis_grid[2][None, :] ** 2
-    furthest_r2 = -1.0
-    chunk = max(1, _CROP_RADIUS_CHUNK_VOXELS // (ny * nx))
-    for z0 in range(0, nz, chunk):
-        occupied = volume[..., z0 : z0 + chunk, :, :] != 0
-        if not bool(occupied.any()):
-            continue
-        r2 = plane_r2 + (axis_grid[0][z0 : z0 + chunk] ** 2)[:, None, None]
-        furthest_r2 = max(
-            furthest_r2, float(torch.where(occupied, r2, r2.new_zeros(())).amax())
-        )
-    if furthest_r2 < 0:
+    furthest = support_radius(volume)
+    if furthest < 0:
         return volume
     # Plus the interpolation's own reach. `rotate_volume` resamples
     # trilinearly, so an output voxel takes from the eight source voxels
@@ -287,7 +342,7 @@ def rotation_safe_crop(volume: torch.Tensor) -> torch.Tensor:
     # difference -- it cost 20% of a blob's density in the test that pins
     # this. And plus the sub-voxel offset `fold_subvoxel_offsets` folds into
     # the same resample, at most half a voxel per axis.
-    radius = math.sqrt(furthest_r2) + math.sqrt(3.0) + _SUBVOXEL_SHIFT_REACH
+    radius = furthest + math.sqrt(3.0) + _SUBVOXEL_SHIFT_REACH
 
     sides = []
     for n in (nz, ny, nx):

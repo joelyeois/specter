@@ -667,6 +667,12 @@ class ConvergedSolver:
             _log_memory(self.device, f"iteration {it + 1} start")
             grad, data_loss = self._gradient(V)
             _log_memory(self.device, f"iteration {it + 1} after gradient")
+            # The exact symmetrisation in `_project` plans NUFFTs of its own,
+            # allocated by cuFINUFFT from the driver; left behind the pass's
+            # plans and PyTorch's cache, that allocation failed (I1, box 448,
+            # batch 638 on a 46 GiB L40), and a failed cuFINUFFT cudaMalloc
+            # leaves the context unusable, past `_retrying`'s reach.
+            self._release()
             lam_V = self._filter(V, lam)
             objective = data_loss + 0.5 * float((V * lam_V).sum())
             grad_V = grad + lam_V  # dObjective/dV

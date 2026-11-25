@@ -413,16 +413,17 @@ class ReconstructionConfig:
     # Defaults to rytov rather than the simulator's multislice: reconstruction
     # runs the forward model once per particle per step, and rytov is the
     # cheapest model that still carries curvature of the Ewald sphere.
-    scattering_model: Literal["multislice", "rytov", "firstborn", "projection"] = (
-        setting(
-            "rytov",
-            help=(
-                "Wave propagation model used by the forward pass. "
-                "rytov is the default here rather than multislice: the model runs once "
-                "per particle per step, and rytov is the cheapest one that still carries "
-                "Ewald-sphere curvature."
-            ),
-        )
+    scattering_model: Literal[
+        "multislice", "rytov", "firstborn", "projection", "ctf"
+    ] = setting(
+        "rytov",
+        help=(
+            "Wave propagation model used by the forward pass. "
+            "rytov is the default here rather than multislice: the model runs once "
+            "per particle per step, and rytov is the cheapest one that still carries "
+            "Ewald-sphere curvature. ctf is the linear weak-phase model on a flat "
+            "Ewald sphere, the forward model of a reconstruction without Ewald correction."
+        ),
     )
     ews_curvature_sign: EwaldSphereSign = setting(
         "negative",

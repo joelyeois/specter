@@ -356,6 +356,25 @@ def test_run_reconstruction_writes_a_numbered_job_directory(
     assert job["params"]["test_run"] is True
 
 
+def test_linear_ctf_model_reconstructs_from_a_config(
+    particle_data: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """`scattering_model="ctf"` (the no-Ewald-correction forward model) passes
+    config validation and runs the whole reconstruction path."""
+    cs_file, mrc_file = particle_data
+    output_dir = tmp_path / "out"
+    config = _config(cs_file, mrc_file, output_dir)
+    config.halfset = "all"
+    config.scattering_model = "ctf"
+    config.rotate_mode = "surface"
+    validate_config(config)
+
+    run_reconstruction(config)
+
+    volume = mrcfile.read(output_dir / "reconstructions" / "J001" / "volume.mrc")
+    assert np.isfinite(volume).all() and np.abs(volume).max() > 0
+
+
 def test_run_reconstruction_halfsets_share_one_job(
     particle_data: tuple[Path, Path], tmp_path: Path
 ) -> None:

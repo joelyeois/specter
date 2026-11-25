@@ -922,18 +922,20 @@ class Specimen:
         )
 
         def posed(crop: torch.Tensor) -> torch.Tensor:
-            # The whole box, not the crop, for both: the crowd reads its
-            # default lateral reach off the template's size, and the rotator
-            # was built for the template's shape.
+            # The rotator was built for the template's shape, so the image's
+            # own copy is turned in the whole box; the box is freed before the
+            # neighbours are stamped from the crop, which the crowd would cut
+            # anyway (an 800-voxel box is 2 GB at that peak).
             field = self._uncropped(crop)
             X = rotator(field, affine)
+            del field
             X = pad_volume(
                 X, self.nxy, self.nz, thickness, p.pads(False), xy_pad_mode="constant"
             )
-            crowd = self._build_crowd(p.pads(False), template=field)
+            crowd = self._build_crowd(p.pads(False), template=crop)
             if crowd is not None:
                 stages.crowd_into(X, crowd, crowd_seeds)
-            del crowd, field
+            del crowd
             return X
 
         with torch.no_grad():
@@ -1000,7 +1002,14 @@ class Specimen:
                 if c.max_distance_z is not None
                 else self.potential.shape[0] * self.voxel_size
             ),
-            max_distance_xy=c.max_distance_xy,
+            # Stated rather than left to the crowd's default, which reads the
+            # template's size: :meth:`_posed_fields` hands it a cropped field.
+            max_distance_xy=(
+                c.max_distance_xy
+                if c.max_distance_xy is not None
+                else self.potential.shape[0] * self.voxel_size
+                + cast(float, c.min_distance)
+            ),
             method=c.method,
             n_points=c.n_points if c.n_points is not None else torch.inf,
             seed=c.seed,

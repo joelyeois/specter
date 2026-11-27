@@ -14,9 +14,10 @@ particle`: the two names run the same command, so it answers to whichever
 one you or the docs use.
 
 This covers single-particle reconstruction. Cryo-ET tilt-series
-reconstruction (`TomogramGhostbuster`/`TomogramReconstructor`) exists in the
-Python API and mirrors the same `run`/`test_run` pattern, but is not yet
-wired into the CLI as `specter reconstruct tomogram`.
+reconstruction (`TomogramGhostbuster`/`TomogramReconstructor`) is available
+from the Python API and is described in
+[Reconstruct a tomogram](tomogram-reconstruction.md); it is not yet wired
+into the CLI as `specter reconstruct tomogram`.
 
 ## Basic usage
 

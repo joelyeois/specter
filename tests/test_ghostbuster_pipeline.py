@@ -379,6 +379,7 @@ def test_tomogram_test_run_bins_counts_by_sum_and_potential_by_mean(
     assert torch.allclose(binned, torch.full((3, BOX // 2, BOX // 2), 28.0))
     # Skip the fit: what is under test is the volume test_run starts from.
     monkeypatch.setattr(tgb, "_fit", lambda model, *args, **kwargs: model)
+    monkeypatch.setattr(tgb, "_solve", lambda model, *args, **kwargs: model)
     model = tgb.test_run(bin_factor=2, device="cpu")
     assert torch.allclose(model.V, torch.full((BOX // 2,) * 3, 0.5))
 
@@ -403,6 +404,7 @@ def test_tomogram_ghostbuster_forwards_reconstructor_settings(
         kmask=kmask,
     )
     monkeypatch.setattr(tgb, "_fit", lambda model, *args, **kwargs: model)
+    monkeypatch.setattr(tgb, "_solve", lambda model, *args, **kwargs: model)
     model = tgb.run(device="cpu")
     assert model.checkpoint_chunks == 4
     assert model.lr_decay == 0.3

@@ -1,6 +1,11 @@
 """
 `TomogramReconstructor`: reconstructs a volume from a tilt series with the
-same forward model as `imaging.TiltSeries`, one tilt per training step.
+same forward model as `imaging.TiltSeries`.
+
+The single-scatter models predict every tilt from one non-uniform FFT of the
+unrotated volume (`specter.scattering.surface_slice_sum`); multislice walks
+the tilted volume slice by slice. The volume may be wider than the images,
+so that it holds everything the tilted beam passes through.
 """
 
 from __future__ import annotations
@@ -16,16 +21,18 @@ import roma
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from scipy.fft import next_fast_len
 from torch.optim.lr_scheduler import LRScheduler
 
-from .._defaults import LR_DECAY, SCHEDULER
+from .._defaults import FFT_PAD_MARGIN, LR_DECAY, SCHEDULER
 from .. import tilt as tilt_geometry
 from ..aberrations import defocus_midplane_shift
 from ..arrays import center_crop
 from ..constants import energy_to_wavelength
 from ..imaging import CTF, ExitWave
+from ..imaging._engines import scattering_engine
 from ..imaging._tilt import tilt_defocus_shift, tilt_theta
-from ..scattering import IterativeScattering
+from ..scattering import IterativeScattering, surface_slice_sum
 from ._base_reconstructor import _BaseReconstructor
 from ..settings import Optics, Propagation, TiltGeometry
 from specter.options import Scheduler
@@ -39,16 +46,39 @@ class TomogramReconstructor(_BaseReconstructor):
     by minimising the discrepancy between simulated and observed images, using
     the same forward model as :class:`~specter.imaging.TiltSeries`.
 
-    One tilt per training step (``batch_size=1`` in the dataloader) keeps GPU
-    memory bounded regardless of tomogram size.  Larger batch sizes accumulate
-    the loss over multiple tilts before each parameter update.
+    Under a single-scatter model (projection, CTF, first Born, Rytov) with
+    ``propagation.rotate_mode`` unset, each tilt is the volume's transform
+    sampled on that tilt's Ewald surface, so a batch of tilts costs one
+    non-uniform FFT and nothing is interpolated. Multislice, or an explicit
+    ``rotate_mode`` other than ``"surface"``, samples the tilted volume slice
+    by slice instead.
 
-    Typically constructed and driven by :class:`TomogramGhostbuster`.
+    The volume's lateral shape may exceed the images'. A tilted beam passes
+    through specimen beside the field of view, and a volume as wide as the
+    images cannot hold it: either the loss is masked to the strip of each
+    tilt the volume fully explains (``use_fov_mask``), discarding up to half
+    of the highest tilts, or the volume is made wide enough to hold every
+    ray (:meth:`covering_shape`), which uses all of the data. Only the
+    surface path accepts a volume wider than its images.
+
+    The reconstructed potential is relative to the specimen's mean: a
+    uniform slab shifts the phase of the whole wave and leaves no contrast.
+    With ``dose_per_angstrom`` set to each tilt's mean counts per unit area,
+    the volume is the potential's departure from that mean, and the empty
+    space beside it stands for more of the same specimen rather than vacuum.
+
+    A tilt series holds fewer pixels than its tomogram holds voxels, so the
+    data alone do not determine the volume. ``smoothness`` and ``tv_weight``
+    add the priors that do (:meth:`regularisation`).
+
+    Typically constructed and driven by :class:`TomogramGhostbuster`, which
+    fits it with `specter.ghostbuster._tomogram_solver.solve_tilt_series`.
 
     Parameters
     ----------
     V : torch.Tensor
-        Initial volume estimate, shape ``(Z, Y, X)``.
+        Initial volume estimate, shape ``(Z, Y, X)``. ``Y`` and ``X`` are at
+        least ``image_size`` and of its parity.
     voxel_size : float
         Voxel size in Å.
     quaternions : torch.Tensor
@@ -109,6 +139,28 @@ class TomogramReconstructor(_BaseReconstructor):
     run_dir : str or Path, optional
         Directory for per-epoch MRC volumes and training metrics.  ``None``
         disables all file output.
+    image_size : int, optional
+        Size of the tilt images in pixels. Default the volume's ``X``.
+    smoothness : float
+        Weight of the quadratic gradient prior, ``smoothness / 2 * sum
+        |grad V|^2`` in the units of the chi-squared sum. Default 0.
+    tv_weight : float
+        Weight of the edge-preserving prior, a pseudo-Huber total variation
+        (:meth:`regularisation`). Default 0.
+    tv_delta : float
+        The gradient magnitude, in volts per voxel, below which the
+        edge-preserving prior is quadratic and above which it grows
+        linearly. Default 0.02.
+
+    Notes
+    -----
+    Measured on a simulated 100 nm specimen at 5 A per voxel and 3.9
+    electrons per square Angstrom per tilt, against the volume the series
+    was simulated from: the edge-preserving prior raised the Fourier shell
+    correlation with the truth from 0.79 to 0.89 at 400 to 100 A over the
+    quadratic prior and recovered part of the missing wedge (0.69 against
+    0.04 there), and a volume covering every ray raised it from 0.53 to 0.79
+    over the masked loss.
     """
 
     def __init__(
@@ -131,6 +183,10 @@ class TomogramReconstructor(_BaseReconstructor):
         slice_batchsize: int = 1,
         checkpoint_chunks: int | None = None,
         run_dir: str | Path | None = None,
+        image_size: int | None = None,
+        smoothness: float = 0.0,
+        tv_weight: float = 0.0,
+        tv_delta: float = 0.02,
     ) -> None:
         super().__init__()
         if propagation.absorption_model == "inelastic_mfp":
@@ -147,9 +203,30 @@ class TomogramReconstructor(_BaseReconstructor):
         )
         self._run_dir = Path(run_dir) if run_dir is not None else None
 
-        # Geometry
-        self.nxy = V.shape[-1]
+        # Geometry: the images are `nxy` across; the volume may be wider.
+        self.nxy = V.shape[-1] if image_size is None else image_size
         self.nz = V.shape[0]
+        self._surface = propagation.rotation() == "surface"
+        ny, nx = V.shape[-2], V.shape[-1]
+        if min(ny, nx) < self.nxy or (ny - self.nxy) % 2 or (nx - self.nxy) % 2:
+            raise ValueError(
+                f"the volume's lateral shape ({ny}, {nx}) must be at least the "
+                f"image size {self.nxy} and of its parity"
+            )
+        if not self._surface and (ny, nx) != (self.nxy, self.nxy):
+            raise ValueError(
+                f"a volume wider than its {self.nxy} px images ({ny} x {nx}) "
+                "needs a single-scatter model sampled on the surface; "
+                f"scattering_model={scattering_model!r} with rotate_mode="
+                f"{propagation.rotate_mode!r} walks the tilted volume instead"
+            )
+        if min(smoothness, tv_weight) < 0 or tv_delta <= 0:
+            raise ValueError(
+                "smoothness and tv_weight must be non-negative and tv_delta positive"
+            )
+        self.smoothness = smoothness
+        self.tv_weight = tv_weight
+        self.tv_delta = tv_delta
         self.voxel_size = voxel_size
         self.voltage = voltage
         self.tilt = tilt
@@ -220,6 +297,7 @@ class TomogramReconstructor(_BaseReconstructor):
         # Physics modules
         self.propagation = propagation
         self.optics = optics
+        self._pad_nxy = self._surface_grid() if self._surface else self.nxy
         self.iterative_scattering = IterativeScattering(
             self.nxy,
             voxel_size,
@@ -256,12 +334,117 @@ class TomogramReconstructor(_BaseReconstructor):
         physically correct. The real-FOV loss mask (use_fov_mask) already
         discards gradient contributions from the zero-padded periphery.
         """
-        V: torch.Tensor = self.V
+        return self._taper(self.V)
+
+    def _taper(self, V: torch.Tensor) -> torch.Tensor:
+        """`V` under the cosine tapers of `tilt`, or `V` itself without any."""
         if self.taper_width > 0 or self.z_taper_width > 0:
             V = tilt_geometry.apply_volume_cosine_taper(
                 V, taper_xy=self.taper_width, taper_z=self.z_taper_width
             )
         return V
+
+    def _surface_grid(self) -> int:
+        """
+        Size of the grid the surface path propagates on.
+
+        The sampled spectrum is that of an image periodic over the grid. A
+        volume wider than the images gets a grid holding its whole
+        projection at every tilt, found from the projected corners of its
+        box, plus the margin every tilt series keeps against wrap
+        (`FFT_PAD_MARGIN`); it has the images' parity, which keeps the volume
+        and the field on one centre. A volume as wide as the images is
+        propagated on the image grid itself, as `TiltSeries` propagates the
+        single-scatter models, so that the two predict the same image; what
+        then wraps at a tilt lies inside the band the loss mask leaves out.
+        """
+        nz, ny, nx = self.V.shape
+        if (ny, nx) == (self.nxy, self.nxy):
+            return self.nxy
+        rot = roma.unitquat_to_rotmat(self.quaternions.double().cpu())
+        corners = torch.tensor(
+            [
+                [sx * nx / 2, sy * ny / 2, sz * nz / 2]
+                for sx in (-1, 1)
+                for sy in (-1, 1)
+                for sz in (-1, 1)
+            ],
+            dtype=torch.float64,
+        )
+        # `rot` takes beam-frame coordinates to the volume's, so its
+        # transpose projects the volume's corners into the image plane.
+        projected = torch.einsum("bji,cj->bci", rot, corners)[..., :2]
+        extent = 2 * float(projected.abs().max())
+        need = max(math.ceil(extent), self.nxy) + 2 * FFT_PAD_MARGIN
+        need += (need - self.nxy) % 2
+        while next_fast_len(need) != need:
+            need += 2
+        return need
+
+    @staticmethod
+    def covering_shape(
+        image_size: int,
+        nz: int,
+        quaternions: torch.Tensor,
+        margin: int = 16,
+    ) -> tuple[int, int, int]:
+        """
+        The smallest volume holding every ray that reaches the detector.
+
+        Each tilt's field of view is traced through the slab ``nz`` thick;
+        the volume's lateral shape is the bounding box of where its corners
+        enter and leave, plus ``margin`` voxels on each side for what the
+        transfer function delocalises into the field. With the tilt axis
+        along a volume axis the box grows across it only, by
+        ``image_size / cos(tilt) + nz * tan(tilt)``; an oblique axis grows
+        both, so a series whose axis is neither is better posed in a volume
+        frame turned to it first.
+
+        Parameters
+        ----------
+        image_size : int
+            Size of the tilt images in pixels.
+        nz : int
+            Depth of the volume in voxels.
+        quaternions : torch.Tensor
+            Per-tilt rotation quaternions, ``(N_tilts, 4)``.
+        margin : int, optional
+            Voxels added on each side. Default 16.
+
+        Returns
+        -------
+        tuple of int
+            ``(nz, Y, X)``, with ``Y`` and ``X`` of ``image_size``'s parity.
+        """
+        rot = roma.unitquat_to_rotmat(torch.as_tensor(quaternions).double().cpu())
+        half = image_size / 2
+        reach = torch.zeros(2, dtype=torch.float64)
+        for cx in (-half, half):
+            for cy in (-half, half):
+                for face in (-nz / 2, nz / 2):
+                    # The point of the ray through detector corner (cx, cy)
+                    # at volume depth `face`: rot @ (cx, cy, s), s chosen so
+                    # that its z component is `face`.
+                    along = (face - rot[:, 2, 0] * cx - rot[:, 2, 1] * cy) / rot[
+                        :, 2, 2
+                    ]
+                    point = (
+                        rot[:, :2, 0] * cx
+                        + rot[:, :2, 1] * cy
+                        + rot[:, :2, 2] * along[:, None]
+                    )
+                    reach = torch.maximum(reach, point.abs().amax(0))
+        sizes = []
+        for r in (float(reach[1]), float(reach[0])):  # (Y, X)
+            size = max(image_size, 2 * math.ceil(r)) + 2 * margin
+            sizes.append(size + (size - image_size) % 2)
+        return nz, sizes[0], sizes[1]
+
+    def field_volume(self) -> torch.Tensor:
+        """The part of ``V`` under the images: its central ``(nz, nxy, nxy)``."""
+        ny, nx = self.V.shape[-2], self.V.shape[-1]
+        y0, x0 = (ny - self.nxy) // 2, (nx - self.nxy) // 2
+        return self.V.detach()[:, y0 : y0 + self.nxy, x0 : x0 + self.nxy]
 
     def _loss_mask(self, tilt_idx: int) -> torch.Tensor | None:
         """
@@ -272,16 +455,23 @@ class TomogramReconstructor(_BaseReconstructor):
         """
         mask = self._fov_mask(tilt_idx)
         edge = self._edge_pads()[tilt_idx]
-        if edge == 0:
+        # A volume reaching past the field by the band's width models what
+        # the transfer function carries in, so that edge keeps its pixels.
+        ny, nx = self.V.shape[-2], self.V.shape[-1]
+        edge_y = 0 if (ny - self.nxy) // 2 >= edge else edge
+        edge_x = 0 if (nx - self.nxy) // 2 >= edge else edge
+        if edge_y == 0 and edge_x == 0:
             return mask
         if mask is None:
             mask = torch.ones(
                 self.nxy, self.nxy, device=self.device, dtype=torch.float32
             )
-        mask[:edge, :] = 0.0
-        mask[self.nxy - edge :, :] = 0.0
-        mask[:, :edge] = 0.0
-        mask[:, self.nxy - edge :] = 0.0
+        if edge_y:
+            mask[:edge_y, :] = 0.0
+            mask[self.nxy - edge_y :, :] = 0.0
+        if edge_x:
+            mask[:, :edge_x] = 0.0
+            mask[:, self.nxy - edge_x :] = 0.0
         return mask
 
     def _edge_pads(self) -> list[int]:
@@ -400,12 +590,14 @@ class TomogramReconstructor(_BaseReconstructor):
         if cached is not None and cached[0] == key:
             return cached[1]
         pads: list[int | None] = []
+        # The volume's width across the tilt axis, which the tilt foreshortens.
+        width = self.V.shape[-2] if self.tilt_axis == "x" else self.V.shape[-1]
         for Q in self.quaternions:
             rotvec = roma.unitquat_to_rotvec(Q.unsqueeze(0))[0]
             theta = rotvec.norm()  # radians (scalar tensor)
             cos_t = torch.cos(theta)
             sin_t = torch.sin(theta)
-            real_fov = int((self.nxy * cos_t - self.nz * sin_t).clamp(min=1).item())
+            real_fov = int((width * cos_t - self.nz * sin_t).clamp(min=1).item())
             pads.append(None if real_fov >= self.nxy else (self.nxy - real_fov) // 2)
         self._fov_pads_cache = (key, pads)
         return pads
@@ -429,6 +621,9 @@ class TomogramReconstructor(_BaseReconstructor):
             (``ExitWave.intensity(cc=None).pixels()``), times the tilt's dose
             per pixel.
         """
+        if self._surface:
+            idx = torch.tensor([tilt_idx], device=self.quaternions.device)
+            return self._forward_tilts(V_prepared, idx)[0]
         theta_matrix = tilt_theta(
             self.quaternions[tilt_idx : tilt_idx + 1],
             self.translations[tilt_idx : tilt_idx + 1],
@@ -473,6 +668,69 @@ class TomogramReconstructor(_BaseReconstructor):
         field = center_crop(image.pixels()[0], self.nxy, dim=(-2, -1))
         return self.dose_per_pixel[tilt_idx] * field
 
+    def _forward_tilts(
+        self, V_prepared: torch.Tensor, idx: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Simulate the noiseless images of tilts ``idx``, ``(len(idx), H, W)``.
+
+        On the surface path the tilts share one non-uniform FFT of the
+        volume; otherwise each is propagated in turn (:meth:`_forward_tilt`).
+        """
+        if not self._surface:
+            return torch.stack([self._forward_tilt(V_prepared, int(i)) for i in idx])
+        idx = idx.to(self.quaternions.device)
+        p = self.propagation
+        model = p.scattering_model
+        flat = model in ("projection", "ctf")
+        scattering = scattering_engine(
+            self._pad_nxy,
+            self.voxel_size,
+            self.voltage,
+            model,
+            p.klim,
+            p.oversample,
+            p.ews_curvature_sign,
+            self.nz,
+            p.alpha,
+            0.0,
+            str(V_prepared.device),
+        )
+        spectrum = surface_slice_sum(
+            V_prepared,
+            self.quaternions[idx],
+            self.translations[idx],
+            pad_nxy=self._pad_nxy,
+            pixel_size=self.voxel_size,
+            wavelength=scattering.wavelength,
+            ews_curvature_sign=p.ews_curvature_sign,
+            flat=flat,
+        )
+        waves = ExitWave(
+            array=scattering.from_slice_sum(spectrum, self.nz),
+            pixel_size=self.voxel_size,
+            voltage=self.voltage,
+            nxy=self.nxy,
+            pad_nxy=self._pad_nxy,
+            oversample=self._image_oversample,
+            # The surface's wave is taken at the unrotated depth's exit
+            # face whatever the tilt, so the shift is the volume's own.
+            defocus_shift=self._defocus_shift_angstrom,
+            ids=idx.cpu(),
+            linear=model == "ctf",
+            alpha=p.alpha,
+        )
+        ctf = CTF({k: getattr(self, k)[idx] for k in self.ctf_params})
+        image = waves.apply_ctf(
+            ctf,
+            backend=self.optics.aberration_backend,
+            lpp_params=self.optics.lpp_params,
+            phase_plate=self.optics.phase_plate,
+            phase_plate_cuton=self.optics.phase_plate_cuton,
+        ).intensity(cc=None)
+        field = center_crop(image.pixels(), self.nxy, dim=(-2, -1))
+        return self.dose_per_pixel[idx][:, None, None] * field
+
     def forward(self, tilt_idx: int) -> torch.Tensor:
         """Simulate tilt image ``tilt_idx`` using the current volume."""
         return self._forward_tilt(self._prepare_volume(), tilt_idx)
@@ -507,6 +765,58 @@ class TomogramReconstructor(_BaseReconstructor):
                 # size (which shrinks by cos(θ) at high tilt).
                 return (mse * mask).sum() / mask.sum()
         return mse.mean()
+
+    def _half_chi2(
+        self, sim: torch.Tensor, obs: torch.Tensor, idx: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Half the chi-squared of tilts ``idx``, summed over their compared pixels.
+
+        The full-batch solver's data term: every compared pixel weighs the
+        same, where :meth:`_compute_loss` weighs every tilt the same.
+        """
+        idx = idx.to(self.dose_per_pixel.device)
+        r2 = (sim - obs) ** 2 / self.dose_per_pixel[idx][:, None, None]
+        if self.use_fov_mask:
+            masks = [self._loss_mask(int(i)) for i in idx]
+            if any(m is not None for m in masks):
+                ones = torch.ones(self.nxy, self.nxy, device=r2.device)
+                r2 = r2 * torch.stack([ones if m is None else m for m in masks])
+        return 0.5 * r2.sum()
+
+    def _n_valid_pixels(self, tilt_idx: int) -> int:
+        """Pixels of tilt ``tilt_idx`` the loss compares."""
+        mask = self._loss_mask(tilt_idx) if self.use_fov_mask else None
+        return self.nxy * self.nxy if mask is None else int(mask.sum().item())
+
+    def regularisation(self, V: torch.Tensor) -> torch.Tensor:
+        """
+        The priors on the volume, in the units of the chi-squared sum.
+
+        ``smoothness / 2 * sum |grad V|^2`` plus ``tv_weight * sum
+        h(|grad V|)``, with forward differences and the pseudo-Huber function
+        ``h(g) = tv_delta * (sqrt(1 + g^2 / tv_delta^2) - 1)``, which is
+        ``g^2 / (2 tv_delta)`` for gradients well below ``tv_delta`` and
+        ``|g|`` well above it. The quadratic prior damps what the data do
+        not determine without preferring any structure. The edge-preserving
+        one prefers compact objects in a flat solvent, which is what lets it
+        restore part of the missing wedge; it is the stronger assumption.
+        """
+        out = V.new_zeros(())
+        if self.smoothness == 0 and self.tv_weight == 0:
+            return out
+        core = V[:-1, :-1, :-1]
+        g2 = (
+            (V[1:, :-1, :-1] - core) ** 2
+            + (V[:-1, 1:, :-1] - core) ** 2
+            + (V[:-1, :-1, 1:] - core) ** 2
+        )
+        if self.smoothness > 0:
+            out = out + 0.5 * self.smoothness * g2.sum()
+        if self.tv_weight > 0:
+            d = self.tv_delta
+            out = out + self.tv_weight * d * (torch.sqrt(1 + g2 / (d * d)) - 1).sum()
+        return out
 
     # ------------------------------------------------------------------ #
     # Optimisation                                                         #
@@ -553,11 +863,16 @@ class TomogramReconstructor(_BaseReconstructor):
 
         total_loss = torch.tensor(0.0, device=self.device)
         # One host transfer for the batch's tilt indices, not a sync per tilt.
+        sims = self._forward_tilts(V_prepared, tilt_indices)
         for i, idx in enumerate(tilt_indices.tolist()):
-            sim = self._forward_tilt(V_prepared, idx)
-            total_loss = total_loss + self._compute_loss(sim, obs_images[i], idx)
+            total_loss = total_loss + self._compute_loss(sims[i], obs_images[i], idx)
 
         loss = total_loss / n
+        if self.smoothness > 0 or self.tv_weight > 0:
+            # The priors are in the units of the chi-squared sum over the
+            # series; the step's loss is a mean per pixel over its tilts.
+            series = 0.5 * self.nxy * self.nxy * len(self.quaternions)
+            loss = loss + self.regularisation(self.V) / series
         total = self._batch_total(n)
         if total != n:
             loss = loss * (n / total)

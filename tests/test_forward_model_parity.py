@@ -254,6 +254,25 @@ def test_tilt_forward_matches_between_simulator_and_inverse(
     nz, nxy = TILT_BOX
     pixel_size = 2.0
     volume = (ball3d(nxy, nxy / 3).float()[:nz] * 0.05).reshape(1, nz, nxy, nxy)
+    if scattering_model != "multislice":
+        # The inverse samples the single-scatter models on the Ewald surface,
+        # which keeps the Nyquist sphere, while the simulator's slice loop
+        # keeps the whole square band. A hard-edged ball holds enough power
+        # in the corners between the two to differ by 19% of the image's
+        # standard deviation, so these models are compared on a band-limited
+        # phantom: Gaussians, compact enough that nothing of them reaches the
+        # strip the simulator reflect-pads.
+        z, y, x = torch.meshgrid(
+            torch.arange(nz) - nz // 2,
+            torch.arange(nxy) - nxy // 2,
+            torch.arange(nxy) - nxy // 2,
+            indexing="ij",
+        )
+        volume = torch.zeros(nz, nxy, nxy)
+        for (cz, cy, cx), sigma in (((1, 1, -1), 1.5), ((-2, -1, 2), 1.8)):
+            r2 = (z - cz) ** 2 + (y - cy) ** 2 + (x - cx) ** 2
+            volume += torch.exp(-r2 / (2 * sigma**2))
+        volume = volume.reshape(1, nz, nxy, nxy)
     ctf_params = {
         "dfu": torch.full((1,), 12000.0),
         "dfv": torch.full((1,), 12000.0),

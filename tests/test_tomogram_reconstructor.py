@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import roma
 import torch
+import torch.nn.functional as F
 import torch.utils.data
 
 from specter.arrays import ball3d
@@ -318,3 +319,224 @@ def test_propagation_curvature_sign_reaches_the_scattering(tr_kwargs: dict) -> N
             ),
         )
         assert model.iterative_scattering.ews_curvature_sign == sign
+
+
+# ---------------------------------------------------------------------------
+# Surface forward model, covering volume, priors and the full-batch solver
+# ---------------------------------------------------------------------------
+
+
+def _blobs(shape: tuple[int, int, int], amplitude: float = 1.0) -> torch.Tensor:
+    """A few Gaussians well inside ``shape``: band limited and compact."""
+    nz, ny, nx = shape
+    z, y, x = torch.meshgrid(
+        torch.arange(nz) - nz // 2,
+        torch.arange(ny) - ny // 2,
+        torch.arange(nx) - nx // 2,
+        indexing="ij",
+    )
+    volume = torch.zeros(shape)
+    for (cz, cy, cx), sigma in (
+        ((1, 2, -3), 1.5),
+        ((-1, -3, 2), 1.8),
+        ((0, 1, 4), 1.4),
+    ):
+        r2 = (z - cz) ** 2 + (y - cy) ** 2 + (x - cx) ** 2
+        volume += amplitude * torch.exp(-r2 / (2 * sigma**2))
+    return volume
+
+
+def _series_kwargs(angles: torch.Tensor, axis: str = "y") -> dict:
+    theta = torch.deg2rad(angles)
+    zero = torch.zeros_like(theta)
+    rotvecs = torch.stack(
+        [zero, theta, zero] if axis == "y" else [theta, zero, zero], -1
+    )
+    n = len(angles)
+    return dict(
+        voxel_size=4.0,
+        quaternions=roma.rotvec_to_unitquat(rotvecs),
+        translations=torch.zeros(n, 2),
+        ctf_params={"dfu": torch.full((n,), 8000.0), "cs": torch.full((n,), 2.7e7)},
+        voltage=300.0,
+        dose_per_angstrom=5.0,
+        tilt=TiltGeometry(tilt_axis=axis),
+    )
+
+
+def test_surface_forward_agrees_with_the_slice_loop() -> None:
+    """A single-scatter model samples the Ewald surface unless told to walk
+    the tilted volume, and the two predict the same image: to rounding
+    untilted, where neither interpolates, and to the slice loop's trilinear
+    blur at a tilt."""
+    volume = _blobs((12, 24, 24))
+    kwargs = _series_kwargs(torch.tensor([0.0, 25.0]))
+    kwargs["translations"] = torch.tensor([[0.0, 0.0], [6.0, -3.0]])
+    surface = TomogramReconstructor(
+        volume.clone(), **kwargs, propagation=Propagation(scattering_model="rytov")
+    )
+    loop = TomogramReconstructor(
+        volume.clone(),
+        **kwargs,
+        propagation=Propagation(scattering_model="rytov", rotate_mode="real"),
+    )
+    assert surface._surface and not loop._surface
+    untilted = (surface.forward(0) - loop.forward(0)).abs().max() / loop.forward(
+        0
+    ).std()
+    assert untilted < 1e-3
+    a, b = surface.forward(1).flatten(), loop.forward(1).flatten()
+    assert torch.corrcoef(torch.stack([a, b]))[0, 1] > 0.995
+
+
+def test_covering_shape_holds_every_ray() -> None:
+    """The covering volume grows across the tilt axis by the tilted field
+    plus the slab's shear, keeps the images' parity, and leaves the loss
+    nothing to mask."""
+    angles = torch.tensor([-45.0, 0.0, 45.0])
+    kwargs = _series_kwargs(angles)
+    nz, n, margin = 8, 24, 4
+    shape = TomogramReconstructor.covering_shape(n, nz, kwargs["quaternions"], margin)
+    across = n / math.cos(math.radians(45)) + nz * math.tan(math.radians(45))
+    assert shape[0] == nz
+    assert shape[1] == n + 2 * margin  # along the tilt axis (y)
+    assert across + 2 * margin <= shape[2] <= across + 2 * margin + 3
+    assert (shape[1] - n) % 2 == 0 and (shape[2] - n) % 2 == 0
+
+    model = TomogramReconstructor(
+        torch.zeros(shape),
+        **kwargs,
+        image_size=n,
+        propagation=Propagation(scattering_model="projection"),
+    )
+    assert model._fov_pads() == [None, None, None]
+    assert model.forward(0).shape == (n, n)
+    assert model.field_volume().shape == (nz, n, n)
+
+
+def test_a_wider_volume_needs_the_surface() -> None:
+    kwargs = _series_kwargs(torch.tensor([0.0]))
+    with pytest.raises(ValueError, match="walks the tilted volume"):
+        TomogramReconstructor(
+            torch.zeros(8, 16, 24),
+            **kwargs,
+            image_size=16,
+            propagation=Propagation(scattering_model="multislice"),
+        )
+    with pytest.raises(ValueError, match="parity"):
+        TomogramReconstructor(
+            torch.zeros(8, 16, 21),
+            **kwargs,
+            image_size=16,
+            propagation=Propagation(scattering_model="rytov"),
+        )
+
+
+def test_regularisation_is_quadratic_then_linear_in_the_gradient() -> None:
+    kwargs = _series_kwargs(torch.tensor([0.0]))
+    prop = Propagation(scattering_model="projection")
+    ramp = torch.arange(8.0).reshape(1, 1, 8).expand(8, 8, 8)  # unit gradient in x
+    n_grad = 7 * 7 * 7
+
+    smooth = TomogramReconstructor(
+        torch.zeros(8, 8, 8), **kwargs, propagation=prop, smoothness=2.0
+    )
+    assert float(smooth.regularisation(torch.ones(8, 8, 8))) == 0.0
+    assert float(smooth.regularisation(0.1 * ramp)) == pytest.approx(
+        0.5 * 2.0 * 0.01 * n_grad, rel=1e-5
+    )
+
+    tv = TomogramReconstructor(
+        torch.zeros(8, 8, 8), **kwargs, propagation=prop, tv_weight=3.0, tv_delta=0.01
+    )
+    # Far below tv_delta the prior is g^2 / (2 delta); far above, |g| - delta.
+    small, large = 1e-4, 1.0
+    assert float(tv.regularisation(small * ramp)) == pytest.approx(
+        3.0 * small**2 / (2 * 0.01) * n_grad, rel=1e-2
+    )
+    assert float(tv.regularisation(large * ramp)) == pytest.approx(
+        3.0 * (large - 0.01) * n_grad, rel=1e-3
+    )
+
+
+def test_solver_fits_a_series_and_the_covering_volume_recovers_more() -> None:
+    """The full-batch solver lowers chi-squared towards zero on noiseless
+    data and recovers the phantom, and a volume holding every ray recovers
+    it better than one as wide as the images with the loss masked."""
+    from specter.ghostbuster._tomogram_solver import solve_tilt_series
+
+    angles = torch.linspace(-50.0, 50.0, 11)
+    kwargs = _series_kwargs(angles)
+    nz, n = 12, 24
+    prop = Propagation(scattering_model="rytov", oversample=1)
+    shape = TomogramReconstructor.covering_shape(n, nz, kwargs["quaternions"], margin=4)
+    # Structure everywhere, as a specimen has: what lies beside the field of
+    # view enters every tilted image, and only the covering volume holds it.
+    noise = torch.randn(1, 1, *shape, generator=torch.Generator().manual_seed(0))
+    truth = _blobs(shape, amplitude=2.0) + F.avg_pool3d(noise, 3, 1, 1)[0, 0]
+    simulator = TomogramReconstructor(truth, **kwargs, image_size=n, propagation=prop)
+    with torch.no_grad():
+        images = simulator._forward_tilts(truth, torch.arange(len(angles)))
+
+    def recover(volume_shape: tuple[int, int, int]) -> tuple[float, float, float]:
+        model = TomogramReconstructor(
+            torch.zeros(volume_shape),
+            **kwargs,
+            image_size=n,
+            propagation=prop,
+            lr=0.1,
+            smoothness=1e-3,
+        )
+        log = solve_tilt_series(model, images, 12, tilt_batch=4)
+        got = model.field_volume().flatten()
+        want = simulator.field_volume().flatten()
+        cc = float(torch.corrcoef(torch.stack([got, want]))[0, 1])
+        return log[0]["chi2_per_pixel"], log[-1]["chi2_per_pixel"], cc
+
+    first, last, cc_covering = recover(shape)
+    assert last < first / 5
+    assert cc_covering > 0.7
+    _, _, cc_masked = recover((nz, n, n))
+    assert cc_covering > cc_masked + 0.1
+
+
+def test_pipeline_solves_a_covering_volume_and_saves_the_field(tmp_path: Path) -> None:
+    from specter.ghostbuster import TomogramGhostbuster
+
+    angles = torch.linspace(-30.0, 30.0, 5)
+    kwargs = _series_kwargs(angles)
+    nz, n = 8, 16
+    prop = Propagation(scattering_model="rytov", oversample=1)
+    shape = TomogramReconstructor.covering_shape(n, nz, kwargs["quaternions"])
+    simulator = TomogramReconstructor(
+        _blobs(shape), **kwargs, image_size=n, propagation=prop
+    )
+    with torch.no_grad():
+        images = simulator._forward_tilts(simulator.V, torch.arange(len(angles)))
+
+    tgb = TomogramGhostbuster(
+        images,
+        voxel_size=kwargs["voxel_size"],
+        voltage=300.0,
+        ctf_params=kwargs["ctf_params"],
+        angles=angles,
+        tilt=kwargs["tilt"],
+        nz=nz,
+        lr=0.1,
+        propagation=prop,
+        iterations=3,
+        smoothness=1e-3,
+        run_dir=tmp_path,
+    )
+    # No dose given: each tilt's mean counts per unit area.
+    expected = images.mean(dim=(-2, -1)) / kwargs["voxel_size"] ** 2
+    assert torch.allclose(tgb._dose_per_angstrom, expected)
+    model = tgb.run(device="cpu")
+    assert tuple(model.V.shape) == shape
+    metrics = json.loads((tmp_path / "metrics.json").read_text())
+    assert len(metrics) == 3
+    assert metrics[-1]["chi2_per_pixel"] < metrics[0]["chi2_per_pixel"]
+    from specter.io import read_mrc
+
+    saved, _ = read_mrc(tmp_path / "volume.mrc")
+    assert tuple(saved.shape) == (nz, n, n)

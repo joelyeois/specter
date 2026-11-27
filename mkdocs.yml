@@ -112,6 +112,7 @@ nav:
               - Render a potential map: user-guide/potential-map.md
           - Reconstruct:
               - Reconstruct a volume: user-guide/reconstruction.md
+              - Reconstruct a tomogram: user-guide/tomogram-reconstruction.md
               - Align maps: user-guide/align-maps.md
           - Manage runs:
               - Configure a run: user-guide/configuration.md

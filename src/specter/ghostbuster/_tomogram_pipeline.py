@@ -9,8 +9,9 @@ from .._defaults import LR_DECAY, SCHEDULER
 from ..io import read_mrc
 from ..progress import console
 
+import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 import roma
 import torch
@@ -19,7 +20,9 @@ import torch.utils.data
 
 from ._helpers import _images_to_counts
 from ._pipeline_base import _GhostbusterBase
+from ._run_helpers import torch_devices
 from ._tomogram_reconstructor import TomogramReconstructor
+from ._tomogram_solver import solve_tilt_series
 from ..settings import Optics, Propagation, TiltGeometry
 from specter.options import ImageUnits, Scheduler, TiltAxis
 
@@ -29,8 +32,18 @@ class TomogramGhostbuster(_GhostbusterBase):
     End-to-end tomogram reconstruction pipeline for cryo-ET tilt series.
 
     Loads tilt-series images, builds a :class:`TomogramReconstructor`, and
-    fits it with ``specter.ghostbuster._training.fit``.  The ``run`` / ``test_run`` API
-    mirrors :class:`Ghostbuster`.
+    fits it: by full-batch conjugate gradients over the whole series
+    (``solver="cg"``, the default) or by Adam on a tilt at a time
+    (``solver="adam"``, ``specter.ghostbuster._training.fit``). The ``run`` /
+    ``test_run`` API mirrors :class:`Ghostbuster`.
+
+    By default the volume is made wide enough to hold every ray that
+    reaches the detector (``extend``), the forward model is Rytov sampled on
+    each tilt's Ewald surface, and the reconstructed potential is relative
+    to the specimen's mean (``dose_per_angstrom=None``). A tilt series does
+    not determine its tomogram on its own; set ``tv_weight`` or
+    ``smoothness`` (`TomogramReconstructor.regularisation`), choosing the
+    weight by fitting one half of the dose and scoring the other.
 
     The forward model is noiseless and predicts electron counts per pixel,
     ``dose_per_angstrom * voxel_size² * |CTF(exitwave)|²``, as the particle
@@ -52,9 +65,13 @@ class TomogramGhostbuster(_GhostbusterBase):
     ctf_params : dict[str, torch.Tensor]
         Per-tilt CTF parameters; each value must have leading dimension
         ``N_tilts``.
-    dose_per_angstrom : float or torch.Tensor
+    dose_per_angstrom : float or torch.Tensor, optional
         Electron dose (fluence) per tilt image in e⁻/Å². Scalar, or a 1-D
         tensor of length ``N_tilts`` for a dose that differs per tilt.
+        ``None`` (the default) takes each tilt's mean counts per unit area,
+        the dose its specimen transmitted, which makes the reconstructed
+        potential relative to the specimen's mean and needs no dose
+        calibration; it requires ``image_units="counts"``.
     angles : sequence of float or torch.Tensor, optional
         Tilt angles in degrees.  Mutually exclusive with ``quaternions``.
     quaternions : torch.Tensor, optional
@@ -77,12 +94,13 @@ class TomogramGhostbuster(_GhostbusterBase):
         flips normalised input and leaves counts alone; ``True`` with counts
         is an error, since counts have a physical sign.
     lr : float, optional
-        Learning rate for V.  ``None`` disables optimisation.
+        Learning rate for V under ``solver="adam"``, where ``None`` disables
+        optimisation. The ``"cg"`` solver sets its own step and ignores it.
     epochs : int
-        Training epochs.  Default 5.
+        Training epochs of ``solver="adam"``.  Default 5.
     batchsize : int
-        Tilt images per optimisation step, over every device.  Default 1
-        (one tilt per step).
+        Tilt images per optimisation step of ``solver="adam"``, over every
+        device.  Default 1 (one tilt per step).
     propagation : Propagation, optional
         How the forward model computes the exit wave (model, amplitude
         contrast, bandlimit). Default ``Propagation()``.
@@ -119,6 +137,32 @@ class TomogramGhostbuster(_GhostbusterBase):
         3-D Fourier-space mask applied to V after every gradient update. Its
         shape must be the reconstructed volume's. `test_run` bins the volume
         and therefore runs without it. Default ``None`` (no mask).
+    extend : bool
+        Reconstruct a volume wide enough to hold every ray that reaches the
+        detector (`TomogramReconstructor.covering_shape`) rather than one as
+        wide as the images with the loss masked to what it explains. Applies
+        when the forward model is sampled on the surface and neither
+        ``V_init`` nor ``kmask``, each of which fixes the volume's shape, is
+        given. Default ``True``.
+    solver : {"cg", "adam"}
+        ``"cg"`` fits every tilt at once by conjugate gradients
+        (`solve_tilt_series`), on one device, for ``iterations``;
+        ``"adam"`` takes ``batchsize`` tilts per step for ``epochs``.
+        Default ``"cg"``.
+    iterations : int
+        Conjugate-gradient iterations. Default 100.
+    smoothness, tv_weight, tv_delta : float
+        The priors, see `TomogramReconstructor`. Default none.
+    tilt_batch : int
+        Tilts predicted per forward pass of the ``"cg"`` solver. Default 8.
+
+    Notes
+    -----
+    The default forward model is Rytov rather than multislice. On a
+    simulated 180 nm specimen imaged at 300 kV, Rytov images differed from
+    multislice ones by at most 0.2% of the signal power at every spatial
+    frequency to 5 A, while a tilt of the slice loop costs as much as the
+    whole series on the surface.
     """
 
     def __init__(
@@ -127,7 +171,7 @@ class TomogramGhostbuster(_GhostbusterBase):
         voxel_size: float,
         voltage: float,
         ctf_params: dict[str, Any],
-        dose_per_angstrom: float | torch.Tensor,
+        dose_per_angstrom: float | torch.Tensor | None = None,
         angles: Sequence[float] | torch.Tensor | None = None,
         quaternions: torch.Tensor | None = None,
         translations: torch.Tensor | None = None,
@@ -138,7 +182,7 @@ class TomogramGhostbuster(_GhostbusterBase):
         lr: float | None = None,
         epochs: int = 5,
         batchsize: int = 1,
-        propagation: Propagation = Propagation(),
+        propagation: Propagation = Propagation(scattering_model="rytov"),
         optics: Optics = Optics(),
         use_fov_mask: bool = True,
         scheduler: Scheduler = SCHEDULER,
@@ -150,9 +194,25 @@ class TomogramGhostbuster(_GhostbusterBase):
         checkpoint_chunks: int | None = None,
         lr_decay: float = LR_DECAY,
         kmask: torch.Tensor | None = None,
+        extend: bool = True,
+        solver: Literal["cg", "adam"] = "cg",
+        iterations: int = 100,
+        smoothness: float = 0.0,
+        tv_weight: float = 0.0,
+        tv_delta: float = 0.02,
+        tilt_batch: int = 8,
     ) -> None:
+        if solver not in ("cg", "adam"):
+            raise ValueError(f"solver={solver!r}; expected 'cg' or 'adam'")
         images = self._load_tilt_series(tilt_series)
         n_tilts, H, W = images.shape
+        if dose_per_angstrom is None:
+            if image_units != "counts":
+                raise ValueError(
+                    "dose_per_angstrom=None reads each tilt's dose off its mean "
+                    "counts, so it needs image_units='counts'"
+                )
+            dose_per_angstrom = images.float().mean(dim=(-2, -1)) / voxel_size**2
         dose = torch.as_tensor(dose_per_angstrom, dtype=torch.float32).flatten()
         if dose.numel() not in (1, n_tilts):
             raise ValueError(
@@ -178,7 +238,21 @@ class TomogramGhostbuster(_GhostbusterBase):
             if translations is None
             else torch.as_tensor(translations, dtype=torch.float32)
         )
-        volume_init = self._build_initial_volume(V_init, nz, nxy=W)
+        depth = nz if nz is not None else W
+        shape = (depth, W, W)
+        if (
+            extend
+            and V_init is None
+            and kmask is None
+            and propagation.rotation() == "surface"
+        ):
+            shape = TomogramReconstructor.covering_shape(W, depth, quats)
+        volume_init = (
+            torch.zeros(shape) if V_init is None else torch.as_tensor(V_init).float()
+        )
+        # Whether the volume is this pipeline's own empty one, which a test
+        # run rebuilds for its binned geometry rather than pooling.
+        self._covering = V_init is None and shape != (depth, W, W)
         if kmask is not None and tuple(kmask.shape) != tuple(volume_init.shape):
             raise ValueError(
                 f"kmask has shape {tuple(kmask.shape)}; it must match the "
@@ -212,6 +286,13 @@ class TomogramGhostbuster(_GhostbusterBase):
         self.checkpoint_chunks = checkpoint_chunks
         self.lr_decay = lr_decay
         self.kmask = kmask
+        self.solver = solver
+        self.iterations = iterations
+        self.smoothness = smoothness
+        self.tv_weight = tv_weight
+        self.tv_delta = tv_delta
+        self.tilt_batch = tilt_batch
+        self._image_size = W
 
     @staticmethod
     def _load_tilt_series(tilt_series: torch.Tensor | str | Path) -> torch.Tensor:
@@ -261,15 +342,37 @@ class TomogramGhostbuster(_GhostbusterBase):
 
         return torch.as_tensor(quaternions, dtype=torch.float32)
 
-    @staticmethod
-    def _build_initial_volume(
-        V_init: torch.Tensor | None, nz: int | None, nxy: int
-    ) -> torch.Tensor:
-        """Build the initial reconstruction volume: V_init if given, else zeros."""
-        if V_init is not None:
-            return torch.as_tensor(V_init).float()
-        depth = nz if nz is not None else nxy
-        return torch.zeros(depth, nxy, nxy)
+    def _solve(
+        self,
+        model: "TomogramReconstructor",
+        images: torch.Tensor,
+        device: int | Sequence[int] | str,
+        iterations: int,
+    ) -> "TomogramReconstructor":
+        """Fit ``model`` to ``images`` by conjugate gradients and save the result."""
+        devices = torch_devices(device)
+        if len(devices) > 1:
+            console.print(
+                "  [dim]solver='cg' runs on one device; using the first[/dim]"
+            )
+        model = model.to(devices[0])
+        log = solve_tilt_series(model, images, iterations, tilt_batch=self.tilt_batch)
+        if log:
+            console.print(
+                f"  chi²/pixel {log[-1]['chi2_per_pixel']:.4f} after "
+                f"{len(log)} iterations, {log[-1]['seconds']:.0f} s"
+            )
+        if self.run_dir is not None:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            (self.run_dir / "params.json").write_text(
+                json.dumps(dict(model.hparams), indent=2, default=str)
+            )
+            (self.run_dir / "metrics.json").write_text(json.dumps(log, indent=2))
+            model._save_volume(
+                model.field_volume().cpu().float(), self.run_dir / "volume.mrc"
+            )
+            console.print(f"  Saved volume → {self.run_dir / 'volume.mrc'}")
+        return model
 
     def _build_reconstructor_and_loader(
         self,
@@ -307,6 +410,10 @@ class TomogramGhostbuster(_GhostbusterBase):
             slice_batchsize=self.slice_batchsize,
             checkpoint_chunks=self.checkpoint_chunks,
             run_dir=self.run_dir,
+            image_size=images.shape[-1],
+            smoothness=self.smoothness,
+            tv_weight=self.tv_weight,
+            tv_delta=self.tv_delta,
         )
         return model, loader
 
@@ -338,12 +445,16 @@ class TomogramGhostbuster(_GhostbusterBase):
             Trained model.  Access the volume via ``model.V.detach()``.
         """
         n_tilts = len(self._images)
-        nz, nxy = self._volume_init.shape[0], self._volume_init.shape[-1]
         console.print(
             f"Starting reconstruction: {n_tilts} tilts  |  "
-            f"volume {nz}×{nxy}×{nxy}  |  {self.propagation.scattering_model}  |  "
-            f"{self.epochs} epochs  |  batch {self.batchsize}  |  "
-            f"{self._device_label(device)}"
+            f"volume {'×'.join(str(n) for n in self._volume_init.shape)}  |  "
+            f"{self.propagation.scattering_model}  |  "
+            + (
+                f"{self.iterations} iterations"
+                if self.solver == "cg"
+                else f"{self.epochs} epochs  |  batch {self.batchsize}"
+            )
+            + f"  |  {self._device_label(device)}"
         )
         model, loader = self._build_reconstructor_and_loader(
             self._images,
@@ -352,6 +463,8 @@ class TomogramGhostbuster(_GhostbusterBase):
             self.batchsize,
             self.kmask,
         )
+        if self.solver == "cg":
+            return self._solve(model, self._images, device, self.iterations)
         return self._fit(model, loader, device, self.epochs, self.precision, callbacks)
 
     def test_run(
@@ -403,6 +516,15 @@ class TomogramGhostbuster(_GhostbusterBase):
             .squeeze(0)
         )
 
+        if self._covering:
+            # An empty covering volume is rebuilt for the binned images: its
+            # pooled shape need not keep their parity.
+            V_b = torch.zeros(
+                TomogramReconstructor.covering_shape(
+                    images_binned.shape[-1], V_b.shape[0], self._quaternions
+                )
+            )
+
         # A kmask is shaped for the full volume and does not survive binning.
         kmask = self.kmask if bin_factor == 1 else None
         if self.kmask is not None and kmask is None:
@@ -412,7 +534,16 @@ class TomogramGhostbuster(_GhostbusterBase):
         model, loader = self._build_reconstructor_and_loader(
             images_binned, V_b, voxel_size_binned, self.batchsize, kmask
         )
-        model = self._fit(model, loader, device, 1, "32", callbacks)
+        if self.solver == "cg":
+            run_dir, self.run_dir = self.run_dir, None  # a test run writes nothing
+            try:
+                model = self._solve(
+                    model, images_binned, device, min(self.iterations, 10)
+                )
+            finally:
+                self.run_dir = run_dir
+        else:
+            model = self._fit(model, loader, device, 1, "32", callbacks)
         self._report_test_run(
             model,
             f"{bin_factor}× binned, {len(self._images)} tilts, "

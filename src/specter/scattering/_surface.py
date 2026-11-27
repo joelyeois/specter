@@ -62,14 +62,18 @@ def surface_slice_sum(
     Parameters
     ----------
     volume : torch.Tensor
-        Real potential of shape (Z, Y, X), unposed, Y == X.
+        Real potential of shape (Z, Y, X), unposed. Y and X may differ, as
+        for a tomogram's slab; each is centred on the propagation grid.
     quaternions : torch.Tensor
         Poses of shape (B, 4), roma (x, y, z, w) order.
     shifts : torch.Tensor
         In-plane shifts of shape (B, 2), (x, y) in Angstrom.
     pad_nxy : int
-        Lateral size of the propagation grid, ``>= X`` (with a symmetric
-        ``(pad_nxy - X) // 2`` margin, as `Specimen.pad_nxy` gives).
+        Lateral size of the propagation grid, ``>= max(Y, X)`` (with a
+        symmetric ``(pad_nxy - X) // 2`` margin, as `Specimen.pad_nxy` gives,
+        and likewise in Y). The sampled spectrum is that of an image
+        periodic over the grid, so the grid must hold the posed volume's
+        whole projection, or what falls outside it wraps around.
     pixel_size : float
         Voxel size in Angstrom; also the slice thickness.
     wavelength : float
@@ -98,10 +102,10 @@ def surface_slice_sum(
     requires a gradient.
     """
     nz, ny, nx = volume.shape
-    if ny != nx:
-        raise ValueError(f"surface sampling needs a square volume, got {ny} x {nx}")
-    if pad_nxy < nx or (pad_nxy - nx) % 2:
-        raise ValueError(f"pad_nxy={pad_nxy} must be X={nx} plus an even margin")
+    if pad_nxy < max(nx, ny) or (pad_nxy - nx) % 2 or (pad_nxy - ny) % 2:
+        raise ValueError(
+            f"pad_nxy={pad_nxy} must be Y={ny} and X={nx} plus an even margin each"
+        )
     device, dx, lam = volume.device, pixel_size, wavelength
     f = torch.fft.fftfreq(pad_nxy, d=dx, device=device, dtype=torch.float64)
     ky, kx = torch.meshgrid(f, f, indexing="ij")

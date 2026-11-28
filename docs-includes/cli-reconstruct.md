@@ -106,7 +106,7 @@ specter reconstruct particle [OPTIONS]
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--scattering_model` | `multislice` \| `rytov` \| `firstborn` \| `projection` | `rytov` | Wave propagation model used by the forward pass. rytov is the default here rather than multislice: the model runs once per particle per step, and rytov is the cheapest one that still carries Ewald-sphere curvature. |
+| `--scattering_model` | `multislice` \| `rytov` \| `firstborn` \| `projection` \| `ctf` | `rytov` | Wave propagation model used by the forward pass. rytov is the default here rather than multislice: the model runs once per particle per step, and rytov is the cheapest one that still carries Ewald-sphere curvature. ctf is the linear weak-phase model on a flat Ewald sphere, the forward model of a reconstruction without Ewald correction. |
 | `--ews_curvature_sign` | `negative` \| `positive` | `negative` | Sign of the Ewald-sphere curvature. The correct sign follows from the instrument's image geometry, not from a software convention, so try both on a new dataset: the wrong one costs resolution wherever the curvature matters. |
 | `--alpha` | `FLOAT` | _none_ | Amplitude contrast ratio for the forward model, overriding the .cs file's ctf/amp_contrast. Unset uses the .cs file's value. |
 | `--bfactor` | `FLOAT` | _none_ | Isotropic B-factor envelope in Angstrom^2 damping high-resolution signal in the forward model. |

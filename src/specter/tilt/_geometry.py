@@ -15,6 +15,7 @@ import torch.nn.functional as F
 
 from .._defaults import FFT_PAD_MARGIN
 from ..filters import cosine_taper_window
+from ..options import TiltAxis
 
 
 def estimate_required_nxy(desired_nxy: int, nz: int, max_tilt_angle_deg: float) -> int:
@@ -273,3 +274,65 @@ def nz_tilt_for_pose(volume_shape: tuple[int, ...], theta_matrix: torch.Tensor) 
     z_max = rotated_corners[:, 2, :].max(dim=1).values
     nz_new = int(torch.ceil((z_max - z_min).max()).item())
     return max(1, nz_new)
+
+
+def turn_to_tilt_axis(
+    quaternions: torch.Tensor, axis: TiltAxis = "x"
+) -> tuple[torch.Tensor, float]:
+    """
+    Pose a tilt series in a volume frame whose ``axis`` is the tilt axis.
+
+    A pose ``R`` takes beam coordinates to the volume's, so the beam runs
+    along ``R e_z`` in the volume. In a single-axis series those directions
+    lie in the plane perpendicular to the tilt axis. The frame is turned
+    about the volume's z by the rotation ``M`` that brings that axis onto
+    ``axis``, and the poses become ``M R``. A volume reconstructed with the
+    returned poses holds the point ``r`` of the original frame at ``M r``.
+
+    With the tilt axis along a volume axis, every ray keeps its coordinate
+    along it, the volume that covers every ray
+    (`TomogramReconstructor.covering_shape`) grows across the axis only, and
+    the volume can be solved in strips along it
+    (`specter.ghostbuster._tomogram_solver.solve_tilt_series_in_strips`).
+
+    Parameters
+    ----------
+    quaternions : torch.Tensor
+        Per-tilt rotation quaternions, ``(N_tilts, 4)``, xyzw convention.
+    axis : {"x", "y"}
+        The volume axis to bring the tilt axis onto. Default ``"x"``.
+
+    Returns
+    -------
+    quaternions : torch.Tensor
+        The poses in the turned frame, ``(N_tilts, 4)``.
+    angle : float
+        The angle of ``M`` in degrees, counter-clockwise about z: the turn
+        of at most 90 degrees that brings the tilt axis onto ``axis``.
+
+    Notes
+    -----
+    The tilt axis is the in-plane direction ``n`` minimising
+    ``sum_i (n . R_i e_z)^2``, the least-squares axis of a series that is
+    not exactly single-axis. An untilted series has no axis, and any frame
+    serves; it is returned unchanged.
+    """
+    rot = roma.unitquat_to_rotmat(torch.as_tensor(quaternions).double())
+    beam = rot[:, :2, 2]  # in-plane part of R e_z, per tilt
+    scatter = beam.T @ beam
+    if float(scatter.trace()) < 1e-12:
+        return torch.as_tensor(quaternions), 0.0
+    n = torch.linalg.eigh(scatter).eigenvectors[:, 0]  # smallest eigenvalue
+    lead = 0 if str(axis).lower() == "x" else 1
+    if n[lead] < 0:
+        n = -n
+    # Angle from `axis` to the tilt axis; M undoes it.
+    angle = math.atan2(float(n[1]), float(n[0]))
+    if lead == 1:
+        angle -= math.pi / 2
+    c, s_ = math.cos(-angle), math.sin(-angle)
+    turn = torch.tensor(
+        [[c, -s_, 0.0], [s_, c, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float64
+    )
+    turned = roma.rotmat_to_unitquat(turn @ rot)
+    return turned.to(torch.as_tensor(quaternions).dtype), math.degrees(-angle)

@@ -78,7 +78,8 @@ class TomogramReconstructor(_BaseReconstructor):
     ----------
     V : torch.Tensor
         Initial volume estimate, shape ``(Z, Y, X)``. ``Y`` and ``X`` are at
-        least ``image_size`` and of its parity.
+        least ``image_size``, unless a ``pixel_mask`` is given, and of its
+        parity.
     voxel_size : float
         Voxel size in Å.
     quaternions : torch.Tensor
@@ -151,6 +152,15 @@ class TomogramReconstructor(_BaseReconstructor):
         The gradient magnitude, in volts per voxel, below which the
         edge-preserving prior is quadratic and above which it grows
         linearly. Default 0.02.
+    pixel_mask : torch.Tensor, optional
+        Boolean mask of shape ``(N_tilts, H, W)``: the pixels of each tilt
+        the loss compares, in addition to what ``use_fov_mask`` leaves out.
+        A volume that holds only part of the specimen under the field, such
+        as one strip of a strip-wise solve
+        (`specter.ghostbuster._tomogram_solver.solve_tilt_series_in_strips`),
+        is fitted to the pixels whose rays stay inside it; with a mask the
+        volume may be narrower than the images. Default ``None``, every
+        pixel.
 
     Notes
     -----
@@ -187,6 +197,7 @@ class TomogramReconstructor(_BaseReconstructor):
         smoothness: float = 0.0,
         tv_weight: float = 0.0,
         tv_delta: float = 0.02,
+        pixel_mask: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
         if propagation.absorption_model == "inelastic_mfp":
@@ -199,7 +210,14 @@ class TomogramReconstructor(_BaseReconstructor):
         self._save_hyperparameters(
             TomogramReconstructor.__init__,
             locals(),
-            ignore=["V", "quaternions", "translations", "ctf_params", "kmask"],
+            ignore=[
+                "V",
+                "quaternions",
+                "translations",
+                "ctf_params",
+                "kmask",
+                "pixel_mask",
+            ],
         )
         self._run_dir = Path(run_dir) if run_dir is not None else None
 
@@ -208,10 +226,21 @@ class TomogramReconstructor(_BaseReconstructor):
         self.nz = V.shape[0]
         self._surface = propagation.rotation() == "surface"
         ny, nx = V.shape[-2], V.shape[-1]
-        if min(ny, nx) < self.nxy or (ny - self.nxy) % 2 or (nx - self.nxy) % 2:
+        narrow = min(ny, nx) < self.nxy and pixel_mask is None
+        if narrow or (ny - self.nxy) % 2 or (nx - self.nxy) % 2:
             raise ValueError(
                 f"the volume's lateral shape ({ny}, {nx}) must be at least the "
-                f"image size {self.nxy} and of its parity"
+                f"image size {self.nxy} (unless a pixel_mask says which pixels "
+                "it explains) and of its parity"
+            )
+        if pixel_mask is not None and tuple(pixel_mask.shape) != (
+            len(quaternions),
+            self.nxy,
+            self.nxy,
+        ):
+            raise ValueError(
+                f"pixel_mask has shape {tuple(pixel_mask.shape)}; expected "
+                f"{(len(quaternions), self.nxy, self.nxy)}"
             )
         if not self._surface and (ny, nx) != (self.nxy, self.nxy):
             raise ValueError(
@@ -293,6 +322,14 @@ class TomogramReconstructor(_BaseReconstructor):
 
         # Fourier-space mask applied after each gradient step
         self.register_buffer("kmask", kmask)
+        self.register_buffer(
+            "pixel_mask",
+            None if pixel_mask is None else torch.as_tensor(pixel_mask).bool(),
+            persistent=False,
+        )
+        # A window the forward model multiplies the volume by, broadcastable
+        # over it; a strip of a strip-wise solve is tapered at its inner faces.
+        self.register_buffer("volume_window", None, persistent=False)
 
         # Physics modules
         self.propagation = propagation
@@ -337,11 +374,13 @@ class TomogramReconstructor(_BaseReconstructor):
         return self._taper(self.V)
 
     def _taper(self, V: torch.Tensor) -> torch.Tensor:
-        """`V` under the cosine tapers of `tilt`, or `V` itself without any."""
+        """`V` under the cosine tapers of `tilt` and the strip window, if any."""
         if self.taper_width > 0 or self.z_taper_width > 0:
             V = tilt_geometry.apply_volume_cosine_taper(
                 V, taper_xy=self.taper_width, taper_z=self.z_taper_width
             )
+        if self.volume_window is not None:
+            V = V * self.volume_window
         return V
 
     def _surface_grid(self) -> int:
@@ -353,7 +392,11 @@ class TomogramReconstructor(_BaseReconstructor):
         projection at every tilt, found from the projected corners of its
         box, plus the margin every tilt series keeps against wrap
         (`FFT_PAD_MARGIN`); it has the images' parity, which keeps the volume
-        and the field on one centre. A volume as wide as the images is
+        and the field on one centre. The projection is displaced by each
+        tilt's shift, and the grid is also wide enough that none of it
+        wraps into the field from the far side, which matters for a strip
+        of a larger volume, posed far from the field's centre by its shift.
+        A volume as wide as the images is
         propagated on the image grid itself, as `TiltSeries` propagates the
         single-scatter models, so that the two predict the same image; what
         then wraps at a tilt lies inside the band the loss mask leaves out.
@@ -374,8 +417,14 @@ class TomogramReconstructor(_BaseReconstructor):
         # `rot` takes beam-frame coordinates to the volume's, so its
         # transpose projects the volume's corners into the image plane.
         projected = torch.einsum("bji,cj->bci", rot, corners)[..., :2]
-        extent = 2 * float(projected.abs().max())
-        need = max(math.ceil(extent), self.nxy) + 2 * FFT_PAD_MARGIN
+        shift = self.translations.double().cpu() / self.voxel_size
+        projected = projected - shift[:, None, :]
+        # The projection must not overlap itself on the periodic grid, and
+        # its farthest point must not wrap round into the field.
+        span = float((projected.amax(1) - projected.amin(1)).max())
+        reach = float(projected.abs().max())
+        need = max(math.ceil(span), math.ceil(self.nxy / 2 + reach), self.nxy)
+        need += 2 * FFT_PAD_MARGIN
         need += (need - self.nxy) % 2
         while next_fast_len(need) != need:
             need += 2
@@ -501,6 +550,27 @@ class TomogramReconstructor(_BaseReconstructor):
         cached = getattr(self, "_edge_pads_cache", None)
         if cached is not None and cached[0] == key:
             return cached[1]
+        cap = self.nxy // 4
+        reach = self._delocalisation()
+        pads = [0 if r > cap else r for r in reach]
+        too_wide = [i for i, r in enumerate(reach) if r > cap]
+        if too_wide:
+            logger.warning(
+                "the transfer function delocalises the image of tilts %s "
+                "further than a quarter of the %d px field, so no part of it "
+                "is free of the specimen's surroundings; those tilts are "
+                "compared without an edge band",
+                too_wide,
+                self.nxy,
+            )
+        self._edge_pads_cache = (key, pads)
+        return pads
+
+    def _delocalisation(self) -> list[int]:
+        """
+        Per-tilt distance, in pixels, over which the transfer function
+        displaces the image: the bound :meth:`_edge_pads` describes, uncapped.
+        """
         wavelength = energy_to_wavelength(self.voltage)
         k = torch.linspace(0.0, 0.5 / self.voxel_size, 1025, dtype=torch.float64)
         params = {name: getattr(self, name).detach().cpu() for name in self.ctf_params}
@@ -510,9 +580,7 @@ class TomogramReconstructor(_BaseReconstructor):
         dfv = params.get("dfv", dfu)
         cs = params.get("cs", zero)
         model = self.propagation.scattering_model
-        cap = self.nxy // 4
         pads: list[int] = []
-        too_wide = []
         for i in range(n_tilts):
             theta = tilt_theta(
                 self.quaternions[i : i + 1].detach().cpu(),
@@ -532,21 +600,7 @@ class TomogramReconstructor(_BaseReconstructor):
                 float((wavelength * k * (defocus - spherical).abs()).max())
                 for defocus in (low, high)
             )
-            pad = math.ceil(reach / self.voxel_size)
-            if pad > cap:
-                too_wide.append(i)
-                pad = 0
-            pads.append(pad)
-        if too_wide:
-            logger.warning(
-                "the transfer function delocalises the image of tilts %s "
-                "further than a quarter of the %d px field, so no part of it "
-                "is free of the specimen's surroundings; those tilts are "
-                "compared without an edge band",
-                too_wide,
-                self.nxy,
-            )
-        self._edge_pads_cache = (key, pads)
+            pads.append(math.ceil(reach / self.voxel_size))
         return pads
 
     def _fov_mask(self, tilt_idx: int) -> torch.Tensor | None:
@@ -757,14 +811,26 @@ class TomogramReconstructor(_BaseReconstructor):
         division both would scale with the square of the dose.
         """
         mse = F.mse_loss(sim, obs, reduction="none") / self.dose_per_pixel[tilt_idx]
-        if self.use_fov_mask:
-            mask = self._loss_mask(tilt_idx)
-            if mask is not None:
-                # Normalise by the number of valid pixels so that all tilt
-                # angles contribute equal gradient signal regardless of FOV
-                # size (which shrinks by cos(θ) at high tilt).
-                return (mse * mask).sum() / mask.sum()
+        mask = self._compared(tilt_idx)
+        if mask is not None:
+            # Normalise by the number of valid pixels so that all tilt
+            # angles contribute equal gradient signal regardless of FOV
+            # size (which shrinks by cos(θ) at high tilt).
+            return (mse * mask).sum() / mask.sum().clamp_min(1.0)
         return mse.mean()
+
+    def _compared(self, tilt_idx: int) -> torch.Tensor | None:
+        """
+        Weights of tilt ``tilt_idx``'s pixels in the loss, or ``None`` for all.
+
+        The product of :meth:`_loss_mask`, when ``use_fov_mask``, and the
+        tilt's ``pixel_mask``.
+        """
+        mask = self._loss_mask(tilt_idx) if self.use_fov_mask else None
+        if self.pixel_mask is None:
+            return mask
+        chosen = self.pixel_mask[tilt_idx].float()
+        return chosen if mask is None else mask * chosen
 
     def _half_chi2(
         self, sim: torch.Tensor, obs: torch.Tensor, idx: torch.Tensor
@@ -777,16 +843,16 @@ class TomogramReconstructor(_BaseReconstructor):
         """
         idx = idx.to(self.dose_per_pixel.device)
         r2 = (sim - obs) ** 2 / self.dose_per_pixel[idx][:, None, None]
-        if self.use_fov_mask:
-            masks = [self._loss_mask(int(i)) for i in idx]
-            if any(m is not None for m in masks):
-                ones = torch.ones(self.nxy, self.nxy, device=r2.device)
-                r2 = r2 * torch.stack([ones if m is None else m for m in masks])
-        return 0.5 * r2.sum()
+        masks = [self._compared(int(i)) for i in idx]
+        if any(m is not None for m in masks):
+            ones = torch.ones(self.nxy, self.nxy, device=r2.device)
+            r2 = r2 * torch.stack([ones if m is None else m for m in masks])
+        # In double precision, as `regularisation` sums.
+        return 0.5 * r2.sum(dtype=torch.float64)
 
     def _n_valid_pixels(self, tilt_idx: int) -> int:
         """Pixels of tilt ``tilt_idx`` the loss compares."""
-        mask = self._loss_mask(tilt_idx) if self.use_fov_mask else None
+        mask = self._compared(tilt_idx)
         return self.nxy * self.nxy if mask is None else int(mask.sum().item())
 
     def regularisation(self, V: torch.Tensor) -> torch.Tensor:
@@ -801,21 +867,27 @@ class TomogramReconstructor(_BaseReconstructor):
         not determine without preferring any structure. The edge-preserving
         one prefers compact objects in a flat solvent, which is what lets it
         restore part of the missing wedge; it is the stronger assumption.
+        A voxel on the volume's last face along an axis has no forward
+        neighbour there, and that difference is taken as zero.
         """
-        out = V.new_zeros(())
+        out = V.new_zeros((), dtype=torch.float64)
         if self.smoothness == 0 and self.tv_weight == 0:
             return out
-        core = V[:-1, :-1, :-1]
-        g2 = (
-            (V[1:, :-1, :-1] - core) ** 2
-            + (V[:-1, 1:, :-1] - core) ** 2
-            + (V[:-1, :-1, 1:] - core) ** 2
-        )
+        # Forward differences at every voxel, zero where the neighbour would
+        # lie outside the volume, so that the voxels of the last faces are
+        # penalised like the rest.
+        g2 = torch.zeros_like(V)
+        g2[:-1] += (V[1:] - V[:-1]) ** 2
+        g2[:, :-1] += (V[:, 1:] - V[:, :-1]) ** 2
+        g2[:, :, :-1] += (V[:, :, 1:] - V[:, :, :-1]) ** 2
+        # Summed in double precision: the solver's line search takes
+        # differences of the objective that single precision does not resolve.
         if self.smoothness > 0:
-            out = out + 0.5 * self.smoothness * g2.sum()
+            out = out + 0.5 * self.smoothness * g2.sum(dtype=torch.float64)
         if self.tv_weight > 0:
             d = self.tv_delta
-            out = out + self.tv_weight * d * (torch.sqrt(1 + g2 / (d * d)) - 1).sum()
+            huber = torch.sqrt(1 + g2 / (d * d)) - 1
+            out = out + self.tv_weight * d * huber.sum(dtype=torch.float64)
         return out
 
     # ------------------------------------------------------------------ #
@@ -872,7 +944,7 @@ class TomogramReconstructor(_BaseReconstructor):
             # The priors are in the units of the chi-squared sum over the
             # series; the step's loss is a mean per pixel over its tilts.
             series = 0.5 * self.nxy * self.nxy * len(self.quaternions)
-            loss = loss + self.regularisation(self.V) / series
+            loss = loss + (self.regularisation(self.V) / series).to(loss.dtype)
         total = self._batch_total(n)
         if total != n:
             loss = loss * (n / total)

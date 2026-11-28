@@ -436,7 +436,9 @@ def test_regularisation_is_quadratic_then_linear_in_the_gradient() -> None:
     kwargs = _series_kwargs(torch.tensor([0.0]))
     prop = Propagation(scattering_model="projection")
     ramp = torch.arange(8.0).reshape(1, 1, 8).expand(8, 8, 8)  # unit gradient in x
-    n_grad = 7 * 7 * 7
+    # Every voxel with a neighbour ahead of it in x, the last faces in y and
+    # z included.
+    n_grad = 8 * 8 * 7
 
     smooth = TomogramReconstructor(
         torch.zeros(8, 8, 8), **kwargs, propagation=prop, smoothness=2.0
@@ -500,6 +502,71 @@ def test_solver_fits_a_series_and_the_covering_volume_recovers_more() -> None:
     assert cc_covering > cc_masked + 0.1
 
 
+def test_the_last_faces_are_penalised_like_the_interior() -> None:
+    """A voxel on the volume's last face is held by the prior through every
+    difference it takes part in, as an interior voxel is; a spike costs the
+    same in the last corner as it would if the corner had neighbours behind
+    it only."""
+    kwargs = _series_kwargs(torch.tensor([0.0]))
+    model = TomogramReconstructor(
+        torch.zeros(8, 8, 8),
+        **kwargs,
+        propagation=Propagation(scattering_model="projection"),
+        smoothness=2.0,
+    )
+    spike = torch.zeros(8, 8, 8)
+    spike[4, 4, 4] = 1.0
+    assert float(model.regularisation(spike)) == pytest.approx(0.5 * 2.0 * 6)
+    spike = torch.zeros(8, 8, 8)
+    spike[-1, -1, -1] = 1.0
+    assert float(model.regularisation(spike)) == pytest.approx(0.5 * 2.0 * 3)
+    spike = torch.zeros(8, 8, 8)
+    spike[3, -1, -1] = 1.0  # on two last faces: four neighbours
+    assert float(model.regularisation(spike)) == pytest.approx(0.5 * 2.0 * 4)
+
+
+def test_the_preconditioned_solve_is_reproducible_and_converges() -> None:
+    """Two identical solves under the quadratic prior agree, on noisy data.
+
+    The curvature that preconditions the solve is probed without the
+    observed images, whose term in the gradient left only rounding error in
+    the probe: two probes agree, and the solve reaches its minimum within a
+    few iterations and stops there instead of following the rounding of a
+    converged gradient. Before, two runs differed by a third of the
+    volume's root-mean-square value or more."""
+    from specter.ghostbuster._tomogram_solver import _Objective, solve_tilt_series
+
+    kwargs, shape, truth = _slanted_series()
+    prop = Propagation(scattering_model="rytov", oversample=1)
+    simulator = TomogramReconstructor(truth, **kwargs, propagation=prop)
+    with torch.no_grad():
+        clean = simulator._forward_tilts(truth, torch.arange(5))
+    images = torch.poisson(clean, generator=torch.Generator().manual_seed(0))
+
+    def solve(iterations: int) -> tuple[torch.Tensor, list[dict]]:
+        model = TomogramReconstructor(
+            torch.zeros(shape), **kwargs, propagation=prop, smoothness=0.03
+        )
+        log = solve_tilt_series(model, images, iterations)
+        return model.V - model.V.mean(), log
+
+    model = TomogramReconstructor(
+        torch.zeros(shape), **kwargs, propagation=prop, smoothness=0.03
+    )
+    objective = _Objective(model, images, torch.arange(5), 8)
+    first = objective.curvature(shape, torch.device("cpu"))
+    second = objective.curvature(shape, torch.device("cpu"))
+    assert float((first - second).norm() / first.norm()) < 1e-4
+
+    (a, log_a), (b, _) = solve(20), solve(20)
+    assert float((a - b).norm() / a.norm()) < 0.02
+    # Converged within a few iterations, and stopped once it had.
+    assert (
+        log_a[4]["objective"] - log_a[-1]["objective"] < 1e-4 * log_a[-1]["objective"]
+    )
+    assert len(log_a) < 20
+
+
 def test_pipeline_solves_a_covering_volume_and_saves_the_field(tmp_path: Path) -> None:
     from specter.ghostbuster import TomogramGhostbuster
 
@@ -524,6 +591,7 @@ def test_pipeline_solves_a_covering_volume_and_saves_the_field(tmp_path: Path) -
         nz=nz,
         lr=0.1,
         propagation=prop,
+        defocus_hand="negative",
         iterations=3,
         smoothness=1e-3,
         run_dir=tmp_path,
@@ -540,3 +608,367 @@ def test_pipeline_solves_a_covering_volume_and_saves_the_field(tmp_path: Path) -
 
     saved, _ = read_mrc(tmp_path / "volume.mrc")
     assert tuple(saved.shape) == (nz, n, n)
+
+
+# ---------------------------------------------------------------------------
+# Pixel mask and the strip-wise solve
+# ---------------------------------------------------------------------------
+
+
+def test_pixel_mask_selects_the_pixels_the_loss_compares() -> None:
+    """Residuals outside ``pixel_mask`` do not count, and only a masked
+    volume may be narrower than its images."""
+    kwargs = _series_kwargs(torch.tensor([0.0, 20.0]))
+    prop = Propagation(scattering_model="rytov", oversample=1)
+    mask = torch.zeros(2, 16, 16, dtype=torch.bool)
+    mask[:, :, :8] = True
+    model = TomogramReconstructor(
+        torch.zeros(8, 16, 16),
+        **kwargs,
+        propagation=prop,
+        use_fov_mask=False,
+        pixel_mask=mask,
+    )
+    idx = torch.arange(2)
+    sim = torch.ones(2, 16, 16)
+    outside = sim.clone()
+    outside[:, :, 8:] += 3.0
+    inside = sim.clone()
+    inside[:, 4, 4] += 3.0
+    assert float(model._half_chi2(sim, outside, idx)) == 0.0
+    assert float(model._half_chi2(sim, inside, idx)) > 0.0
+    assert float(model._compute_loss(sim[0], outside[0], 0)) == 0.0
+    assert model._n_valid_pixels(0) == 16 * 8
+
+    with pytest.raises(ValueError, match="pixel_mask"):
+        TomogramReconstructor(
+            torch.zeros(8, 16, 10), **kwargs, image_size=16, propagation=prop
+        )
+    narrow = TomogramReconstructor(
+        torch.zeros(8, 16, 10),
+        **kwargs,
+        image_size=16,
+        propagation=prop,
+        use_fov_mask=False,
+        pixel_mask=mask,
+    )
+    assert narrow.forward(0).shape == (16, 16)
+
+
+def _slanted_series(
+    n: int = 80, nz: int = 6, slant_deg: float = 4.0
+) -> tuple[dict, tuple[int, int, int], torch.Tensor]:
+    """A tilt series about an axis ``slant_deg`` off the image's x, with
+    shifts, posed in the volume frame turned to that axis; its covering
+    volume's shape and a phantom of smooth blobs filling it."""
+    from specter.tilt import turn_to_tilt_axis
+
+    angles = torch.linspace(-40.0, 40.0, 5)
+    slant = math.radians(slant_deg)
+    axis = torch.tensor([math.cos(slant), math.sin(slant), 0.0])
+    quaternions, turned = turn_to_tilt_axis(
+        roma.rotvec_to_unitquat(torch.deg2rad(angles)[:, None] * axis)
+    )
+    assert turned == pytest.approx(-slant_deg, abs=1e-3)
+    kwargs = dict(
+        voxel_size=4.0,
+        quaternions=quaternions,
+        translations=torch.tensor(
+            [[5.0, -7.0], [0.0, 3.0], [-4.0, 0.0], [6.0, 6.0], [-3.0, -5.0]]
+        ),
+        ctf_params={"dfu": torch.full((5,), 2500.0), "cs": torch.full((5,), 2.7e7)},
+        voltage=300.0,
+        dose_per_angstrom=5.0,
+        image_size=n,
+    )
+    shape = TomogramReconstructor.covering_shape(n, nz, quaternions)
+    _, ny, nx = shape
+    z, y, x = torch.meshgrid(
+        torch.arange(nz) - nz // 2,
+        torch.arange(ny) - ny // 2,
+        torch.arange(nx) - nx // 2,
+        indexing="ij",
+    )
+    generator = torch.Generator().manual_seed(1)
+    truth = torch.zeros(shape)
+    for _ in range(40):
+        cy = float(
+            torch.randint(-ny // 2 + 12, ny // 2 - 12, (1,), generator=generator)
+        )
+        cx = float(
+            torch.randint(-nx // 2 + 12, nx // 2 - 12, (1,), generator=generator)
+        )
+        cz = float(torch.randint(-1, 2, (1,), generator=generator))
+        r2 = (z - cz) ** 2 + (y - cy) ** 2 + (x - cx) ** 2
+        truth += 2.0 * torch.exp(-r2 / (2 * 2.0**2))
+    return kwargs, shape, truth
+
+
+def test_strip_plan_divides_the_volume_into_equal_overlapping_strips() -> None:
+    """The strips have one shape of the images' parity, their shares sum to
+    one at every voxel, each strip's loss stops short of its inner faces by
+    the taper and the transfer function's reach, and a series that does not
+    tilt about a volume axis is refused."""
+    from specter.ghostbuster._tomogram_solver import StripPlan
+
+    kwargs, shape, truth = _slanted_series()
+    prop = Propagation(scattering_model="rytov", oversample=1)
+    model = TomogramReconstructor(truth, **kwargs, propagation=prop)
+    plan = StripPlan.for_model(model, strips=2)
+    assert plan.dim == 2 and plan.size == shape[2]
+    assert len(plan.starts) == 2 and plan.starts[0] == 0
+    assert plan.starts[-1] + plan.width == plan.size
+    assert (plan.width - model.nxy) % 2 == 0
+    assert plan.reach == max(model._delocalisation()) and plan.fade >= 8
+
+    u = torch.arange(plan.size, dtype=torch.float64)
+    shares = torch.stack([plan.weight(i, u) for i in range(2)])
+    assert torch.allclose(shares.sum(0), torch.ones_like(u))
+    for i, start in enumerate(plan.starts):  # no share outside the strip itself
+        outside = (u < start) | (u >= start + plan.width)
+        assert float(shares[i][outside].abs().max()) == 0.0
+    margin = plan.taper + plan.reach
+    inner_face = plan.starts[0] + plan.width - 1
+    assert bool(plan.compared(0, torch.tensor([0.0, inner_face - margin])).all())
+    assert not bool(plan.compared(0, torch.tensor([inner_face - margin + 1.0])).any())
+    # A cross-fade lies where both strips compare every pixel it images onto.
+    seam = plan.seams[0]
+    for edge in (seam - plan.fade, seam + plan.fade):
+        for i in range(2):
+            assert bool(plan.compared(i, torch.tensor([edge - plan.reach])))
+            assert bool(plan.compared(i, torch.tensor([edge + plan.reach])))
+    assert float(plan.window(0)[0]) == 1.0 and float(plan.window(0)[-1]) < 0.05
+    assert float(plan.window(1)[0]) < 0.05 and float(plan.window(1)[-1]) == 1.0
+
+    assert len(StripPlan.for_model(model, max_voxels=truth.numel()).starts) == 1
+    by_size = StripPlan.for_model(model, max_voxels=int(0.8 * truth.numel()))
+    assert len(by_size.starts) == 2
+    with pytest.raises(ValueError, match="no room"):
+        StripPlan.for_model(model, strips=6)
+
+    oblique = dict(kwargs)
+    axis = torch.tensor([math.cos(0.6), math.sin(0.6), 0.0])
+    oblique["quaternions"] = roma.rotvec_to_unitquat(
+        torch.deg2rad(torch.linspace(-40.0, 40.0, 5))[:, None] * axis
+    )
+    with pytest.raises(ValueError, match="turn_to_tilt_axis"):
+        StripPlan.for_model(
+            TomogramReconstructor(truth, **oblique, propagation=prop), strips=2
+        )
+
+
+def test_strips_predict_the_images_the_whole_volume_predicts() -> None:
+    """Each strip, posed by the shift its centre implies, predicts the
+    pixels whose rays it holds as the whole volume does, with the tilt axis
+    off the image axis and the tilts shifted."""
+    from specter.ghostbuster._tomogram_solver import predict_tilt_series
+
+    kwargs, _, truth = _slanted_series()
+    for model_name in ("rytov", "ctf"):
+        model = TomogramReconstructor(
+            truth,
+            **kwargs,
+            propagation=Propagation(scattering_model=model_name, oversample=1),
+        )
+        whole = predict_tilt_series(model)
+        strips = predict_tilt_series(model, strips=2)
+        contrast = (whole - whole.mean(dim=(-2, -1), keepdim=True)).std()
+        assert float((strips - whole).abs().max() / contrast) < 0.02
+
+
+def test_strips_divide_along_y_when_the_tilt_axis_is_y() -> None:
+    """A series tilting about the volume's y is divided along y, and its
+    strips predict the whole volume's images."""
+    from specter.ghostbuster._tomogram_solver import StripPlan, predict_tilt_series
+    from specter.tilt import turn_to_tilt_axis
+
+    n, nz = 80, 6
+    axis = torch.tensor([math.sin(0.07), math.cos(0.07), 0.0])
+    tilts = torch.deg2rad(torch.linspace(-40.0, 40.0, 5))
+    quaternions, _ = turn_to_tilt_axis(
+        roma.rotvec_to_unitquat(tilts[:, None] * axis), "y"
+    )
+    shape = TomogramReconstructor.covering_shape(n, nz, quaternions)
+    z, y, x = torch.meshgrid(
+        torch.arange(nz) - nz // 2,
+        torch.arange(shape[1]) - shape[1] // 2,
+        torch.arange(shape[2]) - shape[2] // 2,
+        indexing="ij",
+    )
+    volume = torch.zeros(shape)
+    for cy, cx in ((-30, 20), (-8, -40), (5, 33), (12, -15), (35, 2)):
+        volume += 2.0 * torch.exp(-(z**2 + (y - cy) ** 2 + (x - cx) ** 2) / 8.0)
+    model = TomogramReconstructor(
+        volume,
+        4.0,
+        quaternions,
+        torch.tensor([[5.0, -7.0], [0.0, 3.0], [-4.0, 0.0], [6.0, 6.0], [-3.0, -5.0]]),
+        {"dfu": torch.full((5,), 2500.0), "cs": torch.full((5,), 2.7e7)},
+        300.0,
+        5.0,
+        image_size=n,
+        propagation=Propagation(scattering_model="rytov", oversample=1),
+    )
+    plan = StripPlan.for_model(model, strips=2)
+    assert plan.dim == 1 and plan.size == shape[1]
+    whole = predict_tilt_series(model)
+    strips = predict_tilt_series(model, strips=2)
+    contrast = (whole - whole.mean(dim=(-2, -1), keepdim=True)).std()
+    assert float((strips - whole).abs().max() / contrast) < 0.02
+
+
+@pytest.mark.parametrize(
+    ("prior", "iterations"),
+    [({"smoothness": 0.03}, 10), ({"tv_weight": 0.01, "tv_delta": 0.05}, 30)],
+    ids=["quadratic", "tv"],
+)
+def test_strip_solve_agrees_with_the_whole_solve(prior: dict, iterations: int) -> None:
+    """Solved in two strips and cross-faded, the volume is the one a single
+    solve gives, in the strips' interiors and across the seam, up to the
+    mean potential, which the data leave free."""
+    from specter.ghostbuster._tomogram_solver import (
+        StripPlan,
+        solve_tilt_series,
+        solve_tilt_series_in_strips,
+    )
+
+    kwargs, shape, truth = _slanted_series()
+    prop = Propagation(scattering_model="rytov", oversample=1)
+    simulator = TomogramReconstructor(truth, **kwargs, propagation=prop)
+    with torch.no_grad():
+        images = simulator._forward_tilts(truth, torch.arange(5))
+
+    whole = TomogramReconstructor(
+        torch.zeros(shape), **kwargs, propagation=prop, **prior
+    )
+    solve_tilt_series(whole, images, iterations)
+    strips = TomogramReconstructor(
+        torch.zeros(shape), **kwargs, propagation=prop, **prior
+    )
+    logs = solve_tilt_series_in_strips(strips, images, iterations, strips=2)
+    assert all(0 < len(log) <= iterations for log in logs)
+
+    plan = StripPlan.for_model(strips, strips=2)
+    distance = (torch.arange(shape[2]) - plan.seams[0]).abs()
+    zones = {"seam": distance <= plan.fade, "interior": distance > plan.fade}
+    for name, zone in zones.items():
+        a = strips.V[..., zone].flatten()
+        b = whole.V[..., zone].flatten()
+        cc = float(torch.corrcoef(torch.stack([a, b]))[0, 1])
+        assert cc > 0.99, (name, cc)
+        difference = (a - a.mean()) - (b - b.mean())
+        assert float(difference.norm() / (b - b.mean()).norm()) < 0.15, name
+    # Both recover the phantom, so the agreement is not that of two empty fits.
+    got, want = whole.V.flatten(), truth.flatten()
+    assert float(torch.corrcoef(torch.stack([got, want]))[0, 1]) > 0.4
+
+
+def test_pipeline_solves_in_strips_and_saves_the_field(tmp_path: Path) -> None:
+    from specter.ghostbuster import TomogramGhostbuster
+
+    kwargs, shape, truth = _slanted_series()
+    prop = Propagation(scattering_model="rytov", oversample=1)
+    simulator = TomogramReconstructor(truth, **kwargs, propagation=prop)
+    with torch.no_grad():
+        images = simulator._forward_tilts(truth, torch.arange(5))
+    tgb = TomogramGhostbuster(
+        images,
+        voxel_size=kwargs["voxel_size"],
+        voltage=300.0,
+        ctf_params=kwargs["ctf_params"],
+        quaternions=kwargs["quaternions"],
+        translations=kwargs["translations"],
+        nz=shape[0],
+        propagation=prop,
+        defocus_hand="negative",
+        iterations=3,
+        smoothness=0.03,
+        strips=2,
+        run_dir=tmp_path,
+    )
+    model = tgb.run(device="cpu")
+    assert tuple(model.V.shape) == shape
+    assert float(model.V.abs().max()) > 0
+    metrics = json.loads((tmp_path / "metrics.json").read_text())
+    assert len(metrics) == 2 and all(len(strip) == 3 for strip in metrics)
+    with pytest.raises(ValueError, match="one or the other"):
+        TomogramGhostbuster(
+            images,
+            voxel_size=4.0,
+            voltage=300.0,
+            ctf_params=kwargs["ctf_params"],
+            quaternions=kwargs["quaternions"],
+            defocus_hand="negative",
+            strips=2,
+            max_voxels=1000,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Defocus hand
+# ---------------------------------------------------------------------------
+
+
+def test_the_curvature_sign_is_the_hand_of_defocus_with_depth() -> None:
+    """A scatterer at height z in the beam frame is imaged as one at the
+    midplane with defocus df + z under "negative" and df - z under
+    "positive", which is what `defocus_hand` documents."""
+    n, nz, voxel, height, defocus = 48, 33, 4.0, 12, 20000.0
+    z, y, x = torch.meshgrid(
+        torch.arange(nz) - nz // 2,
+        torch.arange(n) - n // 2,
+        torch.arange(n) - n // 2,
+        indexing="ij",
+    )
+
+    def image(cz: int, df: float, hand: str) -> torch.Tensor:
+        blob = 3.0 * torch.exp(-((z - cz) ** 2 + y**2 + x**2) / (2 * 1.5**2))
+        model = TomogramReconstructor(
+            blob,
+            voxel,
+            roma.rotvec_to_unitquat(torch.zeros(1, 3)),
+            torch.zeros(1, 2),
+            {"dfu": torch.tensor([df]), "cs": torch.tensor([0.0])},
+            300.0,
+            1.0,
+            propagation=Propagation(
+                scattering_model="rytov", ews_curvature_sign=hand, oversample=1
+            ),
+            use_fov_mask=False,
+        )
+        return model.forward(0)
+
+    for hand, sign in (("negative", 1), ("positive", -1)):
+        raised = image(height, defocus, hand)
+        misfit = {
+            s: float((raised - image(0, defocus + s * height * voxel, hand)).norm())
+            for s in (-1, 0, 1)
+        }
+        assert misfit[sign] < 0.5 * misfit[0] < 0.5 * misfit[-sign]
+
+
+def test_pipeline_takes_the_defocus_hand_and_warns_without_one() -> None:
+    from specter.ghostbuster import TomogramGhostbuster
+
+    kwargs = dict(
+        tilt_series=torch.ones(3, 16, 16),
+        voxel_size=4.0,
+        voltage=300.0,
+        ctf_params={"dfu": torch.full((3,), 8000.0), "cs": torch.full((3,), 2.7e7)},
+        angles=[-20.0, 0.0, 20.0],
+        nz=8,
+    )
+    with pytest.warns(UserWarning, match="defocus_hand"):
+        assumed = TomogramGhostbuster(**kwargs)
+    assert assumed.propagation.ews_curvature_sign == "negative"
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        set_ = TomogramGhostbuster(**kwargs, defocus_hand="positive")
+        # A flat model has no depth, so it needs no hand.
+        TomogramGhostbuster(**kwargs, propagation=Propagation(scattering_model="ctf"))
+    assert set_.propagation.ews_curvature_sign == "positive"
+    assert set_.propagation.scattering_model == "rytov"
+    with pytest.raises(ValueError, match="defocus_hand"):
+        TomogramGhostbuster(**kwargs, defocus_hand="left")

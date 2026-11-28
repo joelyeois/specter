@@ -142,3 +142,64 @@ def test_tilted_slices_are_not_magnified(tilt_deg: float) -> None:
     profile = band.sum(axis=0)
     xs = np.arange(30, 51)
     assert float((profile * xs).sum() / profile.sum()) == pytest.approx(40.0, abs=0.05)
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+@pytest.mark.parametrize("rot", [84.94, -3.0, 30.0])
+def test_turn_to_tilt_axis_puts_every_ray_along_a_volume_axis(
+    rot: float, axis: str
+) -> None:
+    """In the turned frame the beam has no component along the chosen
+    axis at any tilt, the tilt angles are unchanged, and the turn is the
+    in-plane rotation of at most 90 degrees."""
+    from specter.tilt import turn_to_tilt_axis
+
+    quats = tilt_to_quaternions(torch.linspace(-45.0, 45.0, 7), rot)
+    turned, angle = turn_to_tilt_axis(quats, axis)
+    assert abs(angle) <= 90.0 + 1e-6
+    R = roma.unitquat_to_rotmat(turned.double())
+    lead = 0 if axis == "x" else 1
+    assert float(R[:, lead, 2].abs().max()) < 1e-6
+    # The beam's angle to the volume's z is still the tilt angle.
+    assert R[:, 2, 2].numpy() == pytest.approx(
+        np.cos(np.deg2rad(np.linspace(-45.0, 45.0, 7))), abs=1e-6
+    )
+    # The turn is about the beam: M R with M a rotation about z.
+    M = R @ roma.unitquat_to_rotmat(quats.double()).transpose(-1, -2)
+    c, s = np.cos(np.deg2rad(angle)), np.sin(np.deg2rad(angle))
+    expected = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+    assert M.numpy() == pytest.approx(np.tile(expected, (7, 1, 1)), abs=1e-5)
+
+
+def test_aretomo_ctf_file_gives_the_ctf_parameters_and_the_defocus_hand(
+    tmp_path: Path,
+) -> None:
+    """dfHand = -1 is the "positive" curvature sign, the mapping measured on
+    experimental data, and +1 its mirror; a file without the column gives no
+    hand."""
+    from specter.tilt import aretomo3_defocus_hand, read_aretomo3_ctf
+
+    header = "# Columns: #1 micrograph number; #2 - defocus 1 [A]; #3 - defocus 2\n"
+    rows = [
+        "   1   19804.49  19415.53    -59.02     0.0000    0.0421   10.0000",
+        "   2   19724.95  19724.95    -59.02     0.0000    0.0480   10.0000",
+    ]
+    path = tmp_path / "ts_CTF.txt"
+    path.write_text(header + "".join(f"{row}   -1\n" for row in rows))
+    ctf, hand = read_aretomo3_ctf(str(path))
+    assert hand == "positive"
+    assert ctf["dfu"].numpy() == pytest.approx([19804.49, 19724.95])
+    assert ctf["dfv"].numpy() == pytest.approx([19415.53, 19724.95])
+    assert ctf["dfang"].numpy() == pytest.approx([-59.02, -59.02])
+    assert ctf["phaseshift"].numpy() == pytest.approx([0.0, 0.0])
+
+    path.write_text(header + "".join(f"{row}\n" for row in rows))
+    assert read_aretomo3_ctf(str(path))[1] is None
+    path.write_text(header + f"{rows[0]}   1\n{rows[1]}   -1\n")
+    with pytest.raises(ValueError, match="more than one dfHand"):
+        read_aretomo3_ctf(str(path))
+
+    assert aretomo3_defocus_hand(-1) == "positive"
+    assert aretomo3_defocus_hand(1) == "negative"
+    with pytest.raises(ValueError, match="dfHand"):
+        aretomo3_defocus_hand(0)

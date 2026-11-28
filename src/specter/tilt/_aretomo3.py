@@ -31,6 +31,8 @@ import numpy as np
 import roma
 import torch
 
+from ..options import EwaldSphereSign
+
 
 def tilt_to_quaternions(
     tilt_angles_deg: torch.Tensor | Sequence[float],
@@ -336,3 +338,87 @@ def read_aretomo3_xf(
         "shift_pixels": shift_pixels,
         "rotation_matrices": rotation_matrices,
     }
+
+
+def aretomo3_defocus_hand(df_hand: int) -> EwaldSphereSign:
+    """
+    The Ewald-sphere sign that AreTomo3's defocus handedness corresponds to.
+
+    AreTomo3 records, as ``dfHand`` in its CTF file, which way the defocus
+    changes across a tilted specimen. SPECTER's forward model expresses the
+    same choice as the sign of the Ewald-sphere curvature
+    (``Propagation.ews_curvature_sign``, `TomogramGhostbuster`'s
+    ``defocus_hand``), which decides whether a point at height ``z`` in a
+    tilt's beam frame is imaged at defocus ``df - z`` (``"positive"``) or
+    ``df + z`` (``"negative"``).
+
+    Parameters
+    ----------
+    df_hand : int
+        ``dfHand``, +1 or -1.
+
+    Returns
+    -------
+    {"negative", "positive"}
+        ``"positive"`` for -1 and ``"negative"`` for +1, for poses read by
+        :func:`read_aretomo3_aln`.
+
+    Notes
+    -----
+    The mapping of -1 was measured: on a tilt series whose CTF file records
+    ``dfHand = -1``, with poses from :func:`read_aretomo3_aln`, half-dose
+    cross-validation preferred ``"positive"``, and ``"negative"`` scored
+    below a model with one defocus per image. The mapping of +1 is its
+    mirror and has not been measured on a dataset.
+    """
+    if df_hand not in (1, -1):
+        raise ValueError(f"dfHand={df_hand!r}; expected +1 or -1")
+    return "positive" if df_hand == -1 else "negative"
+
+
+def read_aretomo3_ctf(
+    ctf_path: str,
+) -> tuple[dict[str, torch.Tensor], EwaldSphereSign | None]:
+    """
+    Read per-tilt CTF parameters and the defocus hand from an AreTomo3 CTF file.
+
+    Parameters
+    ----------
+    ctf_path : str
+        Path to the ``*_CTF.txt`` file AreTomo3 writes, in CTFFIND's column
+        layout with the handedness appended.
+
+    Returns
+    -------
+    ctf_params : dict of torch.Tensor
+        ``dfu`` and ``dfv`` (the larger and smaller defocus, Å), ``dfang``
+        (the astigmatism azimuth, degrees) and ``phaseshift`` (radians), each
+        of shape ``(N_tilts,)`` in the file's row order, as the
+        reconstructors' ``ctf_params`` take them. The spherical aberration
+        is not in the file; add ``cs`` (Å) before use.
+    defocus_hand : {"negative", "positive"} or None
+        `TomogramGhostbuster`'s ``defocus_hand`` for poses read by
+        :func:`read_aretomo3_aln` (:func:`aretomo3_defocus_hand`), or
+        ``None`` when the file has no ``dfHand`` column.
+
+    Notes
+    -----
+    Columns: 1 micrograph number, 2 and 3 defocus (Å), 4 azimuth of
+    astigmatism (degrees), 5 additional phase shift (radians), 6 cross
+    correlation, 7 the spacing (Å) to which the fit held, 8 ``dfHand``.
+    """
+    data = np.loadtxt(ctf_path, comments="#", ndmin=2)
+    if data.shape[1] < 5:
+        raise ValueError(f"{ctf_path} has {data.shape[1]} columns; expected at least 5")
+    ctf_params = {
+        "dfu": torch.tensor(data[:, 1], dtype=torch.float32),
+        "dfv": torch.tensor(data[:, 2], dtype=torch.float32),
+        "dfang": torch.tensor(data[:, 3], dtype=torch.float32),
+        "phaseshift": torch.tensor(data[:, 4], dtype=torch.float32),
+    }
+    if data.shape[1] < 8:
+        return ctf_params, None
+    hands = {int(round(v)) for v in data[:, 7]}
+    if len(hands) != 1:
+        raise ValueError(f"{ctf_path} records more than one dfHand: {sorted(hands)}")
+    return ctf_params, aretomo3_defocus_hand(hands.pop())

@@ -14,7 +14,9 @@ Split across:
 """
 
 from ._aretomo3 import (
+    aretomo3_defocus_hand,
     read_aretomo3_aln,
+    read_aretomo3_ctf,
     read_aretomo3_global_shifts,
     read_aretomo3_xf,
     tilt_to_quaternions,
@@ -28,11 +30,13 @@ from ._geometry import (
     infer_max_tilt_from_inputs,
     nz_tilt_for_pose,
     pad_volume_xy_for_tilt,
+    turn_to_tilt_axis,
     volume_shape_for_tilt,
 )
 
 __all__ = [
     "apply_volume_cosine_taper",
+    "aretomo3_defocus_hand",
     "estimate_max_allowed_nxy",
     "estimate_max_allowed_tilt_deg",
     "estimate_required_extent",
@@ -41,8 +45,10 @@ __all__ = [
     "nz_tilt_for_pose",
     "pad_volume_xy_for_tilt",
     "read_aretomo3_aln",
+    "read_aretomo3_ctf",
     "read_aretomo3_global_shifts",
     "read_aretomo3_xf",
     "tilt_to_quaternions",
+    "turn_to_tilt_axis",
     "volume_shape_for_tilt",
 ]

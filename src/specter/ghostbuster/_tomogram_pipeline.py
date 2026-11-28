@@ -9,7 +9,9 @@ from .._defaults import LR_DECAY, SCHEDULER
 from ..io import read_mrc
 from ..progress import console
 
+import dataclasses
 import json
+import warnings
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
@@ -22,9 +24,9 @@ from ._helpers import _images_to_counts
 from ._pipeline_base import _GhostbusterBase
 from ._run_helpers import torch_devices
 from ._tomogram_reconstructor import TomogramReconstructor
-from ._tomogram_solver import solve_tilt_series
+from ._tomogram_solver import solve_tilt_series, solve_tilt_series_in_strips
 from ..settings import Optics, Propagation, TiltGeometry
-from specter.options import ImageUnits, Scheduler, TiltAxis
+from specter.options import EwaldSphereSign, ImageUnits, Scheduler, TiltAxis
 
 
 class TomogramGhostbuster(_GhostbusterBase):
@@ -40,7 +42,9 @@ class TomogramGhostbuster(_GhostbusterBase):
     By default the volume is made wide enough to hold every ray that
     reaches the detector (``extend``), the forward model is Rytov sampled on
     each tilt's Ewald surface, and the reconstructed potential is relative
-    to the specimen's mean (``dose_per_angstrom=None``). A tilt series does
+    to the specimen's mean (``dose_per_angstrom=None``). A model that follows
+    the defocus through the specimen's depth needs the hand of that depth,
+    ``defocus_hand``, which differs between datasets. A tilt series does
     not determine its tomogram on its own; set ``tv_weight`` or
     ``smoothness`` (`TomogramReconstructor.regularisation`), choosing the
     weight by fitting one half of the dose and scoring the other.
@@ -146,7 +150,7 @@ class TomogramGhostbuster(_GhostbusterBase):
         given. Default ``True``.
     solver : {"cg", "adam"}
         ``"cg"`` fits every tilt at once by conjugate gradients
-        (`solve_tilt_series`), on one device, for ``iterations``;
+        (`solve_tilt_series`), on one device, or in ``strips``, for ``iterations``;
         ``"adam"`` takes ``batchsize`` tilts per step for ``epochs``.
         Default ``"cg"``.
     iterations : int
@@ -155,6 +159,30 @@ class TomogramGhostbuster(_GhostbusterBase):
         The priors, see `TomogramReconstructor`. Default none.
     tilt_batch : int
         Tilts predicted per forward pass of the ``"cg"`` solver. Default 8.
+    defocus_hand : {"negative", "positive"}, optional
+        Which way the defocus runs with depth along the beam: the forward
+        model's ``Propagation.ews_curvature_sign``, which this replaces when
+        given. A point of the specimen at height ``z`` in a tilt's beam
+        frame (the third coordinate of ``R^T r``, for a pose ``R`` and a
+        volume point ``r``) is imaged at defocus ``df + z`` under
+        ``"negative"`` and ``df - z`` under ``"positive"``. It is a
+        property of the dataset's geometry, and the wrong hand applies
+        the depth correction backwards, which is worse than applying none.
+        SPECTER's simulators use ``"negative"``; for a series aligned by
+        AreTomo3, `specter.tilt.read_aretomo3_ctf` reads it from the CTF
+        file. ``None`` (the default) keeps ``propagation``'s sign, with a
+        warning when the model depends on it (every model but
+        ``"projection"`` and ``"ctf"``).
+    strips : int
+        Solve the volume in this many overlapping strips along the tilt
+        axis (`solve_tilt_series_in_strips`), each on one device, with the
+        volume itself held on the CPU. Requires the tilt axis along volume
+        X or Y (`specter.tilt.turn_to_tilt_axis`) and ``solver="cg"``.
+        Default 1, the whole volume at once.
+    max_voxels : int, optional
+        Divide the volume into the fewest strips of at most this many
+        voxels instead of naming their number. A 46 GB device holds about
+        250 million.
 
     Notes
     -----
@@ -201,9 +229,38 @@ class TomogramGhostbuster(_GhostbusterBase):
         tv_weight: float = 0.0,
         tv_delta: float = 0.02,
         tilt_batch: int = 8,
+        defocus_hand: EwaldSphereSign | None = None,
+        strips: int = 1,
+        max_voxels: int | None = None,
     ) -> None:
         if solver not in ("cg", "adam"):
             raise ValueError(f"solver={solver!r}; expected 'cg' or 'adam'")
+        if strips < 1 or (max_voxels is not None and strips != 1):
+            raise ValueError(
+                "strips must be at least 1, and is found from max_voxels when "
+                "that is given: pass one or the other"
+            )
+        if (strips > 1 or max_voxels is not None) and solver != "cg":
+            raise ValueError("a strip-wise solve needs solver='cg'")
+        if defocus_hand is not None:
+            if defocus_hand not in ("negative", "positive"):
+                raise ValueError(
+                    f"defocus_hand={defocus_hand!r}; expected 'negative' or 'positive'"
+                )
+            propagation = dataclasses.replace(
+                propagation, ews_curvature_sign=defocus_hand
+            )
+        elif propagation.scattering_model not in ("projection", "ctf"):
+            warnings.warn(
+                f"defocus_hand is not set, and scattering_model="
+                f"{propagation.scattering_model!r} follows the defocus through "
+                "the specimen's depth: assuming ews_curvature_sign="
+                f"{propagation.ews_curvature_sign!r}. The hand is a property of "
+                "the dataset; the wrong one is worse than a flat model. Pass "
+                "defocus_hand (specter.tilt.read_aretomo3_ctf reads it from an "
+                "AreTomo3 CTF file).",
+                stacklevel=2,
+            )
         images = self._load_tilt_series(tilt_series)
         n_tilts, H, W = images.shape
         if dose_per_angstrom is None:
@@ -292,6 +349,8 @@ class TomogramGhostbuster(_GhostbusterBase):
         self.tv_weight = tv_weight
         self.tv_delta = tv_delta
         self.tilt_batch = tilt_batch
+        self.strips = strips
+        self.max_voxels = max_voxels
         self._image_size = W
 
     @staticmethod
@@ -351,17 +410,40 @@ class TomogramGhostbuster(_GhostbusterBase):
     ) -> "TomogramReconstructor":
         """Fit ``model`` to ``images`` by conjugate gradients and save the result."""
         devices = torch_devices(device)
-        if len(devices) > 1:
-            console.print(
-                "  [dim]solver='cg' runs on one device; using the first[/dim]"
+        log: list[Any]
+        if self.strips > 1 or self.max_voxels is not None:
+            # The volume stays on the CPU; each strip is solved on a device.
+            log = solve_tilt_series_in_strips(
+                model,
+                images,
+                iterations,
+                strips=None if self.max_voxels is not None else self.strips,
+                max_voxels=self.max_voxels,
+                devices=devices,
+                tilt_batch=self.tilt_batch,
             )
-        model = model.to(devices[0])
-        log = solve_tilt_series(model, images, iterations, tilt_batch=self.tilt_batch)
-        if log:
-            console.print(
-                f"  chi²/pixel {log[-1]['chi2_per_pixel']:.4f} after "
-                f"{len(log)} iterations, {log[-1]['seconds']:.0f} s"
+            for i, entries in enumerate(log):
+                if entries:
+                    console.print(
+                        f"  strip {i + 1}/{len(log)}: chi²/pixel "
+                        f"{entries[-1]['chi2_per_pixel']:.4f} after "
+                        f"{len(entries)} iterations, {entries[-1]['seconds']:.0f} s"
+                    )
+        else:
+            if len(devices) > 1:
+                console.print(
+                    "  [dim]solver='cg' solves the whole volume on one device; "
+                    "using the first (strips divides it between several)[/dim]"
+                )
+            model = model.to(devices[0])
+            log = solve_tilt_series(
+                model, images, iterations, tilt_batch=self.tilt_batch
             )
+            if log:
+                console.print(
+                    f"  chi²/pixel {log[-1]['chi2_per_pixel']:.4f} after "
+                    f"{len(log)} iterations, {log[-1]['seconds']:.0f} s"
+                )
         if self.run_dir is not None:
             self.run_dir.mkdir(parents=True, exist_ok=True)
             (self.run_dir / "params.json").write_text(
